@@ -74,7 +74,7 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). fl
 
 | Status | Meaning | Written by |
 | --- | --- | --- |
-| `planned` | Ordered, with its serial known, or in attestation or install. It may carry `ek_hash` pins. | The owner; fleetd, on an approved pass for a serial NetBox did not know, and on a `provision` or `wipe` of an installed node |
+| `planned` | Ordered, with its serial known, or in attestation or install. It may carry an approved EK binding and `ek_hash` pins. | The owner, through the nodes file; fleetd, on a `provision` or `wipe` of an installed node |
 | `active` | Its config is released, and it is expected Ready | fleetd, when the node fetches its config |
 | `failed` | Held out by the owner | The owner |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |

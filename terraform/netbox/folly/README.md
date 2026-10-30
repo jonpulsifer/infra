@@ -2,9 +2,9 @@
 
 OpenTofu root that applies folly's nodes file, `clusters/folly/inventory/nodes.yaml`, into NetBox on capsule. See [Hardware inventory](https://wiki.lolwtf.ca/reference/inventory/) on the wiki.
 
-For each node it declares the device with its site, role, platform, device type and serial, the address as an IP address on the interface the device type's template makes, that address as the primary IPv4, the cable to the declared switch port, and the declared custom fields. It also declares the node models' device types and interface templates, every custom field on `dcim.device` with its choice sets, and the fleet-controller webhook and its event rule. `nodes.tf` reads the file and `catalog.tf` checks it before the plan reads NetBox.
+For each node it declares the device with its site, role, platform, device type and serial, the address as an IP address on the interface the device type's template makes, that address as the primary IPv4, the cable to the declared switch port, and the declared custom fields. It also declares the node models' device types and interface templates, every custom field on `dcim.device` with its choice sets, and the fleet-controller webhook and its event rule. `nodes.tf` reads the file and `catalog.tf` checks it before the plan reads NetBox, among other things that no two nodes share a serial or approve the same EK and that every approved EK hash is 64 lowercase hex characters. `tofu test` runs `inventory.tftest.hcl`, which plans the fixtures in `testdata/` against mocked providers.
 
-Terraform creates a device as `planned` and never updates it in place, so the status, `desired_action` and the fields talos-attest and fleet-controller write stay theirs. `restapi_object.declared` sends a node's serial, model, primary IPv4 and declared custom fields as a PATCH of those keys alone, when the node is created or its entry changes. Removing an entry deletes the device, its address and its cable.
+Terraform creates a device as `planned` and never updates it in place, so the status, `desired_action` and the fields talos-attest and fleet-controller write stay theirs. `restapi_object.declared` sends a node's serial, model, primary IPv4 and declared custom fields as a PATCH of those keys alone, when the node is created or its entry changes. Its approved EK binding goes to `approved_ek_hash` and `approved_ek_hash_ecc`, null when the entry has none; fleetd alone writes the observed `ek_hash` and `ek_hash_ecc`. Removing an entry deletes the device, its address and its cable.
 
 ## Develop
 
@@ -72,7 +72,9 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 
 ## Inputs
 
-No inputs.
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_nodes_file"></a> [nodes\_file](#input\_nodes\_file) | The nodes file, relative to this root. Only a test names another. | `string` | `"../../../clusters/folly/inventory/nodes.yaml"` | no |
 
 ## Outputs
 

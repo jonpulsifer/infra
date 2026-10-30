@@ -110,3 +110,19 @@ func TestSpireNodesFileLeftAloneForEmptyNetBox(t *testing.T) {
 		t.Errorf("file %q", b)
 	}
 }
+
+// An ECC pin fleetd cleared, null in NetBox after a pass against an
+// RSA-only binding, leaves the RSA EK alone registered.
+func TestSpireNodesDropAClearedPin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spire-nodes.json")
+	reconcileSpire(t, path, spireDevice("riptide", "active", "attested", map[string]any{"ek_hash": hashB, "ek_hash_ecc": nil}))
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), hashA) || !strings.Contains(string(got), `"ek_hashes": [
+        "`+hashB+`"
+      ]`) {
+		t.Errorf("file:\n%s", got)
+	}
+}

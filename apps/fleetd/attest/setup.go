@@ -112,14 +112,15 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
 	}
-	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
+	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Log: log}
 	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
 	}
-	if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
-		return nil, fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
-	}
 	v.NetBox = nb
+	v.BindingAuthor = strings.TrimSpace(os.Getenv("ATTEST_BINDING_AUTHOR"))
+	if v.BindingAuthor == "" {
+		log.Warn("ATTEST_BINDING_AUTHOR is unset, so no approved EK binding counts and every planned machine waits")
+	}
 	v.Recorders = append(v.Recorders, nb)
 	log.Info("NetBox is the system of record", "url", u, "site", site)
 	if metricsFile := os.Getenv("ATTEST_METRICS_FILE"); metricsFile != "" {

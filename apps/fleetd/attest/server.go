@@ -58,7 +58,6 @@ func (s *Server) devIDRoutes(mux *http.ServeMux) {
 func (s *Server) Admin() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /machines", s.machines)
-	mux.HandleFunc("POST /approve", s.approve)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	return s.requireApprover(mux)
 }
@@ -115,10 +114,6 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		code, verdict = http.StatusServiceUnavailable, protocol.VerdictRefused
 	case f.Reason == reasonSerial:
 		code, verdict = http.StatusBadRequest, protocol.VerdictRefused
-	case f.Reason == reasonIntakeRate:
-		code, verdict = http.StatusTooManyRequests, protocol.VerdictRefused
-	case f.Reason == reasonApproval:
-		code, verdict = http.StatusBadRequest, ""
 	case f.Unauthenticated:
 		verdict = protocol.VerdictRefused
 	case f.Unquarantined:
@@ -415,22 +410,6 @@ func (s *Server) machines(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"machines": recs, "pending": pending})
-}
-
-func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Serial   string   `json:"serial"`
-		EKHashes []string `json:"ek_hashes"`
-	}
-	if !decode(w, r, &req) {
-		return
-	}
-	hashes, err := s.V.Approve(r.Context(), req.Serial, req.EKHashes, strings.ToLower(r.Header.Get("Tailscale-User-Login")))
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"approved": hashes, "next": "the next attest writes these to the device's ek_hash and ek_hash_ecc in NetBox"})
 }
 
 // renewStart opens a renewal for a running node. The LAK and the AK blobs

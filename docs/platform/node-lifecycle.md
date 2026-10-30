@@ -9,7 +9,7 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 
 1. The owner adds the node's entry to the nodes file in a pull request, and Atlantis applies it: a `planned` device with its serial, class, address and cable, and no MAC.
 2. The owner plugs the machine into its node port. Firmware PXE on the Kubernetes network loads the signed iPXE from spore, which chains the signed HookOS.
-3. HookOS attests the TPM and boot chain to fleetd before its agent waits for work, and fleetd writes the MAC on the device with the machine's serial. A serial no entry names waits for the owner's approval.
+3. HookOS attests the TPM and boot chain to fleetd before its agent waits for work, and fleetd writes the MAC on the device with the machine's serial. A device whose entry approves no EK, and a serial no entry names, wait: only a TPM that proves every EK its entry approves gets an identity.
 4. On a pass, fleetd issues an LDevID and a LAK certificate. The signed confirm admits the device: fleetd checks its attested switch port, starts its `provision` `Workflow` in [Tinkerbell](nixos/tinkerbell.md), renders its Talos config, and answers an install code wrapped to the TPM.
 5. The `Workflow` wipes the system disk, runs the Talos installer with the code in META, and boots the disk.
 6. On its first boot, Talos fetches its config by UUID and code from `/talos/config`, and takes the node's address statically from it. fleetd drops the config once it is served whole, and sets the device `active`.
@@ -21,7 +21,7 @@ An installed node reinstalls when the owner sets `desired_action` to `provision`
 
 | Component | What it owns | Where it lives |
 | --- | --- | --- |
-| Nodes file | Each node's name, serial, model, class, switch port, address and BMC type | `clusters/folly/inventory/nodes.yaml` |
+| Nodes file | Each node's name, serial, model, class, switch port, address, BMC type and approved EK binding | `clusters/folly/inventory/nodes.yaml` |
 | `terraform/netbox/folly` | The device, its address and cable, its declared custom fields, the custom field definitions, fleetd's webhook | Atlantis on offsite |
 | NetBox | Status, `desired_action`, verdicts, MACs | capsule |
 | fleetd | Attestation, the LDevID and LAK, install codes, renewal, `Hardware`, `Machine`, `Workflow`, the rendered config, retirement | spore |

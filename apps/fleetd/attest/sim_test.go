@@ -49,6 +49,8 @@ type harness struct {
 	tamperRenew func(session string, e *protocol.RenewEvidence)
 	audit       strings.Builder
 	nb          *fakeNetBox
+	// mfr is the maker that certified the TPM's EKs.
+	mfr *testCA
 }
 
 type harnessOpts struct {
@@ -108,6 +110,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		writeSimNV(t, sim, index, data)
 	}
 	mfr := newTestCA(t, "Test TPM Maker", nil, 1)
+	h.mfr = mfr
 	for _, c := range []struct {
 		alg  string
 		nv   uint32
@@ -159,6 +162,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		Roots: roots, Policies: map[string]*Policy{"talos": policy}, Classes: testClasses, CA: devIDCA(t), Store: store,
 		Audit: &Audit{W: &h.audit, Site: "folly"},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
+		BindingAuthor: fakeTerraform,
 	}
 	nb := o.netbox.client()
 	h.v.NetBox = nb
@@ -412,25 +416,27 @@ func TestAttestRefusals(t *testing.T) {
 	}
 }
 
-// NetBox's ek_hash pins the RSA EK.
-func TestNetBoxPinsTheEK(t *testing.T) {
+// NetBox's approved_ek_hash binds the RSA EK, and another binding refuses.
+func TestNetBoxBindsTheEK(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"]})
+	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"approved_ek_hash": h.hashes["rsa"]})
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
-		t.Fatalf("pinned by NetBox: %v", err)
+		t.Fatalf("bound in NetBox: %v", err)
 	}
 	// The pass's recorder writes the pins back; let it land before the owner's edit.
 	f.settled(t, simSerial, 2)
-	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = strings.Repeat("ab", 32) })
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = strings.Repeat("ab", 32) })
 	_, err := h.run(simSerial, simMAC)
 	var refused *client.RefusedError
 	if !errors.As(err, &refused) || refused.Verdict.Reason != reasonEKHash {
-		t.Fatalf("another NetBox pin: %v", err)
+		t.Fatalf("another binding: %v", err)
 	}
 }
 
-func TestFirstIntakeWaitsForApproval(t *testing.T) {
+// A claim no binding admits waits apart from the machine records, and the
+// admin API has no route that authorizes it.
+func TestAnUnboundIntakeWaits(t *testing.T) {
 	h := newHarness(t, harnessOpts{inventory: func(_, _ string) string {
 		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n", simSerial, simMAC)
 	}})
@@ -439,7 +445,6 @@ func TestFirstIntakeWaitsForApproval(t *testing.T) {
 	if !errors.As(err, &refused) || refused.Verdict.Verdict != protocol.VerdictPending {
 		t.Fatalf("first intake: %v", err)
 	}
-	// The claim waits apart from the machine records: nothing is written for testbox.
 	if _, ok, _ := h.v.Store.Record("testbox"); ok {
 		t.Fatal("a first intake's claim wrote a machine record")
 	}
@@ -450,39 +455,14 @@ func TestFirstIntakeWaitsForApproval(t *testing.T) {
 	if metrics, _ := h.v.Metrics(); !strings.Contains(metrics, `talos_attest_machine_status{machine="testbox",status="pending-approval"} 1`) {
 		t.Fatalf("metrics without the pending claim:\n%s", metrics)
 	}
-
-	// The owner approves over the tailnet admin API.
-	admin := h.srv.Admin()
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`"}`))
-	admin.ServeHTTP(rr, req)
-	if rr.Code != http.StatusForbidden {
-		t.Fatalf("an approval without a tailnet login answered %d", rr.Code)
-	}
-	// The owner names the hashes: a pending record is a claim, and another
-	// machine may have replaced it since the owner read GET /machines.
-	for _, body := range []string{`{"serial":"` + simSerial + `"}`, `{"serial":"` + simSerial + `","ek_hashes":["` + strings.Repeat("ab", 32) + `"]}`} {
-		rr = httptest.NewRecorder()
-		req = httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(body))
-		req.Header.Set("Tailscale-User-Login", "Owner@example.com")
-		admin.ServeHTTP(rr, req)
-		if rr.Code != http.StatusBadRequest {
-			t.Fatalf("an approval that does not name the pending hashes answered %d %s", rr.Code, rr.Body.String())
-		}
-	}
-	rr = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`","ek_hashes":["`+h.hashes["rsa"]+`","`+h.hashes["ecc"]+`"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/approve", strings.NewReader(`{"serial":"`+simSerial+`","ek_hashes":["`+h.hashes["rsa"]+`","`+h.hashes["ecc"]+`"]}`))
 	req.Header.Set("Tailscale-User-Login", "Owner@example.com")
-	admin.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("approve: %d %s", rr.Code, rr.Body.String())
+	h.srv.Admin().ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /approve answered %d %s", rr.Code, rr.Body.String())
 	}
-
-	if _, ok, _ := h.v.Store.Pending(simSerial); ok {
-		t.Fatal("the claim still waits after approval")
-	}
-	res, err := h.run(simSerial, simMAC)
-	if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
-		t.Fatalf("after approval: %v", err)
+	if _, err := h.run(simSerial, simMAC); !errors.As(err, &refused) || refused.Verdict.Verdict != protocol.VerdictPending {
+		t.Fatalf("after an approval attempt: %v", err)
 	}
 }

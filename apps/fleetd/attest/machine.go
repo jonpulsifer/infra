@@ -16,12 +16,14 @@ type Machine struct {
 	Class string
 	// Status is NetBox's lifecycle status, such as planned or active.
 	Status string
-	// Pins are the EK hashes on record, by algorithm.
+	// Pins are the EK hashes fleetd observed and proved, by algorithm.
 	Pins map[string]string
+	// Approved is the approved binding, by algorithm: the EK hashes git
+	// declares for the device, which only the owner changes.
+	Approved map[string]string
 	// NetBoxID is the device's id, or 0 when NetBox does not know it.
 	NetBoxID int
-	// FromNetBox is whether NetBox answered for this machine; only then may
-	// a planned device skip approval.
+	// FromNetBox is whether NetBox answered for this machine.
 	FromNetBox bool
 	// Quarantined is whether NetBox's attest_verdict is a quarantine, which
 	// stands until the owner clears the verdict.
@@ -44,7 +46,7 @@ type MachineSource interface {
 // lookupMachine asks NetBox for the machine. A NetBox that does not answer
 // fails closed: nothing is created, nothing is pinned, and the caller
 // refuses without a record. A NetBox that has no such device is a definite
-// no, and the caller waits for the owner's approval.
+// no, and the claim waits for a node entry in git.
 func (v *Verifier) lookupMachine(ctx context.Context, serial string) (Machine, bool, error) {
 	nb, ok, err := v.NetBox.Lookup(ctx, serial)
 	if err != nil {

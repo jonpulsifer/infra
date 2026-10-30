@@ -20,14 +20,17 @@ import (
 func TestUnauthenticatedRequestsWithdrawNothing(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 	f.set(simSerial, func(d *fakeDevice) {
 		d.CustomFields["ek_hash"], d.CustomFields["ek_hash_ecc"] = h.hashes["rsa"], h.hashes["ecc"]
 	})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
-	before := f.settled(t, simSerial, 2)
+	f.settled(t, simSerial, 2)
+	// The node fetched its config: a planned device gets no renewal.
+	f.set(simSerial, func(d *fakeDevice) { d.Status = "active" })
+	before := f.bySerial(simSerial)
 	rec, _, _ := h.v.Store.Record("testbox")
 	unchanged := func(what string) {
 		t.Helper()

@@ -36,8 +36,7 @@ const (
 	VerdictFailedNoQuarantine = "failed-no-quarantine"
 )
 
-// Machine is what the host says about itself, from SMBIOS and its NIC. The
-// hardware facts fill the NetBox device the service creates on first sight.
+// Machine is what the host says about itself, from SMBIOS and its NIC.
 type Machine struct {
 	Serial       string `json:"serial"`
 	UUID         string `json:"uuid"`

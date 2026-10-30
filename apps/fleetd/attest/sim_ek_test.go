@@ -138,7 +138,7 @@ func TestTheIdentityRenewsAfterAReboot(t *testing.T) {
 	}
 	before := h.devID(t, simSerial)
 	h.reboot()
-	h.v.Policy = loadPolicy(t)
+	h.v.Policies = map[string]*Policy{"talos": loadPolicy(t)}
 	h.v.Now = func() time.Time { return time.Now().Add(time.Hour) }
 	renewed, err := h.renew(simSerial)
 	if err != nil || !renewed.Renewed {

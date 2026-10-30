@@ -3,22 +3,24 @@ title: Hardware inventory
 description: The nodes file that declares each folly Kubernetes node, the code that reads it, the OpenTofu root that applies it into NetBox, and the check that compares NetBox with the machines.
 ---
 
-Git declares folly's Kubernetes nodes in `clusters/folly/inventory/nodes.yaml`, the nodes file, and `terraform/netbox/folly` applies it into [NetBox](../platform/netbox.md). Each node is a device with the role `kubernetes-node`. NetBox adds what the services and the owner write: the MAC, the EK hashes, attestation results, SMBIOS facts, the status and `desired_action`.
+Git declares folly's Kubernetes nodes in `clusters/folly/inventory/nodes.yaml`, the nodes file, and `terraform/netbox/folly` applies it into [NetBox](../platform/netbox.md). Each node is a device with the role `kubernetes-node`. NetBox adds what the services and the owner write: the MAC, the EK hashes fleetd observes, attestation results, SMBIOS facts, the status and `desired_action`.
 
 ## Nodes file
 
 `models` holds what every machine of a model shares, keyed by its NetBox device type slug: the SMBIOS model name, the manufacturer, the NIC its template names, the install disk, the TPM version, Intel AMT and the expected Secure Boot state. `nodes` holds one entry per node, keyed by its name, with its model, serial, Talos class, switch port, address and BMC type. A node may override its model's disk, TPM, AMT or Secure Boot. The comment at the top of the file defines each key, and every value is a scalar on its own line.
 
-To add a node, add its entry in a pull request and comment the plans that [Readers](#readers) names, since a change to the file alone gets no autoplan. Then comment `atlantis apply`. The plan fails on an unknown model or class, an address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json` as [Topology](topology.md) describes, a shared address, switch port or serial, or when `API_SERVER_IP` there is no node's address.
+A node may also carry its approved EK binding: `approved_ek_rsa2048` and `approved_ek_eccp256`, each optional, the hash of the TPM's RSA and ECC endorsement key as [fleetd](../apps/fleetd.md) hashes an EK, the lowercase hex SHA-256 of its DER SubjectPublicKeyInfo. fleetd admits a `planned` node, and issues its identity and install code, only when its TPM proves every approved EK, so a node without a binding waits. The binding is two flat keys, not a nested map, because every reader takes the file's scalar shape as it is. The receiving step is its trust source: a receiving scan of the TPM, or the supplier's authenticated record that ties the chassis serial to its EKs. A claim fleetd shows proves nothing on its own, and `mise run attest:approve <serial>` only prints the lines to compare. [Approve a machine's EKs](../runbooks/provision-a-node.md#approve-a-machines-eks) is the procedure.
+
+To add a node, add its entry in a pull request and comment the plans that [Readers](#readers) names, since a change to the file alone gets no autoplan. Then comment `atlantis apply`. The plan fails on an unknown model or class, an address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json` as [Topology](topology.md) describes, a shared address, switch port or serial, an EK two nodes approve, an approved EK hash that is not 64 lowercase hex characters, another key that starts with `approved_`, or when `API_SERVER_IP` there is no node's address. `tofu test` in `terraform/netbox/folly` runs these checks against the fixtures in its `testdata/`.
 
 ## Terraform
 
-The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt`, `secure_boot_expected` and `expected_port`, the switch port. fleetd writes none of them and refuses an install while one is empty. No MAC is needed: fleetd writes it when the machine attests.
+The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt`, `secure_boot_expected` and `expected_port`, the switch port. fleetd writes none of them and refuses an install while one is empty. The approved binding goes to `approved_ek_hash` and `approved_ek_hash_ecc`, and to null for a node without one; fleetd reads them and never writes them. No MAC is needed: fleetd writes it when the machine attests.
 
 | Field or object | Written by |
 | --- | --- |
 | The device's status after it is created, `desired_action` | The owner and [fleetd](../apps/fleetd.md) |
-| MAC, EK hashes, verdicts, LDevID and LAK serials, `smbios_uuid`, `pcr0_by_bios`, SMBIOS facts, the attested network fields | fleetd |
+| MAC, the observed EK hashes `ek_hash` and `ek_hash_ecc`, verdicts, LDevID and LAK serials, `smbios_uuid`, `pcr0_by_bios`, SMBIOS facts, the attested network fields | fleetd |
 | `last_workflow` | fleetd |
 | The rest of the device, the node models' device types, every custom field definition and choice set, and fleetd's webhook and event rule | `terraform/netbox/folly` |
 
@@ -32,7 +34,7 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | UniFi | `address` for the node's DNS record, `switch_port` for its node port | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
 | Talos | `address` for the node's static address, `class`, `disk` for the install selector, `tpm` for `tpm_nodes`, for each node NetBox holds `active` or `failed` | `clusters/folly/talos/nodes.tf`, `talos.tf` |
 | spore's SPIRE | each node with `tpm` `2.0`, for its LDevID alias | `nix/lib/inventory.nix`, `nix/hosts/spore.nix` |
-| [fleetd](../apps/fleetd.md) | Nothing from the file; it reads each declared fact from the node's NetBox device | `apps/fleetd/fleet/netbox.go` |
+| [fleetd](../apps/fleetd.md) | Nothing from the file; it reads each declared fact, the approved EK binding among them, from the node's NetBox device | `apps/fleetd/fleet/netbox.go` |
 
 The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The MACs stay in NetBox: fleetd on spore links each one's `netboot-not-allowed` TFTP path from them on each reconcile pass.
 

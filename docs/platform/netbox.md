@@ -44,6 +44,7 @@ To restore, stop `netbox.service`, run `pg_restore --clean --if-exists -d netbox
 - Keep nginx on loopback. Tailscale serve is the only way in, and the bootstrap VLAN must never reach NetBox.
 - Keep `netbox/secret-key` and `netbox/api-token-pepper`. A new pepper invalidates every API token, and a new secret key ends every session.
 - `ALLOWED_HOSTS` is the host's tailnet name, so another anchor serves NetBox at a new address.
+- Keep `CHANGELOG_RETENTION` at 0. fleetd honours a device's approved EK binding only while the changelog holds Terraform's write of it, and its token reads the changelog.
 
 ## Operate
 

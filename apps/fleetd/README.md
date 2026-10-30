@@ -36,13 +36,14 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_CA_PKCS11_MODULE`, `ATTEST_CA_PKCS11_TOKEN`, `ATTEST_CA_PKCS11_PIN_FILE`, `ATTEST_CA_CERT` | none | A PKCS#11 module such as ykcs11, the token label, a PIN file and a PEM whose first certificate picks the key on the token. Needs a cgo build |
 | `ATTEST_CA_CHAIN` | `/etc/fleetd/devid-ca-chain.pem` | The DevID CA first, then each issuer up to the self-signed root |
 | `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site. A leaf another CA issued verifies only when its CA is here, and each must chain to the chain's root |
-| `ATTEST_SITE` | `folly` | The O of every certificate, and the NetBox site |
+| `ATTEST_SITE` | `folly` | The O of every certificate, and the site each audit line names |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
 | `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the directory of event-log policy profiles, one `<name>.yaml` each |
-| `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, approvals and `verdicts.jsonl` |
+| `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, waiting claims and `verdicts.jsonl` |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
-| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE`, `ATTEST_NETBOX_ROLE` | required, `/run/credentials/fleetd.service/netbox-token`, `kubernetes-node` | NetBox, the only source of machines. A serial it lacks waits for the owner's approval, and a NetBox that does not answer refuses every request |
-| `ATTEST_INTAKE_PER_HOUR`, `ATTEST_PENDING_MAX` | `10`, `50` | How many EKs that activated a credential may create a first-sight device an hour, and how many first-intake claims wait at once |
+| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE` | required, `/run/credentials/fleetd.service/netbox-token` | NetBox, the only source of machines and of each one's approved EK binding. A serial it lacks waits for its node entry, and a NetBox that does not answer refuses every request |
+| `ATTEST_PENDING_MAX` | `50` | How many claims wait at once for an approved EK binding |
+| `ATTEST_BINDING_AUTHOR` | none | The NetBox user Terraform writes as. A binding counts only when NetBox's changelog shows this user made its newest change; unset, no binding counts |
 | `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten on each change |
 
 ### Fleet
@@ -82,28 +83,49 @@ and not answering, every request is 503 `refused`.
 
 | Route | Does |
 | --- | --- |
-| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no pin passes when every EK has a manufacturer certificate |
+| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding waits; [Approved EK binding](#approved-ek-binding) has the rules |
 | `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class and issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
 | `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
 | `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the daily check, from the running node |
 
-The client sends the ECC NIST P256 and RSA 2048 EKs whose certificates the TPM holds in the TCG EK
-Credential Profile's Low Range (version 2.7, 2.2.2.4), or its default RSA EK alone when it holds
-none there; High Range certificates are not used, and a run that finds only those says so. It
-builds each EK from the profile's default template, or from the EK Template and EK Nonce in NV
-(2.2.2.6), checks that the certificate names the key it made, and recreates the key from that
-template for each activation. Only an index that is not defined falls back to the default; an
-unreadable or malformed index, a certificate for another key and an unsupported template each fail
-the run before it reaches fleetd. It never guesses an index's own authorization unless the index
-sets `noDA`, so discovery cannot count toward the TPM's lockout. `tink-attest inspect` prints the
-platform, the TPM's maker and firmware, the EKs an intake would send or why it would fail, and what
-discovery finds for each profile, and changes nothing on the TPM.
+## Approved EK binding
 
-A planned stub binds to the first box whose pass names its serial: fleetd puts the claimed MAC on
-the stub's interface and never replaces a pin on file. A serial NetBox does not know waits for the
-owner's approval, then gets a `planned` device once its TPM activates a credential.
+The nodes file approves a node's EKs as `approved_ek_rsa2048` and `approved_ek_eccp256`, each the
+`EKHash` of the key: lowercase hex SHA-256 of its DER SubjectPublicKeyInfo. `terraform/netbox/folly`
+projects them into the device's `approved_ek_hash` and `approved_ek_hash_ecc`, which fleetd reads
+and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which only fleetd writes.
+
+- A `planned` device passes only when every approved EK is sent, matches its hash exactly and
+  activates its credential, and the quote and the boot policy pass. Another EK passes the usual
+  checks and authorizes nothing. A manufacturer certificate admits no device on its own.
+- A `planned` device without a binding, and a serial NetBox lacks, wait as a claim in
+  `pending/`, which authorizes nothing and creates no device.
+- EKs that are not the binding are refused at the start. fleetd writes nothing, quarantines nothing
+  and journals the device at most every ten minutes.
+- A binding counts only when `ATTEST_BINDING_AUTHOR` made its newest change. fleetd reads the
+  device's records in `/api/core/object-changes/`, newest first, and takes the first one whose
+  `prechange_data` and `postchange_data` differ in either field. A binding another user wrote, a
+  changelog that does not answer, and one with no record that sets the current value are refused
+  with `ek-binding-unauthored` and journaled; nothing is recorded or quarantined. The token needs
+  the view permission on core object changes.
+- Right before it issues the LDevID, and again before it answers the install code, fleetd reads the
+  device and its changelog again, and refuses when the binding changed, went, or was last written
+  by someone else since the start. No claim changes the binding: fleetd never writes it.
+- A pass that matched the binding pins the binding alone: each approved hash, and null for an
+  algorithm the binding leaves out, journaled, so neither a removed TPM's EK nor an extra EK the
+  pass sent stays a pin. Without a binding only an empty pin is written. A replaced TPM needs a
+  change to the binding in the nodes file.
+- A renewal and the daily check prove the LAK on file and read no EK. A `planned` device gets no
+  renewal, since its identity comes from an intake pass; it is refused and journaled. A HookOS
+  attestation of a device past `planned` without a binding is held to its `ek_hash` pins, and gets
+  no install code.
+
+A planned stub binds to the first box that passes for its serial: fleetd puts the claimed MAC on
+the stub's interface. `mise run attest:approve <serial>` prints the nodes-file lines for a waiting
+claim's hashes, for the owner to compare with a receiving scan or the supplier's record before a
+pull request adds them; it authorizes nothing.
 
 ## Install code and admission
 
@@ -147,8 +169,8 @@ Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or 
 fleetd reads the name, serial, status, `primary_ip4`, `oob_ip`, the first physical interface's
 `primary_mac_address`, and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`, `last_workflow`, `expected_port`,
-`smbios_uuid`, `attest_verdict` and the attested network fields. It writes the verdict fields, the
-EK pins, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `none`,
+`smbios_uuid`, `attest_verdict`, `approved_ek_hash`, `approved_ek_hash_ecc` and the attested network fields. It writes the verdict fields, the
+observed EK hashes, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `none`,
 `last_workflow`, `status` and journal entries. A `quarantined` verdict cordons the node through the
 cluster's API on every pass; a control plane's `failed-no-quarantine` is no quarantine, and fleetd
 never uncordons.

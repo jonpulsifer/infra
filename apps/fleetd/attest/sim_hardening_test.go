@@ -6,7 +6,6 @@ package attest
 
 import (
 	"bytes"
-	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -42,22 +41,16 @@ func junkStart(t *testing.T, h *harness, claim protocol.Machine, withEK bool) (i
 	return resp.StatusCode, buf.String()
 }
 
-// A junk EK for a machine whose pins live only in approvals.json is a
-// mismatch, refused: it never writes a pending claim over the pass.
+// A junk EK for a pinned machine, sent without the pinned ECC EK, is
+// refused: it never writes a pending claim over the pass.
 func TestJunkStartNeverOverwritesAnAttestedRecord(t *testing.T) {
-	h := newHarness(t, harnessOpts{inventory: func(_, _ string) string {
-		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n", simSerial, simMAC)
-	}})
-	_, _ = h.run(simSerial, simMAC)
-	if _, err := h.v.Approve(context.Background(), simSerial, []string{h.hashes["rsa"], h.hashes["ecc"]}, "o"); err != nil {
-		t.Fatal(err)
-	}
+	h := newHarness(t, harnessOpts{})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
 	before, _, _ := h.v.Store.Record("testbox")
 	code, body := junkStart(t, h, simClaim, true)
-	if code != http.StatusForbidden || !strings.Contains(body, `"verdict":"refused"`) || !strings.Contains(body, reasonEKHash) {
+	if code != http.StatusForbidden || !strings.Contains(body, `"verdict":"refused"`) || !strings.Contains(body, reasonEKMissing) {
 		t.Fatalf("junk start: %d %s", code, body)
 	}
 	rec, _, _ := h.v.Store.Record("testbox")
@@ -93,12 +86,10 @@ func TestRoleSwappedDevIDIsRefused(t *testing.T) {
 	}
 }
 
-// Junk Starts create nothing in NetBox and spend none of the intake cap;
-// the cap counts EKs that activated a credential.
+// Junk Starts create nothing in NetBox and write no record.
 func TestJunkStartsSpendNothing(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	h.v.IntakePerHour = 2
 	for i := 0; i < 10; i++ {
 		c := simClaim
 		c.Serial, c.Hostname, c.MAC = fmt.Sprintf("JUNK-%d", i), "", ""
@@ -120,24 +111,18 @@ func TestJunkStartsSpendNothing(t *testing.T) {
 	if pendings, _ := h.v.Store.Pendings(); len(pendings) != 5 {
 		t.Fatalf("%d claims wait; the five with an EK should", len(pendings))
 	}
-	// A real machine still gets through: its claim waits, the owner approves,
-	// activation creates its device.
+	// A real machine still gets through: its claim waits, and once its node
+	// entry and binding are in NetBox it passes.
 	r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }())
 	if r.Verdict.Verdict != protocol.VerdictPending {
 		t.Fatalf("legit first intake: %+v", r.Verdict)
 	}
-	if _, err := h.v.Approve(context.Background(), simSerial, []string{h.hashes["rsa"], h.hashes["ecc"]}, "o"); err != nil {
-		t.Fatal(err)
-	}
+	f.add("testbox", simSerial, "planned", "", h.bound(nil))
 	if _, err := h.run(simSerial, simMAC); err != nil {
-		t.Fatalf("after approval: %v", err)
+		t.Fatalf("after the binding: %v", err)
 	}
 	if f.count() != 1 {
 		t.Fatalf("%d devices after the real intake", f.count())
-	}
-	// The same EK again spends nothing more.
-	if !h.v.admitIntake(time.Now(), h.hashes["ecc"]) || !h.v.admitIntake(time.Now(), "other") || h.v.admitIntake(time.Now(), "third") {
-		t.Fatal("the cap does not count distinct EKs")
 	}
 }
 
@@ -146,7 +131,7 @@ func TestJunkStartsSpendNothing(t *testing.T) {
 func TestClaimedHostnameNeverOverwritesARecord(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 	f.set(simSerial, func(d *fakeDevice) {
 		d.CustomFields["ek_hash"], d.CustomFields["ek_hash_ecc"] = h.hashes["rsa"], h.hashes["ecc"]
 	})

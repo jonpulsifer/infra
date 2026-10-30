@@ -19,7 +19,7 @@ import (
 func TestQuarantineStandsWhenItsNetBoxWriteFailed(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 	f.set(simSerial, func(d *fakeDevice) {
 		d.CustomFields["ek_hash"], d.CustomFields["ek_hash_ecc"] = h.hashes["rsa"], h.hashes["ecc"]
 	})
@@ -47,7 +47,7 @@ func activeTestbox(t *testing.T) (*harness, *fakeNetBox) {
 	t.Helper()
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
 	f.set(simSerial, func(d *fakeDevice) {
 		d.CustomFields["ek_hash"], d.CustomFields["ek_hash_ecc"] = h.hashes["rsa"], h.hashes["ecc"]
 	})
