@@ -12,4 +12,4 @@ metadata:
     app.kubernetes.io/name: mate
     app.kubernetes.io/part-of: mate
 data:
-  image: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:5ff73f9d7b70195c618f6fdc08ebb4e42e78eb723997891de419ef6eefc5ccd1
+  image: ghcr.io/jonpulsifer/mate-sandbox:latest@sha256:94db77bdddbeb48c30841f5ac56f4bbdf45c9267223d356c2375e394602b5bda
