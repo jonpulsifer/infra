@@ -79,6 +79,20 @@ Other commands:
 - `provision --action wipe|attest|retire` runs the other fleetd actions.
 - `--set KEY=VALUE` overrides a `hardwareMap` key. A test that does this must say so.
 - `--again` creates a second Workflow while one runs.
+- `--no-boot` leaves out the boot mode, as fleetd does for a device without a BMC or a machine that
+  waits in HookOS. Rufio does not power-cycle the VM, and the agent of the boot it is in takes the
+  run.
+- `--template NAME` runs a copy of the Template that `template` applied. A test that does this
+  must say so.
+- `template NAME [--timeout ACTION=SECONDS]... [--global SECONDS]` applies a copy of the committed
+  Template as NAME, with those action timeouts or that `global_timeout`. The committed Template
+  stays as it is.
+- `slow-installer SECONDS` pushes `ghcr.io/tink-lab/slow-installer:SECONDS`, the class's installer
+  behind `slow-installer.sh`. It writes a tick to the install disk every second for SECONDS, 1 MiB
+  from its end, and echoes it to the console. Then it runs the real installer. Use it with
+  `--set installer_image=...`. A tick after the install action's timeout, or after a wipe, is a disk
+  writer that outlived its action. Read the tick from the host with
+  `dd if=$TINK_LAB_DIR/vms/NAME/DISK.img bs=512 skip=$((SIZE / 512 - 2048)) count=1`.
 - `kubectl` runs against the local API, in namespace `tinkerbell`.
 - `vm console NAME TIMEOUT CMD` runs a command on HookOS's root shell on the serial console. For
   hook-docker's Docker, use `nerdctl -n services.linuxkit exec hook-docker docker ...`.
@@ -119,6 +133,7 @@ wait after the boundary. A COND is one of:
 | `efi NAME show\|next ENTRY\|order A,B,...` | Reads the VM's EFI boot variables from its OVMF store. A write needs the VM off. `next Pxe` or `next Hdd` picks the first such entry in BootOrder. | `efi` `{result}` |
 | `registry delete IMAGE`, `restore IMAGE` | Deletes a lab image's manifest (IMAGE is any part of its reference, such as `talos-installer`), so a pull fails with "manifest unknown". `restore` pushes it back from the cache. | `registry` `{action, image, digest}` |
 | `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. | `registry` `{action, verdict}` |
+| `registry throttle KBPS` | The registry's packets to the VMs over KBPS kilobytes a second are dropped, so a pull crawls instead of failing. `allow` lifts it. | `registry` `{action, kbytes_per_second}` |
 | `observe NAME [--no-console]` | A snapshot. See below. | `observe` |
 
 `observe` records:
@@ -201,9 +216,10 @@ The test numbers are those in the test plan.
 - **Action boundaries come from the API.** An action finishes in HookOS before the API shows it.
   The window between the two is the agent's report. For test 2, cut the agent's network while the
   action runs (`--when action=install:RUNNING`), so it finishes and cannot report.
-- **Timeouts are the Template's.** The installer finishes in about 2 s. For test 3, either make the
-  pull or the installer slow (`registry deny --drop` before the pull), or run a copy of the Template
-  with shorter timeouts. Either varies the inputs, and the finding must say so.
+- **Timeouts are the Template's.** The installer finishes in about 2 s. For test 3, make the
+  installer slow (`slow-installer`) or its pull slow (`registry throttle` once the tools image is
+  pulled, as during wipe-disk), and run a copy of the Template with a shorter timeout (`template`).
+  Each varies the inputs, and the finding must say so.
 - **One flat network.** The VMs, the boot server and the registry share one bridge. The lab routes
   between the Kubernetes network and spore's bootstrap VLAN.
 - **HookOS's image cache lives in RAM for one boot.** To take an image out of it mid-run (test 7),
@@ -221,4 +237,5 @@ The test numbers are those in the test plan.
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
+| `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |

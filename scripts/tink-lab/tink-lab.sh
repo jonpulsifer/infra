@@ -11,7 +11,10 @@
 #   selftest [NAME]                     provision a machine end to end and print the times
 #   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--attest VERDICT]
 #   vm delete NAME | vm console NAME TIMEOUT CMD... | vm screen NAME FILE.png
-#   provision NAME [--action A] [--set KEY=VALUE]... [--again]
+#   provision NAME [--action A] [--set KEY=VALUE]... [--again] [--template NAME] [--no-boot]
+#   template NAME [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the provision
+#                                       Template with other timeouts, for a test
+#   slow-installer SECONDS              the class's installer, writing ticks to its disk first
 #   reconcile NAME | wait NAME TIMEOUT [STATE]
 #   power NAME on|off|soft|cycle|status
 #   cut NAME [--when COND] [--delay S] [--on-after S]
@@ -19,7 +22,7 @@
 #   kill PROC [--signal SIG] [--when COND] | stop PROC | start PROC
 #   disk NAME sentinel|shuffle|usb-attach DISK SIZE|usb-detach DISK
 #   efi NAME show|next ENTRY|order ENTRY,...
-#   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|allow
+#   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow
 #   observe NAME [--no-console]
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
@@ -723,9 +726,11 @@ finished() {
 # provision does what fleetd's Reconciler.start does for one device
 # (apps/fleetd/fleet/reconcile.go): finished Workflows are deleted, a running one is adopted, and
 # otherwise the Hardware allows netboot before a new Workflow (Config.Workflow) exists. --again
-# creates one even when one runs.
+# creates one even when one runs. --template runs a copy that template made. --no-boot leaves out
+# the boot mode, as fleetd does for a device without a BMC or a machine that waits in HookOS, so
+# Rufio does not power-cycle the machine and the agent of the boot it is in takes the run.
 provision() {
-  local name=$1 action=provision again=false sets=() wf running="" w
+  local name=$1 action=provision again=false sets=() wf running="" w tmpl=provision boot=netboot
   shift
   need_vm "$name"
   while [ $# -gt 0 ]; do
@@ -733,6 +738,8 @@ provision() {
       --action) action=$2 && shift 2 ;;
       --set) sets+=("$2") && shift 2 ;;
       --again) again=true && shift ;;
+      --template) tmpl=$2 && shift 2 ;;
+      --no-boot) boot="" && shift ;;
       *) die "provision: unknown $1" ;;
     esac
   done
@@ -762,18 +769,18 @@ provision() {
   fi
   wf=$(jq -n --arg name "$action-$name-$(date +%s)" --arg ns "$NS" --argjson labels "$(labels "$name" "$action")" \
     --arg hw "$name" --arg attest "$attest" --arg wipe "$wipe" --arg retire "$retire" \
-    --arg install "$install" --arg installer "$installer" '{
+    --arg install "$install" --arg installer "$installer" --arg tmpl "$tmpl" --arg boot "$boot" '{
       apiVersion: "tinkerbell.org/v1alpha1", kind: "Workflow",
       metadata: {name: $name, namespace: $ns, labels: $labels},
-      spec: {templateRef: "provision", hardwareRef: $hw,
+      spec: {templateRef: $tmpl, hardwareRef: $hw,
         hardwareMap: {attest: $attest, wipe: $wipe, retire: $retire, install: $install, installer_image: $installer},
-        bootOptions: {toggleAllowNetboot: false, bootMode: "netboot"}}}')
+        bootOptions: ({toggleAllowNetboot: false} + if $boot != "" then {bootMode: $boot} else {} end)}}')
   for w in "${sets[@]}"; do
     wf=$(jq -c --arg k "${w%%=*}" --arg v "${w#*=}" '.spec.hardwareMap[$k] = $v' <<<"$wf")
   done
   apply_hardware "$name" true
   KUBE create -f - <<<"$wf" >/dev/null
-  event event=provision vm="$name" workflow="$(jq -r .metadata.name <<<"$wf")" \
+  event event=provision vm="$name" workflow="$(jq -r .metadata.name <<<"$wf")" template="$tmpl" boot_mode="$boot" \
     "hardwareMap=$(jq -c .spec.hardwareMap <<<"$wf")"
 }
 
@@ -1044,7 +1051,7 @@ manifest_url() {
 }
 
 registry_cmd() {
-  local what=${1:-ls} ref digest r verdict
+  local what=${1:-ls} ref digest r verdict rate
   case $what in
     ls)
       inns curl -s "http://$REG/v2/_catalog" | jq -r '.repositories[]' | while read -r r; do
@@ -1077,12 +1084,78 @@ table inet tinklab_registry {
 EOF
       event event=registry action=deny verdict="$verdict"
       ;;
+    throttle)
+      # Packets from the registry over KBPS kilobytes a second are dropped, so a pull crawls
+      # instead of failing. A pull of an image HookOS has cached still fetches only its manifest.
+      rate=${2:?registry throttle needs kilobytes a second}
+      [[ $rate =~ ^[0-9]+$ ]] || die "registry throttle needs kilobytes a second"
+      inns nft -f - <<EOF
+table inet tinklab_registry {
+  chain out { type filter hook output priority -10; ip saddr $REG tcp sport 80 limit rate over $rate kbytes/second drop; }
+}
+EOF
+      event event=registry action=throttle kbytes_per_second="$rate"
+      ;;
     allow)
       inns nft delete table inet tinklab_registry 2>/dev/null || true
       event event=registry action=allow
       ;;
-    *) die "registry: ls, delete, restore, deny or allow" ;;
+    *) die "registry: ls, delete, restore, deny, throttle or allow" ;;
   esac
+}
+
+# template_cmd applies a copy of the committed provision Template as NAME, with each
+# --timeout ACTION=SECONDS and --global SECONDS (global_timeout) changed, for a test that varies
+# timeouts. provision --template NAME runs it.
+template_cmd() {
+  local name=${1:?template needs a name} data t
+  shift
+  [ "$name" != provision ] || die "the copy needs a name other than provision"
+  data=$(yq -r '.spec.data' "$repo/clusters/folly/tinkerbell/template.yaml")
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --timeout)
+        t=$2 && shift 2
+        [[ ${t#*=} =~ ^[0-9]+$ ]] || die "--timeout is ACTION=SECONDS"
+        yq -e ".tasks[].actions[] | select(.name == \"${t%%=*}\")" <<<"$data" >/dev/null 2>&1 || die "no action ${t%%=*}"
+        data=$(yq "(.tasks[].actions[] | select(.name == \"${t%%=*}\") | .timeout) = ${t#*=}" <<<"$data")
+        ;;
+      --global)
+        [[ $2 =~ ^[0-9]+$ ]] || die "--global is SECONDS"
+        data=$(yq ".global_timeout = $2" <<<"$data")
+        shift 2
+        ;;
+      *) die "template: unknown $1" ;;
+    esac
+  done
+  jq -n --arg name "$name" --arg ns "$NS" --arg data "$data" '{apiVersion: "tinkerbell.org/v1alpha1",
+    kind: "Template", metadata: {name: $name, namespace: $ns}, spec: {data: $data}}' | KUBE apply -f - >/dev/null
+  event event=template name="$name" \
+    "timeouts=$(yq -o json .tasks <<<"$data" | jq -c '[.[].actions[] | {(.name): .timeout}] | add')" \
+    global_timeout="$(yq .global_timeout <<<"$data")"
+}
+
+# slow_installer pushes ghcr.io/tink-lab/slow-installer:SECONDS: the class's Talos installer, with
+# slow-installer.sh in front of /bin/installer. It writes a tick to its install disk every second
+# for SECONDS, then runs the real installer with the same arguments.
+slow_installer() {
+  local secs=${1:?slow-installer needs seconds} base bb stage digest
+  [[ $secs =~ ^[0-9]+$ ]] || die "slow-installer needs seconds"
+  base=$(push_ref "$(jq -r '[.. | .installer_image? // empty][0]' "$repo/clusters/folly/fleet/class-inputs.json")")
+  bb=$(nix build --no-link --print-out-paths nixpkgs#pkgsStatic.busybox)/bin/busybox
+  stage=$dir/build/slow-installer
+  rm -rf "$stage" && mkdir -p "$stage/tinklab" "$stage/usr/bin"
+  inns crane export --insecure --platform linux/amd64 "$base" - | tar -xf - -C "$stage" usr/bin/installer
+  mv "$stage/usr/bin/installer" "$stage/tinklab/installer"
+  install -m 0755 "$bb" "$stage/tinklab/busybox"
+  install -m 0755 "$here/slow-installer.sh" "$stage/usr/bin/installer"
+  echo "$secs" >"$stage/tinklab/seconds"
+  tar --owner=0 --group=0 --mtime=@0 -C "$stage" -cf "$dir/build/slow-installer.tar" tinklab usr
+  inns crane append --insecure --platform linux/amd64 -b "$base" -f "$dir/build/slow-installer.tar" \
+    -t "$REG/tink-lab/slow-installer:$secs" >>"$dir/logs/agent.log" 2>&1 || die "the build failed; see $dir/logs/agent.log"
+  digest=$(inns crane digest --insecure "$REG/tink-lab/slow-installer:$secs")
+  rm -rf "$stage"
+  event event=slow-installer seconds="$secs" image="ghcr.io/tink-lab/slow-installer:$secs" digest="$digest"
 }
 
 # monitor runs each line of stdin as a monitor command, through QMP, which answers before the
@@ -1302,6 +1375,14 @@ case $cmd in
     tools
     registry_cmd "$@"
     ;;
+  template)
+    tools
+    template_cmd "$@"
+    ;;
+  slow-installer)
+    tools
+    slow_installer "$@"
+    ;;
   observe)
     tools
     with=true
@@ -1309,7 +1390,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,31p' "$0" >&2
+    sed -n '2,33p' "$0" >&2
     exit 2
     ;;
 esac
