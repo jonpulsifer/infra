@@ -24,6 +24,8 @@
 #   efi NAME show|next ENTRY|order ENTRY,...
 #   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow
 #   observe NAME [--no-console]
+#   hookos-docker NAME ARGS...          hook-docker's docker on the machine's HookOS, such as
+#                                       restart tink-worker
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
 # workflow=STATE (or FINISHED), console=TEXT (serial output after the hook started) or
@@ -1223,10 +1225,37 @@ parse_when() {
     esac
   done
 }
+# watch_action blocks until ACTION of the machine's newest Workflow is in STATE. It reads a watch
+# on the API, not a poll, so a hook acts within tens of milliseconds of the agent's report: an
+# action such as next-boot runs for 0.2 s after it reports RUNNING.
+watch_action() {
+  local name=$1 act=${2%%:*} want=${2#*:} timeout=$3 state pid rc=124
+  exec {w}< <(exec timeout "$timeout" nsenter -t "$(nspid)" -U -n --preserve-credentials -- \
+    kubectl --kubeconfig "$dir/pki/kubeconfig" -n "$NS" get workflows -l "lolwtf.ca/node=$name" -w -o json \
+    | jq -n --unbuffered -r --arg a "$act" 'foreach inputs as $w ({latest: ""};
+        if $w.metadata.creationTimestamp >= .latest then
+          .latest = $w.metadata.creationTimestamp
+          | .out = ([$w.status.tasks[]?.actions[]? | select(.name == $a) | .state][0] // "")
+        else .out = null end; .out // empty)')
+  pid=$!
+  while IFS= read -r -u "$w" state; do
+    if [ "$state" = "$want" ]; then
+      rc=0
+      break
+    fi
+  done
+  exec {w}<&-
+  pkill -P "$pid" 2>/dev/null || true
+  return "$rc"
+}
+
 at_boundary() {
   local name=$1 start=$SECONDS
   if [ -n "$when" ]; then
-    wait_cond "$name" "$when" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold"
+    case $when in
+      action=*) watch_action "$name" "${when#action=}" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
+      *) wait_cond "$name" "$when" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
+    esac
     event event=boundary vm="$name" when="$when" waited="$((SECONDS - start))"
   fi
   [ "$delay" = 0 ] || sleep "$delay"
@@ -1383,6 +1412,16 @@ case $cmd in
     tools
     slow_installer "$@"
     ;;
+  hookos-docker)
+    tools
+    name=${1:?hookos-docker needs a machine}
+    shift
+    [ $# -gt 0 ] || die "hookos-docker needs docker's arguments"
+    rc=0
+    out=$(console "$name" 60 "nerdctl -n services.linuxkit exec hook-docker docker $*") || rc=$?
+    event event=hookos-docker vm="$name" "args=$*" status="$rc" output="$out"
+    exit "$rc"
+    ;;
   observe)
     tools
     with=true
@@ -1390,7 +1429,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,33p' "$0" >&2
+    sed -n '2,35p' "$0" >&2
     exit 2
     ;;
 esac

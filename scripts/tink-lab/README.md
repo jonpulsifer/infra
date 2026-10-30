@@ -114,7 +114,8 @@ boundary, prints a `boundary` event with the seconds it waited, and then acts. `
 wait after the boundary. A COND is one of:
 
 - `action=NAME:STATE`: an action of the machine's latest Workflow, with STATE as Tinkerbell writes
-  it (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `TIMEOUT`).
+  it (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `TIMEOUT`). A hook reads it from a watch on the
+  API, so it acts 10-20 ms after the agent's report. `wait` polls it every 0.5 s.
 - `workflow=STATE`, or `workflow=FINISHED` for any terminal state.
 - `console=TEXT`: serial output written after the hook started, ANSI codes stripped.
 - `log=PROC:TEXT`: a new line in `logs/PROC.log`. For example, `log=dnsmasq:query[A] enroll` is
@@ -134,6 +135,7 @@ wait after the boundary. A COND is one of:
 | `registry delete IMAGE`, `restore IMAGE` | Deletes a lab image's manifest (IMAGE is any part of its reference, such as `talos-installer`), so a pull fails with "manifest unknown". `restore` pushes it back from the cache. | `registry` `{action, image, digest}` |
 | `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. | `registry` `{action, verdict}` |
 | `registry throttle KBPS` | The registry's packets to the VMs over KBPS kilobytes a second are dropped, so a pull crawls instead of failing. `allow` lifts it. | `registry` `{action, kbytes_per_second}` |
+| `hookos-docker NAME ARGS...` | Runs hook-docker's `docker ARGS...` on HookOS through the serial console, such as `restart tink-worker` to restart the agent. hook-bootkit starts `tink-worker` with restart policy `no`, so nothing else restarts it in one boot. A restart re-runs the stand-in attestation, which writes a new install code. | `hookos-docker` `{vm, args, status, output}` |
 | `observe NAME [--no-console]` | A snapshot. See below. | `observe` |
 
 `observe` records:
@@ -215,7 +217,9 @@ The test numbers are those in the test plan.
   a disk's own cache might not. Raw disk images, no cache mode set.
 - **Action boundaries come from the API.** An action finishes in HookOS before the API shows it.
   The window between the two is the agent's report. For test 2, cut the agent's network while the
-  action runs (`--when action=install:RUNNING`), so it finishes and cannot report.
+  action runs (`--when action=install:RUNNING`), so it finishes and cannot report. next-boot and
+  reboot finish about 150 ms after they report `RUNNING`; the watch beats that, so check that the
+  agent's `executed action` line comes after the `agent-net` event.
 - **Timeouts are the Template's.** The installer finishes in about 2 s. For test 3, make the
   installer slow (`slow-installer`) or its pull slow (`registry throttle` once the tools image is
   pulled, as during wipe-disk), and run a copy of the Template with a shorter timeout (`template`).
