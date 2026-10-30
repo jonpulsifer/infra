@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -58,13 +57,6 @@ func (e *RefusedError) Error() string {
 	return fmt.Sprintf("refused (%d): %s %s: %s", e.Status, e.Verdict.Verdict, e.Verdict.Reason, strings.Join(e.Verdict.Detail, "; "))
 }
 
-type ek struct {
-	alg      string
-	template tpm2.Public
-	msg      protocol.EK
-	hash     string
-}
-
 // Run attests the machine whose TPM rw reaches.
 func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err error) {
 	logf := cfg.Logf
@@ -93,12 +85,12 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		}
 	}()
 
-	eks, err := endorsementKeys(rw)
+	eks, err := DiscoverEKs(rw)
 	if err != nil {
 		return nil, err
 	}
 	for _, e := range eks {
-		logf("EK %s %s (certificate: %v)", e.alg, e.hash, len(e.msg.Cert) > 0)
+		logf("EK %s %s (certificate: %v, NV template: %v, NV nonce: %v)", e.Alg, e.Hash, e.Cert != nil, e.TemplateNV, e.NonceNV)
 	}
 
 	srk, _, err := tpm2.CreatePrimary(rw, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", SRKTemplate)
@@ -131,7 +123,7 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		AK:      protocol.AK{Public: akPub, CreateData: akCreateData, CreateAttestation: akAttest, CreateSignature: akSig},
 	}
 	for _, e := range eks {
-		start.EKs = append(start.EKs, e.msg)
+		start.EKs = append(start.EKs, protocol.EK{Public: e.PublicDER, Cert: e.Cert})
 	}
 	var started protocol.StartResponse
 	if err := post(ctx, cfg, protocol.PathStart, start, &started); err != nil {
@@ -145,9 +137,9 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		if i < 0 {
 			return nil, fmt.Errorf("challenge for an EK this TPM did not send: %s", c.EKHash)
 		}
-		secret, err := activate(rw, ak, eks[i].template, c)
+		secret, err := activate(rw, ak, eks[i], c)
 		if err != nil {
-			return nil, fmt.Errorf("activate credential for the %s EK: %w", eks[i].alg, err)
+			return nil, fmt.Errorf("activate credential for the %s EK: %w", eks[i].Alg, err)
 		}
 		evidence.Activated = append(evidence.Activated, protocol.Activated{EKHash: c.EKHash, Secret: secret})
 	}
@@ -238,12 +230,12 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	if i < 0 {
 		return res, fmt.Errorf("the install code is wrapped to an EK this TPM did not send: %s", confirmed.InstallCodeEKHash)
 	}
-	code, err := activate(rw, ak, eks[i].template, protocol.Challenge{Credential: confirmed.InstallCodeCredential, Secret: confirmed.InstallCodeSecret})
+	code, err := activate(rw, ak, eks[i], protocol.Challenge{Credential: confirmed.InstallCodeCredential, Secret: confirmed.InstallCodeSecret})
 	if err != nil {
 		return res, fmt.Errorf("unwrap the install code: %w", err)
 	}
 	res.InstallCode = base64.RawURLEncoding.EncodeToString(code)
-	logf("install code unwrapped with the %s EK", eks[i].alg)
+	logf("install code unwrapped with the %s EK", eks[i].Alg)
 	return res, nil
 }
 
@@ -262,54 +254,24 @@ func akSign(rw io.ReadWriter, ak tpmutil.Handle, scheme tpm2.SigScheme, data []b
 	return sig.Encode()
 }
 
-func indexOf(eks []ek, hash string) int {
+func indexOf(eks []*EK, hash string) int {
 	for i, e := range eks {
-		if e.hash == hash {
+		if e.Hash == hash {
 			return i
 		}
 	}
 	return -1
 }
 
-// endorsementKeys creates each EK whose certificate the TPM holds, ECC
-// first. A TPM with no certificate sends its RSA EK alone, which the
-// inventory must then pin.
-func endorsementKeys(rw io.ReadWriter) ([]ek, error) {
-	var out []ek
-	for _, c := range []struct {
-		alg  string
-		nv   tpmutil.Handle
-		tmpl tpm2.Public
-	}{{"ecc", nvEKCertECC, EKTemplateECC}, {"rsa", nvEKCertRSA, EKTemplateRSA}} {
-		cert, _ := readNV(rw, c.nv)
-		if cert == nil && (len(out) > 0 || c.alg == "ecc") {
-			continue
-		}
-		h, pub, err := tpm2.CreatePrimary(rw, tpm2.HandleEndorsement, tpm2.PCRSelection{}, "", "", c.tmpl)
-		if err != nil {
-			return nil, fmt.Errorf("create %s EK: %w", c.alg, err)
-		}
-		_ = tpm2.FlushContext(rw, h)
-		der, err := x509.MarshalPKIXPublicKey(pub)
-		if err != nil {
-			return nil, err
-		}
-		e := ek{alg: c.alg, template: c.tmpl, msg: protocol.EK{Public: der, Cert: trimDER(cert)}, hash: hashHex(der)}
-		out = append(out, e)
-	}
-	if len(out) == 0 {
-		return nil, errors.New("no endorsement key")
-	}
-	return out, nil
-}
-
-func activate(rw io.ReadWriter, ak tpmutil.Handle, ekTemplate tpm2.Public, c protocol.Challenge) ([]byte, error) {
+// activate recreates the EK from the template discovery resolved and has it
+// release the credential's secret to the AK.
+func activate(rw io.ReadWriter, ak tpmutil.Handle, e *EK, c protocol.Challenge) ([]byte, error) {
 	if len(c.Credential) < 2 || len(c.Secret) < 2 {
 		return nil, errors.New("malformed challenge")
 	}
-	ekHandle, _, err := tpm2.CreatePrimary(rw, tpm2.HandleEndorsement, tpm2.PCRSelection{}, "", "", ekTemplate)
+	ekHandle, err := loadEK(rw, e)
 	if err != nil {
-		return nil, fmt.Errorf("recreate EK: %w", err)
+		return nil, err
 	}
 	defer tpm2.FlushContext(rw, ekHandle)
 	sess, _, err := tpm2.StartAuthSession(rw, tpm2.HandleNull, tpm2.HandleNull, make([]byte, 16), nil, tpm2.SessionPolicy, tpm2.AlgNull, tpm2.AlgSHA256)
