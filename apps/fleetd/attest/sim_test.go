@@ -48,6 +48,7 @@ type harness struct {
 	// tamperRenew rewrites a renewal's or a check's evidence, by session.
 	tamperRenew func(session string, e *protocol.RenewEvidence)
 	audit       strings.Builder
+	nb          *fakeNetBox
 }
 
 type harnessOpts struct {
@@ -57,7 +58,7 @@ type harnessOpts struct {
 	foreignMfr bool
 	// noEKCerts leaves the maker's certificates out of NV: the TPM sends its RSA EK alone, uncertified.
 	noEKCerts bool
-	// netbox makes the fake NetBox the system of record.
+	// netbox is the fake NetBox; without one the harness makes it from inventory.
 	netbox *fakeNetBox
 }
 
@@ -133,6 +134,11 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if o.netbox == nil {
+		o.netbox = newFakeNetBox(t)
+		inv.seed(o.netbox)
+	}
+	h.nb = o.netbox
 	policy := loadPolicy(t)
 	o.policy(policy)
 	store, err := OpenStore(filepath.Join(dir, "state"))
@@ -140,15 +146,13 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.v = &Verifier{
-		Inventory: inv, Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
+		Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
 		Audit: &Audit{W: &h.audit, Site: "folly"},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
 	}
-	if o.netbox != nil {
-		nb := o.netbox.client()
-		h.v.NetBox = nb
-		h.v.Recorders = append(h.v.Recorders, nb)
-	}
+	nb := o.netbox.client()
+	h.v.NetBox = nb
+	h.v.Recorders = append(h.v.Recorders, nb)
 	h.srv = &Server{V: h.v, Log: h.v.Log, Approvers: map[string]bool{"owner@example.com": true}}
 	h.ts = httptest.NewServer(h.tamperEvidence(h.srv.Public()))
 	t.Cleanup(h.ts.Close)
@@ -263,7 +267,7 @@ func TestAttestPassesAndServesTheDevID(t *testing.T) {
 	}
 	code, body = h.get("/verdict/" + simSerial)
 	var st protocol.Status
-	if err := json.Unmarshal(body, &st); err != nil || code != http.StatusOK || st.Status != protocol.StatusAttested || st.Node != "testbox" || st.UUID == "" || !st.AttestedAt.Equal(rec.AttestedAt) {
+	if err := json.Unmarshal(body, &st); err != nil || code != http.StatusOK || st.Status != protocol.StatusAttested || st.Node != "testbox" || st.UUID == "" || !st.AttestedAt.Equal(rec.AttestedAt.Truncate(time.Second)) {
 		t.Fatalf("GET /verdict: %d %s", code, body)
 	}
 	if code, _ := h.get("/verdict/UNKNOWN"); code != http.StatusNotFound {
@@ -329,9 +333,8 @@ func TestAttestRefusals(t *testing.T) {
 		// answer is a refusal, and no record is written.
 		refused bool
 	}{
-		{name: "unknown serial", serial: "NOT-IN-INVENTORY", reason: reasonUnknownMachine, refused: true},
-		{name: "MAC is not the inventory's", mac: "02:00:00:00:00:99", reason: reasonMACMismatch, refused: true},
-		{name: "EK hash differs from the inventory", opts: harnessOpts{inventory: func(_, ecc string) string {
+		{name: "MAC is not NetBox's", mac: "02:00:00:00:00:99", reason: reasonMACMismatch, refused: true},
+		{name: "EK hash differs from NetBox's", opts: harnessOpts{inventory: func(_, ecc string) string {
 			return defaultInventory(strings.Repeat("0", 64), ecc)
 		}}, reason: reasonEKHash, refused: true},
 		{name: "EK certificate from an unpinned maker", opts: harnessOpts{foreignMfr: true}, reason: reasonEKChain, refused: true},
@@ -399,14 +402,10 @@ func TestAttestRefusals(t *testing.T) {
 	}
 }
 
-// With no hash in git, NetBox's ek_hash pins the RSA EK, and the inventory's
-// ECC pin still applies beside it.
+// NetBox's ek_hash pins the RSA EK.
 func TestNetBoxPinsTheEK(t *testing.T) {
-	bare := func(_, ecc string) string {
-		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    ek_hash_ecc: %s\n", simSerial, simMAC, ecc)
-	}
 	f := newFakeNetBox(t)
-	h := newHarness(t, harnessOpts{inventory: bare, netbox: f})
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"]})
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("pinned by NetBox: %v", err)

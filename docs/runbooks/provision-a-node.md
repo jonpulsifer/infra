@@ -50,7 +50,7 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 A control plane installs the same way and joins the running cluster. The cluster's first control plane, at `API_SERVER_IP`, never installs this way, because the Talos root bootstraps etcd on it.
 
 1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetd.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing, and spore holds no bundle with the cluster's CA keys.
-2. [Declare the node](#declare-the-node) with the class `controlplane`. `homelab.fleetd.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
+2. [Declare the node](#declare-the-node) with the class `controlplane`.
 3. Follow [Plug a machine in](#plug-a-machine-in). An admitted control plane is never auto-provisioned: its attestation passes and the machine waits in HookOS. Set `desired_action` to `provision` in NetBox; fleetd starts the run, and Rufio power-cycles the machine so that its next attestation takes the code. In the pull request of step 5, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 6 gives fleetd the new class inputs for the next control plane.
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
@@ -92,16 +92,15 @@ A serial no declared device names waits for approval, and the console shows `att
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The journal says `on port N, expected M` | A switch port the device does not expect | Move the machine, or correct `expected_port`, and power-cycle it |
+| The journal says `on port N, expected M` | A switch port the device does not expect | Move the machine, or correct `switch_port` in the nodes file, and power-cycle it |
 | The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Set AMT's address, or power the machine on by hand |
-| The journal says the model is not in `FLEET_MODEL_MAP` | An unknown model has no class | Set `talos_class` and `desired_action`, or extend `homelab.fleetd.modelMap` |
+| The journal says the device `lacks` a field | `terraform/netbox/folly` has not applied the node's entry | Comment `atlantis plan -d terraform/netbox/folly` and apply it |
 | The console says `attest: try 5 failed` | fleetd did not answer | Read `journalctl -u fleetd` on spore |
 | The console says `attest: FAILED` and the agent starts at once | fleetd refused the machine | Read the `attest.verdict` audit line in `journalctl -u fleetd` |
 | `desired_action` stays set | fleetd is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
 | The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attestation | Check that the switch sends LLDP, then power-cycle the machine |
-| The journal says a port `is cabled to another device in NetBox` | NetBox holds another device's cable on the attested port | Correct the cables in NetBox; fleetd never removes one |
 | `wipe: this boot did not pass attestation` or `no install code` | The boot's attestation got no pass or no code, so nothing was wiped | Read the `attest.install` audit line in `journalctl -u fleetd`, then set `desired_action` again |
-| The audit line says `no provision` | No `talos_class`, a last run the owner has not repeated, or auto-provision is off | Set the class, or set `desired_action` to `provision` |
+| The audit line says `no provision` | A last run the owner has not repeated, a control plane, or auto-provision is off | Set `desired_action` to `provision` |
 | `EnrollmentNameNotServed` fires | fleetd is down, or its certificate lapsed | Read `journalctl -u fleetd` and the ACME units on spore |
 
 ## Related

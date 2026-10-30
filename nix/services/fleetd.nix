@@ -66,17 +66,6 @@ let
   # until the node renews it from spore's.
   bundle = certs + "/${site}-devid-ca.pem";
 
-  # The verifier's inventory, in the machines: shape it reads (JSON is YAML): each node's serial,
-  # class, TPM version and Secure Boot state from the nodes file. NetBox holds the MACs and pins.
-  inventory = pkgs.writeText "fleetd-inventory.yaml" (
-    builtins.toJSON {
-      machines = lib.mapAttrs (_: n: {
-        inherit (n) serial class tpm;
-        secure_boot = n.secure_boot or false;
-      }) (import ../lib/inventory.nix { inherit lib; });
-    }
-  );
-
   devidPort = 8444;
   adminPort = 8445;
   runDir = "/run/fleetd";
@@ -136,63 +125,7 @@ in
     autoProvision = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Start the provision of an admitted worker that has a class and an address and never ran a Workflow. Off, an admitted device waits for the owner.";
-    };
-    modelMap = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.submodule {
-          options = {
-            class = lib.mkOption {
-              type = lib.types.enum [
-                "controlplane"
-                "worker-g5"
-                "worker-g2"
-              ];
-              description = "The Talos class a machine of the model gets.";
-            };
-            bmc = lib.mkOption {
-              type = lib.types.enum [
-                "none"
-                "amt"
-              ];
-              description = "The model's out-of-band management.";
-            };
-            disk = lib.mkOption {
-              type = lib.types.strMatching "/dev/.+";
-              description = "The disk Talos installs to.";
-            };
-            tpm = lib.mkOption {
-              type = lib.types.enum [
-                ""
-                "2.0"
-              ];
-              default = "";
-              description = "The TPM spec version the model carries. With 2.0, a device of the class renders only once fleetd records its tpm_version.";
-            };
-            amt = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "The amt custom field an admitted device gets when it is empty.";
-            };
-            secure_boot = lib.mkOption {
-              type = lib.types.bool;
-              default = false;
-              description = "The secure_boot_expected custom field an admitted device gets when it is empty.";
-            };
-          };
-        }
-      );
-      default = {
-        "HP EliteDesk 800 G5 Desktop Mini" = {
-          class = "worker-g5";
-          bmc = "amt";
-          disk = "/dev/nvme0n1";
-          tpm = "2.0";
-          amt = true;
-          secure_boot = true;
-        };
-      };
-      description = "Class, BMC, install disk and hardware facts by SMBIOS model, for an admitted device that lacks them. A model not here gets no class and no auto-provision.";
+      description = "Start the provision of an admitted worker that never ran a Workflow. Off, an admitted device waits for the owner.";
     };
   };
 
@@ -205,12 +138,6 @@ in
       {
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
         message = "homelab.fleetd.controlPlanes needs installs, fleetd/worker-secrets and fleetd/bundle in spore's sops file.";
-      }
-      {
-        # A model mapped to a control plane would be admitted with the CA keys in reach; the owner
-        # declares a control plane in NetBox instead.
-        assertion = !cfg.controlPlanes || lib.all (m: m.class != "controlplane") (lib.attrValues cfg.modelMap);
-        message = "homelab.fleetd.modelMap must map no model to controlplane while controlPlanes is on.";
       }
     ];
 
@@ -297,7 +224,6 @@ in
         ATTEST_CA_CERT = "${caChain}";
         ATTEST_EK_ROOTS = "${../../apps/fleetd/attest/roots}";
         ATTEST_POLICY = "${../../apps/fleetd/attest/policy.yaml}";
-        ATTEST_INVENTORY = "${inventory}";
         ATTEST_STATE_DIR = "${stateDir}/attest";
         ATTEST_METRICS_FILE = "${metricsDir}/fleetd-attest.prom";
         # NetBox runs on capsule (./netbox.nix) and serves the anchors on its Anchor network
@@ -326,15 +252,9 @@ in
         FLEET_CONFIG_DIR = "${runDir}/configs";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
-        FLEET_MODEL_MAP = builtins.toJSON cfg.modelMap;
-        FLEET_NODE_PREFIX = topology.K8S_NODE_CIDR;
-        # The gateway and the API server's address are in the prefix and never go to a new node,
-        # and the network's DHCP pool leases to netbooting machines.
-        FLEET_NODE_RESERVED = "${topology.ROUTER_IP},${topology.API_SERVER_IP}";
         # The Talos root bootstraps etcd on the control plane at the API server's address: no
         # provision or wipe runs there, and it never installs from here.
         FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
-        FLEET_NODE_DHCP_PREFIX = topology.K8S_DHCP_CIDR;
         # talosctl writes its patch files and nothing else here.
         HOME = "/tmp";
       }

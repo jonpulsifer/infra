@@ -70,10 +70,6 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	inv, err := LoadInventory(env("ATTEST_INVENTORY", "/etc/fleetd/inventory.yaml"))
-	if err != nil {
-		return nil, err
-	}
 	store, err := OpenStore(env("ATTEST_STATE_DIR", "/var/lib/fleetd/attest"))
 	if err != nil {
 		return nil, err
@@ -89,7 +85,6 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	}
 
 	v := &Verifier{
-		Inventory:  inv,
 		Roots:      roots,
 		Policy:     policy,
 		CA:         ca,
@@ -99,23 +94,24 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 		Now:        time.Now,
 		SessionTTL: 5 * time.Minute,
 	}
-	if u := os.Getenv("ATTEST_NETBOX_URL"); u != "" {
-		tok, err := os.ReadFile(env("ATTEST_NETBOX_TOKEN_FILE", "/run/credentials/fleetd.service/netbox-token"))
-		if err != nil {
-			return nil, fmt.Errorf("ATTEST_NETBOX_URL is set but the token is unreadable: %w", err)
-		}
-		client := &http.Client{Timeout: 10 * time.Second}
-		nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: client, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
-		if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
-			return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
-		}
-		if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
-			return nil, fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
-		}
-		v.NetBox = nb
-		v.Recorders = append(v.Recorders, nb)
-		log.Info("NetBox is the system of record", "url", u, "site", site)
+	u := os.Getenv("ATTEST_NETBOX_URL")
+	if u == "" {
+		return nil, errors.New("ATTEST_NETBOX_URL is required: NetBox is the only source of machines")
 	}
+	tok, err := os.ReadFile(env("ATTEST_NETBOX_TOKEN_FILE", "/run/credentials/fleetd.service/netbox-token"))
+	if err != nil {
+		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
+	}
+	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
+	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
+		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
+	}
+	if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
+		return nil, fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
+	}
+	v.NetBox = nb
+	v.Recorders = append(v.Recorders, nb)
+	log.Info("NetBox is the system of record", "url", u, "site", site)
 	if metricsFile := os.Getenv("ATTEST_METRICS_FILE"); metricsFile != "" {
 		v.OnChange = func() {
 			if err := v.WriteMetricsFile(metricsFile); err != nil {
@@ -124,7 +120,7 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 		}
 		v.OnChange()
 	}
-	log.Info("attestation ready", "machines", inv.Names(), "ek_roots", roots.Count, "ca", ca.Cert.Subject.String())
+	log.Info("attestation ready", "ek_roots", roots.Count, "ca", ca.Cert.Subject.String())
 	return &Server{V: v, Log: log, Approvers: approvers}, nil
 }
 
