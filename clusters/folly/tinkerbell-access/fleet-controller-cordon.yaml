@@ -1,7 +1,8 @@
 ---
 # fleet-controller on spore cordons a node that talos-attest quarantined as
-# this account, which may patch nodes and do nothing else. Its token is
-# `fleet-controller/folly-cordon-token` in nix/secrets/spore.sops.yaml.
+# this account. RBAC lets it patch nodes, and the admission policy below
+# narrows that to a cordon. Its token is `fleet-controller/folly-cordon-token`
+# in nix/secrets/spore.sops.yaml.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -53,3 +54,57 @@ metadata:
     app.kubernetes.io/part-of: fleet-controller
   annotations:
     kubernetes.io/service-account.name: fleet-controller-cordon
+---
+# The account's node updates leave the node unschedulable and change no
+# label, annotation or taint: a cordon, never an uncordon or a relabel.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["nodes"]
+  matchConditions:
+    - name: fleet-controller-cordon
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:kube-system:fleet-controller-cordon"
+  validations:
+    - expression: >-
+        has(object.spec.unschedulable) && object.spec.unschedulable == true
+      reason: Forbidden
+      message: fleet-controller-cordon may only leave a node unschedulable.
+    - expression: >-
+        has(object.metadata.labels) == has(oldObject.metadata.labels) &&
+        (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's labels.
+    - expression: >-
+        has(object.metadata.annotations) == has(oldObject.metadata.annotations) &&
+        (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's annotations.
+    - expression: >-
+        has(object.spec.taints) == has(oldObject.spec.taints) &&
+        (!has(object.spec.taints) || object.spec.taints == oldObject.spec.taints)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's taints.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleet-controller
+spec:
+  policyName: fleet-controller-cordon
+  validationActions: [Deny]
+  matchResources: {}
