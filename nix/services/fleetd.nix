@@ -69,11 +69,16 @@ let
   tftpDir = "/var/lib/tftpboot";
 
   # The netboot-not-allowed directories the old tmpfiles rules made belong to root; fleetd takes
-  # them over once, so it can repoint and remove them.
+  # them over, so it can repoint and remove them. This runs as root in a directory fleetd can
+  # write, so it touches only root's MAC directories and their link, and never follows a link.
   adoptTftpLinks = pkgs.writeShellScript "fleetd-adopt-tftp-links" ''
-    ${pkgs.findutils}/bin/find ${tftpDir} -mindepth 1 -maxdepth 1 -type d \
-      -regextype posix-extended -regex '.*/[0-9a-f]{2}(:[0-9a-f]{2}){5}' \
-      -exec ${pkgs.coreutils}/bin/chown -R fleetd:fleetd {} +
+    mac='[0-9a-f]{2}(:[0-9a-f]{2}){5}'
+    ${pkgs.findutils}/bin/find ${tftpDir} -mindepth 1 -maxdepth 1 -type d -user root \
+      -regextype posix-extended -regex ".*/$mac" \
+      -exec ${pkgs.coreutils}/bin/chown -h fleetd:fleetd {} +
+    ${pkgs.findutils}/bin/find ${tftpDir} -mindepth 2 -maxdepth 2 -type l -user root \
+      -regextype posix-extended -regex ".*/$mac/netboot-not-allowed" \
+      -exec ${pkgs.coreutils}/bin/chown -h fleetd:fleetd {} +
   '';
 
   devidPort = 8444;
