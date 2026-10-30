@@ -87,8 +87,8 @@ render() {
 # type, and its address, which is the node's own for AMT unless NetBox holds an
 # OOB address.
 #
-# Read by terraform/network/unifi/folly (reservations, MAB users, mab_ports),
-# clusters/folly/talos (install disk, tpm_nodes) and the render scripts. Like
+# Read by terraform/network/unifi/folly (node ports, DNS records),
+# clusters/folly/talos (static address, install disk, tpm_nodes) and the render scripts. Like
 # clients.yaml, a change here alone gets no Atlantis autoplan: comment
 # `atlantis plan -d <root>` for each root above.
 #
