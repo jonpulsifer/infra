@@ -1,9 +1,9 @@
 ---
 title: Provision a node
-description: Plug a prepared folly machine into any node port and let it intake, attest and install as a Talos worker or a joining control plane, or declare it in NetBox by hand.
+description: Declare a folly machine in the nodes file, plug it into its node port, and let it intake, attest and install as a Talos worker or a joining control plane.
 ---
 
-Use this runbook to install a new folly node through [NetBox](../platform/netbox.md). The machine phones home from HookOS, [talos-attest](../apps/talos-attest.md) attests it, and [fleet-controller](../apps/fleet-controller.md) names, addresses and provisions it.
+Use this runbook to install a new folly node. Its entry in the nodes file becomes a [NetBox](../platform/netbox.md) device, the machine phones home from HookOS, [talos-attest](../apps/talos-attest.md) attests it, and [fleet-controller](../apps/fleet-controller.md) provisions it.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -15,24 +15,28 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 - You are a tailnet login in `ATTEST_APPROVERS`, and you can read the console.
 - `<node>` is the host name and `<serial>` the SMBIOS serial. An `<addr>` is a free address in `K8S_NODE_CIDR` of `clusters/folly/config/cluster-topology.json`.
 
+## Declare the node
+
+1. On a branch, add an entry under `nodes` in `clusters/folly/inventory/nodes.yaml` with `<node>`, its model, `<serial>`, its class, its switch port, `<addr>` and its BMC type. Add the model under `models` if it is new. [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
+2. Open a pull request and comment `atlantis plan -d terraform/netbox/folly`.
+
+   Result: the plan creates the device, its address and its cable. It fails on an unknown model or class, or an address, port or serial another node holds.
+
+3. Comment `atlantis apply`.
+
+   Result: a `planned` device with the serial, class, address and a cable to the switch port, and no MAC. The export skips it until it has a MAC.
+
 ## Plug a machine in
 
-1. Declare what you expect:
-
-   ```sh
-   mise run netbox:declare --stub <node> --class worker-g5 --serial <serial> [--port <rack port>] [--address <addr>]
-   ```
-
-   Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows. With `--port`, the binding refuses a machine whose intake pass attests another switch port.
-
-2. `--serial` is optional: a class-only stub names the next machine whose first intake you approve in step 4.
-3. Connect the machine to a node port and power it on. Every node port carries the Kubernetes network: each inventory node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
+1. [Declare the node](#declare-the-node).
+2. Make sure that the entry names the machine's serial. A machine whose serial no entry names gets a `planned` device of its own at its first intake.
+3. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each inventory node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
 
    Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
 
 4. [Watch the run](#watch-the-run), and [approve the first intake](#approve-a-first-intake) if it waits.
 
-   Result: the stub, or a new `intake-<serial>` device, is `planned` and `attested`.
+   Result: the declared device is `planned` and `attested`, and holds the machine's MAC.
 
 5. Watch the device's NetBox journal.
 
@@ -50,30 +54,13 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
 13. If the merged export shows the node `planned`, export again in a pull request once NetBox holds it `active`, and apply `clusters/folly/talos`.
 
-## Declare a machine by hand
-
-Use this instead to name every fact yourself, from the HP label and the rack:
-
-```sh
-mise run netbox:declare <node> <serial> <mac> <switch port> <addr>
-```
-
-It refuses a malformed name or MAC, a missing port, and an address outside `K8S_NODE_CIDR`, or held by another device or stub. The `planned` device gets the MAC, a cable and `<addr>`; run it with no arguments for the options, whose defaults are the G5 mini's. Commit the export diff it prints in a pull request.
-
-1. Connect the machine to `<switch port>`, and set its AMT to `<addr>`, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says.
-2. In NetBox, set `desired_action` to `provision`.
-
-   Result: `last_workflow` names `provision-<node>-<unix seconds>`, the status stays `planned`, and Rufio powers the machine on through AMT at `<addr>` to a PXE boot. A device with no BMC journals `power the machine on by hand`.
-
-3. [Watch the run](#watch-the-run), then continue from step 7 above.
-
 ## Provision a control plane
 
 A control plane installs the same way and joins the running cluster. The cluster's first control plane, at `API_SERVER_IP`, never installs this way, because the Talos root bootstraps etcd on it.
 
 1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetController.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing. [fleet-controller](../apps/fleet-controller.md#control-planes) says what spore then holds.
-2. Declare the stub with `--class controlplane`, or declare the machine by hand with `--class controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
-3. Follow [Plug a machine in](#plug-a-machine-in) or [Declare a machine by hand](#declare-a-machine-by-hand) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
+2. [Declare the node](#declare-the-node) with the class `controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
    ```sh

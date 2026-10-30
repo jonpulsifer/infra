@@ -3,26 +3,29 @@ title: Node lifecycle
 description: How a folly node goes from a NetBox device to an attested Talos node with a SPIRE identity, and back out, with the system that owns each step.
 ---
 
-A folly node is a `kubernetes-node` device in [NetBox](netbox.md). The owner starts each run by setting its `desired_action`. [Identity](identity.md#lifecycle) lists the statuses and who writes each.
+A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraform/netbox/folly` applies into [NetBox](netbox.md) as a `kubernetes-node` device. The owner starts each run by setting its `desired_action`. [Identity](identity.md#lifecycle) lists the statuses and who writes each, and [Hardware inventory](../reference/inventory.md) the nodes file.
 
 ## At a glance
 
-1. The owner sets the device's `desired_action` to `provision`.
-2. [fleet-controller](../apps/fleet-controller.md) creates a `provision` `Workflow` in [Tinkerbell](nixos/tinkerbell.md) and resets `desired_action` to `none`.
-3. Rufio powers the node on through its BMC, AMT at the node's own address, to a one-time PXE boot on the Kubernetes network. The owner powers on a BMC-less device.
-4. The signed iPXE chains the signed HookOS, which attests the TPM and boot chain to [talos-attest](../apps/talos-attest.md).
-5. On a pass, talos-attest issues an LDevID and a LAK certificate, has fleet-controller render the node's Talos config, and answers an install code wrapped to the TPM.
-6. The `Workflow` wipes the system disk, runs the Talos installer with the code in META, and boots the disk.
-7. On its first boot, Talos fetches its config by UUID and code from `/talos/config`, and takes the node's address statically from it. The controller deletes the file once nginx serves it whole, and sets the device `active`.
-8. When spore has the node's alias, its SPIRE agent attests by the LDevID and serves SVIDs.
+1. The owner adds the node's entry to the nodes file in a pull request, and Atlantis applies it: a `planned` device with its serial, class, address and cable, and no MAC.
+2. The owner sets the device's `desired_action` to `provision`.
+3. [fleet-controller](../apps/fleet-controller.md) creates a `provision` `Workflow` in [Tinkerbell](nixos/tinkerbell.md) and resets `desired_action` to `none`.
+4. Rufio powers the node on through its BMC, AMT at the node's own address, to a one-time PXE boot on the Kubernetes network. The owner powers on a BMC-less device.
+5. The signed iPXE chains the signed HookOS, which attests the TPM and boot chain to [talos-attest](../apps/talos-attest.md), and talos-attest writes the MAC on the device with the machine's serial.
+6. On a pass, talos-attest issues an LDevID and a LAK certificate, has fleet-controller render the node's Talos config, and answers an install code wrapped to the TPM.
+7. The `Workflow` wipes the system disk, runs the Talos installer with the code in META, and boots the disk.
+8. On its first boot, Talos fetches its config by UUID and code from `/talos/config`, and takes the node's address statically from it. The controller deletes the file once nginx serves it whole, and sets the device `active`.
+9. When spore has the node's alias, its SPIRE agent attests by the LDevID and serves SVIDs.
 
-A machine NetBox does not know starts the same path itself: HookOS phones home, an attest-only run, once the owner approves its first intake, makes it a `planned` device, and fleet-controller binds it to a stub's name, gives it a class and an address, and sets `desired_action` to `provision`. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` issues a new LDevID. `wipe` erases the disk with no attestation. The status `decommissioning` starts a `retire` run, which wipes the disk and powers the node off, leaving it `offline`.
+A machine whose serial no entry names starts the same path itself: HookOS phones home, an attest-only run, once the owner approves its first intake, makes it a `planned` device, and fleet-controller binds it to a stub's name, gives it a class and an address, and sets `desired_action` to `provision`. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` issues a new LDevID. `wipe` erases the disk with no attestation. The status `decommissioning` starts a `retire` run, which wipes the disk and powers the node off, leaving it `offline`.
 
 ## Who owns what
 
 | Component | What it owns | Where it lives |
 | --- | --- | --- |
-| NetBox | Class, status, `desired_action`, verdicts | capsule |
+| Nodes file | Each node's name, serial, model, class, switch port, address and BMC type | `clusters/folly/inventory/nodes.yaml` |
+| `terraform/netbox/folly` | The device, its address and cable, its declared custom fields, the custom field definitions, the fleet-controller webhook | Atlantis on offsite |
+| NetBox | Status, `desired_action`, verdicts, MACs | capsule |
 | fleet-controller | `Hardware`, `Machine`, `Workflow`, the rendered config, retirement | spore |
 | talos-attest | Attestation, the LDevID and LAK, install codes, renewal | every anchor |
 | [Boot plane](nixos/talos-boot.md) | dnsmasq, nginx, the signed iPXE and HookOS, and the `enroll.lolwtf.ca` HTTPS server, behind `BOOT_VIP` | every anchor |

@@ -10,6 +10,7 @@ on:
       - clusters/folly/config/anchor-topology.json
       - clusters/*/config/cluster-topology.json
       - terraform/network/unifi/folly/clients.yaml
+      - clusters/folly/inventory/nodes.yaml
       - .github/scripts/validation-impact.sh
       - .github/scripts/validation-impact_test.sh
       - .github/workflows/terraform.yml
@@ -21,6 +22,7 @@ on:
       - clusters/folly/config/anchor-topology.json
       - clusters/*/config/cluster-topology.json
       - terraform/network/unifi/folly/clients.yaml
+      - clusters/folly/inventory/nodes.yaml
       - .github/scripts/validation-impact.sh
       - .github/scripts/validation-impact_test.sh
       - .github/workflows/terraform.yml
@@ -55,6 +57,7 @@ jobs:
             clusters/folly/config/anchor-topology.json
             clusters/*/config/cluster-topology.json
             terraform/network/unifi/folly/clients.yaml
+            clusters/folly/inventory/nodes.yaml
             .github/scripts/validation-impact.sh
             .github/scripts/validation-impact_test.sh
             .github/workflows/terraform.yml

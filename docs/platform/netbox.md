@@ -26,11 +26,11 @@ Open `https://capsule.<tailnet>`, which the [tailnet grants](network/remote-acce
 
 Atlantis on offsite reaches the API over HTTP on port 8080 at capsule's Anchor network address, which the `nest_k8s_to_capsule_netbox` policy and capsule's firewall admit from offsite's node, VIP and pod ranges.
 
-To expect a node, run `mise run netbox:declare --stub <node> --class <class>`: a `planned` stub with no MAC, which fleet-controller binds to the next machine that intakes and the export leaves out. To add a node with every fact, run `mise run netbox:declare <node> <serial> <mac> <switch port> <address>`. It declares the device as `planned`, with its interface, MAC, cable and primary address, then renders the inventory export. [Provision a node](../runbooks/provision-a-node.md) has both.
+To add a node, add its entry to `clusters/folly/inventory/nodes.yaml` in a pull request; Atlantis applies it as a `planned` device. [Provision a node](../runbooks/provision-a-node.md) has the steps.
 
 ## Data
 
-`mise run netbox:seed` imports folly's devices, cables, prefixes, custom fields and choice sets from the repo, sets each node's `talos_class` and `bmc_type`, and tags what it writes `managed-by: git-seed`. It sets a node's status only when it creates the device, and its class and BMC type only when the device is new or the field is empty. It also seeds the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The operator exports `NETBOX_WEBHOOK_SECRET`, the secret the controller verifies, before the run. A second run changes nothing. [Hardware inventory](../reference/inventory.md) covers the export and the drift check.
+`terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to the fleet controller's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value the controller verifies, is set in NetBox by hand. `mise run netbox:seed` imports the site, the prefixes, the anchors and the switch from the repo, and tags what it writes `managed-by: git-seed`. It also writes the nodes, custom fields and webhook this root declares, from the export. [Hardware inventory](../reference/inventory.md) covers the nodes file, the export and the drift check.
 
 ## Backups
 
@@ -58,6 +58,7 @@ To restore, stop `netbox.service`, run `pg_restore --clean --if-exists -d netbox
 
 - `nix/services/netbox.nix`: NetBox, nginx, Tailscale serve, the superuser bootstrap and the backup
 - `nix/services/netbox-drift.nix`: the drift check
+- `terraform/netbox/folly`: the nodes, the custom fields and the webhook
 - `scripts/netbox-seed.sh` and `scripts/netbox-export.sh`: the seed and the export
 - `nix/secrets/capsule.sops.yaml`: `netbox/` and `garage/keys/netbox/`
 - `nix/services/garage.nix`: the `netbox` bucket and key, which spore's SOPS file holds for the bootstrap
