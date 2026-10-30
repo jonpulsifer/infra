@@ -87,7 +87,7 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Renewal
 
-The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`.
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on the attest service's DevID listener, at the same `ATTEST_URL` as `devid-init`. Otherwise it runs the daily check, which the next section describes.
 
 1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
 2. `POST /v1/renew` with the serial answers a session and a nonce.
@@ -97,6 +97,12 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 6. It writes a renewed LAK certificate first, then the LDevID certificate, so a failed write leaves the renewal due for the next run. It then deletes the `spire-agent` pod on its node, and fails when no pod matches. The new pod's `devid-init` fetches the new certificate.
 
 `scripts/render-spire-devid-ca.sh` writes `spire-devid-ca` from `terraform/pki/certs/folly-devid-ca.pem`, and the kustomize workflow fails when the two differ. A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
+
+### Daily check
+
+On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are. A boot that misses the policy after the LAK's proof sets the device `failed`, and its RADIUS user puts it on the bootstrap network. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [talos-attest](../apps/talos-attest.md) has the rules.
+
+A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when no anchor has recorded a passing quote from a node for 26 hours.
 
 ## GCP access
 

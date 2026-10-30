@@ -127,6 +127,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		code, verdict = http.StatusBadRequest, ""
 	case f.Unauthenticated:
 		verdict = protocol.VerdictRefused
+	case f.Unquarantined:
+		verdict = protocol.VerdictFailedNoQuarantine
 	case f.Reason == reasonEKPending:
 		verdict = protocol.VerdictPending
 	}
@@ -220,7 +222,7 @@ func (s *Server) localStatus(serial string) (protocol.Status, bool, error) {
 	if err != nil || !found {
 		return protocol.Status{}, false, err
 	}
-	st := protocol.Status{Node: rec.Machine, UUID: rec.UUID, AttestedAt: rec.AttestedAt, RSAEKCert: rec.RSAEKCert, UpdatedAt: rec.UpdatedAt, Class: rec.Class}
+	st := protocol.Status{Node: rec.Machine, UUID: rec.UUID, AttestedAt: rec.AttestedAt, RSAEKCert: rec.RSAEKCert, UpdatedAt: rec.UpdatedAt, Class: rec.Class, LDevIDSerial: rec.LDevIDSerial}
 	if s.V.CA != nil {
 		st.Site = s.V.CA.Site
 	}
@@ -274,11 +276,21 @@ func (s *Server) status(ctx context.Context, serial string, local bool) (protoco
 		s.Log.Warn("NetBox holds a pass this anchor has withdrawn", "serial", serial, "anchor_updated", st.UpdatedAt, "netbox_attested", nb.AttestedAt)
 		return st, true, nil
 	}
-	// NetBox keeps last_attested to the second.
-	if ok && st.AttestedAt.Truncate(time.Second).Equal(nb.AttestedAt.Truncate(time.Second)) {
+	if ok && sameAttestation(st, nb) {
 		nb.UUID, nb.RSAEKCert = st.UUID, st.RSAEKCert
 	}
 	return nb, true, nil
+}
+
+// sameAttestation is whether an anchor's record and NetBox's verdict stand
+// on the same LDevID: by its serial when both name one, since a daily check
+// moves attested_at without issuing, else by attested_at to the second, as
+// NetBox keeps it.
+func sameAttestation(mine, nb protocol.Status) bool {
+	if mine.LDevIDSerial != "" && nb.LDevIDSerial != "" {
+		return strings.EqualFold(mine.LDevIDSerial, nb.LDevIDSerial)
+	}
+	return mine.AttestedAt.Truncate(time.Second).Equal(nb.AttestedAt.Truncate(time.Second))
 }
 
 // retiredInNetBox is whether NetBox, when configured, has the device as
@@ -303,10 +315,16 @@ func (s *Server) lookup(ctx context.Context, serial string, local bool) (protoco
 	if err != nil || !ok {
 		return protocol.DevID{}, false, err
 	}
-	if s.V.NetBox != nil && !local && !d.AttestedAt.Truncate(time.Second).Equal(gate.AttestedAt.Truncate(time.Second)) {
-		// NetBox records a pass no anchor could hand us: serve nothing
-		// rather than an older certificate.
-		return protocol.DevID{}, false, nil
+	if s.V.NetBox != nil && !local {
+		mine, _, err := s.localStatus(serial)
+		if err != nil {
+			return protocol.DevID{}, false, err
+		}
+		if !sameAttestation(mine, gate) {
+			// NetBox records a pass no anchor could hand us: serve nothing
+			// rather than an older certificate.
+			return protocol.DevID{}, false, nil
+		}
 	}
 	return d, true, nil
 }
@@ -349,12 +367,17 @@ func (s *Server) refresh(ctx context.Context, serial string) {
 		}
 		var pd protocol.DevID
 		ok, err = s.fetchPeer(ctx, peer, "/devid/", serial, &pd)
-		if err != nil || !ok || serialKey(pd.Serial) != serialKey(serial) || !pd.AttestedAt.Equal(ps.AttestedAt) {
+		if err != nil || !ok || serialKey(pd.Serial) != serialKey(serial) {
 			continue
 		}
 		checked, err := s.V.VerifyDevID(pd, pd.Machine, pd.Serial)
 		if err != nil {
 			s.Log.Warn("peer answer refused", "peer", peer, "serial", serial, "err", err)
+			continue
+		}
+		// The verdict must be the pass the DevID carries: by the LDevID's
+		// serial when the peer names it, else by the attestation time.
+		if ps.LDevIDSerial != "" && !strings.EqualFold(ps.LDevIDSerial, serialHex(checked.LDevID)) || ps.LDevIDSerial == "" && !pd.AttestedAt.Equal(ps.AttestedAt) {
 			continue
 		}
 		issued := checked.LDevID.NotBefore
@@ -625,7 +648,7 @@ func (s *Server) renewStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, protocol.Verdict{Reason: reasonUnknownMachine, Detail: []string{"no LDevID on file for serial " + req.Serial + "; attest from HookOS first"}})
 		return
 	}
-	resp, err := s.V.RenewStart(r.Context(), req.Serial, d)
+	resp, err := s.V.RenewStart(r.Context(), req.Serial, d, req.Check)
 	if err != nil {
 		s.writeError(w, err)
 		return

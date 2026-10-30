@@ -35,6 +35,11 @@ type RenewConfig struct {
 	Roots *x509.CertPool
 	// RenewBefore is how long before the LDevID's expiry a renewal is due.
 	RenewBefore time.Duration
+	// Check runs the daily check when no renewal is due: the same evidence
+	// on the same routes, judged by the same policy, and no new certificate.
+	Check bool
+	// BIOS is the SMBIOS BIOS version, under which the service records PCR 0.
+	BIOS string
 	// PCRs to quote in the SHA-256 bank.
 	PCRs []int
 	Now  func() time.Time
@@ -45,6 +50,10 @@ type RenewConfig struct {
 type RenewResult struct {
 	// Renewed is false when no renewal was due.
 	Renewed bool
+	// Checked is whether the daily check ran and passed instead, and
+	// AttestedAt the pass the service recorded.
+	Checked    bool
+	AttestedAt time.Time
 	// NotAfter is the expiry of the LDevID now in NV.
 	NotAfter time.Time
 }
@@ -53,11 +62,18 @@ type RenewResult struct {
 // NV, so the node has nothing to renew until an intake stores them.
 var ErrNoLDevID = errors.New("no LDevID or LAK certificate in NV")
 
+// ErrCheckUnsupported means the service did not open the daily check it was
+// asked for, as one that predates it does. No evidence went to it, since it
+// would have issued new certificates instead.
+var ErrCheckUnsupported = errors.New("the attest service does not serve the daily check")
+
 // Renew asks the service to certify the node's LDevID key again when the
 // LDevID in NV expires within cfg.RenewBefore, or is gone while the LAK is
 // there. It signs the boot evidence with the LAK, whose blobs, like the
 // LDevID's, it reads from the service's LDevID lookup and loads under the SRK,
 // checks the answer against cfg.Roots, and stores the new certificates in NV.
+// With cfg.Check, a run with no renewal due sends the same evidence as the
+// daily check, and NV is left alone.
 func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult, error) {
 	logf := cfg.Logf
 	if logf == nil {
@@ -81,6 +97,7 @@ func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult
 	if err != nil {
 		return nil, err
 	}
+	check := false
 	switch {
 	case ldevid == nil && lak == nil:
 		return nil, ErrNoLDevID
@@ -88,10 +105,15 @@ func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult
 		logf("NV %#x holds no LDevID but NV %#x holds the LAK: renewing", protocol.NVLDevIDCert, protocol.NVLAKCert)
 	default:
 		if left := ldevid.NotAfter.Sub(cfg.Now()); left > cfg.RenewBefore {
-			logf("LDevID %x expires %s, in %s: not due", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339), left.Round(time.Hour))
-			return &RenewResult{NotAfter: ldevid.NotAfter}, nil
+			if !cfg.Check {
+				logf("LDevID %x expires %s, in %s: not due", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339), left.Round(time.Hour))
+				return &RenewResult{NotAfter: ldevid.NotAfter}, nil
+			}
+			logf("LDevID %x expires %s, in %s: not due; checking", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339), left.Round(time.Hour))
+			check = true
+		} else {
+			logf("LDevID %x expires %s: renewing", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339))
 		}
-		logf("LDevID %x expires %s: renewing", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339))
 	}
 
 	hc := Config{BaseURL: cfg.BaseURL, HTTP: cfg.HTTP}
@@ -115,19 +137,29 @@ func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult
 	}
 
 	var started protocol.RenewStart
-	if err := post(ctx, hc, protocol.PathRenew, protocol.RenewRequest{Serial: cfg.Serial}, &started); err != nil {
+	if err := post(ctx, hc, protocol.PathRenew, protocol.RenewRequest{Serial: cfg.Serial, Check: check}, &started); err != nil {
 		return nil, err
 	}
-	logf("renewal session %s", started.Session)
+	if check && !started.Check {
+		return nil, ErrCheckUnsupported
+	}
+	logf("renewal session %s (check %t)", started.Session, check)
 
 	evidence, err := renewEvidence(rw, devid, started.Nonce, cfg.PCRs)
 	if err != nil {
 		return nil, err
 	}
 	evidence.EventLog = cfg.EventLog
+	evidence.BIOS = cfg.BIOS
 	var renewed protocol.Renewed
 	if err := post(ctx, hc, strings.Replace(protocol.PathRenewEvidence, "{session}", started.Session, 1), evidence, &renewed); err != nil {
 		return nil, err
+	}
+	if check {
+		if !renewed.Checked {
+			return nil, errors.New("the service answered the check without a verdict")
+		}
+		return &RenewResult{Checked: true, AttestedAt: renewed.AttestedAt, NotAfter: ldevid.NotAfter}, nil
 	}
 
 	now := cfg.Now()

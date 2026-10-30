@@ -166,11 +166,13 @@ func (r *EKRoots) Verify(ek protocol.EK, now time.Time) (VerifiedEK, error) {
 
 // Failure is a refusal with a stable reason. Unauthenticated marks one that
 // nothing the machine's TPM signed led to; it is answered as a refusal and
-// recorded against no machine.
+// recorded against no machine. Unquarantined marks a control-plane node's
+// failed check, which is recorded and alerts but leaves the node in place.
 type Failure struct {
 	Reason          string
 	Detail          string
 	Unauthenticated bool
+	Unquarantined   bool
 }
 
 func (f *Failure) Error() string { return f.Reason + ": " + f.Detail }

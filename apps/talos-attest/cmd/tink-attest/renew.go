@@ -26,10 +26,17 @@ func printf(format string, args ...any) {
 
 type renewOpts struct {
 	url, device, eventLog, serial string
-	caBundle                      string
+	caBundle, bios                string
 	before, timeout               time.Duration
 	namespace, selector, node     string
+	check                         bool
+	// http is the client for the attest service; nil uses a one-minute timeout.
+	http *http.Client
 }
+
+// errNoTPM is a run that found no TPM device: nothing is sent, so nothing
+// can quarantine the node, and the service's missing-check alert says so.
+var errNoTPM = errors.New("no TPM device")
 
 // renew runs once, or with -every forever: the next run follows a run that
 // succeeded after -every, and one that failed after -retry.
@@ -41,7 +48,9 @@ func renew(args []string) error {
 	fs.StringVar(&o.device, "tpm", env("TPM_DEVICE", "/dev/tpmrm0"), "TPM resource manager device")
 	fs.StringVar(&o.eventLog, "event-log", env("EVENT_LOG", "/sys/kernel/security/tpm0/binary_bios_measurements"), "TCG event log")
 	fs.StringVar(&o.serial, "serial", env("SERIAL", readTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
+	fs.StringVar(&o.bios, "bios", env("BIOS_VERSION", readTrim("/sys/class/dmi/id/bios_version")), "SMBIOS BIOS version, under which the service records PCR 0")
 	fs.DurationVar(&o.before, "renew-before", 30*24*time.Hour, "renew when the LDevID expires within this long")
+	fs.BoolVar(&o.check, "check", env("CHECK", "true") == "true", "when no renewal is due, run the daily check: a quote the service judges and records, with no new certificate")
 	fs.StringVar(&o.namespace, "restart-namespace", env("RESTART_NAMESPACE", ""), "namespace of the pods to restart after a renewal")
 	fs.StringVar(&o.selector, "restart-selector", env("RESTART_SELECTOR", ""), "label selector of the pods to restart after a renewal; empty restarts none")
 	fs.StringVar(&o.node, "node", env("NODE_NAME", ""), "this node's Kubernetes name")
@@ -72,7 +81,11 @@ func renew(args []string) error {
 			return err
 		}
 		wait := *every
-		if err != nil {
+		switch {
+		case errors.Is(err, errNoTPM):
+			printf("NO TPM: %v; nothing was sent, so the node is not quarantined for it, and TalosAttestNotChecked alerts", err)
+			wait = *retry
+		case err != nil:
 			printf("RENEWAL FAILED: %v", err)
 			wait = *retry
 		}
@@ -84,7 +97,14 @@ func renew(args []string) error {
 	}
 }
 
+// renewOnce reads everything local first: a run without the TPM, the event
+// log or the CA bundle sends nothing to the service.
 func renewOnce(parent context.Context, o renewOpts) error {
+	rw, err := tpm2.OpenTPM(o.device)
+	if err != nil {
+		return fmt.Errorf("%w: open %s: %v", errNoTPM, o.device, err)
+	}
+	defer rw.Close()
 	// Read on every run, so a rotated CA in the mounted ConfigMap takes effect.
 	pem, err := os.ReadFile(o.caBundle)
 	if err != nil {
@@ -98,29 +118,41 @@ func renewOnce(parent context.Context, o renewOpts) error {
 	if err != nil {
 		return fmt.Errorf("event log: %w", err)
 	}
-	rw, err := tpm2.OpenTPM(o.device)
-	if err != nil {
-		return fmt.Errorf("open %s: %w", o.device, err)
+	if len(log) == 0 {
+		return fmt.Errorf("event log %s is empty", o.eventLog)
 	}
-	defer rw.Close()
+	hc := o.http
+	if hc == nil {
+		hc = &http.Client{Timeout: time.Minute}
+	}
 
 	ctx, cancel := context.WithTimeout(parent, o.timeout)
 	defer cancel()
 	res, err := client.Renew(ctx, rw, client.RenewConfig{
 		BaseURL:     o.url,
-		HTTP:        &http.Client{Timeout: time.Minute},
+		HTTP:        hc,
 		Serial:      o.serial,
 		EventLog:    log,
 		Roots:       roots,
 		RenewBefore: o.before,
+		Check:       o.check,
+		BIOS:        o.bios,
 		Logf:        printf,
 	})
 	if errors.Is(err, client.ErrNoLDevID) {
 		printf("serial %s: %v; nothing to renew", o.serial, err)
 		return nil
 	}
+	if errors.Is(err, client.ErrCheckUnsupported) {
+		printf("serial %s: %v; no check today", o.serial, err)
+		return nil
+	}
 	if err != nil {
 		return err
+	}
+	if res.Checked {
+		printf("CHECKED: serial %s, attested %s", o.serial, res.AttestedAt.Format(time.RFC3339))
+		return nil
 	}
 	if !res.Renewed {
 		return nil

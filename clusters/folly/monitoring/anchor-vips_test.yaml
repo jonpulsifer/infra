@@ -261,3 +261,120 @@ tests:
             exp_annotations:
               message: "The intake window on spore has been open for 6 hours"
               description: "talos-attest on spore admits boxes under the open intake policy. Close the window with mise run fleet:intake close when racking is done."
+
+  # riptide's newest check, on capsule, is an hour old, so spore's 28-hour-old one does not count.
+  # optiplex last passed 28 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 0x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 97200x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 0x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="oldbox"}'
+        values: 0x1700
+      - series: 'kube_node_info{node="riptide"}'
+        values: 1x1700
+      - series: 'kube_node_info{node="optiplex"}'
+        values: 1x1700
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: TalosAttestNotChecked
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: TalosAttestNotChecked
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex has not passed a TPM quote check in 26 hours"
+              description: "No anchor has recorded a passing daily check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+
+  # spore refused a check of riptide at minute 10: the alert fires for an hour, then clears. A pass
+  # never fires.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="riptide",verdict="refused"}'
+        values: 600x100
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="riptide",verdict="pass"}'
+        values: 600x100
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TalosAttestCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: riptide
+              verdict: refused
+            exp_annotations:
+              message: "riptide's daily check ended in refused"
+              description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy, and NetBox has the device failed. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
+      - eval_time: 80m
+        alertname: TalosAttestCheckFailed
+        exp_alerts: []
+
+  # spore saw riptide's PCR 0 change, then capsule's later check matched once the owner explained it:
+  # the newer check is current, so no alert. optiplex's newest check, on forge, shows a change.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_pcr0_changed{instance="spore",machine="riptide"}'
+        values: 1x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_pcr0_changed{instance="capsule",machine="riptide"}'
+        values: 0x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_pcr0_changed{instance="forge",machine="optiplex"}'
+        values: 1x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 1500x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestPCR0Changed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: forge
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex's PCR 0 changed at the same BIOS version"
+              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+
+  # optiplex, the control plane, failed in place on spore, and no anchor has a newer record: critical.
+  # riptide failed in place on forge, then passed on capsule later: the newer record clears it. A
+  # failed-no-quarantine check's own timestamp never raises the warning rule.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_failed_no_quarantine{instance="spore",machine="optiplex"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="spore",machine="optiplex"}'
+        values: 3000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="optiplex"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="optiplex"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="forge",machine="riptide"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="forge",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="riptide"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="optiplex",verdict="failed-no-quarantine"}'
+        values: 120x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              verdict: failed-no-quarantine
+              instance: spore
+              machine: optiplex
+            exp_annotations:
+              message: "Control-plane node optiplex failed attestation and is not quarantined"
+              description: "optiplex's TPM quoted a boot that misses talos-attest's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u talos-attest on spore, then reinstall or fix the node; the next passing check clears this."
