@@ -163,6 +163,24 @@ in
               type = lib.types.strMatching "/dev/.+";
               description = "The disk Talos installs to.";
             };
+            tpm = lib.mkOption {
+              type = lib.types.enum [
+                ""
+                "2.0"
+              ];
+              default = "";
+              description = "The TPM spec version the model carries. With 2.0, /render refuses a device of the class until talos-attest records its tpm_version.";
+            };
+            amt = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "The amt custom field a bound device gets when it is empty.";
+            };
+            secure_boot = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "The secure_boot_expected custom field a bound device gets when it is empty.";
+            };
           };
         }
       );
@@ -171,9 +189,12 @@ in
           class = "worker-g5";
           bmc = "amt";
           disk = "/dev/nvme0n1";
+          tpm = "2.0";
+          amt = true;
+          secure_boot = true;
         };
       };
-      description = "Class, BMC and install disk by SMBIOS model, for a machine that intakes. A model not here gets no class and no auto-provision.";
+      description = "Class, BMC, install disk and hardware facts by SMBIOS model, for a machine that intakes. A model not here gets no class and no auto-provision.";
     };
   };
 

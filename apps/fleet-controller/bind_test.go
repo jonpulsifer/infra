@@ -714,3 +714,42 @@ func TestParseModels(t *testing.T) {
 		t.Error("broken JSON parsed")
 	}
 }
+
+func TestBindFillsTheModelsHardwareFactsWhenEmpty(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 5)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.reconcile(t)
+	for _, field := range []string{"amt", "secure_boot_expected"} {
+		if got := bt.cf(field); got != true {
+			t.Errorf("%s = %v, want true", field, got)
+		}
+	}
+}
+
+func TestBindNeverOverwritesAHardwareFact(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, map[string]any{"amt": false, "secure_boot_expected": false}), stubDevice(20, "swell", "", "worker-g5", 5)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.reconcile(t)
+	for _, field := range []string{"amt", "secure_boot_expected"} {
+		if got := bt.cf(field); got != false {
+			t.Errorf("%s = %v, want false", field, got)
+		}
+	}
+}
+
+func TestBindLeavesFactsOfAnUnknownModelEmpty(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice("Unknown Box", nil)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.reconcile(t)
+	for _, field := range []string{"amt", "secure_boot_expected"} {
+		if got := bt.cf(field); got != nil {
+			t.Errorf("%s = %v, want it empty", field, got)
+		}
+	}
+}

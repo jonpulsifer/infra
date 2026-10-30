@@ -194,6 +194,33 @@ func TestSMBIOSUUIDWaitsForTheField(t *testing.T) {
 	}
 }
 
+// A pass proves a TPM 2.0 and records it when the field is empty, and never
+// over an owner's value.
+func TestPassRecordsTPMVersionOnlyWhenEmpty(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		fields map[string]any
+		want   any
+	}{
+		{name: "empty", fields: map[string]any{"talos_class": "worker-g5", "tpm_version": nil}, want: "2.0"},
+		{name: "owner value", fields: map[string]any{"talos_class": "worker-g5", "tpm_version": "1.2"}, want: "1.2"},
+		{name: "undefined", fields: map[string]any{"talos_class": "worker-g5"}, want: nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeNetBox(t)
+			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+			f.add("testbox", simSerial, "planned", simMAC, c.fields)
+			if _, err := h.run(simSerial, simMAC); err != nil {
+				t.Fatal(err)
+			}
+			d := f.settled(t, simSerial, 2)
+			if got := d.CustomFields["tpm_version"]; got != c.want {
+				t.Fatalf("tpm_version = %v, want %v (%+v)", got, c.want, d.CustomFields)
+			}
+		})
+	}
+}
+
 func TestRefusedRenderWithholdsTheCode(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
 	c, fleet := newFakeController(t, http.StatusConflict)

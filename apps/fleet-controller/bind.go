@@ -11,17 +11,22 @@ import (
 	"time"
 )
 
-// Model is what the model map says of one SMBIOS model: the class, BMC and
-// install disk a machine of that model gets on intake.
+// Model is what the model map says of one SMBIOS model: the class, BMC,
+// install disk and hardware facts a machine of that model gets on intake.
+// TPM is the spec version the model carries; a render of its class waits for
+// the device to record it.
 type Model struct {
-	Class string `json:"class"`
-	BMC   string `json:"bmc"`
-	Disk  string `json:"disk"`
+	Class      string `json:"class"`
+	BMC        string `json:"bmc"`
+	Disk       string `json:"disk"`
+	TPM        string `json:"tpm"`
+	AMT        bool   `json:"amt"`
+	SecureBoot bool   `json:"secure_boot"`
 }
 
 // DefaultModels is FLEET_MODEL_MAP when the environment sets none.
 var DefaultModels = map[string]Model{
-	"HP EliteDesk 800 G5 Desktop Mini": {Class: "worker-g5", BMC: "amt", Disk: "/dev/nvme0n1"},
+	"HP EliteDesk 800 G5 Desktop Mini": {Class: "worker-g5", BMC: "amt", Disk: "/dev/nvme0n1", TPM: "2.0", AMT: true, SecureBoot: true},
 }
 
 // ParseModels reads FLEET_MODEL_MAP.
@@ -177,7 +182,8 @@ func (b *binding) note(format string, a ...any) { b.notes = append(b.notes, fmt.
 
 // bind makes an attested intake a node. The device talos-attest created for
 // the machine's serial, or the stub it reused, takes a stub's name and
-// address, the model's class, BMC and disk, the switch port its intake pass
+// address, the model's class, BMC and disk, its amt and secure_boot_expected
+// when they are empty, the switch port its intake pass
 // attested,
 // and a free address when it has none, and then desired_action provision.
 // Every step writes only what differs, so a pass that stops anywhere is
@@ -258,6 +264,12 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	}
 	if disk != d.Disk {
 		fields["install_disk"] = disk
+	}
+	if known && d.AMT == nil {
+		fields["amt"] = model.AMT
+	}
+	if known && d.SecureBootExpected == nil {
+		fields["secure_boot_expected"] = model.SecureBoot
 	}
 	if expected != d.ExpectedPort {
 		fields["expected_port"] = expected

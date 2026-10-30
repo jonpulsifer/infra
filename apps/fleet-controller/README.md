@@ -55,7 +55,8 @@ Devices with role `kubernetes-node` and status `planned`, `staged`, `active`,
 `failed` or `decommissioning`. Read: `name`, `serial`, `status`,
 `primary_ip4`, `oob_ip`, the first physical interface's `primary_mac_address`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
-`bmc_type`, `desired_action`, `last_workflow`, and talos-attest's
+`bmc_type`, `amt`, `secure_boot_expected`, `desired_action`,
+`last_workflow`, and talos-attest's
 `attested_address`, `attested_switch`, `attested_switch_port` and
 `attested_network_at`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),

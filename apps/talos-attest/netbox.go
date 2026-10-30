@@ -104,6 +104,8 @@ type netboxDevice struct {
 		BIOSVersion  string   `json:"bios_version"`
 		// SMBIOSUUID is nil when NetBox defines no smbios_uuid field.
 		SMBIOSUUID json.RawMessage `json:"smbios_uuid"`
+		// TPMVersion is nil when NetBox defines no tpm_version field.
+		TPMVersion json.RawMessage `json:"tpm_version"`
 		// PCR0ByBIOS is nil when NetBox defines no pcr0_by_bios field.
 		PCR0ByBIOS json.RawMessage `json:"pcr0_by_bios"`
 		// The attested network fields, nil when NetBox does not define one.
@@ -112,6 +114,13 @@ type netboxDevice struct {
 		AttestedSwitchPort json.RawMessage `json:"attested_switch_port"`
 		AttestedNetworkAt  json.RawMessage `json:"attested_network_at"`
 	} `json:"custom_fields"`
+}
+
+// fieldEmpty says whether a custom field's raw value is null or a blank
+// string.
+func fieldEmpty(raw json.RawMessage) bool {
+	var s *string
+	return json.Unmarshal(raw, &s) == nil && (s == nil || strings.TrimSpace(*s) == "")
 }
 
 // pcr0Map reads pcr0_by_bios, a JSON object of BIOS version to PCR 0 hex.
@@ -618,6 +627,11 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			// never waits for scripts/netbox-seed.sh to add it.
 			if u, ok := smbiosUUID(r.UUID); ok && d.CustomFields.SMBIOSUUID != nil {
 				fields["smbios_uuid"] = u
+			}
+			// Activating a credential against the EK proves a TPM 2.0, which
+			// a stub declared without the fact lacks. An owner's value stays.
+			if d.CustomFields.TPMVersion != nil && fieldEmpty(d.CustomFields.TPMVersion) {
+				fields["tpm_version"] = "2.0"
 			}
 		}
 		if !r.Renewed {

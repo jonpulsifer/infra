@@ -322,6 +322,7 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	stateDir := env("FLEET_STATE_DIR", "/var/lib/fleet-controller")
 	in := &Installer{
 		Site:   cfg.Site,
+		Models: cfg.Models,
 		NetBox: netbox,
 		Kube:   kube,
 		Store: &Store{
