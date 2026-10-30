@@ -49,7 +49,7 @@ func (f *fakeInstaller) requests() []InstallRequest {
 func installVerifier(t *testing.T, f Installer, audit io.Writer) (*Verifier, *fakeNetBox) {
 	nb := newFakeNetBox(t)
 	nb.add("testbox", "SIM-0001", "planned", "", map[string]any{"approved_ek_hash_ecc": "ek-under-test"})
-	return &Verifier{NetBox: nb.client(), Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}, nb
+	return &Verifier{NetBox: nb.client(), BindingAuthor: fakeTerraform, Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}, nb
 }
 
 // keySession is a session with an ECC EK and an AK in AKTemplate's shape,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -250,6 +251,69 @@ func (d netboxDevice) machine(mac string) Machine {
 	return m
 }
 
+// netboxChange is one record of NetBox's changelog, with the custom fields
+// of the object before and after the change.
+type netboxChange struct {
+	ID       int       `json:"id"`
+	Time     time.Time `json:"time"`
+	UserName string    `json:"user_name"`
+	Pre      *struct {
+		CustomFields map[string]any `json:"custom_fields"`
+	} `json:"prechange_data"`
+	Post *struct {
+		CustomFields map[string]any `json:"custom_fields"`
+	} `json:"postchange_data"`
+}
+
+// changesPage and maxChanges bound how much of a device's changelog
+// bindingAuthor reads before it gives up.
+const (
+	changesPage = 200
+	maxChanges  = 5000
+)
+
+// bindingAuthor is the user who made the newest change to the device's
+// approved binding, from NetBox's changelog, newest first. It errs when the
+// changelog does not answer, when no record changes the binding, and when
+// the newest one that does sets another value than want, as when the
+// record that set it was pruned.
+func (n *NetBox) bindingAuthor(ctx context.Context, deviceID int, want map[string]string) (string, error) {
+	approvedOf := func(data *struct {
+		CustomFields map[string]any `json:"custom_fields"`
+	}) map[string]string {
+		if data == nil {
+			return map[string]string{}
+		}
+		str := func(k string) string { v, _ := data.CustomFields[k].(string); return v }
+		return byAlg(str("approved_ek_hash"), str("approved_ek_hash_ecc"))
+	}
+	for offset := 0; offset < maxChanges; offset += changesPage {
+		var page netboxPage[netboxChange]
+		path := fmt.Sprintf("/api/core/object-changes/?changed_object_type=dcim.device&changed_object_id=%d&ordering=-time,-id&limit=%d&offset=%d", deviceID, changesPage, offset)
+		if err := n.do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			return "", err
+		}
+		changes, err := page.items()
+		if err != nil {
+			return "", err
+		}
+		for _, c := range changes {
+			post := approvedOf(c.Post)
+			if maps.Equal(approvedOf(c.Pre), post) {
+				continue
+			}
+			if !maps.Equal(post, want) {
+				return "", fmt.Errorf("the newest change to the binding, %d at %s by %s, does not set its current value", c.ID, c.Time.UTC().Format(time.RFC3339), c.UserName)
+			}
+			return c.UserName, nil
+		}
+		if len(changes) == 0 || offset+len(changes) >= *page.Count {
+			return "", errors.New("no changelog record sets the binding; NetBox may have pruned it")
+		}
+	}
+	return "", fmt.Errorf("no change to the binding among the device's newest %d changelog records", maxChanges)
+}
+
 // byAlg keys an RSA and an ECC EK hash by algorithm, leaving out an empty one.
 func byAlg(rsa, ecc string) map[string]string {
 	out := map[string]string{}
@@ -432,8 +496,8 @@ func plain(s string) string {
 
 // Record implements Recorder: the verdict and the issued serials go to the
 // device's custom fields before the machine gets its answer. Only a pass
-// whose session proved the EKs writes the pins, an empty one or one its
-// approved binding replaced, and only a pass refreshes
+// whose session proved the EKs writes the pins: the approved binding it
+// matched, or else only an empty pin, and only a pass refreshes
 // sku and bios_version. A daily check's pass writes only the verdict, its
 // time and what the quote showed for PCR 0. A quarantine writes only its
 // verdict, which revokes the identity and which fleetd cordons the
@@ -479,16 +543,32 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			fields["bios_version"] = r.BIOS
 		}
 		if r.EKProven {
-			// A pin on file is replaced only by the approved binding the
-			// pass matched; otherwise only an empty one is written.
+			// A pass that matched an approved binding pins the binding alone:
+			// each approved hash, and no pin for an algorithm it leaves out,
+			// so a removed TPM's EK and an extra EK the pass sent stay
+			// unpinned. Without a binding a pin on file is kept, and only an
+			// empty one is written.
 			for _, pin := range []struct{ field, alg, cur string }{{"ek_hash", "rsa", d.CustomFields.EKHash}, {"ek_hash_ecc", "ecc", d.CustomFields.EKHashECC}} {
+				cur := strings.ToLower(strings.TrimSpace(pin.cur))
+				if len(r.approved) > 0 {
+					want := r.approved[pin.alg]
+					switch {
+					case want == cur:
+					case want != "":
+						fields[pin.field] = want
+					default:
+						fields[pin.field] = nil
+						n.journalLater(ctx, d.ID, "info", fmt.Sprintf("fleetd: cleared %s %s, which the approved binding does not name", pin.field, cur), r.Serial)
+					}
+					continue
+				}
 				h := r.EKHashes[pin.alg]
 				switch {
-				case h == "" || strings.EqualFold(pin.cur, h):
-				case pin.cur == "" || r.approved[pin.alg] == h:
+				case h == "" || cur == h:
+				case cur == "":
 					fields[pin.field] = h
 				default:
-					comment := fmt.Sprintf("fleetd: kept %s %s; the pass proved %s", pin.field, strings.ToLower(pin.cur), h)
+					comment := fmt.Sprintf("fleetd: kept %s %s; the pass proved %s", pin.field, cur, h)
 					if n.Log != nil {
 						n.Log.Warn("NetBox pin kept", "serial", r.Serial, "field", pin.field, "on_file", pin.cur, "proved", h)
 					}

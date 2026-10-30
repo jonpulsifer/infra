@@ -424,3 +424,137 @@ func TestABindingAddedDuringTheSessionRefuses(t *testing.T) {
 		t.Fatalf("against the new binding: %+v", r.Verdict)
 	}
 }
+
+// A pass against a binding pins the binding alone. A replaced TPM under an
+// RSA-only binding clears the old TPM's ECC pin, which SPIRE would otherwise
+// still take, and the new TPM's extra ECC EK, certified and activated, is
+// never pinned.
+func TestABoundPassPinsTheBindingAlone(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		pins map[string]any
+	}{
+		{"replaced TPM", map[string]any{"ek_hash": strings.Repeat("ab", 32), "ek_hash_ecc": strings.Repeat("cd", 32)}},
+		{"extra ECC EK", nil},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFakeNetBox(t)
+			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+			fields := map[string]any{"approved_ek_hash": h.hashes["rsa"], "talos_class": "worker-g5"}
+			maps.Copy(fields, c.pins)
+			f.add("swell", "SIM-STUB", statusPlanned, simMAC, fields)
+			if _, err := h.run("SIM-STUB", simMAC); err != nil {
+				t.Fatalf("the approved TPM: %v", err)
+			}
+			d := f.settled(t, "SIM-STUB", 2)
+			if d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != nil {
+				t.Fatalf("pins after a pass against an RSA-only binding: %+v", d.CustomFields)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			for _, ch := range f.changes {
+				if ch.Post["ek_hash_ecc"] == h.hashes["ecc"] {
+					t.Fatalf("the extra ECC EK was pinned in change %d", ch.ID)
+				}
+			}
+		})
+	}
+}
+
+// A planned device gets its identity only from an intake pass: a renewal
+// is refused and journaled, and quarantines nothing. The daily check, which
+// issues nothing, still runs, and an active node renews with no binding.
+func TestRenewalRefusedWhilePlanned(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	f.add("testbox", simSerial, statusPlanned, simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	if _, err := h.run(simSerial, simMAC); err != nil {
+		t.Fatal(err)
+	}
+	f.settled(t, simSerial, 2)
+	h.v.Now = func() time.Time { return time.Now().Add(time.Hour) }
+	if r := refusal(t, func() error { _, err := h.renew(simSerial); return err }()); r.Verdict.Verdict != protocol.VerdictRefused || r.Verdict.Reason != reasonStatus {
+		t.Fatalf("renewal while planned: %+v", r.Verdict)
+	}
+	if rec, _, _ := h.v.Store.Record("testbox"); rec.Status != StatusAttested {
+		t.Fatalf("a refused renewal changed the record: %+v", rec)
+	}
+	waitFor(t, "the renewal journal entry", func() bool { return f.journaled("refused a renewal while the device is planned") })
+	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
+		t.Fatalf("daily check while planned: %v", err)
+	}
+	f.set(simSerial, func(d *fakeDevice) {
+		d.Status = "active"
+		delete(d.CustomFields, "approved_ek_hash")
+		delete(d.CustomFields, "approved_ek_hash_ecc")
+	})
+	if _, err := h.renew(simSerial); err != nil {
+		t.Fatalf("an active node's renewal: %v", err)
+	}
+}
+
+// A binding that changes while Evidence runs either refuses the pass, or
+// the pass issues and pins against the binding that held at its re-check,
+// never a mix of the two.
+func TestEvidenceRacingABindingChange(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	other := strings.Repeat("ab", 32)
+	for i := range 6 {
+		serial := "SIM-RACE-" + string(rune('A'+i))
+		f.add("race"+strings.ToLower(serial[len(serial)-1:]), serial, statusPlanned, "", h.bound(nil))
+		var wg sync.WaitGroup
+		h.tamper = func(*protocol.EvidenceRequest) {
+			wg.Go(func() {
+				time.Sleep(time.Duration(i) * 2 * time.Millisecond)
+				f.set(serial, func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = other })
+			})
+		}
+		res, err := h.run(serial, simMAC)
+		wg.Wait()
+		if err != nil {
+			if r := refusal(t, err); r.Verdict.Reason != reasonBinding {
+				t.Fatalf("%s: %+v", serial, r.Verdict)
+			}
+			continue
+		}
+		if res.Verdict.Verdict != protocol.VerdictPass {
+			t.Fatalf("%s: %+v", serial, res.Verdict)
+		}
+		d := f.settled(t, serial, 2)
+		if d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
+			t.Fatalf("%s: pins after a raced pass: %+v", serial, d.CustomFields)
+		}
+	}
+}
+
+// A binding whose newest change another NetBox user made is refused at the
+// start and again right before issue, and nothing is recorded.
+func TestABindingNotFromTerraformRefuses(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"talos_class": "worker-g5"})
+	f.author = "owner"
+	f.set("SIM-STUB", func(d *fakeDevice) { maps.Copy(d.CustomFields, h.bound(nil)) })
+	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }()); r.Verdict.Reason != reasonBindingAuthor || r.Verdict.Verdict != protocol.VerdictRefused {
+		t.Fatalf("a binding the owner wrote: %+v", r.Verdict)
+	}
+	waitFor(t, "the journal entry", func() bool { return f.journaled("binding last changed by owner, not Terraform") })
+
+	// Terraform writes it again, and another user rewrites it mid-session
+	// to the same value: the re-check before issue refuses.
+	f.author = fakeTerraform
+	f.set("SIM-STUB", func(d *fakeDevice) { delete(d.CustomFields, "approved_ek_hash") })
+	f.set("SIM-STUB", func(d *fakeDevice) { maps.Copy(d.CustomFields, h.bound(nil)) })
+	h.tamper = func(*protocol.EvidenceRequest) {
+		f.author = "owner"
+		f.set("SIM-STUB", func(d *fakeDevice) { delete(d.CustomFields, "approved_ek_hash") })
+		f.set("SIM-STUB", func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = h.hashes["rsa"] })
+	}
+	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }()); r.Verdict.Reason != reasonBindingAuthor {
+		t.Fatalf("a binding rewritten mid-session: %+v", r.Verdict)
+	}
+	if d := f.bySerial("SIM-STUB"); d.Patches != 0 || h.issued() {
+		t.Fatalf("a refused binding wrote or issued: %+v", d.CustomFields)
+	}
+}

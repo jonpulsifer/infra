@@ -107,6 +107,10 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
 	}
 	v.NetBox = nb
+	v.BindingAuthor = strings.TrimSpace(os.Getenv("ATTEST_BINDING_AUTHOR"))
+	if v.BindingAuthor == "" {
+		log.Warn("ATTEST_BINDING_AUTHOR is unset, so no approved EK binding counts and every planned machine waits")
+	}
 	v.Recorders = append(v.Recorders, nb)
 	log.Info("NetBox is the system of record", "url", u, "site", site)
 	if metricsFile := os.Getenv("ATTEST_METRICS_FILE"); metricsFile != "" {

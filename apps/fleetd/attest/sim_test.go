@@ -152,6 +152,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
 		Audit: &Audit{W: &h.audit, Site: "folly"},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
+		BindingAuthor: fakeTerraform,
 	}
 	nb := o.netbox.client()
 	h.v.NetBox = nb

@@ -47,6 +47,10 @@ type Verifier struct {
 	Log        *slog.Logger
 	Now        func() time.Time
 	SessionTTL time.Duration
+	// BindingAuthor is the NetBox user Terraform writes as. An approved
+	// binding counts only when NetBox's changelog shows that this user made
+	// its newest change; with none set, no binding counts.
+	BindingAuthor string
 	// OnChange runs after any record changes, to refresh the metrics file.
 	OnChange func()
 	// Installer, when set, renders an intake pass's Talos config under an
@@ -59,11 +63,11 @@ type Verifier struct {
 	// errs when it cannot say, which counts as unexpected.
 	Expected func(ctx context.Context, serial string) (bool, error)
 
-	mu         sync.Mutex
-	sessions   map[string]*session
-	verdicts   map[[2]string]uint64
-	checks     map[[2]string]checkCount
-	mismatches map[int]time.Time
+	mu       sync.Mutex
+	sessions map[string]*session
+	verdicts map[[2]string]uint64
+	checks   map[[2]string]checkCount
+	claims   map[int]time.Time
 }
 
 type session struct {
@@ -149,6 +153,9 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 			return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonEKMissing, "two %s EKs", ek.Alg))
 		}
 		eks = append(eks, ek)
+	}
+	if err := v.bindingAuthored(ctx, m); err != nil {
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, err)
 	}
 	if err := v.admitPins(ctx, m, req.Machine, eks); err != nil {
 		return protocol.StartResponse{}, err
@@ -285,35 +292,62 @@ func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Mach
 		return v.pend(ctx, m, claim, eks, err)
 	}
 	if len(m.Approved) > 0 {
-		v.journalMismatch(ctx, m, claim, eks, err)
+		v.journalClaim(ctx, m, fmt.Sprintf("fleetd: refused a claim of this serial by EKs that are not its approved binding; nothing was recorded, and the binding stands (MAC %s, %s): %s", claim.MAC, ekSummary(eks), err))
 	}
 	return v.reject(&m, claim, err)
 }
 
-// mismatchEvery is how often a device's journal takes a claim that is not
-// its approved binding: anyone who knows a serial can make one.
-const mismatchEvery = 10 * time.Minute
+// claimEvery is how often a device's journal takes a refused claim: anyone
+// who knows a serial can make one.
+const claimEvery = 10 * time.Minute
 
-// journalMismatch notes on the device that a TPM other than the approved
-// one claimed its serial. The binding and the device stay as they are.
-func (v *Verifier) journalMismatch(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK, cause error) {
+// journalClaim notes a refused claim on the device, at most every
+// claimEvery. The binding and the device stay as they are.
+func (v *Verifier) journalClaim(ctx context.Context, m Machine, comment string) {
 	if v.NetBox == nil || m.NetBoxID == 0 {
 		return
 	}
 	now := v.Now()
 	v.mu.Lock()
-	if v.mismatches == nil {
-		v.mismatches = map[int]time.Time{}
+	if v.claims == nil {
+		v.claims = map[int]time.Time{}
 	}
-	last, seen := v.mismatches[m.NetBoxID]
-	if seen && now.Sub(last) < mismatchEvery {
+	if last, seen := v.claims[m.NetBoxID]; seen && now.Sub(last) < claimEvery {
 		v.mu.Unlock()
 		return
 	}
-	v.mismatches[m.NetBoxID] = now
+	v.claims[m.NetBoxID] = now
 	v.mu.Unlock()
-	comment := plain(fmt.Sprintf("fleetd: refused a claim of this serial by EKs that are not its approved binding; nothing was recorded, and the binding stands (MAC %s, %s): %s", claim.MAC, ekSummary(eks), cause))
-	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", comment, m.Serial)
+	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", plain(comment), m.Serial)
+}
+
+// bindingAuthored errs unless the device is unbound, or NetBox's changelog
+// shows that BindingAuthor, Terraform's user, made the newest change to its
+// approved binding. A binding anyone else wrote counts for nothing: the
+// attempt is refused and journaled, and nothing is recorded.
+func (v *Verifier) bindingAuthored(ctx context.Context, m Machine) error {
+	if len(m.Approved) == 0 {
+		return nil
+	}
+	err := v.checkAuthor(ctx, m)
+	if err != nil {
+		v.journalClaim(ctx, m, "fleetd: refused an attestation: "+err.Error())
+	}
+	return err
+}
+
+func (v *Verifier) checkAuthor(ctx context.Context, m Machine) error {
+	if v.BindingAuthor == "" {
+		return fail(reasonBindingAuthor, "%s's approved EK binding counts for nothing: no binding author is set", m.Name)
+	}
+	user, err := v.NetBox.bindingAuthor(ctx, m.NetBoxID, m.Approved)
+	if err != nil {
+		return fail(reasonBindingAuthor, "%s's approved EK binding counts for nothing: %v", m.Name, err)
+	}
+	if user != v.BindingAuthor {
+		return fail(reasonBindingAuthor, "%s's binding last changed by %s, not Terraform", m.Name, user)
+	}
+	return nil
 }
 
 // matchPins checks the EKs against hashes by algorithm, approved or pinned
@@ -550,6 +584,9 @@ func (v *Verifier) confirmBinding(ctx context.Context, s *session) (Machine, err
 	if !maps.Equal(m.Approved, s.machine.Approved) {
 		return Machine{}, fail(reasonBinding, "%s's approved EK binding changed during the session; attest again", m.Name)
 	}
+	if err := v.bindingAuthored(ctx, m); err != nil {
+		return Machine{}, err
+	}
 	if err := checkPinned(m, s.eks); err != nil {
 		return Machine{}, err
 	}
@@ -745,6 +782,10 @@ func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmR
 		return protocol.ConfirmResponse{}, err
 	}
 	v.Log.Info("attestation confirmed", "machine", rec.Machine, "nv_indexes", req.NVIndexes)
+	if s.renew == nil {
+		// The pins follow the binding the pass matched, as at the pass.
+		rec.approved = s.machine.Approved
+	}
 	v.record(ctx, rec)
 	v.changed()
 	resp := protocol.ConfirmResponse{Status: "confirmed"}
@@ -785,6 +826,15 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 	}
 	if m.blocked() {
 		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.lifecycle()))
+	}
+	// A planned device gets its identity from an intake pass against its
+	// approved binding, never from a renewal. The daily check issues
+	// nothing and still runs.
+	if !check && strings.EqualFold(m.Status, statusPlanned) {
+		if v.NetBox != nil && m.NetBoxID != 0 {
+			v.NetBox.journalLater(ctx, m.NetBoxID, "warning", "fleetd: refused a renewal while the device is planned; it attests from HookOS against its approved EK binding", m.Serial)
+		}
+		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is planned and gets no renewal; it attests from HookOS", m.Name))
 	}
 	// The DevID's files are checked as if they came over plain HTTP: nothing in it is
 	// trusted until its certificates chain to this CA and name the machine,

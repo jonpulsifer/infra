@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -29,9 +30,30 @@ type fakeNetBox struct {
 	journal    []string
 	next       int
 	srv        *httptest.Server
-	// failDevices answers every device lookup 500; failPatch every write.
+	// failDevices answers every device lookup 500; failPatch every write;
+	// failChanges every changelog read 403.
 	failDevices bool
 	failPatch   bool
+	failChanges bool
+	// changes is the changelog, oldest first. author is the user an edit
+	// through add or set is logged as; the service's own writes are fleetd's.
+	changes []fakeChange
+	author  string
+}
+
+type fakeChange struct {
+	ID       int
+	DeviceID int
+	User     string
+	Time     time.Time
+	Pre      map[string]any
+	Post     map[string]any
+}
+
+// logChange appends a change of d's custom fields by user, from pre.
+func (f *fakeNetBox) logChange(d *fakeDevice, pre map[string]any, user string) {
+	f.next++
+	f.changes = append(f.changes, fakeChange{ID: f.next, DeviceID: d.ID, User: user, Time: time.Now(), Pre: pre, Post: maps.Clone(d.CustomFields)})
 }
 
 type fakeDevice struct {
@@ -59,7 +81,7 @@ type fakeInterface struct {
 }
 
 func newFakeNetBox(t *testing.T) *fakeNetBox {
-	f := &fakeNetBox{t: t, devices: map[int]*fakeDevice{}, interfaces: map[int]*fakeInterface{}, types: map[int]string{}, mfrs: map[int]string{}, next: 100}
+	f := &fakeNetBox{t: t, devices: map[int]*fakeDevice{}, interfaces: map[int]*fakeInterface{}, types: map[int]string{}, mfrs: map[int]string{}, next: 100, author: fakeTerraform}
 	f.types[1] = "HP EliteDesk 800 G5 Desktop Mini"
 	f.mfrs[1] = "HP"
 	f.srv = httptest.NewServer(http.HandlerFunc(f.serve))
@@ -71,6 +93,9 @@ func (f *fakeNetBox) client() *NetBox {
 	return &NetBox{URL: f.srv.URL, Token: "nbt_test", Client: f.srv.Client()}
 }
 
+// fakeTerraform is the user the fake logs Terraform's edits as.
+const fakeTerraform = "terraform"
+
 // add seeds a device with a MAC on eth0.
 func (f *fakeNetBox) add(name, serial, status, mac string, fields map[string]any) *fakeDevice {
 	f.mu.Lock()
@@ -81,6 +106,7 @@ func (f *fakeNetBox) add(name, serial, status, mac string, fields map[string]any
 		d.CustomFields[k] = v
 	}
 	f.devices[d.ID] = d
+	f.logChange(d, nil, f.author)
 	f.next++
 	i := &fakeInterface{ID: f.next, DeviceID: d.ID, Name: "eno1", MAC: mac}
 	if mac != "" {
@@ -130,8 +156,10 @@ func (f *fakeNetBox) set(serial string, change func(*fakeDevice)) {
 	defer f.mu.Unlock()
 	for _, d := range f.devices {
 		if strings.EqualFold(d.Serial, serial) {
+			pre := maps.Clone(d.CustomFields)
 			change(d)
 			d.Updated = time.Now()
+			f.logChange(d, pre, f.author)
 			return
 		}
 	}
@@ -227,6 +255,15 @@ func (f *fakeNetBox) serve(w http.ResponseWriter, r *http.Request) {
 		if s, ok := body["status"].(string); ok {
 			d.Status = s
 		}
+		pre := maps.Clone(d.CustomFields)
+		// Only Terraform writes the approved binding: the service never does.
+		if cf, ok := body["custom_fields"].(map[string]any); ok {
+			for _, k := range []string{"approved_ek_hash", "approved_ek_hash_ecc"} {
+				if _, wrote := cf[k]; wrote {
+					f.t.Errorf("fake NetBox: the service wrote %s on device %d", k, d.ID)
+				}
+			}
+		}
 		if cf, ok := body["custom_fields"].(map[string]any); ok {
 			for k, v := range cf {
 				d.CustomFields[k] = v
@@ -234,6 +271,7 @@ func (f *fakeNetBox) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		d.Updated = time.Now()
 		d.Patches++
+		f.logChange(d, pre, "fleetd")
 		writeJSON(w, http.StatusOK, f.deviceJSON(d))
 	case r.Method == http.MethodGet && path == "/api/dcim/interfaces":
 		var out []any
@@ -315,6 +353,30 @@ func (f *fakeNetBox) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		page(w, nil)
+	case r.Method == http.MethodGet && path == "/api/core/object-changes":
+		if f.failChanges {
+			http.Error(w, `{"detail":"You do not have permission to perform this action."}`, http.StatusForbidden)
+			return
+		}
+		if q.Get("changed_object_type") != "dcim.device" {
+			http.Error(w, "unfiltered changelog read", http.StatusBadRequest)
+			return
+		}
+		out := []any{}
+		for i := len(f.changes) - 1; i >= 0; i-- {
+			if c := f.changes[i]; strconv.Itoa(c.DeviceID) == q.Get("changed_object_id") {
+				rec := map[string]any{"id": c.ID, "time": c.Time.UTC().Format(time.RFC3339Nano), "user_name": c.User, "prechange_data": nil, "postchange_data": map[string]any{"custom_fields": c.Post}}
+				if c.Pre != nil {
+					rec["prechange_data"] = map[string]any{"custom_fields": c.Pre}
+				}
+				out = append(out, rec)
+			}
+		}
+		total := len(out)
+		offset, _ := strconv.Atoi(q.Get("offset"))
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		out = out[min(offset, total):min(offset+limit, total)]
+		writeJSON(w, http.StatusOK, map[string]any{"count": total, "results": out})
 	case r.Method == http.MethodPost && path == "/api/extras/journal-entries":
 		f.journal = append(f.journal, fmt.Sprintf("%v %v: %v", body["assigned_object_id"], body["kind"], body["comments"]))
 		writeJSON(w, http.StatusCreated, map[string]any{"id": 1})

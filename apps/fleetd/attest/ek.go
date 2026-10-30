@@ -202,6 +202,7 @@ const (
 	reasonEKHash         = "ek-hash-mismatch"
 	reasonEKPending      = "ek-pending-approval"
 	reasonBinding        = "ek-binding-changed"
+	reasonBindingAuthor  = "ek-binding-unauthored"
 	reasonAK             = "ak-invalid"
 	reasonSession        = "session"
 	reasonConfirm        = "confirm-signature"
