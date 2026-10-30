@@ -60,7 +60,7 @@ The DevID CA and the SPIRE CA have different jobs. The DevID CA certifies device
 
 ### Declaration and boot
 
-Automatic installation requires a complete machine declaration. A declared planned device can bind its first certified EK without a separate approval. An unknown serial needs the owner's EK approval; that approval does not supply the declaration fields required for installation.
+Automatic installation requires a complete machine declaration, including an approved EK binding in the node's entry. The binding comes from a receiving scan or a supplier record, not from the claim. fleetd honours it only when NetBox's changelog shows Terraform's user wrote it. A planned device without a binding, and an unknown serial, wait as claims that authorize nothing.
 
 UniFi DHCP directs PXE to spore. Firmware loads signed iPXE, which loads signed HookOS. The HookOS command line pins the agent image by digest.
 
@@ -135,7 +135,7 @@ Evidence has four distinct levels: source analysis, simulator tests, integration
 | Question | Evidence in the tree | Conclusion and boundary |
 | --- | --- | --- |
 | Can a TPM session bind installation authorization to its key? | `apps/fleetd/attest/sim_install_test.go` | Simulator cases exercise install-code delivery and session takeover refusal. They do not test physical TPM latency. |
-| Can an unknown or unavailable inventory authorize installation? | `apps/fleetd/attest/sim_fleet_test.go` | Tests cover NetBox failure and initial enrollment. Automatic first binding of an unpinned planned device remains a trust gap. |
+| Can an unknown or unavailable inventory authorize installation? | `apps/fleetd/attest/sim_fleet_test.go` | Tests cover NetBox failure, unbound and mismatched enrollment, a binding changed or written by another user during a session, and pins after a bound pass (`sim_intake_test.go`, `binding_test.go`). The binding is only as sound as its receiving evidence. |
 | Does admission require a complete declaration? | `apps/fleetd/fleet/admit_test.go` | Tests cover missing fields, port mismatch and automatic control-plane refusal. A matching report is not proof of cable location. |
 | Can a config be fetched twice? | `apps/fleetd/fleet/install_test.go` | Cases cover concurrent fetches, response completion, expiry and service restart. They do not prevent theft of an unspent code. |
 | Does the wipe require the current boot's authorization? | `apps/fleetd/fleet/template_test.go` | Tests exercise the provision script's pass and code gates. They do not constrain a hostile privileged runtime. |
@@ -157,7 +157,7 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | --- | --- | --- | --- |
 | Replay an earlier attestation response | Solved | Session nonce, credential activation and quote checks in `apps/fleetd/attest/attest.go`. | Assumes trusted verifier state and sound TPM cryptography. |
 | Substitute a different TPM for an existing EK pin | Solved | EK matching and activation in `apps/fleetd/attest/attest.go`. | Does not establish who controls the correct TPM. |
-| Win first enrollment with a copied serial and MAC | Not solved | Manufacturer EK validation and admission checks constrain the attempt. | An unpinned planned device has no independent chassis-to-EK binding. |
+| Win first enrollment with a copied serial and MAC | Solved | A planned device admits only the EKs its Terraform-written binding names, in `apps/fleetd/attest/attest.go`. | Rests on the receiving evidence behind the binding and on the Terraform user's token and NetBox admin. |
 | Forge a physical switch location | Not solved | `apps/fleetd/attest/network.go` checks signed reports; admission checks `expected_port`. | LLDP observations do not authenticate a cable or switch. |
 | Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. | Does not establish that firmware measures all relevant code correctly. |
 | Run an old but accepted signed image | Not solved | Signing-authority checks apply in `apps/fleetd/attest/policy.yaml`. | Empty `boot_applications` provides no exact-image restriction or version floor. |
