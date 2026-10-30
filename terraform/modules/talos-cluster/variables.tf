@@ -70,9 +70,6 @@ variable "nodes" {
     installer_image = optional(string)
     # A change replaces the node's talos_machine (see nodes.tf).
     install_generation = optional(string)
-    # fleet-controller is installing the node: the root applies no config to it
-    # until it has joined and this is unset.
-    enrolling = optional(bool, false)
   }))
 
   validation {
@@ -80,8 +77,8 @@ variable "nodes" {
     error_message = "role must be controlplane or worker."
   }
   validation {
-    condition     = length([for n in var.nodes : n if n.role == "controlplane" && !n.enrolling]) >= 1
-    error_message = "A cluster needs a control plane that is not enrolling."
+    condition     = length([for n in var.nodes : n if n.role == "controlplane"]) >= 1
+    error_message = "A cluster needs a control plane."
   }
 }
 

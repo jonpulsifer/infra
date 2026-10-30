@@ -53,7 +53,7 @@ func (c Config) bootstrapAddress(s string) bool {
 // during the run from another bootstrap address moves the Machine there, and
 // one from anywhere else, such as the device's own Kubernetes address once
 // its RADIUS user moves it, ends the pin. A finished run ends it too.
-// Otherwise a planned or staged device without oob_ip, which may still sit on
+// Otherwise a planned device without oob_ip, which may still sit on
 // the bootstrap network where its Kubernetes address means nothing, takes
 // the address its last intake pass attested, when that is younger than
 // AttestedAddressTTL and a bootstrap host address. AMT shares the host's NIC
@@ -76,7 +76,7 @@ func (c Config) bootstrapBMC(d Device, workflows []Object, now time.Time) Device
 		d.BMCAddress, d.BootstrapBMC = a, true
 		return d
 	}
-	if d.Status != "planned" && d.Status != "staged" {
+	if d.Status != "planned" {
 		return d
 	}
 	if !fresh(d.Attested.At, now, AttestedAddressTTL) || !c.bootstrapAddress(d.Attested.Address) {

@@ -11,7 +11,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | `attest` | Attests, and boots the installed disk | The status stays, and the node has a new LDevID |
 | `wipe` | Wipes the system disk, with no attestation | The node stays in HookOS until a Workflow runs |
 
-`provision` and `wipe` move the device to `staged`. `attest` leaves the status alone. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
+`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. `attest` leaves the status alone. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.

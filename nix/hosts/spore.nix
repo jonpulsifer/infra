@@ -16,13 +16,13 @@ let
   # With tpm_devid on, a node attests by the LDevID that the attest service issues it, whose subject
   # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
   # its OU (the class) or O (the site), so each machine in the inventory with a TPM 2.0 that NetBox
-  # has staged or active gets its own alias, and a new machine needs a spore deploy.
+  # has planned or active gets its own alias, and a new machine needs a spore deploy.
   devidNodes = lib.attrNames (
     lib.filterAttrs (
       _: m:
       m.tpm or null == "2.0"
       && lib.elem m.status [
-        "staged"
+        "planned"
         "active"
       ]
     ) (import ../lib/inventory.nix { inherit lib; })

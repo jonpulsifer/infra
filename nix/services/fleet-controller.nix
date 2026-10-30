@@ -155,7 +155,6 @@ in
               type = lib.types.enum [
                 "none"
                 "amt"
-                "redfish"
               ];
               description = "The model's out-of-band management.";
             };
@@ -343,6 +342,9 @@ in
         FLEET_NODE_PREFIX = topology.K8S_NODE_CIDR;
         # The gateway and the API server's address are in the prefix and never go to a new node.
         FLEET_NODE_RESERVED = "${topology.ROUTER_IP},${topology.API_SERVER_IP}";
+        # The Talos root bootstraps etcd on the control plane at the API server's address: no
+        # provision or wipe runs there, and it never installs from here.
+        FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
         # talosctl writes its patch files and nothing else here.
         HOME = "/tmp";
       }
@@ -355,8 +357,6 @@ in
       }
       // lib.optionalAttrs cfg.controlPlanes {
         FLEET_CONTROLPLANE_BUNDLE = "%d/bundle";
-        # The Talos root bootstraps etcd on the control plane at the API server's address.
-        FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
         # A control plane's config carries the CA keys, so it waits unread for less time.
         FLEET_CONTROLPLANE_CONFIG_TTL = "30m";
       };

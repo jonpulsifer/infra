@@ -19,8 +19,8 @@ const ActionRetire = "retire"
 
 // Action says what one run asks the provision Template to do, and the NetBox
 // status an active or failed device takes while it runs (NextStatus). An
-// attest leaves an active node active: staged would mark it enrolling in the
-// Talos root, which then applies no config to it.
+// attest leaves an active node active: planned would take it out of the
+// Talos root, which applies no config to a node until it is active.
 type Action struct {
 	Attest, Wipe, Retire bool
 	Status               string
@@ -29,33 +29,47 @@ type Action struct {
 // Actions are the runs the controller starts, by desired_action and by
 // ActionRetire.
 var Actions = map[string]Action{
-	"provision":  {Attest: true, Wipe: true, Status: "staged"},
+	"provision":  {Attest: true, Wipe: true, Status: "planned"},
 	"attest":     {Attest: true},
-	"wipe":       {Wipe: true, Status: "staged"},
+	"wipe":       {Wipe: true, Status: "planned"},
 	ActionRetire: {Wipe: true, Retire: true},
 }
 
-// HasBMC says whether the device gets a Machine now. A planned device has no
-// RADIUS user yet, so it and its AMT sit on the bootstrap fallback with a
-// lease there, and an AMT address derived from the Kubernetes address it
-// does not hold yet is wrong; until the status leaves planned, only an
-// explicit oob_ip counts, or the bootstrap address its last intake pass
-// attested (Config.bootstrapBMC). A device fresh from its intake is in the
-// same place: its export has not been applied, and its agent waits in
-// HookOS.
+// Installing says whether a planned device has passed attestation: its
+// first install, or a reinstall after a provision or wipe moved it back to
+// planned. It stays planned until its node fetches its config.
+func (d Device) Installing() bool { return d.Status == "planned" && passedVerdict(d.Verdict) }
+
+// passedVerdict says whether an attest_verdict is a pass, as talos-attest reads
+// it: attested, or a control plane's failed check that left it in place.
+func passedVerdict(verdict string) bool {
+	return verdict == "attested" || strings.HasPrefix(verdict, "failed-no-quarantine")
+}
+
+// unplaced says whether the device has not passed attestation as planned. A
+// planned device has no RADIUS user yet, so it and its AMT sit on the
+// bootstrap fallback with a lease there, and an AMT address derived from the
+// Kubernetes address it does not hold yet is wrong.
+func (d Device) unplaced() bool { return d.Status == "planned" && !d.Installing() }
+
+// HasBMC says whether the device gets a Machine now. Until an unplaced
+// device passes attestation, only an explicit oob_ip counts, or the
+// bootstrap address its last intake pass attested (Config.bootstrapBMC). A
+// device fresh from its intake is in the same place: its export has not
+// been applied, and its agent waits in HookOS.
 func (d Device) HasBMC() bool {
 	if d.BMCType == "none" || d.BMCAddress == "" {
 		return false
 	}
-	return d.Status != "planned" && !d.FromIntake() || d.OOBAddress != "" || d.BootstrapBMC
+	return !d.unplaced() && !d.FromIntake() || d.OOBAddress != "" || d.BootstrapBMC
 }
 
 // ManualBoot says whether Rufio stays out of a run: a device without a
-// Machine, a planned device, whose BMC Rufio cannot reach at a Kubernetes
+// Machine, an unplaced device, whose BMC Rufio cannot reach at a Kubernetes
 // address it does not hold yet, unless its AMT is at its attested bootstrap
 // address, and a device fresh from its intake, which is already in HookOS.
 func (d Device) ManualBoot() bool {
-	return d.Status == "planned" && !d.BootstrapBMC || d.FromIntake() || !d.HasBMC()
+	return d.unplaced() && !d.BootstrapBMC || d.FromIntake() || !d.HasBMC()
 }
 
 func labels(d Device, extra map[string]string) map[string]any {
@@ -107,7 +121,6 @@ func (c Config) Hardware(d Device, netboot bool) Object {
 
 // Machine is the device's Rufio Machine. AMT speaks plain HTTP digest auth
 // on 16992, because its TLS offers only RSA key exchange, which Go refuses.
-// Redfish is a BMC of its own at oob_ip.
 func (c Config) Machine(d Device) (Object, error) {
 	secret, ok := c.BMCSecrets[d.BMCType]
 	if !ok {
@@ -123,12 +136,6 @@ func (c Config) Machine(d Device) (Object, error) {
 		conn["providerOptions"] = map[string]any{
 			"preferredOrder": []any{"IntelAMT"},
 			"intelAMT":       map[string]any{"hostScheme": "http", "port": c.AMTPort},
-		}
-	case "redfish":
-		conn["insecureTLS"] = c.RedfishInsecure
-		conn["providerOptions"] = map[string]any{
-			"preferredOrder": []any{"gofish"},
-			"redfish":        map[string]any{"port": c.RedfishPort, "useBasicAuth": true},
 		}
 	default:
 		return nil, fmt.Errorf("bmc_type %q has no Rufio provider here", d.BMCType)
@@ -235,10 +242,9 @@ func (c Config) Workflow(d Device, action string, now time.Time) Object {
 }
 
 // NextStatus is the NetBox status a device takes when an action starts, or
-// "" to leave it. A provision or wipe marks an active or failed device
-// staged. A planned device stays planned: talos-attest grants a first intake
-// the no-click pass only while the device is planned, and moves it to staged
-// itself on the verdict.
+// "" to leave it. A provision or wipe moves an active or failed device back
+// to planned, which the Talos root applies no config to, until its node
+// fetches its config. A planned device stays planned.
 func NextStatus(action, current string) string {
 	next := Actions[action].Status
 	if next == "" || next == current {

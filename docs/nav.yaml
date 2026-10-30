@@ -47,7 +47,6 @@ sections:
       - platform/opentofu.md
       - platform/build-and-release.md
       - platform/cloud.md
-      - platform/metal-dev.md
       - path: platform/observability.md
         children: [platform/observability/alerting.md]
   - title: Hosts

@@ -163,7 +163,7 @@ description = "Declare a new planned Kubernetes node in NetBox, then render the 
 run = "bash scripts/netbox-declare.sh"
 
 [tasks."netbox:export"]
-description = "Write clusters/folly/inventory/machines.yaml from NetBox's active and staged kubernetes-node devices"
+description = "Write clusters/folly/inventory/machines.yaml from NetBox's planned, active and failed kubernetes-node devices"
 run = "bash scripts/netbox-export.sh"
 
 [tasks."netbox:check"]
@@ -174,22 +174,6 @@ run = "bash scripts/netbox-export.sh --check"
 description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"
 run = "bash scripts/inventory.sh observe"
 
-[tasks."metal-dev:up"]
-description = "Start the metal-dev VM in GCP, join it to the tailnet and give it the DNS-01 token (terraform/metal-dev)"
-run = "bash scripts/metal-dev/up.sh"
-
-[tasks."metal-dev:down"]
-description = "Stop the metal-dev VM; its disk and virtual nodes stay"
-run = "bash scripts/metal-dev/down.sh"
-
-[tasks."metal-dev:seed"]
-description = "Seed the metal-dev VM's own NetBox from git, with the URL pinned to the VM and its token; never the lab's NetBox"
-run = "bash scripts/metal-dev/seed.sh"
-
-[tasks."metal-dev:intake"]
-description = "Create a virtual node on metal-dev, enroll the lab's Secure Boot keys, declare it in the host's NetBox and follow it to active (args: [name])"
-run = "bash scripts/metal-dev/intake.sh"
-
 [tasks."attest:approve"]
 description = "Show the first intake that waits for a serial on the anchors' talos-attest, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
 run = "bash scripts/attest.sh approve"
@@ -197,10 +181,6 @@ run = "bash scripts/attest.sh approve"
 [tasks."attest:pending"]
 description = "List the first intakes that wait for approval on each anchor's talos-attest"
 run = "bash scripts/attest.sh pending"
-
-[tasks."fleet:intake"]
-description = "Open, close or show the intake window on every anchor's talos-attest, over ssh as the owner (args: open <duration> | close | status)"
-run = "bash scripts/fleet-intake.sh"
 
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"

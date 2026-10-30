@@ -427,7 +427,7 @@ func TestNetBoxPinsTheEK(t *testing.T) {
 	}
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: bare, netbox: f})
-	f.add("testbox", simSerial, "staged", simMAC, map[string]any{"ek_hash": h.hashes["rsa"]})
+	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"]})
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("pinned by NetBox: %v", err)
 	}

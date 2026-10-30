@@ -3,7 +3,7 @@
 # prints one node's observed entry.
 #
 #   inventory.sh check [--record] [--metrics <file>]
-#                       every staged, active or failed node in NetBox; exits 1 on drift.
+#                       every active or failed node in NetBox; exits 1 on drift.
 #                       --record writes a NetBox journal entry when a node's findings change and keeps the `drift` tag on
 #                       the drifting devices; --metrics writes netbox_drift for node-exporter.
 #   inventory.sh observe [--insecure] <address>
@@ -98,7 +98,7 @@ check() {
   for node in $(jq -r 'keys[]' <<<"$addresses"); do
     address="$(jq -r --arg n "$node" '.[$n]' <<<"$addresses")"
     if ! jq -e --arg n "$node" 'has($n)' <<<"$machines" >/dev/null; then
-      echo "$node: no active or staged kubernetes-node device in NetBox"
+      echo "$node: no active or failed kubernetes-node device in NetBox"
       series+=("netbox_drift{device=\"$node\"} 1")
       drift=1
       continue

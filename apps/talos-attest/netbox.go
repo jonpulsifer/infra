@@ -20,7 +20,7 @@ import (
 
 // NetBox is the system of record for machines and their lifecycle. The
 // service reads a machine's class, status and EK pins from the device with
-// its serial, creates a device at staged for a serial NetBox has never seen,
+// its serial, creates a planned device for a serial NetBox has never seen,
 // and writes each verdict to the device's custom fields. The local state
 // directory stays the cache of what this anchor issued.
 type NetBox struct {
@@ -302,14 +302,12 @@ func intakeName(claim protocol.Machine) string {
 	return h
 }
 
-// Create adds a device at staged for a serial NetBox has never seen, with
+// Create adds a planned device for a serial NetBox has never seen, with
 // the device type the SMBIOS model names, made under its manufacturer when
-// NetBox lacks it, and the NIC's MAC on its first interface. It is named
-// name, or by intakeName when name is empty.
-func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string) (Machine, error) {
-	if name == "" {
-		name = intakeName(claim)
-	}
+// NetBox lacks it, and the NIC's MAC on its first interface. intakeName
+// names it.
+func (n *NetBox) Create(ctx context.Context, claim protocol.Machine) (Machine, error) {
+	name := intakeName(claim)
 	siteID, err := n.idBy(ctx, "/api/dcim/sites/", "slug", n.Site)
 	if err != nil {
 		return Machine{}, err
@@ -334,7 +332,7 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string
 		"device_type":   typeID,
 		"role":          roleID,
 		"site":          siteID,
-		"status":        statusStaged,
+		"status":        statusPlanned,
 		"serial":        serialKey(claim.Serial),
 		"custom_fields": fields,
 		"comments":      "Created by talos-attest on first sight, after its TPM activated a credential.",
@@ -360,14 +358,14 @@ func (n *NetBox) Create(ctx context.Context, claim protocol.Machine, name string
 	if err := n.journal(ctx, d.ID, "info", plain(fmt.Sprintf("talos-attest: created on first sight from HookOS, after credential activation (serial %s, MAC %s, %s %s)", claim.Serial, mac, claim.Manufacturer, claim.Model))); err != nil {
 		return Machine{}, err
 	}
-	d.Status.Value = statusStaged
+	d.Status.Value = statusPlanned
 	d.Serial = serialKey(claim.Serial)
 	return d.machine(mac), nil
 }
 
 // Bind puts a box's MAC on the declared stub it attested as, the planned
 // device the owner entered, and journals a MAC it wrote. The stub keeps its
-// name; the verdict stages it. It reports whether it wrote the MAC; a MAC
+// name and stays planned until its node fetches its config. It reports whether it wrote the MAC; a MAC
 // already on file that is the claim's is no write, and another is
 // errMACTaken.
 func (n *NetBox) Bind(ctx context.Context, deviceID int, claim protocol.Machine) (bool, error) {
@@ -563,7 +561,7 @@ func plain(s string) string {
 // whose session proved the EKs writes the pins, and only a pass refreshes
 // sku and bios_version. A daily check's pass writes only the verdict, its
 // time and what the quote showed for PCR 0. A quarantine fails the device; a
-// pass on a planned device stages it. The journal entry follows on its own.
+// pass leaves the status alone. The journal entry follows on its own.
 func (n *NetBox) Record(ctx context.Context, r Record) error {
 	d, ok, err := n.device(ctx, r.Serial)
 	if err != nil {
@@ -636,9 +634,6 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 		}
 		if !r.Renewed {
 			networkFields(d, r, fields)
-		}
-		if d.Status.Value == statusPlanned {
-			patch["status"] = statusStaged
 		}
 		kind, comment = "success", fmt.Sprintf("talos-attest: attested; LDevID %s, LAK %s", r.LDevIDSerial, r.LAKSerial)
 		if r.Renewed {
@@ -715,7 +710,7 @@ func pcr0Fields(d netboxDevice, r Record, fields map[string]any) [][2]string {
 // networkFields writes where an intake pass found the machine plugged in, as
 // its AK signed it, into each network field NetBox defines. A pass without
 // a fact clears its field, so no older address or port outlives a newer
-// pass. fleet-controller dials a planned or staged machine's AMT at the
+// pass. fleet-controller dials a planned machine's AMT at the
 // address and cables it to the port.
 func networkFields(d netboxDevice, r Record, fields map[string]any) {
 	var addr, chassis, port, at any

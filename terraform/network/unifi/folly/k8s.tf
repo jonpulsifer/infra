@@ -5,15 +5,16 @@ locals {
 
   machines = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
 
-  # Hostname to address for every node: the export's active, staged and failed
+  # Hostname to address for every node: the export's active and failed
   # machines, which clusters/folly/talos treats as nodes.
   node_addresses = {
     for node, m in local.machines : node => m.address
-    if contains(["active", "staged", "failed"], try(m.status, "active")) && try(m.address, null) != null
+    if contains(["active", "failed"], try(m.status, "active")) && try(m.address, null) != null
   }
 
-  # A planned machine is not a node yet. Its reservation comes from the
-  # export's address, once it has a MAC and a switch port.
+  # A planned machine is not a node yet, or reinstalls. Its reservation and
+  # DNS record come from the export's address, once it has a MAC and a
+  # switch port, so a reprovisioned node keeps its name.
   planned_addresses = {
     for node, m in local.machines : node => m.address
     if try(m.status, "active") == "planned" && try(m.mac, null) != null && try(m.switch_port, null) != null && try(m.address, null) != null
@@ -25,6 +26,7 @@ locals {
       "erx" = cidrhost(local.anchor_cidr, 5)
       "k8s" = local.topology.API_SERVER_IP
     },
+    local.planned_addresses,
     local.node_addresses,
   )
 }

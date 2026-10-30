@@ -15,7 +15,7 @@ type Machine struct {
 	MAC    string
 	// Class is NetBox's talos_class, the LDevID's OU.
 	Class string
-	// Status is NetBox's lifecycle status, such as planned or staged. Empty
+	// Status is NetBox's lifecycle status, such as planned or active. Empty
 	// when only the inventory knows the machine.
 	Status string
 	// Pins are the EK hashes on record, by algorithm.
@@ -30,7 +30,6 @@ type Machine struct {
 // NetBox lifecycle statuses the service acts on.
 const (
 	statusPlanned         = "planned"
-	statusStaged          = "staged"
 	statusFailed          = "failed"
 	statusDecommissioning = "decommissioning"
 	statusOffline         = "offline"

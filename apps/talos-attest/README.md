@@ -43,11 +43,8 @@ ATTEST_APPROVERS=you@example.com \
 | `ATTEST_PEER_SYNC` | `10m` | How often this anchor adopts the newest pass its peers hold for the machines it knows, such as a renewal served elsewhere; `0` turns it off |
 | `ATTEST_INTAKE_PER_HOUR` | `10` | How many distinct EKs that activated a credential may create a first-sight device in NetBox per hour |
 | `ATTEST_PENDING_MAX` | `50` | How many first-intake claims wait for approval at once; the oldest give way |
-| `ATTEST_INTAKE_WINDOW_FILE` | `/var/lib/talos-attest/intake-open` | The owner's intake window: an RFC3339 time until which it is open, at most 24 hours after the file was written. Read on every start, so opening and closing need no restart. No file, or one that does not read as RFC3339, is closed. |
-| `ATTEST_INTAKE_REQUIRE_WINDOW` | `false` | Under `declared`, a stub passes only while the window is open |
-| `ATTEST_INTAKE_POLICY` | `declared` | How a box with no pins on record gets its identity, as [Intake policy](#intake-policy) says: `declared` or `open` |
 | `ATTEST_METRICS_FILE` | none | A node-exporter textfile the service rewrites on each change |
-| `ATTEST_NETBOX_URL` | none | Makes NetBox the system of record: the device with the serial names the machine, its `talos_class` and status; a serial NetBox never saw gets a device at `staged`; each verdict goes to its custom fields; `GET /verdict` reads it first |
+| `ATTEST_NETBOX_URL` | none | Makes NetBox the system of record: the device with the serial names the machine, its `talos_class` and status; a serial NetBox never saw gets a `planned` device once the owner approves it; each verdict goes to its custom fields; `GET /verdict` reads it first |
 | `ATTEST_NETBOX_TOKEN_FILE` | `/run/credentials/talos-attest.service/netbox-token` | The NetBox API token |
 | `ATTEST_NETBOX_ROLE` | `kubernetes-node` | The device role a first-sight device gets |
 | `FLEET_RENDER_URL` | none | fleet-controller's `/render`, such as `http://<SPORE_IP>:8446/render`. When set, an intake pass's confirm answers an install code once the controller has rendered the config under it; unset, no code is minted. |
@@ -117,47 +114,31 @@ never written over or quarantined. A verdict matches the LDevID an anchor
 serves by `ldevid_serial`, which `GET /verdict` carries, since a check moves
 `last_attested`.
 
-## Intake policy
+## Intake
 
-Under `declared`, the default, the owner's stub is the authorization: a
-`planned` device that NetBox holds with the claimed serial passes when every
-EK carries a certificate that chains to `roots/`, whether or not the window
-is open, as any planned device does. With `ATTEST_INTAKE_REQUIRE_WINDOW`,
-the data-centre setting beside stubs that name their `expected_port`, it
-passes only while the window is open. The pass binds the stub to the box.
+The owner's stub is the authorization: a `planned` device that NetBox holds
+with the claimed serial passes when every EK carries a certificate that
+chains to `roots/` (a ROCA-weak RSA EK is refused as always), as any planned
+device does. The pass binds the stub to the box.
 Before anything is issued the service looks the stub up again, and refuses
 when it has left `planned`, when a MAC on file is not the claim's, or
 when pins on file are not these EKs. It then puts the claimed MAC on the
 stub's first interface, and refuses unless the interface then holds that one
 MAC as its primary; the stub keeps its name. Every planned device needs a
 claimed MAC that reads as one. Across anchors the first box to bind a stub holds it.
-A serial NetBox does not know stays pending, window or not.
+A serial NetBox does not know stays pending until the owner approves it;
+its pass then creates a `planned` device, named by the claimed hostname or
+`intake-<serial slug>`, with the first-sight facts and the EK hashes as its
+pins. The pass leaves a `planned` device planned: fleet-controller sets
+`active` when the node fetches its config.
 
-Under `open`, the opt-in, within the window a start for a serial neither
-NetBox nor the inventory knows is treated as a `planned` device's: when every
-EK carries a certificate that chains to `roots/` (a ROCA-weak RSA EK is
-refused as always), it needs no approval. Activation, the quote, the policy
-and the LDevID run as usual, and the pass creates the device at `staged`,
-named `intake-<serial slug>` whatever hostname the claim names, with the
-first-sight facts and the EK hashes as its pins. Outside the window the
-claim is pending. A planned device passes by the planned rule and is not
-bound, but one with no pins is looked up again before anything is issued,
-as under `declared`.
-
-Under either policy, an EK without a pinned maker's certificate leaves the
-claim pending, a claimed MAC that a pass may write must read as six hex
-bytes, and the window never changes the outcome for a serial NetBox knows: a
-pin mismatch, a `failed` device and a known device with no pin decide as
-without it. When NetBox learns the serial between the start and the
-evidence, the start's rules decide for that device: it must be `planned` or
-`staged`, then its MAC and its pins decide, with no window. A pass never replaces a pin on file; only an
-empty `ek_hash` or `ek_hash_ecc` is written. Each intake pass, a declared
-stub's binding or the open window's, writes one `attest.intake` audit line.
-
-The window stays open at most 24 hours: a later close time in the file is
-clamped to 24 hours after the file was written, or after now when its mtime
-is in the future, and `POST /intake` to 24 hours from now, and each clamp is
-journaled.
+An EK without a pinned maker's certificate leaves the claim pending, and a
+claimed MAC that a pass may write must read as six hex bytes. When NetBox
+learns the serial between the start and the evidence, the start's rules
+decide for that device: it must be `planned`, then its MAC and its pins
+decide. A pass never replaces a pin on file; only an empty `ek_hash` or
+`ek_hash_ecc` is written. Each stub's binding writes one `attest.intake`
+audit line.
 
 ### Risks
 
@@ -167,8 +148,7 @@ maker can boot the lab-signed HookOS, rewrite the SMBIOS serial to the
 stub's and spoof its MAC on an open bootstrap port; the first such box to
 attest takes the stub's identity. The MAC is a tripwire, not
 authentication. Keep the gap between declaring a stub and plugging it in
-short; in a data centre set `ATTEST_INTAKE_REQUIRE_WINDOW` and give stubs an
-`expected_port`; and pin the EK hashes where a vendor supplies them, which
+short; give stubs an `expected_port`; and pin the EK hashes where a vendor supplies them, which
 makes the pins, not the stub, decide.
 
 ## Install code
@@ -212,7 +192,7 @@ pass whose signature holds, the service writes `attested_address`, `attested_swi
 (the chassis ID), `attested_switch_port` (the port ID) and
 `attested_network_at` (the pass's time) to each of those fields NetBox
 defines (`scripts/netbox-seed.sh`). A fact the pass lacks clears its field,
-and a renewal writes none. fleet-controller dials a `planned` or `staged`
+and a renewal writes none. fleet-controller dials a `planned`
 machine's AMT at the address, and cables the machine to the port; the
 facts are as true as the HookOS that booted, which the quote proves, and the
 switch that sent the frame. The parser in `lldp/` is a copy of the one in
@@ -224,8 +204,8 @@ module.
 Every decision is one JSON line on stdout, beside the structured log:
 `{event, site, node, serial, class, status, approver, reason, ts}`
 with `event` one of `attest.verdict`, `attest.issue`, `attest.renew`,
-`attest.check`, `attest.pcr0`, `attest.install` and `attest.intake`, an
-intake pass or the window opened or closed through the admin API.
+`attest.check`, `attest.pcr0`, `attest.install` and `attest.intake`, a
+declared stub's binding.
 
 ## Renewal
 
@@ -259,17 +239,6 @@ Every route requires `Tailscale-User-Login` in `ATTEST_APPROVERS`.
 | --- | --- |
 | `GET /machines` | Every record, the claims that wait for approval with their EK hashes, and the inventory's machines |
 | `POST /approve` | `{"serial": ..., "ek_hashes": [...]}` approves the named EK hashes of a pending first intake. The owner names them as `GET /machines` shows them, because a pending record is a claim that another machine may have replaced since; a hash that is not pending is 400. The next pass writes them to NetBox's `ek_hash` and `ek_hash_ecc`; without NetBox, commit them to `machines.yaml`. |
-| `GET /intake` | `{open, open_until, policy, require_window}`: the intake window as this anchor reads it |
-| `POST /intake` | `{"open_until": "<RFC3339>"}` opens the window until then, at most 24 hours from now; an empty or past time closes it. Answers as `GET /intake`. |
-
-`mise run fleet:intake open <duration>|close|status` (`scripts/fleet-intake.sh`)
-writes or removes the window's file on every anchor over ssh as the owner,
-refuses a duration over 24 hours, and reads `GET /intake` for `status`.
-`talos_attest_intake_open{policy}` is 1 while the window is open and the
-policy consults it: always under `open`, and under `declared` only with
-`ATTEST_INTAKE_REQUIRE_WINDOW`. `talos_attest_intake_open_until_seconds{policy}`
-is the close time, 0 with no file. Both refresh within 30 seconds of a change
-to the file or the window's close.
 
 ## Test
 

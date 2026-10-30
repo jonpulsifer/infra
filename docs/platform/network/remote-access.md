@@ -13,7 +13,6 @@ Remote access is a Tailscale tailnet that the owner uses to reach both sites' pr
 | `policy.hujson` | Holds the grants, and approves the Connectors' routes | Tailscale |
 | `devices.tf` | Authorizes each device, sets its key expiry and assigns its tags | Tailscale |
 | CI identity | Lets the `nixos-deploy` workflow join as `tag:ci` with a GitHub OIDC token | GitHub Actions |
-| metal-dev identity | Lets the [metal dev env](../metal-dev.md) VM join as `tag:gcp` with its service account's Google identity token | Compute Engine |
 | forge OAuth client | Enrolls forge as `tag:lab-host` | forge |
 
 The Kubernetes nodes run no Tailscale client (`nix/system/tailscale-disable.nix`), so tailnet traffic reaches each site through its Connector. folly's LAN networks are Management and the Anchor network, and offsite's is Default.
@@ -36,13 +35,12 @@ The Connectors carry `tag:k8s`, `tag:k8s-<site>`, and `tag:folly` or `tag:offsit
 ## Rules
 
 - The CI identity accepts only `nixos-deploy.yaml` runs on `main`.
-- The metal-dev identity accepts only tokens whose subject is the `metal-dev` service account's unique ID and whose `email` claim is its address.
 - The tailnet requires device approval. A new device waits until Atlantis applies its entry in `devices.tf`.
 - `policy.hujson` holds literal subnets. After a topology change, edit its `autoApprovers`, `ipsets` and `tests`. Otherwise new routes wait for approval, the grants deny the new range, and the policy apply fails.
 
 ## Where it lives
 
-- `terraform/network/tailscale/`: the tailnet settings, policy and device map, the CI identity in `github_actions.tf`, the metal-dev identity in `metal_dev.tf` and the forge client in `oauth_clients.tf`
+- `terraform/network/tailscale/`: the tailnet settings, policy and device map, the CI identity in `github_actions.tf` and the forge client in `oauth_clients.tf`
 - `terraform/network/tailscale/fleet.tf.json`: the tailnet name
 - `clusters/base/networking/tailscale/`: the `tailscale-operator` HelmRelease
 - `clusters/<site>/networking/tailscale-connectors/`: each site's Connector

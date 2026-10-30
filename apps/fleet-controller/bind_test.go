@@ -42,7 +42,7 @@ func intakeDevice(model string, cf map[string]any) map[string]any {
 		cf = map[string]any{}
 	}
 	cf["attest_verdict"] = "attested"
-	return nbDevice(nodeID, "intake-mxl0172q7x", "staged", boxSerial, model, cf)
+	return nbDevice(nodeID, "intake-mxl0172q7x", "planned", boxSerial, model, cf)
 }
 
 func stubDevice(id int, name, serial, class string, port any) map[string]any {
@@ -505,7 +505,7 @@ func TestBindSerialStubWinsOverAnOlderClassStub(t *testing.T) {
 func TestBindStubBornDeviceKeepsItsName(t *testing.T) {
 	// talos-attest took over the stub swell under the declared policy and
 	// wrote the MAC it proved: the device keeps the stub's name.
-	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested", "expected_port": 5})
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested", "expected_port": 5})
 	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
 	bt.nb.ips = []map[string]any{reservedIP(500, "swell", "10.3.0.13/26")}
@@ -522,7 +522,7 @@ func TestBindStubBornDeviceKeepsItsName(t *testing.T) {
 // serial whose fake agent reported SUCCESS binds nothing: the device waits
 // for talos-attest to write the MAC its pass proved.
 func TestBindNeverWritesAClaimedMAC(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested"})
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested"})
 	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, nil)
 	defer done()
 	for p, o := range intakeObjects(prepMAC, "STATE_RUNNING") {
@@ -569,7 +569,7 @@ func TestFailedIntakeExpiresDespiteASerialStub(t *testing.T) {
 }
 
 func TestBindLeavesAStubAnotherDeviceIsTakingOver(t *testing.T) {
-	other := nbDevice(50, "intake-other", "staged", "OTHER1", g5, map[string]any{"talos_class": "worker-g5"})
+	other := nbDevice(50, "intake-other", "planned", "OTHER1", g5, map[string]any{"talos_class": "worker-g5", "attest_verdict": "attested"})
 	other["description"] = bindMarker + "swell"
 	bt, done := newBindTest(t, rackMAC,
 		[]map[string]any{intakeDevice(g5, nil), other, stubDevice(20, "swell", "", "worker-g5", nil)},
@@ -603,6 +603,8 @@ func TestBindIsIdempotent(t *testing.T) {
 	}
 }
 
+// An intake ends unbound when its device has not passed attestation: the
+// device's own objects follow.
 func TestBindWaitsForTheIntakeAndTheVerdict(t *testing.T) {
 	bt, done := newBindTest(t, rackMAC, []map[string]any{intakeDevice(g5, map[string]any{})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
@@ -614,8 +616,8 @@ func TestBindWaitsForTheIntakeAndTheVerdict(t *testing.T) {
 	bt.kube.setState("intake-38-22-e2-aa-bb-05-1", "STATE_SUCCESS")
 	bt.node()["custom_fields"].(map[string]any)["attest_verdict"] = "pending-approval"
 	bt.reconcile(t)
-	if len(bt.nb.patches) != 0 || !bt.journal("binds once it is staged and attested") {
-		t.Errorf("patches %v journals %v", bt.nb.patches, bt.nb.journals)
+	if len(bt.nb.patches) != 0 || !bt.intakeGone(rackMAC) {
+		t.Errorf("patches %v objects %v", bt.nb.patches, bt.kube.objects)
 	}
 }
 
@@ -680,7 +682,7 @@ func TestFillPortJournalsANodeOffItsExpectedPort(t *testing.T) {
 }
 
 func TestFillPortIgnoresThePrepStation(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, nil)
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"attest_verdict": "attested"})
 	bt, done := newBindTest(t, prepMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
 	defer done()
 	bt.attest(prepMAC, testNow)

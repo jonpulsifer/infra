@@ -25,14 +25,14 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows. `--port` gives the node its cable at the prep station; without it, the cable comes from an intake pass on a rack port.
 
-2. If talos-attest admits serials no stub names, `--serial` is optional: a class-only stub names the next machine. Open its window if needed: `mise run fleet:intake open 2h`.
+2. `--serial` is optional: a class-only stub names the next machine whose first intake you approve in step 4.
 3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9. On this port the installed Talos boots and fetches its config, then stalls with DNS i/o timeouts, because its resolvers are on the Anchor network, which the bootstrap VLAN cannot reach. The move to the rack port is the fix, and the node joins after it.
 
    Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
 
 4. [Watch the run](#watch-the-run), and [approve the first intake](#approve-a-first-intake) if it waits.
 
-   Result: the stub, or a new `intake-<serial>` device, is `staged` and `attested`.
+   Result: the stub, or a new `intake-<serial>` device, is `planned` and `attested`.
 
 5. Watch the device's NetBox journal.
 
@@ -48,7 +48,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 10. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 11. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
 12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
-13. If the merged export shows the node `staged`, export again in a pull request, and apply `clusters/folly/talos`.
+13. If the merged export shows the node `planned`, export again in a pull request once NetBox holds it `active`, and apply `clusters/folly/talos`.
 
 ## Declare a machine by hand
 

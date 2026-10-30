@@ -168,16 +168,6 @@ spec:
           annotations:
             message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
             description: "Neither machines.yaml nor NetBox pins {{ $labels.machine }}'s EK hash. Approve it on {{ $labels.instance }}'s admin API, as docs/runbooks/provision-a-node.md says."
-        # The intake window is the owner's statement that boxes are being racked; a batch takes an
-        # hour or two, so a window open for six hours was forgotten.
-        - alert: TalosAttestIntakeOpen
-          expr: talos_attest_intake_open == 1
-          for: 6h
-          labels:
-            severity: warning
-          annotations:
-            message: "The intake window on {{ $labels.instance }} has been open for 6 hours"
-            description: "talos-attest on {{ $labels.instance }} admits boxes under the {{ $labels.policy }} intake policy. Close the window with mise run fleet:intake close when racking is done."
         # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
         # this fires only after a week of failed renewals. One anchor serves a renewal
         # and the others keep the old record, so the newest expiry counts.

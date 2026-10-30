@@ -136,7 +136,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		// ends the intake.
 		// Only talos-attest writes a MAC it proved; an intake's claimed MAC
 		// never reaches NetBox, so an attested device without one waits.
-		if d.MAC == "" && d.Status == "staged" && d.Verdict == "attested" {
+		if d.MAC == "" && d.Installing() {
 			why := "fleet-controller: the device is attested and has no MAC in NetBox; it binds and provisions once talos-attest writes the MAC it proved"
 			if err := r.journalOnce(ctx, fmt.Sprintf("no-mac/%d", d.ID), d, "warning", why); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
@@ -144,14 +144,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		}
 		hw, ok := in.byMAC[d.MAC]
 		ok = ok && d.MAC != ""
-		if ok && d.Status == "staged" {
+		if ok && d.Installing() {
 			if err := r.bind(ctx, d, hw, in, pass); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 			}
 			continue
 		}
-		// Any other status, a planned device declared by hand included, is no
-		// intake to bind: an intake that has stopped running is stale, and goes
+		// Any other device, an unattested planned one declared by hand
+		// included, is no intake to bind: an intake that has stopped running is stale, and goes
 		// before the device's own objects.
 		if ok {
 			if wf := in.newest[hw.Name()]; wf != nil && !Finished(wf.State()) {
@@ -280,6 +280,13 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 	}
 	if _, ok := Actions[d.DesiredAction]; !ok || d.DesiredAction == ActionRetire {
 		return nil
+	}
+	// The control plane the Talos root bootstraps etcd on is never wiped:
+	// a reinstall destroys etcd, and planned would take the cluster's only
+	// control plane out of the root.
+	if Actions[d.DesiredAction].Wipe && r.Config.Bootstrap != "" && d.Address == r.Config.Bootstrap {
+		why := fmt.Sprintf("fleet-controller: %s refused: %s is the control plane the Talos root bootstraps etcd on, and a wipe destroys etcd; desired_action stays %s", d.DesiredAction, d.Address, d.DesiredAction)
+		return r.journalOnce(ctx, "bootstrap/"+d.Name+"/"+d.DesiredAction, d, "warning", why)
 	}
 	if !hardware {
 		why := "fleet-controller: " + d.DesiredAction + " waits: the device needs a primary MAC on an interface and install_disk"

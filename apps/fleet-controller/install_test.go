@@ -121,7 +121,7 @@ func (it *installTest) appendLog(t *testing.T, lines ...string) {
 }
 
 func TestRenderRejectsABadSignature(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), "wrong"); code != http.StatusUnauthorized {
 		t.Fatalf("a bad signature: %d", code)
 	}
@@ -135,7 +135,7 @@ func TestRenderRejectsABadSignature(t *testing.T) {
 }
 
 func TestRenderRejectsAMalformedRequest(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	for _, mut := range []func(*RenderRequest){
 		func(r *RenderRequest) { r.UUID = strings.ToUpper(testUUID) },
 		func(r *RenderRequest) { r.Code = "../../etc/passwd" },
@@ -158,24 +158,23 @@ func TestRenderGates(t *testing.T) {
 		kube   func(*fakeKube)
 		want   int
 	}{
-		{name: "unknown serial", status: "staged", req: func(r *RenderRequest) { r.Serial = "NOPE" }, want: 409},
+		{name: "unknown serial", status: "planned", req: func(r *RenderRequest) { r.Serial = "NOPE" }, want: 409},
 		{name: "active device", status: "active", want: 409},
 		{name: "failed device", status: "failed", want: 409},
-		{name: "attest run", status: "staged", cf: map[string]any{"last_workflow": "attest-riptide-1700000000"}, want: 409},
-		{name: "no run", status: "staged", cf: map[string]any{"last_workflow": nil}, want: 409},
-		{name: "another node's run", status: "staged", cf: map[string]any{"last_workflow": "provision-swell-1700000000"}, want: 409},
-		{name: "run finished", status: "staged", kube: func(k *fakeKube) { k.setState(provWF, "STATE_SUCCESS") }, want: 409},
-		{name: "run gone", status: "staged", kube: func(k *fakeKube) { delete(k.objects, wfBase+provWF) }, want: 409},
-		{name: "control plane", status: "staged", cf: map[string]any{"talos_class": "controlplane"}, req: func(r *RenderRequest) { r.Class = "controlplane" }, want: 409},
-		{name: "node mismatch", status: "staged", req: func(r *RenderRequest) { r.Node = "swell" }, want: 409},
-		{name: "class mismatch", status: "staged", req: func(r *RenderRequest) { r.Class = "worker-g2" }, want: 409},
-		{name: "class without inputs", status: "staged", cf: map[string]any{"talos_class": "worker-g9"}, req: func(r *RenderRequest) { r.Class = "worker-g9" }, want: 503},
-		{name: "another SMBIOS UUID", status: "staged", req: func(r *RenderRequest) { r.UUID = "00000000-0000-0000-0000-000000000000" }, want: 409},
-		{name: "a run that installs nothing", status: "staged", kube: func(k *fakeKube) {
+		{name: "attest run", status: "planned", cf: map[string]any{"last_workflow": "attest-riptide-1700000000"}, want: 409},
+		{name: "no run", status: "planned", cf: map[string]any{"last_workflow": nil}, want: 409},
+		{name: "another node's run", status: "planned", cf: map[string]any{"last_workflow": "provision-swell-1700000000"}, want: 409},
+		{name: "run finished", status: "planned", kube: func(k *fakeKube) { k.setState(provWF, "STATE_SUCCESS") }, want: 409},
+		{name: "run gone", status: "planned", kube: func(k *fakeKube) { delete(k.objects, wfBase+provWF) }, want: 409},
+		{name: "control plane", status: "planned", cf: map[string]any{"talos_class": "controlplane"}, req: func(r *RenderRequest) { r.Class = "controlplane" }, want: 409},
+		{name: "node mismatch", status: "planned", req: func(r *RenderRequest) { r.Node = "swell" }, want: 409},
+		{name: "class mismatch", status: "planned", req: func(r *RenderRequest) { r.Class = "worker-g2" }, want: 409},
+		{name: "class without inputs", status: "planned", cf: map[string]any{"talos_class": "worker-g9"}, req: func(r *RenderRequest) { r.Class = "worker-g9" }, want: 503},
+		{name: "another SMBIOS UUID", status: "planned", req: func(r *RenderRequest) { r.UUID = "00000000-0000-0000-0000-000000000000" }, want: 409},
+		{name: "a run that installs nothing", status: "planned", kube: func(k *fakeKube) {
 			k.objects[wfBase+provWF]["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "false"}}
 		}, want: 409},
-		{name: "a run from an older controller", status: "staged", kube: func(k *fakeKube) { delete(k.objects[wfBase+provWF], "spec") }, want: 409},
-		{name: "staged", status: "staged", want: 201},
+		{name: "a run from an older controller", status: "planned", kube: func(k *fakeKube) { delete(k.objects[wfBase+provWF], "spec") }, want: 409},
 		{name: "planned", status: "planned", want: 201},
 	}
 	for _, c := range cases {
@@ -212,7 +211,7 @@ func TestRenderGates(t *testing.T) {
 }
 
 func TestRenderWritesTheConfigForNginx(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, reason := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatalf("%d %s", code, reason)
 	}
@@ -285,7 +284,7 @@ func (it *installTest) size(t *testing.T, code string) int64 {
 }
 
 func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -317,7 +316,7 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 	}
 
 	// A replay of the render call cannot bring the file back.
-	it.nb.set("status", map[string]any{"value": "staged"})
+	it.nb.set("status", map[string]any{"value": "planned"})
 	if code, reason := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
 		t.Fatalf("a replayed render: %d %s", code, reason)
 	}
@@ -342,7 +341,7 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 }
 
 func TestOnlyAWholeGetBurns(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -370,7 +369,7 @@ func TestOnlyAWholeGetBurns(t *testing.T) {
 }
 
 func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -404,7 +403,7 @@ func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
 // A disk error on the file's deletion leaves the served node to be
 // released: the record and the burned hash are written first.
 func TestServedNodeIsReleasedWhenItsFileWillNotGo(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -431,7 +430,7 @@ func TestServedNodeIsReleasedWhenItsFileWillNotGo(t *testing.T) {
 	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
 		t.Fatalf("the release patch: %v", p)
 	}
-	it.nb.set("status", map[string]any{"value": "staged"})
+	it.nb.set("status", map[string]any{"value": "planned"})
 	if code, _ := it.post(t, goodRequest(), testSecret); code != http.StatusConflict {
 		t.Fatal("a served code rendered again")
 	}
@@ -440,7 +439,7 @@ func TestServedNodeIsReleasedWhenItsFileWillNotGo(t *testing.T) {
 // A Drop that fails after NetBox took the release repeats neither the
 // update nor the success journal on later sweeps.
 func TestReleaseIsNotRepeatedWhenTheDropFails(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -479,7 +478,7 @@ func TestReleaseIsNotRepeatedWhenTheDropFails(t *testing.T) {
 }
 
 func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	ctx := context.Background()
 	other := "00000000-0000-0000-0000-000000000000"
 	wrong := strings.Repeat("W", 43)
@@ -618,7 +617,7 @@ func TestTailDrainsARotationWhileStopped(t *testing.T) {
 }
 
 func TestUnreadConfigExpires(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	// A worker's config keeps the TTL beside the shorter control-plane one.
 	it.in.ControlPlaneTTL = 30 * time.Minute
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
@@ -660,7 +659,7 @@ func TestUnreadConfigExpires(t *testing.T) {
 }
 
 func TestReleaseLeavesAStatusTheOwnerChanged(t *testing.T) {
-	it := newInstallTest(t, "staged", nil)
+	it := newInstallTest(t, "planned", nil)
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -681,7 +680,7 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 	hm := func(d Device, action string) map[string]any {
 		return cfg.Workflow(d, action, testNow)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
 	}
-	g5 := Device{Name: "riptide", Class: "worker-g5", TPM: "2.0", Status: "staged", BMCType: "none"}
+	g5 := Device{Name: "riptide", Class: "worker-g5", TPM: "2.0", Status: "planned", BMCType: "none"}
 	if m := hm(g5, "provision"); m["install"] != "true" || m["installer_image"] != "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4" {
 		t.Fatalf("a worker provision: %v", m)
 	}
@@ -724,7 +723,7 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 }
 
 func controlPlaneTest(t *testing.T) (*installTest, RenderRequest) {
-	it := newInstallTest(t, "staged", map[string]any{"talos_class": "controlplane"})
+	it := newInstallTest(t, "planned", map[string]any{"talos_class": "controlplane"})
 	req := goodRequest()
 	req.Class = "controlplane"
 	return it, req
@@ -840,7 +839,7 @@ func TestRenderRefusesATPMModelWithoutTPMVersion(t *testing.T) {
 		{name: "class without a TPM model", tpm: nil, models: map[string]Model{"x": {Class: "worker-g5"}}, want: 201},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			it := newInstallTest(t, "staged", map[string]any{"tpm_version": c.tpm})
+			it := newInstallTest(t, "planned", map[string]any{"tpm_version": c.tpm})
 			it.in.Models = c.models
 			code, reason := it.post(t, goodRequest(), testSecret)
 			if code != c.want {
