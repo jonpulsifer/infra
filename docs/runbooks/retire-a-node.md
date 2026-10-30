@@ -51,7 +51,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflows -w
    ```
 
-   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. The node powers off.
+   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. The node powers off. `SUCCESS` means the power-off started, so step 3 is how you know it happened.
 
 3. Make sure that NetBox shows the device as `offline`.
 

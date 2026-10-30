@@ -77,6 +77,8 @@ spec:
           - name: wipe-disk
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 600
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
             command:
               - /bin/sh
               - -c
@@ -86,6 +88,13 @@ spec:
                 if [ "$WIPE" != true ]; then
                   log "nothing wiped this run"
                   exit 0
+                fi
+                # An installer that outlived its action, after a timeout the action could not clean up,
+                # would keep writing the disk this action wipes. Remove it, and wipe nothing if it stays.
+                docker rm -f provision-install >/dev/null 2>&1 || true
+                if [ -n "$(docker ps -aq --filter name=^provision-install$ 2>/dev/null)" ]; then
+                  log "an installer from an earlier run is still there; nothing wiped"
+                  exit 1
                 fi
                 [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
                 log "wiping every partition of $DISK"
@@ -124,12 +133,19 @@ spec:
                   exit 1
                 fi
                 log "installing $INSTALLER_IMAGE to $DISK"
-                if docker run --rm --privileged --network none \
+                # The installer is a sibling container on HookOS's Docker, so stopping this action
+                # stops only the docker client. The shell waits in the background and removes the
+                # installer when tink-agent's SIGTERM ends the action at its timeout.
+                trap 'docker rm -f provision-install >/dev/null 2>&1; log "stopped; the installer is removed"; exit 143' TERM INT
+                docker run --rm --name provision-install --privileged --network none \
                   --volume /dev:/dev \
                   --volume /tmp/fleet:/tmp/fleet:ro \
                   --mount type=volume,dst=/sys/firmware/efi/efivars,volume-driver=local,volume-opt=type=efivarfs,volume-opt=device=efivarfs,volume-nocopy=true \
                   --env DISK="$DISK" --env PAYLOAD="$PAYLOAD_FILE" \
-                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1; then
+                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1 &
+                rc=0
+                wait $! || rc=$?
+                if [ "$rc" = 0 ]; then
                   tail -n 5 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
                 else
                   tail -n 25 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
@@ -196,7 +212,8 @@ spec:
                 key=b; what="rebooting"
                 if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
                 # A detached container reboots or powers off the node after this action reports success.
-                docker run -d --privileged --name provision-reboot \
+                docker rm -f provision-reboot >/dev/null 2>&1 || true
+                docker run -d --rm --privileged --name provision-reboot \
                   ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f \
                   sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
                 for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done
