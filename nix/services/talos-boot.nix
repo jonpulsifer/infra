@@ -1,14 +1,9 @@
-# Talos boot server for folly's bootstrap VLAN, on every anchor. A timer mirrors the SecureBoot ISO,
+# Talos boot server for folly's bootstrap VLAN, on spore. A timer mirrors the SecureBoot ISO,
 # netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed image
 # against its committed signing cert, and keeps the previous release as prev. dnsmasq serves the
-# iPXE over TFTP and nginx serves the rest, at the anchor's own bootstrap address and at the boot
-# VIP, which ./anchor-vips.nix moves to an anchor that passes the checks below. Smee
-# (./tinkerbell.nix, spore only) answers PXE on the VLAN.
-#
-# nginx also terminates TLS for the enrollment name at the boot VIP. On that server HookOS's agent
-# posts a machine's facts to /fleet/intake, talos-attest runs its device flow under /attest/
-# (./talos-attest.nix), and an installed node fetches its first config from /talos/config. Intake
-# and the config go to fleet-controller on spore (../lib/talos-config.nix, ./fleet-controller.nix).
+# iPXE over TFTP and nginx serves the rest at spore's bootstrap address, which the Kubernetes
+# network's DHCP names (terraform/network/unifi/folly/k8s.tf). Smee (./tinkerbell.nix) answers PXE
+# on the VLAN, and fleetd (./fleetd.nix) serves the enrollment name's HTTPS at the same address.
 {
   config,
   lib,
@@ -19,17 +14,11 @@
 let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
-  talosConfig = import ../lib/talos-config.nix;
-  configServer = "http://${lab.hosts.${talosConfig.server}}:${toString talosConfig.port}";
-  intakeServer = "http://${lab.hosts.${talosConfig.server}}:${toString talosConfig.controllerPort}";
-  # The talos.config URL in the installer's UKI names this host (.github/workflows/talos-images.yml).
+  # fleetd's boot listener answers this name (./fleetd.nix).
   host = "enroll.${fleet.dnsZone}";
   iface = "bootstrap";
-  peers = map (anchor: lab.bootstrap.hosts.${anchor}) (
-    lib.remove name (lib.attrNames lab.bootstrap.hosts)
-  );
   site = config.homelab.site;
-  address = lab.bootstrap.hosts.${name};
+  address = lab.bootstrap.hosts.spore;
   stateDir = "/var/lib/talos-boot";
   siteDir = "${stateDir}/${site}";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
@@ -86,8 +75,7 @@ let
   };
 
   # The bootstrap VLAN holds unenrolled machines, so its interface admits only what they use: the
-  # ports declared for it (here and in ./tinkerbell.nix), the DNS and NTP that its DHCP names, ping,
-  # and the boot VIP's VRRP from the other anchors. The global allowed ports apply on every
+  # ports declared for it (here and in ./tinkerbell.nix), DNS, NTP and ping. The global allowed ports apply on every
   # interface, so the chain runs before them, after nixos-fw's trusted-interface and
   # established-connection accepts. NixOS deletes and recreates nixos-fw-accept and
   # nixos-fw-log-refuse on every reload, which fails while another chain refers to them, so this
@@ -110,38 +98,28 @@ let
         123
       ]
     ) allowed.allowedUDPPortRanges
-    ++ [ "-p icmp --icmp-type echo-request" ]
-    ++ map (peer: "-p 112 -s ${peer}") peers;
+    ++ [ "-p icmp --icmp-type echo-request" ];
 
-  # keepalived's track script for the boot VIP, and the probe below: dnsmasq runs, and nginx serves
-  # HookOS at this anchor's own bootstrap address.
+  # The probe below: dnsmasq runs, and nginx serves HookOS at spore's bootstrap address.
   serves = pkgs.writeShellScript "talos-boot-serves" ''
     ${pkgs.systemd}/bin/systemctl is-active --quiet dnsmasq.service
     ${pkgs.curl}/bin/curl --fail --silent --head --output /dev/null --max-time 2 http://${address}/talos/${site}/${hookos}
   '';
-  # The boot VIP's second track script, and the probe below: nginx serves the enrollment name with
-  # a certificate that Talos's bundled roots trust.
+  # The second probe: fleetd serves the enrollment name with a certificate that Talos's bundled
+  # roots trust.
   servesHttps = pkgs.writeShellScript "talos-boot-serves-https" ''
     ${pkgs.curl}/bin/curl --fail --silent --output /dev/null --max-time 2 \
       --cacert ${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt \
-      --resolve ${host}:443:127.0.0.1 https://${host}/healthz
+      --resolve ${host}:443:${address} https://${host}/healthz
   '';
 in
 {
   assertions = [
     {
       assertion = lab.bootstrap.hosts ? ${name};
-      message = "talos-boot.nix may only be imported by an anchor with a bootstrap address: ${lib.concatStringsSep ", " (lib.attrNames lab.bootstrap.hosts)}";
+      message = "talos-boot.nix may only be imported by a host with a bootstrap address: ${lib.concatStringsSep ", " (lib.attrNames lab.bootstrap.hosts)}";
     }
   ];
-
-  # cert-manager's DNS-01 token (clusters/folly/networking/cert-manager/cloudflare-secret.sops.yaml).
-  sops.secrets."acme/cloudflare-token" = { };
-
-  services.prometheus.exporters.node = {
-    enabledCollectors = [ "textfile" ];
-    extraFlags = [ "--collector.textfile.directory=${metricsDir}" ];
-  };
 
   networking.vlans.${iface} = {
     id = lab.bootstrap.vlan;
@@ -159,9 +137,8 @@ in
 
   # A node on the Kubernetes network reaches the boot services through the gateway, which routes it
   # onto the VLAN (the UniFi policies kubernetes_to_boot). The main table sends its replies out
-  # end0, and the firewall's strict reverse-path filter drops the request, so traffic from a
-  # bootstrap address, the boot VIP included, takes a table whose default is the gateway on the
-  # VLAN. The filter's reverse lookup takes the request's destination as its source, matches the
+  # end0, and the firewall's strict reverse-path filter drops the request, so traffic from the
+  # bootstrap address takes a table whose default is the gateway on the VLAN. The filter's reverse lookup takes the request's destination as its source, matches the
   # rule, and finds the route back out the interface the request arrived on.
   systemd.network.networks."40-${iface}" = {
     routes = [
@@ -185,9 +162,7 @@ in
     ];
   };
 
-  # nginx listens on the boot VIP whether or not this anchor holds it.
-  boot.kernel.sysctl."net.ipv4.ip_nonlocal_bind" = 1;
-
+  # 80 for nginx's boot files, 443 for fleetd's enrollment name.
   networking.firewall.interfaces.${iface} = {
     allowedTCPPorts = [
       80
@@ -231,90 +206,15 @@ in
     };
   };
 
-  # Talos trusts only its bundled roots before it has a config, so the name needs a public
-  # certificate. The address is private, so the challenge is DNS-01.
-  security.acme = {
-    acceptTerms = true;
-    certs.${host} = {
-      dnsProvider = "cloudflare";
-      dnsResolver = "1.1.1.1:53";
-      credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = config.sops.secrets."acme/cloudflare-token".path;
-      group = config.services.nginx.group;
-    };
-  };
-
   services.nginx = {
     enable = true;
-    virtualHosts.${host} = {
-      onlySSL = true;
-      useACMEHost = host;
-      # The VIP for the bootstrap VLAN, loopback for the probe. nginx binds the VIP on every anchor.
-      listen =
-        map
-          (addr: {
-            inherit addr;
-            port = 443;
-            ssl = true;
-          })
-          [
-            lab.bootstrap.vip
-            "127.0.0.1"
-          ];
-      locations = {
-        "/".return = "404";
-        # The probe's answer. return runs in the rewrite phase, before allow and deny would, so the
-        # address check is a rewrite too.
-        "= /healthz".extraConfig = ''
-          access_log off;
-          if ($remote_addr != 127.0.0.1) {
-            return 404;
-          }
-          return 200;
-        '';
-        # HookOS's agent (images/tink-agent-autoid) posts a machine's facts before it waits for
-        # work; fleet-controller answers on its Anchor address, which every anchor reaches. The
-        # machine's address, its AMT's while it is on the bootstrap VLAN, goes in X-Real-IP, which
-        # the controller trusts from the Anchor network only.
-        "= ${talosConfig.intakePath}" = {
-          proxyPass = "${intakeServer}/intake";
-          extraConfig = ''
-            limit_except POST {
-              deny all;
-            }
-            client_max_body_size 16k;
-            access_log off;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_connect_timeout 5s;
-          '';
-        };
-      }
-      // lib.optionalAttrs (name != talosConfig.server) {
-        # The installed node's first config lives on one anchor, which serves this location itself
-        # (./fleet-controller.nix); the others pass it to that anchor's Anchor address.
-        "= /talos/config" = {
-          proxyPass = "${configServer}/talos/config$is_args$args";
-          # The query carries the install code, which stays out of this anchor's access log.
-          extraConfig = ''
-            if ($request_method != GET) {
-              return 405;
-            }
-            access_log off;
-            proxy_connect_timeout 5s;
-          '';
-        };
-      };
-    };
     virtualHosts.talos-boot = {
-      listen =
-        map
-          (addr: {
-            inherit addr;
-            port = 80;
-          })
-          [
-            address
-            lab.bootstrap.vip
-          ];
+      listen = [
+        {
+          addr = address;
+          port = 80;
+        }
+      ];
       locations = {
         "/".return = "404";
         "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
@@ -324,46 +224,19 @@ in
   };
 
   systemd.tmpfiles.rules = [
-    "d ${metricsDir} 0755 root root -"
     "d ${stateDir} 0755 root root -"
     "d ${siteDir} 0755 root root -"
     "d /var/lib/tftpboot 0755 root root -"
     "d /var/lib/tftpboot/talos 0755 root root -"
     "d ${tftpDir} 0755 root root -"
     "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"
-    # No service writes this file, and node-exporter would export its last series forever.
-    "r ${metricsDir}/talos-enroll-check.prom"
   ];
 
-  services.keepalived.vrrpScripts.talos-boot = {
-    script = toString serves;
-    interval = 5;
-    fall = 2;
-    rise = 2;
-    weight = -120;
-    user = "nobody";
-  };
-  # The boot VIP moves off an anchor that does not serve the enrollment name, as it does off one
-  # that does not serve the boot files.
-  services.keepalived.vrrpScripts.talos-boot-https = {
-    script = toString servesHttps;
-    interval = 5;
-    fall = 2;
-    rise = 2;
-    weight = -120;
-    user = "nobody";
-  };
-  services.keepalived.vrrpInstances.boot.trackScripts = [ "talos-boot-https" ];
-
-  # Whether this anchor holds the boot VIP and passes each check. The cluster cannot reach the
-  # bootstrap VLAN, so node-exporter carries them.
+  # Whether spore passes each check. The cluster cannot reach the bootstrap VLAN, so node-exporter
+  # carries them.
   systemd.services.talos-boot-check = {
-    description = "Export whether this anchor holds the boot VIP and serves the Talos boot files";
-    path = with pkgs; [
-      coreutils
-      gnugrep
-      iproute2
-    ];
+    description = "Export whether spore serves the Talos boot files and the enrollment name";
+    path = with pkgs; [ coreutils ];
     serviceConfig = {
       Type = "oneshot";
       UMask = "0022";
@@ -376,10 +249,6 @@ in
     };
     script = ''
       set -u
-      held=0
-      if ip -4 -o addr show dev ${iface} | grep -qF ' ${lab.bootstrap.vip}/'; then
-        held=1
-      fi
       serving=0
       if ${serves}; then
         serving=1
@@ -391,13 +260,10 @@ in
       metrics=$(mktemp ${metricsDir}/.talos-boot-check.XXXXXX)
       trap 'rm -f "$metrics"' EXIT
       {
-        printf '# HELP talos_boot_vip_held Whether this anchor holds the boot VIP.\n'
-        printf '# TYPE talos_boot_vip_held gauge\n'
-        printf 'talos_boot_vip_held{site="${site}"} %s\n' "$held"
-        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves HookOS at this anchor.\n'
+        printf '# HELP talos_boot_serving Whether dnsmasq runs and nginx serves HookOS at spore.\n'
         printf '# TYPE talos_boot_serving gauge\n'
         printf 'talos_boot_serving{site="${site}"} %s\n' "$serving"
-        printf '# HELP talos_boot_https_serving Whether nginx serves the enrollment name at this anchor with a certificate Talos trusts.\n'
+        printf '# HELP talos_boot_https_serving Whether fleetd serves the enrollment name at spore with a certificate Talos trusts.\n'
         printf '# TYPE talos_boot_https_serving gauge\n'
         printf 'talos_boot_https_serving{site="${site}"} %s\n' "$https"
       } > "$metrics"
@@ -409,7 +275,7 @@ in
   };
 
   systemd.timers.talos-boot-check = {
-    description = "Periodically export the boot VIP and Talos boot file state";
+    description = "Periodically export the Talos boot file and enrollment name state";
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnBootSec = "2m";

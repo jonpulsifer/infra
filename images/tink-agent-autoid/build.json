@@ -1,0 +1,14 @@
+[
+  {
+    "_comment": "The context is the repo root because the image builds apps/fleetd's tink-attest client.",
+    "image": "tink-agent-autoid",
+    "context": ".",
+    "file": "images/tink-agent-autoid/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/tink-agent-autoid",
+      "apps/fleetd",
+      "packages/pkcs11signer"
+    ]
+  }
+]

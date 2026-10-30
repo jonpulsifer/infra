@@ -136,13 +136,13 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
-  # Every anchor serves TFTP on the bootstrap VLAN. A DHCP answer from any of them would race UniFi's
-  # and Smee's offers, and a boot VIP on another interface would never reach a booting machine. The
-  # VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage, the exporters and the
-  # Tinkerbell API, which the global allowed ports open on every other interface.
-  anchor-boot =
+  # spore alone serves TFTP on the bootstrap VLAN. A DHCP answer from it would race UniFi's and
+  # Smee's offers. The VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage,
+  # the exporters and the Tinkerbell API, which the global allowed ports open on every other
+  # interface.
+  boot-plane =
     let
-      anchors = lib.filterAttrs (_: c: c.services.keepalived.vrrpInstances ? boot) configs;
+      anchors = lib.filterAttrs (_: c: c.networking.vlans ? bootstrap) configs;
       refused = [
         22
         111
@@ -198,21 +198,13 @@ in
         in
         dnsmasq ? "dhcp-range"
         || dnsmasq.port != [ 0 ]
-        || c.services.keepalived.vrrpInstances.boot.interface != "bootstrap"
         || dnsmasq."tftp-single-port" or [ ] != [ true ]
         || firewallBroken c
       ) anchors;
     in
-    require "anchor-boot"
-      (
-        lib.attrNames anchors == [
-          "capsule"
-          "forge"
-          "spore"
-        ]
-        && broken == [ ]
-      )
-      "anchors with the boot VIP: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
+    require "boot-plane"
+      (lib.attrNames anchors == [ "spore" ] && broken == [ ])
+      "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
   # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. Both
   # on is the transition; each node then has one alias per attestor, since an agent matches a node

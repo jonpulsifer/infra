@@ -3,7 +3,6 @@
   "build": [
     "ddnsd",
     "flameboss",
-    "fleet-controller",
     "netbench",
     "rackstat",
     "atlantis",
@@ -18,7 +17,6 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
-    "talos-attest",
     "tally",
     "tally-ocr",
     "tink-agent-autoid",
@@ -81,8 +79,7 @@
       "clusters/folly/talos/netboot.json"
     ],
     "tink-attest": [
-      "clusters/folly/apps/spire/tpm-reattest.yaml",
-      "clusters/folly/tinkerbell/template.yaml"
+      "clusters/folly/apps/spire/tpm-reattest.yaml"
     ],
     "tink-reprovision-tools": [
       "clusters/folly/tinkerbell/template.yaml"

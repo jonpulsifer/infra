@@ -1,9 +1,9 @@
 ---
 title: Retire a node
-description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleet-controller wipes it, then remove its entry from the nodes file.
+description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleetd wipes it, then remove its entry from the nodes file.
 ---
 
-Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleet-controller](../apps/fleet-controller.md) then wipes the system disk and powers the node off, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
+Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleetd](../apps/fleetd.md) then wipes the system disk and powers the node off, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain and the `Node` deletion act on the cluster.
@@ -83,23 +83,23 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | System | What happens to the node |
 | --- | --- |
 | UniFi | The apply deletes its DNS record, and its switch port keeps its Kubernetes override |
-| SPIRE | spore drops its LDevID alias at the deploy, so no workload entry names it. talos-attest renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
+| SPIRE | spore drops its LDevID alias at the deploy, so no workload entry names it. fleetd renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
 | Talos | The Talos root stops managing the node |
-| Tinkerbell | fleet-controller deletes its `Hardware` and `Machine` |
+| Tinkerbell | fleetd deletes its `Hardware` and `Machine` |
 | NetBox | The apply deletes the device with its history. To use the machine again, follow [Provision a node](provision-a-node.md) |
 
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| No `retire-` `Workflow` | The device has no primary MAC or `install_disk`, or fleet-controller is down | Read the device's journal, and `journalctl -u fleet-controller` on spore |
+| No `retire-` `Workflow` | The device has no primary MAC or `install_disk`, or fleetd is down | Read the device's journal, and `journalctl -u fleetd` on spore |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
-| The device stays `decommissioning` after a failed run | The controller journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
+| The device stays `decommissioning` after a failed run | fleetd journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
 
 ## Related
 
 - [Provision a node](provision-a-node.md)
-- [fleet-controller](../apps/fleet-controller.md)
+- [fleetd](../apps/fleetd.md)
 - [Hardware inventory](../reference/inventory.md)
 - [Identity](../platform/identity.md#lifecycle)
 - [Restore a volume](restore-a-volume.md)

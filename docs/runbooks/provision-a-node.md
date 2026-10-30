@@ -1,9 +1,9 @@
 ---
 title: Provision a node
-description: Declare a folly machine in the nodes file, plug it into its node port, and let it intake, attest and install as a Talos worker or a joining control plane.
+description: Declare a folly machine in the nodes file, plug it into its node port, and let it attest and install as a Talos worker or a joining control plane.
 ---
 
-Use this runbook to install a new folly node. Its entry in the nodes file becomes a [NetBox](../platform/netbox.md) device, the machine phones home from HookOS, [talos-attest](../apps/talos-attest.md) attests it, and [fleet-controller](../apps/fleet-controller.md) provisions it.
+Use this runbook to install a new folly node. Its entry in the nodes file becomes a [NetBox](../platform/netbox.md) device, the machine attests from HookOS on every boot, and [fleetd](../apps/fleetd.md) admits the device its serial names and provisions it.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -28,35 +28,30 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 
 ## Plug a machine in
 
-1. [Declare the node](#declare-the-node).
-2. Make sure that the entry names the machine's serial. A machine whose serial no entry names gets a `planned` device of its own at its first intake.
-3. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each declared node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
+1. [Declare the node](#declare-the-node), with the machine's serial in its entry.
+2. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each declared node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
 
-   Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
+   Result: HookOS boots, and the console shows `attest: PASSED`. The device holds the machine's MAC, its `attested_*` fields and `attest_verdict` `attested`. If it waits instead, [approve the first intake](#approve-a-first-intake).
 
-4. [Watch the run](#watch-the-run), and [approve the first intake](#approve-a-first-intake) if it waits.
+3. Watch the device's NetBox journal, and [the run](#watch-the-run).
 
-   Result: the declared device is `planned` and `attested`, and holds the machine's MAC.
+   Result: `started Workflow provision-<node>-<unix seconds>`, with the note that the machine attested from HookOS. HookOS takes the run, and the installed Talos boots with its address set statically.
 
-5. Watch the device's NetBox journal.
-
-   Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run, and the installed Talos boots with that address set statically.
-
-6. Set the machine's AMT to the node's address, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says, so Rufio reaches it for every later run.
-7. Once NetBox holds the node `active`, open a pull request, comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
+4. Set the machine's AMT to the node's address, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says, so Rufio reaches it for every later run.
+5. Once NetBox holds the node `active`, open a pull request, comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 
    Result: the Talos root manages the node, since it reads each node's status from NetBox.
 
-8. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
-9. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
+6. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
+7. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
 
 ## Provision a control plane
 
 A control plane installs the same way and joins the running cluster. The cluster's first control plane, at `API_SERVER_IP`, never installs this way, because the Talos root bootstraps etcd on it.
 
-1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetController.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing. [fleet-controller](../apps/fleet-controller.md#control-planes) says what spore then holds.
-2. [Declare the node](#declare-the-node) with the class `controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
-3. Follow [Plug a machine in](#plug-a-machine-in) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the pull request of step 7, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 8 gives the controller the new class inputs for the next control plane.
+1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetd.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing, and spore holds no bundle with the cluster's CA keys.
+2. [Declare the node](#declare-the-node) with the class `controlplane`. `homelab.fleetd.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in). An admitted control plane is never auto-provisioned: its attestation passes and the machine waits in HookOS. Set `desired_action` to `provision` in NetBox; fleetd starts the run, and Rufio power-cycles the machine so that its next attestation takes the code. In the pull request of step 5, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 6 gives fleetd the new class inputs for the next control plane.
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
    ```sh
@@ -80,32 +75,34 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 2. Watch the console and NetBox.
 
-   Result: `attest: PASSED`, `install: installed Talos to <disk>`, and at the node's first boot, `active`.
+   Result: `attest: PASSED`, `install code written`, `install: installed Talos to <disk>`, and at the node's first boot, `active`.
 
 ## Approve a first intake
 
-With no pin, the console shows `attest: FAILED` with `pending-approval`.
+A serial no declared device names waits for approval, and the console shows `attest: FAILED` with `pending-approval`. So does a declared device whose EK has no manufacturer certificate.
 
 > [!CAUTION]
 > A waiting claim proves nothing, because another machine can send one with this serial. Approve only hashes that you read on the console.
 
 1. Read the EK hashes, `rsa:<hash>` and `ecc:<hash>`, on the console.
 2. Run `mise run attest:approve <serial>`, and answer `y` if the hashes match.
-3. For an intake, delete its `Hardware <mac>`, or wait an hour, and power-cycle the machine. For a declared device, set `desired_action` to `provision` again.
+3. Power-cycle the machine, so that HookOS attests again.
 
 ## If something goes wrong
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The journal says `on port N, expected M` | A switch port the stub does not expect | Move the machine, or correct `expected_port` |
+| The journal says `on port N, expected M` | A switch port the device does not expect | Move the machine, or correct `expected_port`, and power-cycle it |
 | The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Set AMT's address, or power the machine on by hand |
-| The journal says the model is not in `FLEET_MODEL_MAP` | An unknown model has no class | Set `talos_class` and `desired_action`, or extend `homelab.fleetController.modelMap` |
-| No `Hardware <mac>` appears | The MAC is known, or the intake was refused | Read `fleet.intake` in `journalctl -u fleet-controller` on spore |
-| `desired_action` stays set | The controller is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
-| The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attest action | Check that the switch sends LLDP, then run `attest` |
-| The journal says a port `is cabled to another device in NetBox` | NetBox holds another device's cable on the attested port | Correct the cables in NetBox; the controller never removes one |
-| `install: no install code` | Attest withheld the code | Read the `attest.install` audit line, then set `desired_action` again |
-| The audit line says 409 | No `talos_class`, or `class-inputs.json` lacks it | Set the class, or run `mise run render-class-inputs` |
+| The journal says the model is not in `FLEET_MODEL_MAP` | An unknown model has no class | Set `talos_class` and `desired_action`, or extend `homelab.fleetd.modelMap` |
+| The console says `attest: try 5 failed` | fleetd did not answer | Read `journalctl -u fleetd` on spore |
+| The console says `attest: FAILED` and the agent starts at once | fleetd refused the machine | Read the `attest.verdict` audit line in `journalctl -u fleetd` |
+| `desired_action` stays set | fleetd is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
+| The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attestation | Check that the switch sends LLDP, then power-cycle the machine |
+| The journal says a port `is cabled to another device in NetBox` | NetBox holds another device's cable on the attested port | Correct the cables in NetBox; fleetd never removes one |
+| `wipe: this boot did not pass attestation` or `no install code` | The boot's attestation got no pass or no code, so nothing was wiped | Read the `attest.install` audit line in `journalctl -u fleetd`, then set `desired_action` again |
+| The audit line says `no provision` | No `talos_class`, a last run the owner has not repeated, or auto-provision is off | Set the class, or set `desired_action` to `provision` |
+| `EnrollmentNameNotServed` fires | fleetd is down, or its certificate lapsed | Read `journalctl -u fleetd` and the ACME units on spore |
 
 ## Related
 

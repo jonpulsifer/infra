@@ -11,13 +11,8 @@ in
   bootstrap = {
     cidr = data.BOOTSTRAP_CIDR;
     vlan = builtins.fromJSON data.BOOTSTRAP_VLAN;
-    # The anchors' boot VIP (../services/anchor-vips.nix).
-    vip = data.BOOT_VIP;
-    hosts = {
-      capsule = data.CAPSULE_BOOTSTRAP_IP;
-      spore = data.SPORE_BOOTSTRAP_IP;
-      forge = data.FORGE_BOOTSTRAP_IP;
-    };
+    # spore alone serves the boot plane (../services/talos-boot.nix, ../services/fleetd.nix).
+    hosts.spore = data.SPORE_BOOTSTRAP_IP;
   };
   # The anchors' shared VIPs for DNS and NTP (../services/anchor-vips.nix).
   ns = {

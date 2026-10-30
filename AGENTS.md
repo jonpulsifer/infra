@@ -18,7 +18,7 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 - Change live infrastructure only through git. Author the desired state here,
   and Flux, Atlantis and the host rebuilds apply it. A folly node's lifecycle
   is in NetBox: only the owner sets a device's `desired_action` or its
-  `decommissioning` status, and fleet-controller acts on it as Flux acts on
+  `decommissioning` status, and fleetd acts on it as Flux acts on
   git. Change live state by hand only when the owner asks, even when a runbook
   has the steps.
 - Flux owns the kthx engine's namespace and prerequisites. The engine owns each
@@ -55,7 +55,7 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 | Kubernetes | Flux | After a merge to `main` |
 | NixOS | `nixos-rebuild` | On a deploy, and at the daily auto-upgrade from `main` on hosts that have one |
 | Wiki | `.github/workflows/wiki.yml` to Cloudflare Pages | After a merge to `main` |
-| folly node lifecycle | fleet-controller on spore, from NetBox | When the owner sets a device's `desired_action` or `decommissioning` status |
+| folly node lifecycle | fleetd on spore, from NetBox | When the owner sets a device's `desired_action` or `decommissioning` status |
 
 [How changes ship](docs/platform/how-changes-ship.md) has each path and its
 exceptions.

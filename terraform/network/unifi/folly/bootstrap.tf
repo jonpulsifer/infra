@@ -1,20 +1,15 @@
 locals {
   bootstrap_cidr = "${cidrhost(local.anchor_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.anchor_topology.BOOTSTRAP_CIDR)[1]}"
 
-  # The anchors' bootstrap addresses, spore first, and the boot VIP that
-  # keepalived moves between them (nix/services/anchor-vips.nix).
-  anchor_boot_ips = [
-    local.anchor_topology.SPORE_BOOTSTRAP_IP,
-    local.anchor_topology.CAPSULE_BOOTSTRAP_IP,
-    local.anchor_topology.FORGE_BOOTSTRAP_IP,
-  ]
-  boot_vip = local.anchor_topology.BOOT_VIP
+  # spore's bootstrap address, where it serves TFTP, the boot files, Smee,
+  # Tink and fleetd (nix/services/talos-boot.nix, nix/services/fleetd.nix).
+  boot_server = local.anchor_topology.SPORE_BOOTSTRAP_IP
 
   # The Kubernetes network's DHCP boot option: the signed iPXE that dnsmasq
-  # serves over TFTP at the boot VIP.
+  # serves over TFTP on spore.
   boot_option = {
     enabled  = true
-    server   = local.boot_vip
+    server   = local.boot_server
     filename = "talos/folly/ipxe-amd64-secureboot.efi"
   }
 
@@ -38,9 +33,9 @@ locals {
   switch = local.clients.switches["USW 24 PoE"]
 }
 
-# The anchors' bootstrap addresses and the boot VIP live here: every node
-# netboots from them across the gateway (kubernetes_to_boot in firewall.tf).
-# No switch port carries the network untagged, so it has no DHCP.
+# spore's bootstrap address lives here: every node netboots from it across
+# the gateway (kubernetes_to_boot in firewall.tf). No switch port carries the
+# network untagged, so it has no DHCP.
 resource "unifi_network" "bootstrap" {
   name               = "bootstrap"
   subnet             = local.bootstrap_cidr
@@ -61,13 +56,11 @@ resource "unifi_network" "bootstrap" {
 
   lifecycle {
     precondition {
-      condition = alltrue([
-        for ip in concat(local.anchor_boot_ips, [local.boot_vip]) : contains(
-          [for i in range(2, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
-          ip,
-        )
-      ]) && length(distinct(concat(local.anchor_boot_ips, [local.boot_vip]))) == 4
-      error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP, CAPSULE_BOOTSTRAP_IP, FORGE_BOOTSTRAP_IP and BOOT_VIP must be four distinct host addresses in BOOTSTRAP_CIDR other than the gateway."
+      condition = contains(
+        [for i in range(2, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
+        local.boot_server,
+      )
+      error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP must be a host address in BOOTSTRAP_CIDR other than the gateway."
     }
   }
 }
@@ -104,10 +97,10 @@ resource "unifi_device" "usw_24_poe" {
   forget_on_destroy = false
   allow_adoption    = false
 
-  # Each anchor keeps the Anchor network untagged and its PoE, and gains the bootstrap
-  # VLAN tagged for TFTP, HTTP, DNS, NTP and the boot VIP's VRRP, and on spore
-  # Smee's proxy DHCP. The provider cannot write tagged_networkconf_ids, so the
-  # custom list names what to leave off.
+  # Each anchor keeps the Anchor network untagged and its PoE. spore gains the
+  # bootstrap VLAN tagged for TFTP, HTTP, HTTPS, DNS, NTP and Smee's proxy
+  # DHCP; capsule and forge serve nothing there. The provider cannot write
+  # tagged_networkconf_ids, so the custom list names what to leave off.
   dynamic "port_override" {
     for_each = local.anchor_ports
     content {
@@ -120,12 +113,15 @@ resource "unifi_device" "usw_24_poe" {
       forward               = "customize"
       native_networkconf_id = unifi_network.lab.id
       tagged_vlan_mgmt      = "custom"
-      excluded_networkconf_ids = [
-        unifi_network.fml.id,
-        unifi_network.k8s.id,
-        unifi_network.future.id,
-        unifi_network.iot.id,
-      ]
+      excluded_networkconf_ids = concat(
+        [
+          unifi_network.fml.id,
+          unifi_network.k8s.id,
+          unifi_network.future.id,
+          unifi_network.iot.id,
+        ],
+        port_override.key == "spore" ? [] : [unifi_network.bootstrap.id],
+      )
     }
   }
 

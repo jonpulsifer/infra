@@ -21,7 +21,7 @@ sections:
       - apps/wiki.md
       - apps/lookout.md
       - group: Internal tools
-        items: [apps/netbench.md, apps/talos-attest.md, apps/fleet-controller.md]
+        items: [apps/netbench.md, apps/fleetd.md]
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform

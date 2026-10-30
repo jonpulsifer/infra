@@ -1,0 +1,305 @@
+# promtool tests for fleetd-rules.yaml, run by `mise run k8s:check-rules`.
+# rule_files names the rendered PrometheusRule; kustomization.yaml omits this file.
+rule_files:
+  - fleetd.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # fleetd renders a config at minute 10, and the node fetches it at minute 51.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_install_configs_oldest_age_seconds{job="node-exporter",instance="spore"}'
+        values: 0x9 0+60x40 0x10
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: FleetInstallPending
+        exp_alerts: []
+      - eval_time: 42m
+        alertname: FleetInstallPending
+        exp_alerts: []
+      - eval_time: 44m
+        alertname: FleetInstallPending
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: A rendered Talos config has waited 30 minutes for its node
+              description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the provision Workflow and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 55m
+        alertname: FleetInstallPending
+        exp_alerts: []
+
+  # spore's boot files and enrollment name serve until minute 10, then both checks fail.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_serving{instance="spore",site="folly"}'
+        values: 1x9 0x31
+      - series: 'talos_boot_https_serving{instance="spore",site="folly"}'
+        values: 1x9 0x31
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: BootFilesNotServed
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: BootFilesNotServed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              site: folly
+            exp_annotations:
+              message: spore does not serve the Talos boot files
+              description: "dnsmasq is down, nginx does not serve HookOS at spore's bootstrap address, or spore exports no talos-boot-check metrics, so firmware on the Kubernetes network cannot load the signed iPXE or HookOS. Check dnsmasq and nginx on spore (nix/services/talos-boot.nix)."
+      - eval_time: 30m
+        alertname: EnrollmentNameNotServed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              site: folly
+            exp_annotations:
+              message: fleetd does not serve the enrollment name
+              description: "fleetd is down, has no trusted certificate for the enrollment name, or spore exports no talos-boot-check metrics, so HookOS cannot attest and an installed node cannot fetch its config. Read journalctl -u fleetd and the ACME renewal on spore (nix/services/fleetd.nix)."
+
+  # spore exports no boot checks at all.
+  - interval: 1m
+    input_series:
+      - series: 'up{job="node-exporter",instance="spore"}'
+        values: 1x30
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: EnrollmentNameNotServed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: fleetd does not serve the enrollment name
+              description: "fleetd is down, has no trusted certificate for the enrollment name, or spore exports no talos-boot-check metrics, so HookOS cannot attest and an installed node cannot fetch its config. Read journalctl -u fleetd and the ACME renewal on spore (nix/services/fleetd.nix)."
+
+  # fleetd's DevID listener answers until minute 10, then stops.
+  - interval: 1m
+    input_series:
+      - series: 'fleetd_devid_serving{instance="spore",job="node-exporter"}'
+        values: 1x9 0x31
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: FleetdDevIDNotServing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FleetdDevIDNotServing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              job: node-exporter
+            exp_annotations:
+              message: fleetd does not answer on its DevID listener
+              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+
+  # A worker falls back to PXE at minute 10 and its unattended boot is refused.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_verdicts_total{instance="spore",verdict="refused",reason="unattended-boot"}'
+        values: 0x10 1x50
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestUnattendedBootFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TalosAttestUnattendedBootFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              verdict: refused
+              reason: unattended-boot
+            exp_annotations:
+              message: "A machine booted HookOS unprompted and failed attestation"
+              description: "A node booted HookOS while no run expected it, and its attestation failed. fleetd refused it and recorded nothing, so it keeps its identity. Read the device's NetBox journal and journalctl -u fleetd on spore, and look for a BIOS reset or a disk fault."
+
+  # spore has not mirrored a release in seven hours.
+  - interval: 1m
+    input_series:
+      - series: 'talos_boot_mirror_last_success_timestamp_seconds{instance="spore",site="folly"}'
+        values: 0x400
+    alert_rule_test:
+      - eval_time: 380m
+        alertname: BootMirrorStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              site: folly
+            exp_annotations:
+              message: The Talos boot mirror on spore has not verified a release for 6 hours
+              description: "talos-boot-mirror.service fails, or has never succeeded. spore serves its last verified release. A Talos version bump fails the mirror until that version's release exists."
+
+  # spore quarantined riptide, then capsule passed it later: the newer pass is current, so no alert.
+  # optiplex's only record, on forge, is a quarantine, so it fires.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_machine_status{instance="spore",machine="riptide",status="quarantined"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_machine_status{instance="capsule",machine="riptide",status="quarantined"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_machine_status{instance="forge",machine="optiplex",status="quarantined"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 1500x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestQuarantined
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              instance: forge
+              machine: optiplex
+              status: quarantined
+            exp_annotations:
+              message: "optiplex failed attestation and is quarantined"
+              description: "fleetd refused optiplex, and its LDevID is withdrawn. Read the reason in GET /machines on fleetd's admin API or in /var/lib/fleetd/attest/verdicts.jsonl, as docs/runbooks/provision-a-node.md says."
+
+  # spore issued riptide's first LDevID, which nears its expiry, and capsule served the renewal: the
+  # newest expiry counts, so no alert. optiplex's only LDevID, on forge, expires within 23 days.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 86400x80
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 7776000x80
+      - series: 'talos_attest_ldevid_expiry_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 86400x80
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: TalosAttestLDevIDExpiring
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex's LDevID expires within 23 days"
+              description: "tpm-reattest has not renewed optiplex's LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
+
+  # riptide's newest check, on capsule, is an hour old, so spore's 28-hour-old one does not count.
+  # optiplex last passed 28 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 0x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 97200x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 0x1700
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="oldbox"}'
+        values: 0x1700
+      - series: 'kube_node_info{node="riptide"}'
+        values: 1x1700
+      - series: 'kube_node_info{node="optiplex"}'
+        values: 1x1700
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: TalosAttestNotChecked
+        exp_alerts: []
+      - eval_time: 28h
+        alertname: TalosAttestNotChecked
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex has not passed a TPM quote check in 26 hours"
+              description: "fleetd has recorded no passing daily check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+
+  # spore refused a check of riptide at minute 10: the alert fires for an hour, then clears. A pass
+  # never fires.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="riptide",verdict="refused"}'
+        values: 600x100
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="riptide",verdict="pass"}'
+        values: 600x100
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: TalosAttestCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              machine: riptide
+              verdict: refused
+            exp_annotations:
+              message: "riptide's daily check ended in refused"
+              description: "quarantine: the TPM quoted a boot that misses fleetd's renewal policy: NetBox's attest_verdict reads quarantined, and fleetd serves no LDevID for it and cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u fleetd on spore."
+      - eval_time: 80m
+        alertname: TalosAttestCheckFailed
+        exp_alerts: []
+
+  # spore saw riptide's PCR 0 change, then capsule's later check matched once the owner explained it:
+  # the newer check is current, so no alert. optiplex's newest check, on forge, shows a change.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_pcr0_changed{instance="spore",machine="riptide"}'
+        values: 1x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_pcr0_changed{instance="capsule",machine="riptide"}'
+        values: 0x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_pcr0_changed{instance="forge",machine="optiplex"}'
+        values: 1x10
+      - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
+        values: 1500x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestPCR0Changed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: forge
+              machine: optiplex
+            exp_annotations:
+              message: "optiplex's PCR 0 changed at the same BIOS version"
+              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+
+  # optiplex, the control plane, failed in place on spore, and no anchor has a newer record: critical.
+  # riptide failed in place on forge, then passed on capsule later: the newer record clears it. A
+  # failed-no-quarantine check's own timestamp never raises the warning rule.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_failed_no_quarantine{instance="spore",machine="optiplex"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="spore",machine="optiplex"}'
+        values: 3000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="optiplex"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="optiplex"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="forge",machine="riptide"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="forge",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="riptide"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="optiplex",verdict="failed-no-quarantine"}'
+        values: 120x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              verdict: failed-no-quarantine
+              instance: spore
+              machine: optiplex
+            exp_annotations:
+              message: "Control-plane node optiplex failed attestation and is not quarantined"
+              description: "optiplex's TPM quoted a boot that misses fleetd's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u fleetd on spore, then reinstall or fix the node; the next passing check clears this."

@@ -42,10 +42,10 @@ in
           # also public records, but answering them here keeps the page
           # reachable without the WAN.
           10.3.0.84 api.smiirl.com counter.${fleet.dnsZone} smiirl.${fleet.dnsZone}
-          # The bootstrap VLAN's DHCP names the anchors as resolvers, so a machine
-          # that boots there reaches the enrollment name's HTTPS server at the boot VIP
-          # (./talos-boot.nix). Its public name keeps its certificate.
-          ${lab.bootstrap.vip} enroll.${fleet.dnsZone}
+          # The Kubernetes network's DHCP names the anchors as resolvers, so a
+          # machine that netboots there reaches fleetd's enrollment name at spore's
+          # bootstrap address (./fleetd.nix). Its public name keeps its certificate.
+          ${lab.bootstrap.hosts.spore} enroll.${fleet.dnsZone}
           # The hosts plugin caps TTL at 65535 seconds. /etc/hosts is an
           # immutable Nix-store file, so polling it for changes only burns I/O.
           ttl 65535

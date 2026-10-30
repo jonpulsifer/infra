@@ -1,6 +1,6 @@
 # A YubiKey that holds a hardware DevID CA key in a PIV slot, reached through pcscd and ykcs11.
-# scripts/devid-ca-yubikey.sh initializes the key over ssh; members of the talos-attest group may
-# use the card and read its PIN (docs/runbooks/set-up-a-devid-ca-yubikey.md).
+# scripts/devid-ca-yubikey.sh initializes the key over ssh; members of the devid-ca group, fleetd on
+# spore, may use the card and read its PIN (docs/runbooks/set-up-a-devid-ca-yubikey.md).
 {
   config,
   lib,
@@ -54,7 +54,7 @@ in
       type = lib.types.nullOr lib.types.str;
       readOnly = true;
       default = if provisioned then config.sops.secrets.${pinSecret}.path else null;
-      description = "The PIV PIN, readable by the talos-attest group, for ATTEST_CA_PKCS11_PIN_FILE.";
+      description = "The PIV PIN, readable by the devid-ca group, for ATTEST_CA_PKCS11_PIN_FILE.";
     };
   };
 
@@ -68,7 +68,7 @@ in
           polkit.addRule(function(action, subject) {
             if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
                  action.id == "org.debian.pcsc-lite.access_card") &&
-                (subject.user == "root" || subject.isInGroup("talos-attest"))) {
+                (subject.user == "root" || subject.isInGroup("devid-ca"))) {
               return polkit.Result.YES;
             }
           });
@@ -79,7 +79,7 @@ in
           SUBSYSTEM=="usb", ATTR{idVendor}=="1050", GROUP="pcscd", MODE="0660"
         '';
 
-        users.groups.talos-attest = { };
+        users.groups.devid-ca = { };
 
         environment.systemPackages = [
           pkgs.opensc
@@ -92,7 +92,7 @@ in
       }
       (lib.mkIf provisioned {
         sops.secrets.${pinSecret} = {
-          group = "talos-attest";
+          group = "devid-ca";
           mode = "0440";
         };
       })

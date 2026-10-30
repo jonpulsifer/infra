@@ -19,17 +19,15 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
-      - 'apps/fleet-controller/**'
+      - 'apps/fleetd/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/talos-attest/**'
       - 'images/spire-agent-tpm/devid-init/**'
-      - 'images/tink-agent-autoid/intake/**'
-      # talos-attest's tests read these.
+      # fleetd's tests read these.
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
       - 'packages/pkcs11signer/**'
@@ -41,17 +39,15 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
-      - 'apps/fleet-controller/**'
+      - 'apps/fleetd/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/talos-attest/**'
       - 'images/spire-agent-tpm/devid-init/**'
-      - 'images/tink-agent-autoid/intake/**'
-      # talos-attest's tests read these.
+      # fleetd's tests read these.
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
       - 'packages/pkcs11signer/**'
@@ -76,16 +72,14 @@ jobs:
           - apps/bosun
           - apps/ddnsd
           - apps/flameboss
-          - apps/fleet-controller
+          - apps/fleetd
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki
           - apps/kthx-engine-verifier
           - apps/netbench
           - apps/smiirl
-          - apps/talos-attest
           - images/spire-agent-tpm/devid-init
-          - images/tink-agent-autoid/intake
           - packages/pkcs11signer
     defaults:
       run:
@@ -98,8 +92,8 @@ jobs:
           # Most of these modules are stdlib-only and have no go.sum, which
           # setup-go's default cache looks for and fails without.
           cache: false
-      # talos-attest's software TPM (go-tpm-tools/simulator) links libcrypto.
-      - if: matrix.module == 'apps/talos-attest'
+      # fleetd's software TPM (go-tpm-tools/simulator) links libcrypto.
+      - if: matrix.module == 'apps/fleetd'
         run: dpkg -s libssl-dev >/dev/null 2>&1 || (sudo apt-get update -q && sudo apt-get install -yq libssl-dev)
       # pkcs11signer's tests sign on a SoftHSM2 token, and fail rather than skip without it.
       - if: matrix.module == 'packages/pkcs11signer'

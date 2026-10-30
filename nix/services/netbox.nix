@@ -17,7 +17,7 @@ let
 
   host = "${config.networking.hostName}.${fleet.tailnet}";
   # The other anchors are no tailnet peers of this host, so they reach NetBox on the Anchor
-  # network instead (talos-attest, nix/services/talos-attest.nix).
+  # network instead (fleetd on spore, nix/services/fleetd.nix).
   anchorAddr = lab.hosts.${config.networking.hostName};
   anchorPeers = lib.attrValues (
     lib.filterAttrs (name: _: name != config.networking.hostName) {

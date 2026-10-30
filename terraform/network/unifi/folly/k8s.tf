@@ -44,11 +44,11 @@ resource "unifi_network" "k8s" {
       enabled = true
       servers = local.dns_servers
     }
-    # A machine netboots here, from the anchors on their bootstrap addresses
-    # through the policy kubernetes_to_boot in firewall.tf: the offer names
-    # the boot VIP and the signed iPXE's filename. The resolvers above are the
-    # anchors' CoreDNS, which answers enroll.lolwtf.ca with the boot VIP.
-    tftp_server = local.boot_vip
+    # A machine netboots here, from spore's bootstrap address through the
+    # policy kubernetes_to_boot in firewall.tf: the offer names that address
+    # and the signed iPXE's filename. The resolvers above are the anchors'
+    # CoreDNS, which answers enroll.lolwtf.ca with the same address.
+    tftp_server = local.boot_server
     boot        = local.boot_option
   }
 

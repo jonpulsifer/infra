@@ -31,7 +31,7 @@ targets() {
     path=${path%\\}
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/anchor-topology.json | .github/workflows/nix-ci.yaml)
+      flake.nix | flake.lock | nix/* | apps/ddnsd/* | apps/fleetd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/anchor-topology.json | .github/workflows/nix-ci.yaml)
         target_set["nix:flake-check"]=1
         ;;
       # spore mirrors the Talos release that talos.tf names and checks it against the committed certs,
@@ -39,7 +39,7 @@ targets() {
       clusters/folly/talos/talos.tf | clusters/folly/talos/netboot.json | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
         target_set["nix:flake-check"]=1
         ;;
-      # spore's SPIRE node aliases and the anchors' talos-attest read the nodes file.
+      # spore's SPIRE node aliases and fleetd's inventory read the nodes file.
       clusters/folly/inventory/nodes.yaml)
         target_set["nix:flake-check"]=1
         ;;

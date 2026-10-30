@@ -60,9 +60,9 @@ let
   # Flux on folly applies the objects in clusters/folly/tinkerbell/ to this namespace, as the client
   # certificate CN that scripts/tinkerbell-certs.sh --client issues. RBAC cannot be bootstrapped by
   # the identity it authorizes, so tinkerbell-rbac applies it with the admin certificate. Git holds
-  # the Template and the BMC Secrets; fleet-controller (./fleet-controller.nix) owns the Hardware,
+  # the Template and the BMC Secrets; fleetd (./fleetd.nix) owns the Hardware,
   # Machine and Workflow objects with the admin certificate. Flux keeps its verbs on those kinds so
-  # that it can prune the ones it applied before the controller existed.
+  # that it can prune the ones it applied before fleetd existed.
   namespace = "tinkerbell";
   fluxUser = "folly-flux";
   manage = [

@@ -147,7 +147,7 @@ description = "Firing Alertmanager alerts on every cluster (optional substring f
 run = "bash scripts/alerts.sh"
 
 [tasks.render-class-inputs]
-description = "Write fleet-controller's per-class render inputs to clusters/folly/fleet/ from the folly Talos root, with no state and each node's status from NetBox, and the MACs NetBox holds for spore's netboot links"
+description = "Write fleetd's per-class render inputs to clusters/folly/fleet/ from the folly Talos root, with no state and each node's status from NetBox, and the MACs NetBox holds for spore's netboot links"
 run = "bash scripts/render-class-inputs.sh"
 
 [tasks."inventory:check"]
@@ -159,11 +159,11 @@ description = "Print a folly node's observed inventory entry (args: [--insecure]
 run = "bash scripts/inventory.sh observe"
 
 [tasks."attest:approve"]
-description = "Show the first intake that waits for a serial on the anchors' talos-attest, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
+description = "Show the first intake that waits for a serial on fleetd, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
 run = "bash scripts/attest.sh approve"
 
 [tasks."attest:pending"]
-description = "List the first intakes that wait for approval on each anchor's talos-attest"
+description = "List the first intakes that wait for approval on fleetd"
 run = "bash scripts/attest.sh pending"
 
 [tasks."k8s:render-apps"]

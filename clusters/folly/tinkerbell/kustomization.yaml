@@ -1,9 +1,9 @@
 # Applied by Flux on folly to spore's Tinkerbell API (the tinkerbell Kustomization in
 # clusters/folly/flux-system/tinkerbell.yaml). spore's tinkerbell-rbac unit creates the namespace
 # and lets Flux's identity manage these kinds in it. Git holds only the Template and the BMC
-# credential Secrets: fleet-controller on spore (apps/fleet-controller) owns the Hardware, Machine
+# credential Secrets: fleetd on spore (apps/fleetd) owns the Hardware, Machine
 # and Workflow objects, which it makes from NetBox. A Secret is named bmc-<bmc_type>, the NetBox
-# field's value, so the controller can point each Machine at its credentials.
+# field's value, so fleetd can point each Machine at its credentials.
 ---
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization

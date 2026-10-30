@@ -1,7 +1,7 @@
 ---
-# fleet-controller on spore cordons a node that talos-attest quarantined as
-# this account. RBAC lets it patch nodes, and the admission policy below
-# narrows that to a cordon. Its token is `fleet-controller/folly-cordon-token`
+# fleetd on spore cordons a node it quarantined as this account, whose name
+# is the one its sealed token names. RBAC lets it patch nodes, and the admission policy below
+# narrows that to a cordon. Its token is `fleetd/folly-cordon-token`
 # in nix/secrets/spore.sops.yaml.
 apiVersion: v1
 kind: ServiceAccount
@@ -10,7 +10,7 @@ metadata:
   namespace: kube-system
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
 automountServiceAccountToken: false
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -19,7 +19,7 @@ metadata:
   name: fleet-controller-cordon
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
@@ -31,7 +31,7 @@ metadata:
   name: fleet-controller-cordon
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -51,7 +51,7 @@ metadata:
   namespace: kube-system
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
   annotations:
     kubernetes.io/service-account.name: fleet-controller-cordon
 ---
@@ -63,7 +63,7 @@ metadata:
   name: fleet-controller-cordon
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
 spec:
   failurePolicy: Fail
   matchConstraints:
@@ -103,7 +103,7 @@ metadata:
   name: fleet-controller-cordon
   labels:
     app.kubernetes.io/name: fleet-controller-cordon
-    app.kubernetes.io/part-of: fleet-controller
+    app.kubernetes.io/part-of: fleetd
 spec:
   policyName: fleet-controller-cordon
   validationActions: [Deny]

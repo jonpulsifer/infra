@@ -4,7 +4,7 @@
 #   1. the talos provider's talos_machine_configuration data source, as
 #      Atlantis does, from the module's install_inputs;
 #   2. talosctl gen config from the same inputs;
-#   3. fleet-controller's class render (apps/fleet-controller: class inputs
+#   3. fleetd's class render (apps/fleetd/fleet: class inputs
 #      plus the node document it writes from the node's facts), which writes
 #      the config an install fetches, through its TestRenderParity, which also
 #      proves the throwaway-bundle worker render.
@@ -15,7 +15,7 @@
 # committed class inputs must be rendered while NetBox holds every declared
 # control plane active. Beside the declared nodes, the root is evaluated with one more machine,
 # joining-cp, a control plane at a documentation address, twice. Planned, as a
-# control plane that fleet-controller installs is until it fetches its config,
+# control plane that fleetd installs is until it fetches its config,
 # the root applies no config to it and the committed class inputs stay current.
 # Active, the root takes it as a second control plane that joins the cluster
 # (talos_machine.joining), and every node is compared from the root's inputs
@@ -228,10 +228,10 @@ for node in $(jq -r 'keys[]' "$inputs"); do
   fi
 done
 
-# fleet-controller's render of each node, against the module's, from the
+# fleetd's render of each node, against the module's, from the
 # class inputs the root renders with joining-cp active.
 FLEET_PARITY_INPUTS="$inputs" FLEET_PARITY_NODES="$work/nodes.json" \
   FLEET_CLASS_INPUTS="$work/class-inputs-joining.json" FLEET_PARITY_BUNDLE="$work/secrets.yaml" \
-  go test -C apps/fleet-controller -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
+  go test -C apps/fleetd -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./fleet/ || failed=1
 
 exit "$failed"
