@@ -59,7 +59,11 @@ the boot evidence after credential activation at intake, and after the LAK's
 signature on a renewal. It revokes the identity: NetBox's `attest_verdict`
 becomes `quarantined: <reason>`, the status stays, `GET /devid` answers 403,
 and fleet-controller cordons the node. Until the owner clears the verdict,
-the machine gets no identity and no renewal. Everything refused before that
+the machine gets no identity and no renewal. Once NetBox holds no quarantine,
+`GET /devid` answers the node's DevID, whose TPM-bound blobs it needs to prove
+itself, and its next daily check or renewal that passes every proof and the
+policy replaces the anchor's quarantined record; the files under
+`GET /devid/{serial}/{file}` come back then. Everything refused before that
 proof, a wrong MAC, an unknown or mismatched EK, a failed activation, a quote
 the LAK did not sign, a quarantined, `failed`, `decommissioning` or `offline`
 device, is the verdict `refused`:

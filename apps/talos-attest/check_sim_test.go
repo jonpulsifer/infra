@@ -201,6 +201,89 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 	})
 }
 
+// The owner lifts an active node's quarantine by clearing its verdict in
+// NetBox. Until then nothing changes; afterwards the next check that proves
+// the LAK, the LDevID key and the boot replaces the anchor's quarantined
+// record, and the LDevID is served again. A check that misses the policy
+// after the lift quarantines it again.
+func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
+	h, f := activeNode(t)
+	before := nvLDevID(t, h)
+	policy := h.v.Policy.RenewRequiredAuthorities
+	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
+		t.Fatalf("policy miss: %+v", r)
+	}
+	quarantined(t, h, f, reasonPolicy)
+	h.v.Policy.RenewRequiredAuthorities = policy
+
+	// A good boot changes nothing while the verdict stands.
+	if _, err := h.check(h.ts.URL, "1.0"); err == nil {
+		t.Fatal("a check passed before the owner lifted the quarantine")
+	}
+
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["attest_verdict"] = "" })
+	// The node gets its key blobs to prove itself with; the files SPIRE
+	// reads wait for the proof.
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusOK {
+		t.Fatalf("the lifted node's DevID answered %d before a check", code)
+	}
+	if code, _ := h.get("/devid/" + simSerial + "/" + fileLDevIDCert); code == http.StatusOK {
+		t.Fatal("the lifted node's LDevID file was served before a check")
+	}
+	if rec, ok, _ := h.v.Store.Record("testbox"); !ok || rec.Status != StatusQuarantined {
+		t.Fatalf("the lift alone replaced the quarantine: %+v", rec)
+	}
+	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
+		t.Fatalf("the first check after the lift: %v", err)
+	}
+	if d := f.settled(t, simSerial, 4); d.Status != "active" || d.CustomFields["attest_verdict"] != StatusAttested {
+		t.Fatalf("NetBox after the lift: %s %+v", d.Status, d.CustomFields)
+	}
+	rec, ok, err := h.v.Store.Record("testbox")
+	if err != nil || !ok || rec.Status != StatusAttested || len(rec.EKHashes) == 0 || !strings.EqualFold(rec.LDevIDSerial, serialHex(before)) {
+		t.Fatalf("the anchor's record after the lift: %+v %v", rec, err)
+	}
+	if code, body := h.get("/devid/" + simSerial + "/" + fileLDevIDCert); code != http.StatusOK || !strings.Contains(string(body), "BEGIN CERTIFICATE") {
+		t.Fatalf("the lifted node's LDevID file: %d %s", code, body)
+	}
+	if after := nvLDevID(t, h); !after.Equal(before) {
+		t.Fatal("a check issued a new LDevID")
+	}
+
+	// The lift restores the identity, not a free pass: a miss quarantines again.
+	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
+		t.Fatalf("a miss after the lift: %+v", r)
+	}
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
+		t.Fatalf("the requarantined node's DevID answered %d", code)
+	}
+}
+
+// Clearing the verdict lifts nothing without a proof: forged evidence for
+// the lifted serial is refused and leaves the anchor's quarantine in place.
+func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
+	h, f := activeNode(t)
+	policy := h.v.Policy.RenewRequiredAuthorities
+	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
+		t.Fatalf("policy miss: %+v", r)
+	}
+	h.v.Policy.RenewRequiredAuthorities = policy
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["attest_verdict"] = "" })
+	h.tamperRenew = func(_ string, e *protocol.RenewEvidence) { e.Quote.Signature = append([]byte{}, e.Quote.Signature[:len(e.Quote.Signature)-1]...) }
+	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictRefused {
+		t.Fatalf("forged evidence after the lift: %+v", r)
+	}
+	if rec, ok, _ := h.v.Store.Record("testbox"); !ok || rec.Status != StatusQuarantined {
+		t.Fatalf("forged evidence replaced the quarantine: %+v", rec)
+	}
+	if code, _ := h.get("/devid/" + simSerial + "/" + fileLDevIDCert); code == http.StatusOK {
+		t.Fatal("forged evidence reopened the LDevID file")
+	}
+}
+
 // The control plane is never quarantined by a running quote: failing
 // folly's only control plane would move the cluster's API to the bootstrap
 // VLAN. Its failure is recorded, journaled and alerts; status and LDevID stay.

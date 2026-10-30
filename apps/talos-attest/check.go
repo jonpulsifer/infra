@@ -126,11 +126,17 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 		return protocol.Renewed{}, v.quarantine(ctx, &s.machine, s.claim, nil, err, true)
 	}
 	// The session holds the record as it stood at the start. A quarantine or
-	// another LDevID since then stands: the pass writes nothing over it.
+	// another LDevID since then stands: the pass writes nothing over it. The
+	// one quarantine a pass replaces is the one the owner lifted before the
+	// session started, still unchanged.
 	if cur, ok, err := v.Store.Record(s.machine.Name); err != nil {
 		return protocol.Renewed{}, err
-	} else if ok && (cur.Status != StatusAttested || !strings.EqualFold(cur.LDevIDSerial, s.renew.LDevIDSerial)) {
-		return unproven(fail(reasonStatus, "%s's record changed during the check; the newer record stands", s.machine.Name))
+	} else if ok {
+		same := cur.Status == StatusAttested && strings.EqualFold(cur.LDevIDSerial, s.renew.LDevIDSerial)
+		lifted := !s.lifted.IsZero() && cur.Status == StatusQuarantined && cur.UpdatedAt.Equal(s.lifted)
+		if !same && !lifted {
+			return unproven(fail(reasonStatus, "%s's record changed during the check; the newer record stands", s.machine.Name))
+		}
 	}
 	now := v.Now()
 	rec := *s.renew
