@@ -284,7 +284,7 @@ in
     };
 
     # The bootstrap VLAN reaches the device flow over TLS on the enrollment name's HTTPS server at
-    # the boot VIP (./talos-enroll.nix), whose public certificate HookOS's CA bundle trusts, and
+    # the boot VIP (./talos-boot.nix), whose public certificate HookOS's CA bundle trusts, and
     # over plain HTTP on ./talos-boot.nix's port 80, at the boot VIP and at this anchor's own
     # bootstrap address.
     services.nginx.virtualHosts =

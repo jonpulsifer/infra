@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The worker subset of a Talos secrets bundle: what a worker's config carries,
 # which is tokens, identifiers and CA certificates, never a CA private key.
-# talos-enroll renders workers from it (apps/talos-enroll/README.md), so an
+# fleet-controller renders workers from it (apps/fleet-controller/README.md), so an
 # anchor that holds only the subset cannot mint a control-plane config or a
 # talosconfig.
 #

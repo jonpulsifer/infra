@@ -19,7 +19,6 @@
     "kthx-engine-verifier",
     "switchboard",
     "talos-attest",
-    "talos-enroll",
     "tally",
     "tally-ocr",
     "tink-agent-autoid",
@@ -71,9 +70,6 @@
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
-    ],
-    "talos-enroll": [
-      "clusters/folly/apps/talos-enroll/02-deployment.yaml"
     ],
     "tally": [
       "clusters/folly/apps/tally/deployment.yaml"

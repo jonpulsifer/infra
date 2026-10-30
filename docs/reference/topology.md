@@ -9,7 +9,7 @@ Two JSON files are the single source of truth for the lab's network facts: addre
 
 | File | Holds | Keys |
 | --- | --- | --- |
-| `clusters/<site>/config/cluster-topology.json` | One cluster: its node, pod, service and load-balancer ranges, API server, gateway router, BGP ASNs and the address of each node | `CLUSTER_NAME`, `API_SERVER_*`, `ROUTER_IP`, `*_CIDR`, `LB_RANGE`, `CLUSTER_DNS`, `BGP_*_ASN`, `NODE_ADDRESSES`, and on folly `ENROLL_VIP`, the pinned address of the enrollment server's Gateway |
+| `clusters/<site>/config/cluster-topology.json` | One cluster: its node, pod, service and load-balancer ranges, API server, gateway router, BGP ASNs and the address of each node | `CLUSTER_NAME`, `API_SERVER_*`, `ROUTER_IP`, `*_CIDR`, `LB_RANGE`, `CLUSTER_DNS`, `BGP_*_ASN`, `NODE_ADDRESSES`, and on folly `ENROLL_VIP`, an address no Gateway holds, which the bootstrap firewall policies still name |
 | `clusters/folly/config/anchor-topology.json` | The folly lab: the Anchor network, `future` and bootstrap ranges, the bootstrap VLAN ID, and the addresses of lab hosts and Windows desktops | `ANCHOR_CIDR`, `FUTURE_CIDR`, `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_IP`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP` |
 
 Print the keys and values of a file with `jq .data <file>`.

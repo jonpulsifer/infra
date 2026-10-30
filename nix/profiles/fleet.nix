@@ -54,7 +54,7 @@
     # collector emits about 5 per unit, and these are small Pis.
     enabledCollectors = [ "systemd" ];
     extraFlags = [
-      "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|spore-native-boot-rackpi5|coredns|chronyd|tailscaled|ddnsd|sshd|harmonia|docker|garage|spire-server|spire-server-entries|netbox|netbox-rq|netbox-serve|postgresql|redis-netbox|talos-enroll)\\.service"
+      "--collector.systemd.unit-include=(nfs-server|nfs-mountd|rpc-statd|dnsmasq|nginx|spore-native-boot-rackpi5|coredns|chronyd|tailscaled|ddnsd|sshd|harmonia|docker|garage|spire-server|spire-server-entries|netbox|netbox-rq|netbox-serve|postgresql|redis-netbox)\\.service"
     ];
   };
 

@@ -4,7 +4,7 @@ description: A Compute Engine VM with nested virtualization that replays folly's
 status: unverified
 ---
 
-The metal dev env is one spot VM in the `homelab-ng` project, `metal-dev`, that stands in for folly's bootstrap VLAN, the three anchors and a machine in the rack. Provisioning changes to [Talos boot](nixos/talos-boot.md), [Tinkerbell](nixos/tinkerbell.md), [Talos enrollment](../apps/talos-enroll.md), [talos-attest](../apps/talos-attest.md) and the fleet controller run here first. Nothing in it is folly's: its DevID CA, Talos secrets, NetBox and Tinkerbell API are made on the VM's first boot. No virtual node has booted through it yet.
+The metal dev env is one spot VM in the `homelab-ng` project, `metal-dev`, that stands in for folly's bootstrap VLAN, the three anchors and a machine in the rack. Provisioning changes to [Talos boot](nixos/talos-boot.md), [Tinkerbell](nixos/tinkerbell.md), [talos-attest](../apps/talos-attest.md) and [fleet-controller](../apps/fleet-controller.md) run here first. Nothing in it is folly's: its DevID CA, Talos secrets, NetBox and Tinkerbell API are made on the VM's first boot. No virtual node has booted through it yet, and none can install: its controller renders no config, since it has no class inputs or worker secrets and the dev class is a control plane, which the controller refuses.
 
 ## Parts
 
@@ -13,12 +13,12 @@ The metal dev env is one spot VM in the `homelab-ng` project, `metal-dev`, that 
 | `metalbr0` | A bridge that carries `BOOTSTRAP_CIDR`. The host owns the gateway, `SPORE_BOOTSTRAP_IP` and `BOOT_VIP` on it, so the signed images' baked addresses resolve. | the VM |
 | dnsmasq and chrony | DHCP with the signed iPXE as the boot file, TFTP, DNS that answers the enrollment name with the VIP, and NTP | the VM |
 | Release mirror | Downloads the newest `talos-folly/<version>-*` release every 30 minutes and verifies each signed image against `clusters/folly/talos/secureboot/` | `/var/lib/metal-dev/talos` |
-| nginx | The boot files at port 80, the attest device flow under `/attest/`, and the enrollment name on 443 with a Let's Encrypt certificate from DNS-01 | the VM |
+| nginx | The boot files at port 80, the attest device flow under `/attest/`, and the enrollment name on 443 with a Let's Encrypt certificate from DNS-01, which answers 404 to every path | the VM |
 | libvirt, QEMU, OVMF, swtpm | Virtual nodes with a TPM 2.0 whose EK certificates chain to swtpm's local CA, and firmware in Setup Mode | the VM |
 | sushy-tools | A Redfish BMC over libvirt, one virtual node at a time, for Rufio | container, `gateway:8000` |
 | Tinkerbell | The embedded binary, as on spore, with DHCP off | the VM, API on loopback |
 | NetBox | `services.netbox`, the dev system of record | `http://metal-dev.<tailnet>:8080` |
-| talos-enroll, talos-attest, fleet-controller | The boot plane, pulled as `:latest` | containers on the host network |
+| talos-attest, fleet-controller | The boot plane, pulled as `:latest` | containers on the host network |
 
 ## Rules
 

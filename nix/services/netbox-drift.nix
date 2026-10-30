@@ -13,7 +13,7 @@ let
   secret = name: config.sops.secrets.${name}.path;
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   exported = "https://raw.githubusercontent.com/jonpulsifer/infra/main/clusters/folly/inventory/machines.yaml";
-  talosctl = pkgs.callPackage ../../apps/talos-enroll/talosctl.nix { };
+  talosctl = pkgs.callPackage ../../apps/fleet-controller/talosctl.nix { };
 
   tools = pkgs.stdenvNoCC.mkDerivation {
     name = "netbox-inventory";
@@ -90,7 +90,12 @@ let
   '';
 in
 {
-  sops.secrets."netbox/api-token" = { };
+  sops.secrets = {
+    "netbox/api-token" = { };
+    # folly's `talosctl gen secrets` bundle, the 1Password note talos-folly-secrets, under the key
+    # name it was first sealed with. It holds every cluster CA key.
+    "talos-enroll/bundle" = { };
+  };
 
   systemd.services.netbox-drift = {
     description = "Compare folly's nodes with NetBox";

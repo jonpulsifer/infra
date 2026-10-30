@@ -3,14 +3,14 @@
 # namespace (./tinkerbell.nix). A device's desired_action starts a provision Workflow; a device in
 # decommissioning is wiped and set offline. It reconciles every two minutes and when NetBox's
 # event-rule webhook posts to port 8446 on the Anchor network. HookOS's agent posts each machine's
-# facts to /intake on that port, through every anchor's enrollment server (./talos-enroll.nix).
+# facts to /intake on that port, through every anchor's enrollment name server (./talos-boot.nix).
 #
 # It also renders the config a worker's first boot from disk fetches: talos-attest posts /render
 # on the same port at the end of a full intake, and the controller writes
 # talos/<uuid>/<code>.yaml under its state directory. nginx serves it at /talos/config on the
 # enrollment name's HTTPS server here, and on a plain-HTTP port of this anchor's Anchor address
-# that the other anchors' enrollment servers pass the location to (../lib/talos-config.nix,
-# ./talos-enroll.nix). The controller follows nginx's log of the location, burns a served file and
+# that the other anchors' enrollment name servers pass the location to (../lib/talos-config.nix,
+# ./talos-boot.nix). The controller follows nginx's log of the location, burns a served file and
 # sets the device active.
 #
 # For a machine NetBox does not know, /intake makes an attest-only Workflow. The controller then
@@ -49,10 +49,12 @@ let
     "admin-key"
   ];
   fleet-controller = pkgs.callPackage ../../apps/fleet-controller/package.nix { };
-  talosctl = pkgs.callPackage ../../apps/talos-enroll/talosctl.nix { };
-  # The worker subset of the secrets bundle that ./talos-enroll.nix loads; the controller renders
-  # workers only, and refuses a control plane.
-  workerSecrets = config.sops.secrets ? "talos-enroll/worker-secrets";
+  talosctl = pkgs.callPackage ../../apps/fleet-controller/talosctl.nix { };
+  # The worker subset of folly's secrets bundle (scripts/talos-worker-secrets.sh), under the key
+  # name it was first sealed with. The controller renders workers only, and refuses a control plane.
+  workerSecrets =
+    lib.hasInfix "\ntalos-enroll:\n" secrets && lib.hasInfix "\n    worker-secrets:" secrets;
+  metricsDir = "/var/lib/prometheus-node-exporter-text-files";
 
   # A UUID and a code that match their shapes name a file; anything else names none, so nginx
   # never builds a path from a raw query argument.
@@ -188,10 +190,13 @@ in
     }
     // lib.optionalAttrs unifi {
       "fleet-controller/unifi-api-key" = { };
+    }
+    // lib.optionalAttrs workerSecrets {
+      "talos-enroll/worker-secrets" = { };
     };
 
     # NetBox on capsule posts the webhook, every anchor's talos-attest the render call and every
-    # anchor's nginx the agent's intake (./talos-enroll.nix), from the Anchor network; the other
+    # anchor's nginx the agent's intake (./talos-boot.nix), from the Anchor network; the other
     # anchors' nginx fetches /talos/config from it too.
     networking.firewall.extraCommands = ''
       iptables -A nixos-fw -i end0 -p tcp -s ${lab.cidr} --dport ${toString cfg.webhookPort} -j nixos-fw-accept
@@ -298,7 +303,7 @@ in
       }
       // lib.optionalAttrs workerSecrets {
         # Written by `mise run render-class-inputs` from the Talos root.
-        FLEET_CLASS_INPUTS = "${../../clusters/${cfg.site}/apps/talos-enroll/class-inputs.json}";
+        FLEET_CLASS_INPUTS = "${../../clusters/${cfg.site}/fleet/class-inputs.json}";
         FLEET_WORKER_SECRETS = "%d/worker-secrets";
         FLEET_TALOSCTL = lib.getExe talosctl;
       };
@@ -349,6 +354,47 @@ in
         SystemCallArchitectures = "native";
         SystemCallFilter = [ "@system-service" ];
         SystemCallErrorNumber = "EPERM";
+      };
+    };
+
+    # The controller's /metrics, for node-exporter's textfile collector (./talos-boot.nix), since
+    # its port admits only the Anchor network. A controller that does not answer leaves the file
+    # empty, so its series go absent.
+    systemd.services.fleet-controller-metrics = {
+      description = "Export fleet-controller's metrics through node-exporter";
+      serviceConfig = {
+        Type = "oneshot";
+        UMask = "0022";
+        NoNewPrivileges = true;
+        PrivateDevices = true;
+        PrivateTmp = true;
+        ProtectHome = true;
+        ProtectSystem = "strict";
+        ReadWritePaths = [ metricsDir ];
+      };
+      path = [
+        pkgs.coreutils
+        pkgs.curl
+      ];
+      script = ''
+        set -u
+        metrics=$(mktemp ${metricsDir}/.fleet-controller.XXXXXX)
+        trap 'rm -f "$metrics"' EXIT
+        curl --fail --silent --max-time 5 http://127.0.0.1:${toString cfg.webhookPort}/metrics > "$metrics" || : > "$metrics"
+        # node_exporter reads the textfile directory as its own user.
+        chmod 0644 "$metrics"
+        mv "$metrics" ${metricsDir}/fleet-controller.prom
+        trap - EXIT
+      '';
+    };
+
+    systemd.timers.fleet-controller-metrics = {
+      description = "Periodically export fleet-controller's metrics";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "2m";
+        OnUnitActiveSec = "1m";
+        Unit = "fleet-controller-metrics.service";
       };
     };
   };

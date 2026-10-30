@@ -70,7 +70,7 @@ op read "$METAL_DEV_CLOUDFLARE_REF" \
   | iap_ssh 'sudo install -m 600 -o root -g root /dev/stdin /var/lib/metal-dev/cloudflare-token && sudo systemctl restart "acme-enroll.*.service" 2>/dev/null || true'
 
 echo "mirroring the newest signed release"
-iap_ssh 'sudo systemctl start metal-dev-talos-mirror.service && systemctl is-active netbox.service metal-dev-tinkerbell.service podman-sushy.service podman-talos-enroll.service podman-talos-attest.service podman-fleet-controller.service || true'
+iap_ssh 'sudo systemctl start metal-dev-talos-mirror.service && systemctl is-active netbox.service metal-dev-tinkerbell.service podman-sushy.service podman-talos-attest.service podman-fleet-controller.service || true'
 
 host="$(tailnet_host)"
 cat <<EOF

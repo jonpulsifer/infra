@@ -26,7 +26,6 @@ on:
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
       - 'apps/talos-attest/**'
-      - 'apps/talos-enroll/**'
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/tink-agent-autoid/intake/**'
       # talos-attest's tests read these.
@@ -49,7 +48,6 @@ on:
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
       - 'apps/talos-attest/**'
-      - 'apps/talos-enroll/**'
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/tink-agent-autoid/intake/**'
       # talos-attest's tests read these.
@@ -85,7 +83,6 @@ jobs:
           - apps/netbench
           - apps/smiirl
           - apps/talos-attest
-          - apps/talos-enroll
           - images/spire-agent-tpm/devid-init
           - images/tink-agent-autoid/intake
           - packages/pkcs11signer

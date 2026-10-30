@@ -147,7 +147,7 @@ description = "Firing Alertmanager alerts on every cluster (optional substring f
 run = "bash scripts/alerts.sh"
 
 [tasks.render-class-inputs]
-description = "Write talos-enroll's per-class render inputs from the folly Talos root, with no state, and the inventory's MACs for spore's netboot links"
+description = "Write fleet-controller's per-class render inputs to clusters/folly/fleet/ from the folly Talos root, with no state, and the inventory's MACs for spore's netboot links"
 run = "bash scripts/render-class-inputs.sh"
 
 [tasks."inventory:check"]
@@ -173,18 +173,6 @@ run = "bash scripts/netbox-export.sh --check"
 [tasks."inventory:observe"]
 description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"
 run = "bash scripts/inventory.sh observe"
-
-[tasks."enroll:approve"]
-description = "Approve the Talos enrollment whose code the machine's console shows, over the tailnet (args: <code> <node>)"
-run = "bash scripts/enroll.sh approve"
-
-[tasks."enroll:deny"]
-description = "Deny a waiting Talos machine by its uuid over the tailnet (args: <uuid>)"
-run = "bash scripts/enroll.sh deny"
-
-[tasks."enroll:pending"]
-description = "List the Talos enrollments that wait for approval or for their config fetch"
-run = "bash scripts/enroll.sh pending"
 
 [tasks."metal-dev:up"]
 description = "Start the metal-dev VM in GCP, join it to the tailnet and give it the DNS-01 token (terraform/metal-dev)"

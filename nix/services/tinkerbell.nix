@@ -23,7 +23,7 @@ let
   # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
   # names /<mac>/netboot-not-allowed on spore's TFTP, so that path serves the same signed iPXE, which
   # falls back to its own menu when Smee has no script.
-  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/${site}/apps/talos-enroll/node-macs.json);
+  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/${site}/fleet/node-macs.json);
   # nginx's base for the signed HookOS UKI. Smee's default HookOS script reads it; a Hardware
   # object's netboot.ipxe.url replaces that script, so Secure Boot nodes never use it.
   osieUrl = "http://${bootstrapIp}/talos/${site}";

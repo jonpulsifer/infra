@@ -15,7 +15,7 @@ fleet-controller makes [Tinkerbell](../platform/nixos/tinkerbell.md) follow NetB
 | Intake | `http://<SPORE_IP>:8446/intake`, as `https://enroll.lolwtf.ca/fleet/intake` at the boot VIP | A new machine's HookOS, unauthenticated |
 | Render | `http://<SPORE_IP>:8446/render` | [talos-attest](talos-attest.md) on any anchor, from the Anchor network, signed with `fleet-controller/attest-secret` |
 | Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` | A node's first boot from disk, at the boot VIP |
-| Health and metrics | `http://<SPORE_IP>:8446/healthz` and `/metrics` | The Anchor network |
+| Health and metrics | `http://<SPORE_IP>:8446/healthz` and `/metrics`; spore's `fleet-controller-metrics` timer copies `/metrics` into node-exporter each minute | The Anchor network, and Prometheus through node-exporter |
 
 To run a machine, set its `desired_action` in NetBox:
 
@@ -41,7 +41,7 @@ The controller creates `Workflow <action>-<name>-<unix seconds>`, sets `desired_
 
 ## Install
 
-Installs are on: `nix/hosts/spore.nix` sets `homelab.fleetController.installs`. With the option off, no `Workflow` installs and `/render` refuses every call. A `provision` of a class whose class inputs say `worker` carries `install=true` and the class's `installer_image` in its `hardwareMap`, when the attest step runs. At the end of the intake talos-attest posts `{serial, uuid, node, class, code}` to `/render`, signed as HMAC-SHA512 hex of the body in `X-Fleet-Signature`. The controller answers 409 unless the device is `planned` or `staged`, its `last_workflow` is an unfinished `provision` run with `install=true`, its `smbios_uuid` is unset or the request's, and the code is unspent. It renders the config from the class inputs as [Talos enrollment](talos-enroll.md) does, writes `talos/<uuid>/<code>.yaml` under `/var/lib/fleet-controller`, and answers 201. The `install` action runs the installer with the code in META, and the node's first boot fetches the file by it.
+Installs are on: `nix/hosts/spore.nix` sets `homelab.fleetController.installs`. With the option off, no `Workflow` installs and `/render` refuses every call. A `provision` of a class whose class inputs say `worker` carries `install=true` and the class's `installer_image` in its `hardwareMap`, when the attest step runs. At the end of the intake talos-attest posts `{serial, uuid, node, class, code}` to `/render`, signed as HMAC-SHA512 hex of the body in `X-Fleet-Signature`. The controller answers 409 unless the device is `planned` or `staged`, its `last_workflow` is an unfinished `provision` run with `install=true`, its `smbios_uuid` is unset or the request's, and the code is unspent. It renders the config with `talosctl gen config --with-secrets` from the class's entry in `clusters/folly/fleet/class-inputs.json`, which `mise run render-class-inputs` writes from the Talos root, the worker subset of the secrets bundle in spore's sops file, and the device's name, address, install disk and TPM in NetBox. It refuses a control plane. It writes `talos/<uuid>/<code>.yaml` under `/var/lib/fleet-controller`, and answers 201. The `install` action runs the installer with the code in META, and the node's first boot fetches the file by it.
 
 nginx serves `/talos/config` on spore, and capsule and forge pass it to spore's Anchor address on port 8447 (`nix/lib/talos-config.nix`). Both Anchor-network legs, the render call and the proxied fetch, are plain HTTP. The controller reads nginx's log of the location every two seconds. A whole GET of the file's bytes deletes it and sets the device `active` with `attest_consumed_at`; a range, a HEAD or an aborted fetch deletes nothing. A served, expired or replaced code stays spent for a day, so a replayed render call is refused. A 404 for a machine with a waiting file is journaled at most every ten minutes. A file nobody fetched is deleted after two hours. Each step is an audit line, `fleet.render`, `fleet.release` or `fleet.expire`.
 
@@ -64,7 +64,7 @@ Every two minutes, and two seconds after the webhook rings, the controller lists
 | `/healthz` answers 503 | No pass succeeded within three intervals; `journalctl -u fleet-controller` on spore names the error |
 | `fleet_reconcile_errors_total` rises | A pass ended with an error; the pass still did what it could |
 | A device's journal says a run waits | The device lacks a MAC or `install_disk` in NetBox |
-| `fleet_install_files_oldest_age_seconds` rises | A rendered config waits for its node's first boot; the install or the boot failed |
+| `FleetInstallPending` fires | A rendered config has waited 30 minutes for its node's first boot; the install or the boot failed |
 | `fleet_install_unreleased` is above 0 | nginx served a config and NetBox refused the release; the device's journal says why, and the controller retries |
 | `fleet_install_renders_refused_total` rises | talos-attest asked for a render the device's state forbids; the controller's journal names the gate |
 | `fleet_intake_limited_total` rises | Machines intake faster than the rate limits allow; a flood of claims, or many boxes at once |
@@ -74,4 +74,6 @@ Every two minutes, and two seconds after the webhook rings, the controller lists
 - Source and environment: `apps/fleet-controller/`
 - spore: `nix/services/fleet-controller.nix`
 - Template and Secrets: `clusters/folly/tinkerbell/`
+- Class inputs: `clusters/folly/fleet/class-inputs.json`, and the pinned talosctl in `apps/fleet-controller/talosctl.nix`
+- Alerts: `clusters/folly/monitoring/fleet-controller-rules.yaml`
 - Image: `ghcr.io/jonpulsifer/fleet-controller`, for a boot plane that runs as containers
