@@ -180,7 +180,7 @@ func TestFailedNetBoxWriteFailsClosed(t *testing.T) {
 	if code, body := h.get("/verdict/" + simSerial); code != http.StatusOK || !strings.Contains(string(body), `"status":"quarantined"`) {
 		t.Fatalf("verdict with NetBox stale: %d %s", code, body)
 	}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("DevID with NetBox stale: %d", code)
 	}
 }
@@ -266,37 +266,38 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	}
 	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = h.hashes["rsa"] })
 
-	// A boot the TPM vouches for that breaks the policy quarantines: NetBox goes failed.
+	// A boot the TPM vouches for that breaks the policy quarantines: NetBox records
+	// the verdict, the status stays, and the anchors serve no LDevID.
 	h.tamper = func(r *protocol.EvidenceRequest) { r.EventLog = readFile(t, "testdata/optiplex-eventlog.bin") }
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonEventLog || r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("tampered boot evidence: %+v", r.Verdict)
 	}
 	h.tamper = nil
-	if d := f.settled(t, simSerial, 5); d.Status != "failed" || d.CustomFields["attest_verdict"] != "quarantined: "+reasonEventLog {
+	if d := f.settled(t, simSerial, 5); d.Status != "planned" || d.CustomFields["attest_verdict"] != "quarantined: "+reasonEventLog {
 		t.Fatalf("after the quarantine: %s %+v", d.Status, d.CustomFields)
 	}
 	if code, body := h.get("/verdict/" + simSerial); code != http.StatusOK || !strings.Contains(string(body), `"status":"quarantined"`) {
 		t.Fatalf("quarantined verdict: %d %s", code, body)
 	}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("a quarantined device's DevID answered %d", code)
 	}
 
-	// Leaving failed is the owner's: until then, no attest and no renewal.
+	// Lifting the quarantine is the owner's: until then, no attest and no renewal.
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonStatus || r.Verdict.Verdict != protocol.VerdictRefused {
-		t.Fatalf("attest while failed: %+v", r.Verdict)
+		t.Fatalf("attest while quarantined: %+v", r.Verdict)
 	}
 	rr = httptest.NewRecorder()
 	h.srv.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, protocol.PathRenew, strings.NewReader(`{"serial":"`+simSerial+`"}`)))
 	if rr.Code != http.StatusForbidden {
-		t.Fatalf("renewal while failed: %d %s", rr.Code, rr.Body.String())
+		t.Fatalf("renewal while quarantined: %d %s", rr.Code, rr.Body.String())
 	}
-	if d := f.bySerial(simSerial); d.Patches != 5 || d.Status != "failed" {
-		t.Fatalf("a refusal while failed wrote to NetBox: %d writes, %s", d.Patches, d.Status)
+	if d := f.bySerial(simSerial); d.Patches != 5 || d.Status != "planned" {
+		t.Fatalf("a refusal while quarantined wrote to NetBox: %d writes, %s", d.Patches, d.Status)
 	}
-	f.set(simSerial, func(d *fakeDevice) { d.Status = "planned" })
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["attest_verdict"] = "" })
 	if _, err := h.run(simSerial, simMAC); err != nil {
-		t.Fatalf("after the owner cleared failed: %v", err)
+		t.Fatalf("after the owner cleared the verdict: %v", err)
 	}
 	if d := f.settled(t, simSerial, 7); d.Status != "planned" || d.CustomFields["attest_verdict"] != StatusAttested {
 		t.Fatalf("after the second pass: %s %+v", d.Status, d.CustomFields)
@@ -385,7 +386,7 @@ func TestRenewalFromTheRunningNode(t *testing.T) {
 	if r := refusal(t, func() error { _, err := h.renew(simSerial); return err }()); r.Verdict.Reason != reasonPolicy {
 		t.Fatalf("renewal against the HookOS policy: %+v", r.Verdict)
 	}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("a quarantined machine's DevID answered %d", code)
 	}
 }

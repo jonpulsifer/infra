@@ -40,13 +40,13 @@ func TestReplayDoesNotUndoAQuarantine(t *testing.T) {
 		t.Fatalf("tampered boot: %+v", r.Verdict)
 	}
 	h.tamper = nil
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("DevID after the quarantine: %d", code)
 	}
 	liar := replayLiar(real)
 	defer liar.Close()
 	h.srv.Peers = []string{liar.URL}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("a replayed pass reopened the DevID: %d", code)
 	}
 	h.srv.SyncPeers(context.Background())
@@ -78,13 +78,13 @@ func TestReplayDoesNotUndoAQuarantineNetBoxWriteFailed(t *testing.T) {
 		t.Fatalf("tampered boot: %+v", r.Verdict)
 	}
 	h.tamper = nil
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("DevID after the quarantine: %d", code)
 	}
 	liar := replayLiar(real)
 	defer liar.Close()
 	h.srv.Peers = []string{liar.URL}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("a replayed pass reopened the DevID with NetBox stale: %d", code)
 	}
 	h.srv.SyncPeers(context.Background())

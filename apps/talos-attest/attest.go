@@ -132,7 +132,7 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		m = Machine{Name: intakeName(req.Machine), Serial: req.Machine.Serial, FromNetBox: true}
 	}
 	if m.blocked() {
-		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.Status))
+		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.lifecycle()))
 	}
 	if m.MAC != "" && normalMAC(req.Machine.MAC) != normalMAC(m.MAC) {
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACMismatch, "MAC %q is not %s's", req.Machine.MAC, m.Name))
@@ -347,6 +347,9 @@ func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Mach
 // recheck applies the start's rules to a device NetBox holds now: its
 // lifecycle, its MAC and its pins.
 func (v *Verifier) recheck(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK) error {
+	if m.Quarantined {
+		return v.reject(&m, claim, fail(reasonStatus, "%s is %s and gets no identity; the owner changes that in NetBox", m.Name, m.lifecycle()))
+	}
 	// First sight issues only to a planned device: an active node is never
 	// re-issued because its serial appeared during a session.
 	if !strings.EqualFold(m.Status, statusPlanned) {
@@ -856,7 +859,7 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		return protocol.RenewStart{}, fail(reasonUnknownMachine, "no machine has serial %q", serial)
 	}
 	if m.blocked() {
-		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.Status))
+		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.lifecycle()))
 	}
 	// The DevID may have come from a peer over plain HTTP: nothing in it is
 	// trusted until its certificates chain to this CA and name the machine,
@@ -977,7 +980,7 @@ func (v *Verifier) RenewAllowed(ctx context.Context, serial string) error {
 		return v.reject(nil, protocol.Machine{Serial: serial}, err)
 	}
 	if ok && m.blocked() {
-		return v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.Status))
+		return v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.lifecycle()))
 	}
 	return nil
 }

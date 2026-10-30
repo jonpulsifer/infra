@@ -25,6 +25,9 @@ type Machine struct {
 	// FromNetBox is whether NetBox answered for this machine. Only then is
 	// Status its lifecycle, and only then may a planned device skip approval.
 	FromNetBox bool
+	// Quarantined is whether NetBox's attest_verdict is a quarantine, which
+	// stands until the owner clears the verdict.
+	Quarantined bool
 }
 
 // NetBox lifecycle statuses the service acts on.
@@ -88,19 +91,31 @@ func (v *Verifier) lookupMachine(ctx context.Context, serial string) (Machine, b
 const classControlPlane = "controlplane"
 
 // controlPlane reports whether the machine's class, NetBox's talos_class
-// or the inventory's, is the control plane's. Failing such a node puts the
-// cluster's API on the bootstrap VLAN, so a failed running quote alerts and
-// leaves it in place.
+// or the inventory's, is the control plane's. Quarantining such a node would
+// revoke the identity of the node that serves the cluster's API and cordon
+// it, so a failed running quote alerts and leaves it in place.
 func (m Machine) controlPlane() bool {
 	return strings.EqualFold(strings.TrimSpace(m.Class), classControlPlane)
 }
 
-// blocked reports whether the lifecycle forbids issuing to the machine: a
-// retired one, and a failed one until the owner moves it out of failed.
+// blocked reports whether the machine may get no identity: a retired one, a
+// failed one until the owner moves it out of failed, and a quarantined one
+// until the owner clears its verdict.
 func (m Machine) blocked() bool {
+	if m.Quarantined {
+		return true
+	}
 	switch strings.ToLower(m.Status) {
 	case statusDecommissioning, statusOffline, statusFailed:
 		return true
 	}
 	return false
+}
+
+// lifecycle names what blocks the machine, for a refusal's detail.
+func (m Machine) lifecycle() string {
+	if m.Quarantined {
+		return StatusQuarantined
+	}
+	return m.Status
 }

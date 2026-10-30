@@ -243,7 +243,8 @@ func (n *NetBox) nic(ctx context.Context, deviceID int) (netboxInterface, bool, 
 }
 
 func (d netboxDevice) machine(mac string) Machine {
-	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: string(d.CustomFields.Class), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true, Pins: map[string]string{}}
+	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: string(d.CustomFields.Class), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true, Pins: map[string]string{},
+		Quarantined: strings.HasPrefix(d.CustomFields.Verdict, StatusQuarantined)}
 	if h := strings.ToLower(d.CustomFields.EKHash); h != "" {
 		m.Pins["rsa"] = h
 	}
@@ -560,8 +561,10 @@ func plain(s string) string {
 // device's custom fields before the machine gets its answer. Only a pass
 // whose session proved the EKs writes the pins, and only a pass refreshes
 // sku and bios_version. A daily check's pass writes only the verdict, its
-// time and what the quote showed for PCR 0. A quarantine fails the device; a
-// pass leaves the status alone. The journal entry follows on its own.
+// time and what the quote showed for PCR 0. A quarantine writes only its
+// verdict, which revokes the identity and which fleet-controller cordons the
+// node on; the status stays. A pass leaves the status alone too. The
+// journal entry follows on its own.
 func (n *NetBox) Record(ctx context.Context, r Record) error {
 	d, ok, err := n.device(ctx, r.Serial)
 	if err != nil {
@@ -575,8 +578,8 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 	var kind, comment string
 	switch {
 	case r.unquarantined:
-		// A control-plane node keeps its status and its identity: failing it
-		// would move the cluster's API to the bootstrap VLAN.
+		// A control-plane node keeps its identity and is not cordoned: it
+		// serves the cluster's API.
 		fields["attest_verdict"] = fmt.Sprintf("%s: %s", protocol.VerdictFailedNoQuarantine, r.CheckFailed)
 		kind, comment = "danger", fmt.Sprintf("talos-attest: failed attestation (%s) and not quarantined, since %s is a control-plane node: %s", r.CheckFailed, d.Name, plain(strings.Join(r.Detail, "; ")))
 	case r.Status == StatusAttested && r.check:
@@ -641,8 +644,7 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 		}
 	case r.Status == StatusQuarantined:
 		fields["attest_verdict"] = fmt.Sprintf("%s: %s", StatusQuarantined, r.Reason)
-		patch["status"] = statusFailed
-		kind, comment = "danger", fmt.Sprintf("talos-attest: quarantined (%s): %s", r.Reason, plain(strings.Join(r.Detail, "; ")))
+		kind, comment = "danger", fmt.Sprintf("talos-attest: quarantined (%s); the anchors serve no LDevID for it until the owner clears attest_verdict: %s", r.Reason, plain(strings.Join(r.Detail, "; ")))
 	default:
 		return fmt.Errorf("a record with status %q is not a verdict", r.Status)
 	}
@@ -710,8 +712,8 @@ func pcr0Fields(d netboxDevice, r Record, fields map[string]any) [][2]string {
 // networkFields writes where an intake pass found the machine plugged in, as
 // its AK signed it, into each network field NetBox defines. A pass without
 // a fact clears its field, so no older address or port outlives a newer
-// pass. fleet-controller dials a planned machine's AMT at the
-// address and cables it to the port.
+// pass. fleet-controller cables the machine to the port; the address is for
+// the owner.
 func networkFields(d netboxDevice, r Record, fields map[string]any) {
 	var addr, chassis, port, at any
 	if n := r.Network; n != nil {
