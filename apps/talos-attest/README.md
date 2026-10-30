@@ -194,6 +194,9 @@ without the value, and with no code it removes a code an earlier run left.
 
 An intake pass also writes the validated SMBIOS UUID to the device's
 `smbios_uuid`, once NetBox defines that field (`scripts/netbox-seed.sh`).
+Activating a credential against the EK proves a TPM 2.0, so the pass writes
+`tpm_version` `2.0` when the field is empty, which a device declared as a stub
+lacks. A value the owner set stays.
 
 ## Network facts
 

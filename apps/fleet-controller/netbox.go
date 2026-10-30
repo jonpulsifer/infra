@@ -25,20 +25,23 @@ type NetBox struct {
 
 // Device is what the controller reads from one NetBox device.
 type Device struct {
-	ID            int
-	Name          string
-	Serial        string
-	Status        string
-	Address       string
-	MAC           string
-	Disk          string
-	Class         string
-	TPM           string
-	BMCType       string
-	BMCAddress    string
-	OOBAddress    string
-	DesiredAction string
-	LastWorkflow  string
+	ID      int
+	Name    string
+	Serial  string
+	Status  string
+	Address string
+	MAC     string
+	Disk    string
+	Class   string
+	TPM     string
+	// AMT and SecureBootExpected are nil while the custom field is empty.
+	AMT                *bool
+	SecureBootExpected *bool
+	BMCType            string
+	BMCAddress         string
+	OOBAddress         string
+	DesiredAction      string
+	LastWorkflow       string
 	// SMBIOSUUID is the machine's attested SMBIOS UUID, which talos-attest
 	// writes on a pass.
 	SMBIOSUUID string
@@ -177,6 +180,15 @@ type rawDevice struct {
 	CustomFields map[string]json.RawMessage `json:"custom_fields"`
 }
 
+// boolValue reads a boolean custom field, nil when it is unset.
+func boolValue(raw json.RawMessage) *bool {
+	var b *bool
+	if json.Unmarshal(raw, &b) != nil {
+		return nil
+	}
+	return b
+}
+
 // intValue reads an integer custom field, 0 when it is unset.
 func intValue(raw json.RawMessage) int {
 	var n *int
@@ -198,20 +210,22 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	}
 	cf := func(k string) string { return selectValue(r.CustomFields[k]) }
 	d := Device{
-		ID:            r.ID,
-		Name:          r.Name,
-		Serial:        r.Serial,
-		Status:        selectValue(r.Status),
-		Disk:          cf("install_disk"),
-		Class:         cf("talos_class"),
-		TPM:           cf("tpm_version"),
-		BMCType:       cf("bmc_type"),
-		DesiredAction: cf("desired_action"),
-		LastWorkflow:  cf("last_workflow"),
-		SMBIOSUUID:    strings.ToLower(cf("smbios_uuid")),
-		Verdict:       cf("attest_verdict"),
-		Description:   r.Description,
-		ExpectedPort:  intValue(r.CustomFields["expected_port"]),
+		ID:                 r.ID,
+		Name:               r.Name,
+		Serial:             r.Serial,
+		Status:             selectValue(r.Status),
+		Disk:               cf("install_disk"),
+		Class:              cf("talos_class"),
+		TPM:                cf("tpm_version"),
+		BMCType:            cf("bmc_type"),
+		DesiredAction:      cf("desired_action"),
+		LastWorkflow:       cf("last_workflow"),
+		SMBIOSUUID:         strings.ToLower(cf("smbios_uuid")),
+		Verdict:            cf("attest_verdict"),
+		Description:        r.Description,
+		ExpectedPort:       intValue(r.CustomFields["expected_port"]),
+		AMT:                boolValue(r.CustomFields["amt"]),
+		SecureBootExpected: boolValue(r.CustomFields["secure_boot_expected"]),
 	}
 	if r.DeviceType != nil {
 		d.Model = r.DeviceType.Model

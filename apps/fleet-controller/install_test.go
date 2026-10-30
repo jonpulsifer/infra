@@ -826,3 +826,32 @@ func TestLoadInstallerGatesControlPlanes(t *testing.T) {
 		t.Fatal("a worker subset loaded as the bundle")
 	}
 }
+
+func TestRenderRefusesATPMModelWithoutTPMVersion(t *testing.T) {
+	models := map[string]Model{"HP EliteDesk 800 G5 Desktop Mini": DefaultModels["HP EliteDesk 800 G5 Desktop Mini"]}
+	for _, c := range []struct {
+		name   string
+		tpm    any
+		models map[string]Model
+		want   int
+	}{
+		{name: "empty tpm_version", tpm: nil, models: models, want: 409},
+		{name: "recorded tpm_version", tpm: "2.0", models: models, want: 201},
+		{name: "class without a TPM model", tpm: nil, models: map[string]Model{"x": {Class: "worker-g5"}}, want: 201},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			it := newInstallTest(t, "staged", map[string]any{"tpm_version": c.tpm})
+			it.in.Models = c.models
+			code, reason := it.post(t, goodRequest(), testSecret)
+			if code != c.want {
+				t.Fatalf("answered %d (%s), want %d", code, reason, c.want)
+			}
+			if _, err := os.Stat(it.cfgPath(testCode)); (c.want == 201) != (err == nil) {
+				t.Fatalf("config exists: %v", err == nil)
+			}
+			if c.want == 409 && it.rend.calls != 0 {
+				t.Fatal("the renderer ran")
+			}
+		})
+	}
+}

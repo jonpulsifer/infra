@@ -44,6 +44,9 @@ type Installer struct {
 	// secrets bundle the renderer holds. Off, a control plane is refused
 	// and the owner renders it.
 	ControlPlanes bool
+	// Models is the model map: a class whose model says TPM 2.0 renders
+	// only for a device that records it.
+	Models map[string]Model
 	// ControlPlaneTTL replaces TTL for a control plane's config, which
 	// carries the cluster's CA keys.
 	ControlPlaneTTL time.Duration
@@ -208,6 +211,9 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 			return d, conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
 		}
 	}
+	if d.TPM == "" && i.classHasTPM(d.Class) {
+		return d, conflict("%s has no tpm_version, and its model carries a TPM 2.0; it renders once talos-attest records it", d.Name)
+	}
 	if err := i.prepare(ctx); err != nil {
 		return d, unavailable("the renderer: %v", err)
 	}
@@ -230,6 +236,16 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 		log.Printf("journal the render of %s: %v", d.Name, err)
 	}
 	return d, nil
+}
+
+// classHasTPM says whether a model of the class carries a TPM 2.0.
+func (i *Installer) classHasTPM(class string) bool {
+	for _, m := range i.Models {
+		if m.Class == class && m.TPM == "2.0" {
+			return true
+		}
+	}
+	return false
 }
 
 func (i *Installer) prepare(ctx context.Context) error {
