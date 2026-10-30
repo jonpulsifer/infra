@@ -102,7 +102,7 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| `oidc-discovery-provider` | Publishes the keys that check JWT-SVIDs, as the issuer `https://spire.lolwtf.ca` | A pod in `spire-oidc` on a labelled node |
+| `oidc-discovery-provider` | Publishes the keys that check JWT-SVIDs, as the issuer `https://spire.lolwtf.ca` | Two pods in `spire-oidc`, each on a different labelled node |
 | folly Cloudflare Tunnel | Serves `/.well-known/openid-configuration` and `/keys` on `spire.lolwtf.ca`, and no other path | Cloudflare, to the provider's Service |
 | `fml-pool` provider `spire` | Trades a JWT-SVID for a GCP token whose subject is the SPIFFE ID | GCP |
 
