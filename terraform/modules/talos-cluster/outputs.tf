@@ -40,11 +40,16 @@ output "install_inputs" {
 # documents and the secrets: fleet-controller renders a node of a class
 # from these, in this order, with the node document between the cluster
 # patches and the class's own. The node document it renders (hostname,
-# install target, certSANs, labels) mirrors node_docs in patches.tf, and the
+# install target, certSANs, labels, static address) mirrors node_docs in patches.tf, and the
 # parity check above holds the two together.
 output "render_inputs" {
-  description = "cluster_name, cluster_endpoint, talos_contract, kubernetes_version, dns_zone, the cluster and control-plane patch lists in order, the TPM node patches of a fresh install, and the TPM node label."
+  description = "cluster_name, cluster_endpoint, talos_contract, kubernetes_version, dns_zone, the cluster and control-plane patch lists in order, the TPM node patches of a fresh install, the TPM node label, and the link, prefix length and gateway of a static address (null without static_addresses)."
   value = {
+    node_network = var.static_addresses ? {
+      link          = local.node_link
+      prefix_length = local.node_prefix_length
+      gateway       = local.topology.ROUTER_IP
+    } : null
     cluster_name         = local.topology.CLUSTER_NAME
     cluster_endpoint     = local.cluster_endpoint
     talos_contract       = var.talos_contract

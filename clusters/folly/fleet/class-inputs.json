@@ -6,7 +6,7 @@
     "cluster_endpoint": "https://folly.lolwtf.ca:6443",
     "cluster_name": "folly",
     "config_patches": [
-      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n",
+      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n\"nameservers\":\n- \"address\": \"10.2.0.53\"\n- \"address\": \"10.2.0.54\"\n\"searchDomains\":\n  \"domains\":\n  - \"lolwtf.ca\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"LinkAliasConfig\"\n\"name\": \"net0\"\n\"selector\":\n  \"match\": \"true\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SysctlConfig\"\n\"params\":\n  \"fs.inotify.max_user_watches\": \"524288\"\n  \"user.max_user_namespaces\": \"11255\"\n  \"vm.max_map_count\": \"1048576\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"defaultRuntimeSeccompProfileEnabled\": true\n\"kind\": \"KubeletConfig\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"filesystem\":\n  \"type\": \"xfs\"\n\"kind\": \"UserVolumeConfig\"\n\"name\": \"data\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"grow\": true\n  \"minSize\": \"100GiB\"\n",
@@ -24,6 +24,11 @@
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "controlplane",
+    "node_network": {
+      "gateway": "10.3.0.1",
+      "link": "net0",
+      "prefix_length": 26
+    },
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -41,7 +46,7 @@
     "cluster_endpoint": "https://folly.lolwtf.ca:6443",
     "cluster_name": "folly",
     "config_patches": [
-      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n",
+      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n\"nameservers\":\n- \"address\": \"10.2.0.53\"\n- \"address\": \"10.2.0.54\"\n\"searchDomains\":\n  \"domains\":\n  - \"lolwtf.ca\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"LinkAliasConfig\"\n\"name\": \"net0\"\n\"selector\":\n  \"match\": \"true\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SysctlConfig\"\n\"params\":\n  \"fs.inotify.max_user_watches\": \"524288\"\n  \"user.max_user_namespaces\": \"11255\"\n  \"vm.max_map_count\": \"1048576\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"defaultRuntimeSeccompProfileEnabled\": true\n\"kind\": \"KubeletConfig\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"filesystem\":\n  \"type\": \"xfs\"\n\"kind\": \"UserVolumeConfig\"\n\"name\": \"data\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"grow\": true\n  \"minSize\": \"100GiB\"\n",
@@ -53,6 +58,11 @@
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "worker",
+    "node_network": {
+      "gateway": "10.3.0.1",
+      "link": "net0",
+      "prefix_length": 26
+    },
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -70,7 +80,7 @@
     "cluster_endpoint": "https://folly.lolwtf.ca:6443",
     "cluster_name": "folly",
     "config_patches": [
-      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n",
+      "\"$patch\": \"delete\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeFlannelCNIConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeNetworkConfig\"\n\"podSubnets\":\n- \"10.100.0.0/20\"\n\"serviceSubnets\":\n- \"10.10.0.0/16\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"clusterDNS\":\n- \"10.10.0.254\"\n\"kind\": \"KubeletConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SecurityProfileConfig\"\n\"workloadIsolation\": true\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"hostDNS\":\n  \"enabled\": true\n  \"forwardKubeDNSToHost\": false\n\"kind\": \"ResolverConfig\"\n\"nameservers\":\n- \"address\": \"10.2.0.53\"\n- \"address\": \"10.2.0.54\"\n\"searchDomains\":\n  \"domains\":\n  - \"lolwtf.ca\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"LinkAliasConfig\"\n\"name\": \"net0\"\n\"selector\":\n  \"match\": \"true\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"SysctlConfig\"\n\"params\":\n  \"fs.inotify.max_user_watches\": \"524288\"\n  \"user.max_user_namespaces\": \"11255\"\n  \"vm.max_map_count\": \"1048576\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"defaultRuntimeSeccompProfileEnabled\": true\n\"kind\": \"KubeletConfig\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"filesystem\":\n  \"type\": \"xfs\"\n\"kind\": \"UserVolumeConfig\"\n\"name\": \"data\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"grow\": true\n  \"minSize\": \"100GiB\"\n",
@@ -82,6 +92,11 @@
     "kubernetes_version": "v1.36.3",
     "labels": {},
     "machine_type": "worker",
+    "node_network": {
+      "gateway": "10.3.0.1",
+      "link": "net0",
+      "prefix_length": 26
+    },
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"

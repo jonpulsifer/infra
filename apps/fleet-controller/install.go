@@ -217,7 +217,7 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if err := i.prepare(ctx); err != nil {
 		return d, unavailable("the renderer: %v", err)
 	}
-	cfg, err := i.Renderer.Render(ctx, Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM})
+	cfg, err := i.Renderer.Render(ctx, Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address})
 	if err != nil {
 		return d, unavailable("render %s: %v", d.Name, err)
 	}
