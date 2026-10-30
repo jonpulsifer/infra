@@ -26,7 +26,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
    Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows.
 
 2. If talos-attest admits serials no stub names, `--serial` is optional: a class-only stub names the next machine. Open its window if needed: `mise run fleet:intake open 2h`.
-3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9.
+3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9. On this port the installed Talos boots and fetches its config, then stalls with DNS i/o timeouts, because its resolvers are on the Anchor network, which the bootstrap VLAN cannot reach. The move to the rack port is the fix, and the node joins after it.
 
    Result: the controller creates `Hardware <mac>` and an attest-only `Workflow intake-<mac>-<unix seconds>`.
 
