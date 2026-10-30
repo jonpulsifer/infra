@@ -18,6 +18,7 @@ folly := {
 		"CLUSTER_DNS": "10.10.0.254",
 		"CILIUM_NATIVE_ROUTING_CIDR": "10.0.0.0/9",
 		"LB_RANGE": "10.3.0.64/26",
+		"K8S_DHCP_CIDR": "10.3.0.48/28",
 		"BGP_GATEWAY_ASN": "64512",
 		"BGP_CILIUM_ASN": "64513",
 	},
@@ -71,6 +72,24 @@ test_accepted_topology_configmaps_satisfy_the_contract if {
 test_comma_separated_dns_list_satisfies_the_contract if {
 	multiple_dns := with_fact(folly, "CLUSTER_DNS", "10.10.0.254,10.10.0.253")
 	count(deny) == 0 with input as [wrap(multiple_dns, "multiple-dns.json")]
+}
+
+test_folly_requires_a_dhcp_cidr if {
+	"folly.json: K8S_DHCP_CIDR is required on folly" in deny with input as [wrap(without_fact(folly, "K8S_DHCP_CIDR"), "folly.json")]
+}
+
+test_dhcp_cidr_must_be_canonical if {
+	"folly.json: K8S_DHCP_CIDR must be a canonical IPv4 CIDR" in deny with input as [wrap(with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.49/28"), "folly.json")]
+}
+
+test_dhcp_cidr_must_be_inside_the_node_cidr if {
+	"folly.json: K8S_DHCP_CIDR must be inside K8S_NODE_CIDR" in deny with input as [wrap(with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.64/28"), "folly.json")]
+}
+
+test_dhcp_cidr_must_not_hold_the_gateway_or_the_api_server if {
+	low := with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.0/28")
+	"folly.json: K8S_DHCP_CIDR must not contain ROUTER_IP" in deny with input as [wrap(low, "folly.json")]
+	"folly.json: K8S_DHCP_CIDR must not contain API_SERVER_IP" in deny with input as [wrap(low, "folly.json")]
 }
 
 test_trailing_comma_dns_is_denied_with_local_diagnostic if {

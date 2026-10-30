@@ -43,13 +43,15 @@ resource "terraform_data" "install" {
 
   lifecycle {
     # A static address outside the node prefix, or with no resolver, would
-    # cut the node off at its next apply.
+    # cut the node off at its next apply, and one in the DHCP pool would
+    # collide with a netbooting machine's lease.
     precondition {
       condition = !var.static_addresses || (
         length(var.nameservers) > 0 &&
-        cidrhost("${each.value.address}/${local.node_prefix_length}", 0) == cidrhost(local.topology.K8S_NODE_CIDR, 0)
+        cidrhost("${each.value.address}/${local.node_prefix_length}", 0) == cidrhost(local.topology.K8S_NODE_CIDR, 0) &&
+        try(cidrhost("${each.value.address}/${split("/", local.topology.K8S_DHCP_CIDR)[1]}", 0) != cidrhost(local.topology.K8S_DHCP_CIDR, 0), true)
       )
-      error_message = "With static_addresses, every node's address must be in K8S_NODE_CIDR and nameservers must name a resolver."
+      error_message = "With static_addresses, every node's address must be in K8S_NODE_CIDR and outside K8S_DHCP_CIDR, and nameservers must name a resolver."
     }
   }
 }
