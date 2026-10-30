@@ -19,6 +19,7 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
+      - 'apps/fleet-controller/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
@@ -41,6 +42,7 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
+      - 'apps/fleet-controller/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
@@ -76,6 +78,7 @@ jobs:
           - apps/bosun
           - apps/ddnsd
           - apps/flameboss
+          - apps/fleet-controller
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki
