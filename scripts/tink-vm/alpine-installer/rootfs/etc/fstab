@@ -1,0 +1,2 @@
+LABEL=alpine-root	/	ext4	rw,relatime	0 1
+LABEL=ALPINE-ESP	/boot/efi	vfat	rw,umask=0077	0 2

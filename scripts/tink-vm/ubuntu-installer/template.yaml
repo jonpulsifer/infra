@@ -1,0 +1,182 @@
+# Spike, not applied anywhere: the provision Template for a class whose OS is Ubuntu. It is
+# clusters/folly/tinkerbell/template.yaml with three changes. install runs INSTALLER_IMAGE, an
+# image that holds a verified Ubuntu cloud image (./Dockerfile): its entrypoint writes the image to
+# the disk, writes the NoCloud seed (the Hardware's hostname and the node's payload, its
+# user-data) over the root and adds an Ubuntu boot entry for shim. next-boot prefers that entry.
+# Where the Talos install gives the installer the install code, this one needs the code to exist,
+# since wipe-disk's gate is the code, and reads the payload tarball that the attest step would
+# fetch with the node's LDevID (decision 1); in the spike both are put in /worker/fleet by hand.
+# wipe-disk and reboot are the provision Template's, unchanged; next-boot differs in the entry it
+# prefers.
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Template
+metadata:
+  name: provision-ubuntu
+spec:
+  data: |
+    version: "0.1"
+    name: provision-ubuntu
+    global_timeout: 1800
+    tasks:
+      - name: provision-ubuntu
+        worker: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+        volumes:
+          - /dev:/dev
+        environment:
+          DISK: "{{ index .Hardware.Disks 0 }}"
+          MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+          ATTEST: '{{ or (index . "attest") "true" }}'
+          WIPE: "{{ .wipe }}"
+          RETIRE: "{{ .retire }}"
+          # Tinkerbell renders with missingkey=error, so a Workflow from a controller that sets no
+          # install keys reads them as no install.
+          INSTALL: '{{ or (index . "install") "false" }}'
+          INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          INSTALL_CODE_FILE: /tmp/fleet/install_code
+          ATTESTED_FILE: /tmp/fleet/attested
+          PAYLOAD_FILE: /tmp/fleet/payload.tar.gz
+          NODE_HOSTNAME: "{{ (index .Hardware.Interfaces 0).DHCP.Hostname }}"
+        actions:
+          - name: wipe-disk
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 600
+            volumes:
+              - /worker/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
+                # A run that attests fails when this boot's attestation did, before it wipes
+                # anything, and the install code gates the wipe of a run that installs, so a
+                # refused machine keeps its disk.
+                if [ "$ATTEST" = true ] && [ ! -e "$ATTESTED_FILE" ]; then
+                  log "this boot did not pass attestation; nothing wiped"
+                  exit 1
+                fi
+                if [ "$WIPE" != true ]; then
+                  log "nothing wiped this run"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ] && [ ! -s "$INSTALL_CODE_FILE" ]; then
+                  log "no install code; nothing wiped"
+                  exit 1
+                fi
+                [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
+                log "wiping every partition of $DISK"
+                for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                  wipefs --all --force "$p"
+                  dd if=/dev/zero of="$p" bs=1M count=16 conv=fsync 2>/dev/null || true
+                done
+                wipefs --all --force "$DISK"
+                sgdisk --zap-all "$DISK"
+                dd if=/dev/zero of="$DISK" bs=1M count=1 conv=fsync
+                dd if=/dev/zero of="$DISK" bs=512 count=2048 conv=fsync seek=$(( $(blockdev --getsz "$DISK") - 2048 ))
+                blockdev --rereadpt "$DISK" || true
+                if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
+                log "wiped $DISK"
+          # The installer image holds the cloud image; its entrypoint is the whole install. Its
+          # output goes to the console too, since Tinkerbell keeps no action log.
+          - name: install
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 900
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+              - /worker/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "install: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "install: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$INSTALL" != true ]; then
+                  log "nothing installed this run"
+                  exit 0
+                fi
+                if [ ! -s "$INSTALL_CODE_FILE" ]; then
+                  log "no install code: the boot's attestation got none (no intake pass, or fleetd refused the render)"
+                  exit 1
+                fi
+                if [ ! -s "$PAYLOAD_FILE" ]; then
+                  log "no payload: the attest step fetched none"
+                  exit 1
+                fi
+                log "installing $INSTALLER_IMAGE to $DISK"
+                if docker run --rm --privileged --network none \
+                  --volume /dev:/dev \
+                  --volume /worker/fleet:/tmp/fleet:ro \
+                  --mount type=volume,dst=/sys/firmware/efi/efivars,volume-driver=local,volume-opt=type=efivarfs,volume-opt=device=efivarfs,volume-nocopy=true \
+                  --env DISK="$DISK" --env PAYLOAD="$PAYLOAD_FILE" --env NODE_HOSTNAME="$NODE_HOSTNAME" \
+                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1; then
+                  tail -n 5 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                else
+                  tail -n 25 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                  log "the installer failed; the lines above are its last output"
+                  exit 1
+                fi
+          # After an install the disk boots, preferring the installer's Ubuntu entry; after a wipe
+          # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
+          # each certain. A run that only attests leaves the firmware's boot order alone.
+          - name: next-boot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 120
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
+                # BootNext is a convenience: with netboot off for the node, a refused PXE falls
+                # through to the installed disk anyway, so an EFI failure here is logged, not fatal.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  log "efivarfs did not mount ($err); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if ! entries=$(efibootmgr -v 2>&1); then
+                  log "efibootmgr failed ($entries); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ]; then
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Ubuntu.*/\1/p' | head -n 1)
+                  [ -n "$n" ] || n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
+                  what="the installed disk"
+                elif [ "$WIPE" = true ]; then
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  what="IPv4 network"
+                else
+                  log "nothing installed or wiped; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ -z "$n" ]; then
+                  log "no entry for $what; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if err=$(efibootmgr -q -n "$n" 2>&1); then
+                  log "Boot$n ($what) is the next boot"
+                else
+                  log "BootNext refused ($err); the firmware's boot order decides the next boot"
+                fi
+          # A retired node powers off instead, and stays off until somebody turns it on.
+          - name: reboot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 120
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                key=b; what="rebooting"
+                if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
+                # A detached container reboots or powers off the node after this action reports success.
+                docker run -d --privileged --name provision-reboot \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f \
+                  sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
+                for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done
