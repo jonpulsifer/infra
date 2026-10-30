@@ -1,0 +1,322 @@
+package client
+
+import (
+	"bytes"
+	"context"
+	"crypto"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/google/go-tpm/legacy/tpm2"
+	"github.com/google/go-tpm/tpmutil"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
+)
+
+// RenewConfig is one renewal's inputs.
+type RenewConfig struct {
+	// BaseURL is the attest service's DevID listener, which serves the
+	// LDevID lookup and the renewal routes.
+	BaseURL string
+	HTTP    *http.Client
+	Serial  string
+	// EventLog is the running boot's TCG event log.
+	EventLog []byte
+	// Roots are the issuing DevID CAs. A renewed certificate must chain to
+	// one of them, since the routes are plain HTTP.
+	Roots *x509.CertPool
+	// RenewBefore is how long before the LDevID's expiry a renewal is due.
+	RenewBefore time.Duration
+	// Check runs the daily check when no renewal is due: the same evidence
+	// on the same routes, judged by the same policy, and no new certificate.
+	Check bool
+	// BIOS is the SMBIOS BIOS version, under which the service records PCR 0.
+	BIOS string
+	// PCRs to quote in the SHA-256 bank.
+	PCRs []int
+	Now  func() time.Time
+	Logf func(format string, args ...any)
+}
+
+// RenewResult is what a renewal leaves.
+type RenewResult struct {
+	// Renewed is false when no renewal was due.
+	Renewed bool
+	// Checked is whether the daily check ran and passed instead, and
+	// AttestedAt the pass the service recorded.
+	Checked    bool
+	AttestedAt time.Time
+	// NotAfter is the expiry of the LDevID now in NV.
+	NotAfter time.Time
+}
+
+// ErrNoLDevID means the TPM holds neither an LDevID nor a LAK certificate in
+// NV, so the node has nothing to renew until an intake stores them.
+var ErrNoLDevID = errors.New("no LDevID or LAK certificate in NV")
+
+// ErrCheckUnsupported means the service did not open the daily check it was
+// asked for, as one that predates it does. No evidence went to it, since it
+// would have issued new certificates instead.
+var ErrCheckUnsupported = errors.New("the attest service does not serve the daily check")
+
+// Renew asks the service to certify the node's LDevID key again when the
+// LDevID in NV expires within cfg.RenewBefore, or is gone while the LAK is
+// there. It signs the boot evidence with the LAK, whose blobs, like the
+// LDevID's, it reads from the service's LDevID lookup and loads under the SRK,
+// checks the answer against cfg.Roots, and stores the new certificates in NV.
+// With cfg.Check, a run with no renewal due sends the same evidence as the
+// daily check, and NV is left alone.
+func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult, error) {
+	logf := cfg.Logf
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	if cfg.Now == nil {
+		cfg.Now = time.Now
+	}
+	if len(cfg.PCRs) == 0 {
+		cfg.PCRs = []int{0, 1, 2, 3, 4, 5, 6, 7}
+	}
+	if cfg.Roots == nil {
+		return nil, errors.New("no DevID CAs to check a renewed certificate against")
+	}
+
+	ldevid, err := readNVCert(rw, protocol.NVLDevIDCert, logf)
+	if err != nil {
+		return nil, err
+	}
+	lak, err := readNVCert(rw, protocol.NVLAKCert, logf)
+	if err != nil {
+		return nil, err
+	}
+	check := false
+	switch {
+	case ldevid == nil && lak == nil:
+		return nil, ErrNoLDevID
+	case ldevid == nil:
+		logf("NV %#x holds no LDevID but NV %#x holds the LAK: renewing", protocol.NVLDevIDCert, protocol.NVLAKCert)
+	default:
+		if left := ldevid.NotAfter.Sub(cfg.Now()); left > cfg.RenewBefore {
+			if !cfg.Check {
+				logf("LDevID %x expires %s, in %s: not due", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339), left.Round(time.Hour))
+				return &RenewResult{NotAfter: ldevid.NotAfter}, nil
+			}
+			logf("LDevID %x expires %s, in %s: not due; checking", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339), left.Round(time.Hour))
+			check = true
+		} else {
+			logf("LDevID %x expires %s: renewing", ldevid.SerialNumber, ldevid.NotAfter.Format(time.RFC3339))
+		}
+	}
+
+	hc := Config{BaseURL: cfg.BaseURL, HTTP: cfg.HTTP}
+	var devid protocol.DevID
+	if err := get(ctx, hc, strings.Replace(protocol.PathDevID, "{serial}", url.PathEscape(cfg.Serial), 1), &devid); err != nil {
+		return nil, fmt.Errorf("LDevID lookup: %w", err)
+	}
+	akKey, err := blobKey(devid.AKPublic)
+	if err != nil {
+		return nil, fmt.Errorf("the service's AK blob: %w", err)
+	}
+	ldKey, err := blobKey(devid.LDevIDPublic)
+	if err != nil {
+		return nil, fmt.Errorf("the service's LDevID blob: %w", err)
+	}
+	if lak != nil && !sameKey(akKey, lak.PublicKey) {
+		return nil, errors.New("the service's AK blob is not the LAK in NV")
+	}
+	if ldevid != nil && !sameKey(ldKey, ldevid.PublicKey) {
+		return nil, errors.New("the service's LDevID blob is not the LDevID in NV")
+	}
+
+	var started protocol.RenewStart
+	if err := post(ctx, hc, protocol.PathRenew, protocol.RenewRequest{Serial: cfg.Serial, Check: check}, &started); err != nil {
+		return nil, err
+	}
+	if check && !started.Check {
+		return nil, ErrCheckUnsupported
+	}
+	logf("renewal session %s (check %t)", started.Session, check)
+
+	evidence, err := renewEvidence(rw, devid, started.Nonce, cfg.PCRs)
+	if err != nil {
+		return nil, err
+	}
+	evidence.EventLog = cfg.EventLog
+	evidence.BIOS = cfg.BIOS
+	var renewed protocol.Renewed
+	if err := post(ctx, hc, strings.Replace(protocol.PathRenewEvidence, "{session}", started.Session, 1), evidence, &renewed); err != nil {
+		return nil, err
+	}
+	if check {
+		if !renewed.Checked {
+			return nil, errors.New("the service answered the check without a verdict")
+		}
+		return &RenewResult{Checked: true, AttestedAt: renewed.AttestedAt, NotAfter: ldevid.NotAfter}, nil
+	}
+
+	now := cfg.Now()
+	next, err := verifyLeaf(renewed.LDevIDCert, ldKey, devid.Machine, cfg.Serial, cfg.Roots, now)
+	if err != nil {
+		return nil, fmt.Errorf("renewed LDevID: %w", err)
+	}
+	if ldevid != nil && !next.NotAfter.After(ldevid.NotAfter) {
+		return nil, fmt.Errorf("renewed LDevID expires %s, no later than the one in NV", next.NotAfter.Format(time.RFC3339))
+	}
+	var nextLAK *x509.Certificate
+	if renewed.LAKCert != "" {
+		if nextLAK, err = verifyLeaf(renewed.LAKCert, akKey, devid.Machine, cfg.Serial, cfg.Roots, now); err != nil {
+			return nil, fmt.Errorf("renewed LAK: %w", err)
+		}
+	}
+
+	// The LAK goes first. A failed write of either leaves the old LDevID, or
+	// none, in NV, so the next run finds the renewal still due and the LAK
+	// still there to sign it.
+	if nextLAK != nil {
+		if err := writeNV(rw, protocol.NVLAKCert, nextLAK.Raw); err != nil {
+			return nil, fmt.Errorf("store the LAK at NV %#x: %w", protocol.NVLAKCert, err)
+		}
+		logf("LAK %x stored at NV %#x", nextLAK.SerialNumber, protocol.NVLAKCert)
+	}
+	if err := writeNV(rw, protocol.NVLDevIDCert, next.Raw); err != nil {
+		return nil, fmt.Errorf("store the LDevID at NV %#x: %w", protocol.NVLDevIDCert, err)
+	}
+	logf("LDevID %x stored at NV %#x, expires %s", next.SerialNumber, protocol.NVLDevIDCert, next.NotAfter.Format(time.RFC3339))
+	return &RenewResult{Renewed: true, NotAfter: next.NotAfter}, nil
+}
+
+// renewEvidence loads the LAK and the LDevID key from their blobs, quotes the
+// PCRs with the LAK and certifies the LDevID key with it, both qualified by
+// the nonce.
+func renewEvidence(rw io.ReadWriter, devid protocol.DevID, nonce []byte, pcrs []int) (protocol.RenewEvidence, error) {
+	var out protocol.RenewEvidence
+	srk, _, err := tpm2.CreatePrimary(rw, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", SRKTemplate)
+	if err != nil {
+		return out, fmt.Errorf("create SRK: %w", err)
+	}
+	ak, _, err := tpm2.Load(rw, srk, "", devid.AKPublic, devid.AKPrivate)
+	if err != nil {
+		_ = tpm2.FlushContext(rw, srk)
+		return out, fmt.Errorf("load the LAK: %w", err)
+	}
+	defer tpm2.FlushContext(rw, ak)
+	ld, _, err := tpm2.Load(rw, srk, "", devid.LDevIDPublic, devid.LDevIDPrivate)
+	_ = tpm2.FlushContext(rw, srk)
+	if err != nil {
+		return out, fmt.Errorf("load the LDevID key: %w", err)
+	}
+	defer tpm2.FlushContext(rw, ld)
+
+	quote, sig, err := tpm2.Quote(rw, ak, "", "", nonce, tpm2.PCRSelection{Hash: tpm2.AlgSHA256, PCRs: pcrs}, tpm2.AlgNull)
+	if err != nil {
+		return out, fmt.Errorf("quote: %w", err)
+	}
+	rawSig, err := sig.Encode()
+	if err != nil {
+		return out, err
+	}
+	out.Quote = protocol.Quote{Quote: quote, Signature: rawSig}
+	values, err := readPCRs(rw, pcrs)
+	if err != nil {
+		return out, err
+	}
+	for _, i := range pcrs {
+		out.PCRs = append(out.PCRs, protocol.PCR{Index: i, Digest: values[i]})
+	}
+	attest, certSig, err := tpm2.CertifyEx(rw, "", "", ld, ak, nonce, *AKTemplate.ECCParameters.Sign)
+	if err != nil {
+		return out, fmt.Errorf("certify the LDevID key: %w", err)
+	}
+	out.LDevID = protocol.Certified{Public: devid.LDevIDPublic, Attestation: attest, Signature: certSig}
+	return out, nil
+}
+
+// readNVCert reads the DER certificate at an NV index. It answers nil when
+// the index is not defined, or holds no certificate, as an interrupted write
+// leaves it; any other TPM error is an error.
+func readNVCert(rw io.ReadWriter, index uint32, logf func(string, ...any)) (*x509.Certificate, error) {
+	if _, err := tpm2.NVReadPublic(rw, tpmutil.Handle(index)); err != nil {
+		var he tpm2.HandleError
+		if errors.As(err, &he) && he.Code == tpm2.RCHandle {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read the public area of NV %#x: %w", index, err)
+	}
+	b, err := readNV(rw, tpmutil.Handle(index))
+	if err != nil {
+		return nil, fmt.Errorf("read NV %#x: %w", index, err)
+	}
+	cert, err := x509.ParseCertificate(trimDER(b))
+	if err != nil {
+		logf("NV %#x holds no certificate (%v); treating it as empty", index, err)
+		return nil, nil
+	}
+	return cert, nil
+}
+
+// blobKey is the public key of a TPMT_PUBLIC blob.
+func blobKey(blob []byte) (crypto.PublicKey, error) {
+	pub, err := tpm2.DecodePublic(blob)
+	if err != nil {
+		return nil, err
+	}
+	return pub.Key()
+}
+
+func sameKey(a, b crypto.PublicKey) bool {
+	x, errA := x509.MarshalPKIXPublicKey(a)
+	y, errB := x509.MarshalPKIXPublicKey(b)
+	return errA == nil && errB == nil && bytes.Equal(x, y)
+}
+
+// verifyLeaf parses the first certificate of a PEM chain and checks that it
+// chains to roots, is valid at now, certifies want, and names this machine
+// and serial.
+func verifyLeaf(chain string, want crypto.PublicKey, machine, serial string, roots *x509.CertPool, now time.Time) (*x509.Certificate, error) {
+	block, _ := pem.Decode([]byte(chain))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return nil, errors.New("no PEM certificate")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := cert.Verify(x509.VerifyOptions{Roots: roots, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); err != nil {
+		return nil, fmt.Errorf("not from a pinned DevID CA: %w", err)
+	}
+	if !sameKey(cert.PublicKey, want) {
+		return nil, errors.New("it certifies another key")
+	}
+	if cert.Subject.CommonName != machine || cert.Subject.SerialNumber != serial {
+		return nil, fmt.Errorf("it names %q serial %q, not %q serial %q", cert.Subject.CommonName, cert.Subject.SerialNumber, machine, serial)
+	}
+	return cert, nil
+}
+
+func get(ctx context.Context, cfg Config, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(cfg.BaseURL, "/")+path, nil)
+	if err != nil {
+		return err
+	}
+	client := cfg.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET %s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out)
+}
