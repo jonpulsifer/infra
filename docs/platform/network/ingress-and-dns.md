@@ -7,11 +7,11 @@ Ingress gives a cluster service a Gateway address, a Cloudflare DNS name from ex
 
 ## Private names
 
-An app attaches an HTTPRoute to its cluster's shared `cluster-gateway`, or declares its own Gateway. folly's `cluster-gateway` has one `*.lolwtf.ca` wildcard listener that admits routes from any namespace. offsite's has one HTTPS listener for each hostname. folly's enrollment server declares its own Gateway, pinned at `ENROLL_VIP` in `clusters/folly/config/cluster-topology.json`, the one VIP that the [bootstrap VLAN's firewall](routing-and-firewall.md#bootstrap-vlan-and-mac-auth) admits.
+An app attaches an HTTPRoute to its cluster's shared `cluster-gateway`, or declares its own Gateway. folly's `cluster-gateway` has one `*.lolwtf.ca` wildcard listener that admits routes from any namespace. offsite's has one HTTPS listener for each hostname.
 
 external-dns publishes each route's name as an A record at its Gateway's load-balancer address (VIP). The VIP is private, so the name works on the LAN, and over the [tailnet](remote-access.md) for the owner. With policy `sync` and `txtOwnerId` set to `CLUSTER_NAME`, each cluster deletes its own records when their routes go.
 
-Hosts resolve as `<host>.lolwtf.ca`. The Kubernetes nodes come from `NODE_ADDRESSES` in each cluster's [topology file](../../reference/topology.md): folly's through `static_records` in `terraform/network/unifi/folly/k8s.tf`, offsite's through `terraform/network/cloudflare/lolwtf.ca.tf`, which also publishes each cluster's `API_SERVER_HOSTNAME`. Lab hosts come from each `lab` and `rpis` entry with an `ip` in `terraform/network/unifi/folly/clients.yaml`.
+Hosts resolve as `<host>.lolwtf.ca`. The Kubernetes nodes come from folly's [nodes file](../../reference/inventory.md), through `static_records` in `terraform/network/unifi/folly/k8s.tf`, and from `NODE_ADDRESSES` in offsite's [topology file](../../reference/topology.md), through `terraform/network/cloudflare/lolwtf.ca.tf`, which also publishes each cluster's `API_SERVER_HOSTNAME`. Lab hosts come from each `lab` and `rpis` entry with an `ip` in `terraform/network/unifi/folly/clients.yaml`.
 
 ## Public names
 
@@ -25,11 +25,15 @@ Each cluster that serves kthx Apps has an Apps Gateway with its own VIP. An App 
 
 ## Lab DNS and time
 
-DHCP on the Kubernetes, future and iot networks hands out capsule and spore as resolvers. `dns.lolwtf.ca` and `time.lolwtf.ca` point at both.
+[capsule](../../hosts/capsule.md), [spore](../../hosts/spore.md) and [forge](../../hosts/forge.md) are the three anchors. Each runs CoreDNS and chrony through `nix/profiles/anchor.nix`.
+
+Two shared addresses, `ns1.lolwtf.ca` and `ns2.lolwtf.ca` (`NS1_IP` and `NS2_IP` in `clusters/folly/config/anchor-topology.json`), make the three one service. keepalived on every anchor runs unicast VRRP for both, from `nix/services/anchor-vips.nix`. ns1 prefers capsule, then forge, then spore; ns2 prefers forge, then spore, then capsule. An anchor whose CoreDNS stops answering drops below every healthy anchor, so the address moves to one that answers. `AnchorVipDown` fires when an address has no holder or its CoreDNS is down. `s3.lolwtf.ca` (`S3_VIP`) fronts the anchors' Garage S3 API, held on capsule, then forge, then spore; a Garage that lacks a quorum or stops answering S3 drops its anchor below the healthy ones, and `AnchorS3VipDown` fires when no anchor serves it.
+
+DHCP on the Kubernetes, future and iot networks hands out ns1 and ns2 as resolvers, `dns.lolwtf.ca` and `time.lolwtf.ca` point at them, and folly's Talos nodes take time from them (`TimeSyncConfig` in `clusters/folly/talos/patches.tf`). NixOS hosts keep their own time servers (`networking.timeServers` in `nix/profiles/fleet.nix`).
 
 CoreDNS blocks the StevenBlack hosts list and forwards other queries over TLS to Cloudflare's malware-blocking resolvers. It answers `api.smiirl.com` with folly's smiirl Gateway address for the [Smiirl counter](../../apps/smiirl.md). [cloudpi4](../../hosts/cloudpi4.md) runs the same config as a test resolver.
 
-Chrony syncs from NTS servers and polls the other host.
+Chrony syncs from NTS servers and polls the other two anchors.
 
 ## Rules
 

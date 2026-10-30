@@ -45,17 +45,19 @@ resource "unifi_wlan" "fml" {
   security   = "wpapsk"
   passphrase = data.onepassword_item.wifi.password
 
-  ap_group_ids = [
-    data.unifi_ap_group.all_aps.id,
-  ]
+  ap_group = {
+    ids = [data.unifi_ap_group.all_aps.id]
+  }
 
   network_id    = unifi_network.fml.id
   user_group_id = unifi_client_qos_rate.unmetered.id
 
-  wlan_band                 = "both"
-  wlan_bands                = ["2g", "5g", "6g"]
-  wpa3_support              = true
-  wpa3_transition           = true
+  wlan_band  = "both"
+  wlan_bands = ["2g", "5g", "6g"]
+  wpa3 = {
+    support    = true
+    transition = true
+  }
   pmf_mode                  = "optional"
   minimum_data_rate_2g_kbps = 1000
   minimum_data_rate_5g_kbps = 6000

@@ -15,7 +15,7 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 | [retrofit](retrofit.md) | offsite control plane | offsite | HP EliteDesk 800 G2 DM | Talos Linux | live |
 | [oldschool](oldschool.md) | offsite worker | offsite | HP EliteDesk 800 G3 DM | Talos Linux | live |
 | [hotrod](hotrod.md) | offsite sandbox node | offsite | HP mini, Intel Core i5-10500T | Talos Linux | live |
-| [spore](spore.md) | NFS, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
+| [spore](spore.md) | Garage, x86 netboot, forge's boot image, DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [capsule](capsule.md) | DNS and NTP | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [forge](forge.md) | arm64 build host | folly | Raspberry Pi 5, NVMe | NixOS | live |
 | [rackpi5](rackpi5.md) | forge's HTTP boot image | folly | forge's board | NixOS | live |
@@ -33,13 +33,13 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 
 | Hosts | Name | Declared in |
 | --- | --- | --- |
-| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from `NODE_ADDRESSES` in `clusters/folly/config/cluster-topology.json` |
+| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from the `address` of each node in `clusters/folly/inventory/nodes.yaml` |
 | offsite nodes | `<host>.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json` |
-| Hosts on [Lab Net](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
+| Hosts on [the Anchor network](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
 | offsite control plane | `offsite.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `API_SERVER_IP` in `clusters/offsite/config/cluster-topology.json` |
 | Tailnet devices | `<host>.<tailnet>` | `terraform/network/tailscale/devices.tf`. `<tailnet>` is the `tailnet` key in `terraform/network/tailscale/fleet.tf.json`. |
 
-The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches them and Lab Net through each site's Connector. See [Remote access](../platform/network/remote-access.md).
+The Kubernetes nodes run no Tailscale client. Off the LAN, the owner reaches them and the Anchor network through each site's Connector. See [Remote access](../platform/network/remote-access.md).
 
 ## Unmanaged devices at offsite
 
@@ -58,5 +58,5 @@ Each sheet states its host's divergence. These cover more than one host, or a ho
 
 - eviropico runs Pimoroni's MicroPython firmware, and no file in git holds its code.
 - capsule and forge are on the tailnet, and `devices.tf` lists neither. forge enrols through the OAuth client in `terraform/network/tailscale/oauth_clients.tf`.
-- `devices.tf` lists nuc, with `tag:folly`, and desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers either.
+- `devices.tf` lists desktop-g7i75ls, with `tag:offsite`. No sheet or NixOS configuration covers it.
 - The Kubernetes nodes run no Tailscale client, and `devices.tf` does not list them. Their tailnet entries stay in the admin console.

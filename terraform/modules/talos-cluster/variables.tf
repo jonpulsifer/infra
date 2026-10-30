@@ -77,9 +77,21 @@ variable "nodes" {
     error_message = "role must be controlplane or worker."
   }
   validation {
-    condition     = length([for n in var.nodes : n if n.role == "controlplane"]) == 1
-    error_message = "This lab runs exactly one control plane per cluster."
+    condition     = length([for n in var.nodes : n if n.role == "controlplane"]) >= 1
+    error_message = "A cluster needs a control plane."
   }
+}
+
+variable "static_addresses" {
+  type        = bool
+  description = "Configure every node's address statically: its address in K8S_NODE_CIDR's prefix on its one physical NIC, the default route through ROUTER_IP, and the resolvers below, with no DHCP. Off, Talos runs its default DHCP on every physical link."
+  default     = false
+}
+
+variable "nameservers" {
+  type        = list(string)
+  description = "The resolvers of a node with a static address."
+  default     = []
 }
 
 variable "workload_isolation" {
@@ -102,7 +114,7 @@ variable "controlplane_patches" {
 
 variable "tpm_nodes" {
   type        = set(string)
-  description = "Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM."
+  description = "Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM, and kexec is off on them."
   default     = []
 
   validation {

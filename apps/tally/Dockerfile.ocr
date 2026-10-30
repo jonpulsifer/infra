@@ -3,7 +3,7 @@
 # tally-ocr: tally's virtualenv with the `ocr` extra and Docling's models baked
 # in, for the worker that runs with no egress. It serves no web, so it skips
 # the Bun stages of Dockerfile; the Python stages match that file.
-FROM python:3.13-slim-trixie@sha256:81c118faaca296a46b46a7dd7f3bf7575a956d8a4af22623b3de2ff504a3e89b AS python
+FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS python
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1
 

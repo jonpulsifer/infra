@@ -14,11 +14,35 @@ provider "registry.opentofu.org/1password/onepassword" {
     "h1:sfvN1OOuXaxSkYMT6ZMbrwSGUvaiB7Y24E2gVwIQlvU=",
     "zh:0259dece04523bcdbd558c20c0eda0f614535fae3d583fb191549d8139137b85",
     "zh:2f387a14e2cbd5c1ef4f9540b1a1aa4f84a61eb2c633b1a6bab16609afbeb8b2",
+    "zh:890df766e9b839623b1f0437355032a3c006226a6c200cd911e15ee1a9014e9f",
     "zh:9c0f5db50328ab322b8a4ab85ce89c8f386ff60671d337705f3e307b31001b7b",
     "zh:9ccbbb83dba7c8b1ce2b08c91aa58af77419f9dd04b4ca76cca7fe47d3791b3d",
     "zh:d650a08d8521d5a51f0c4929decafbdd965c9bd191c7f48004427ba310613ade",
     "zh:df82258369d1dd0801dbead6e85491edf166729fbb3b97aa3e9b08eb346cd90f",
     "zh:f5db95e5f612b2156002067a5929a791b33f2d8efd64a44d110d533b850e74ee",
+  ]
+}
+
+provider "registry.opentofu.org/e-breuninger/netbox" {
+  version     = "5.8.0"
+  constraints = "~> 5.8"
+  hashes = [
+    "h1:F2LHWzEXdx5WssYWlBByUv9omR5ByrH420FCy0RwILs=",
+    "h1:IJ7H6AW16Q9o5bRqMRJUbIGFDuiZMpD0MkRZ1Hn85zY=",
+    "h1:fVuxKPGLTbgDIGdfuydtoLEaBDkhSk7cQKfLvycUi9k=",
+    "h1:qTx7A5gnEG6f2cweOqguw1mUwhN44fn8d+bOO3juU8E=",
+    "h1:sGQzgqz866QcHRy3N8Ev6mDFAR/ZIi9rJMlm+YKIQ7I=",
+    "h1:wQvHzD7jbNwZPWN++HIBEwxOktbOZejV+B5Fnch17GA=",
+    "h1:xJp5ASGlnnpLtXvECfCsY7ne7RqMz9rRQUWw61AdxvE=",
+    "h1:xbECf+gsAaivSyMQePQiOQWfLc88G/+y5LDiitEvZBo=",
+    "zh:6412c428d6d018d253388461c14732484aa5fcb092e137f43493e413c7aa6ee0",
+    "zh:65abcac4c766b6600a329c33aed56b29114c2b0ed076561345a85a776418d0a4",
+    "zh:7e9e15ad6ae75cae99cb18f47193c176fe4381cf7b4597a25f7d08b318826324",
+    "zh:834e9bf4442d82bb65f2956eb76ff82ac017ba37dc5577174fd4acd1bbfca04c",
+    "zh:b9cc1af96833e3219b81f6bb0de5dfb08672d676a61bac0d8b272b35e7aa8be3",
+    "zh:d08cd43454fc4d329d24edd4a74a503c9f788bf01c215ffdcec0d92c463bccf8",
+    "zh:ede3a486c79085f98f3340c1d26e3e56c75f63d3d4841472e634b79870769312",
+    "zh:fdb1258840c1472f6de7027c5b6a2c60fac79024bd473225ae01ffa5bcea2480",
   ]
 }
 

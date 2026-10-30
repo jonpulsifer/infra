@@ -1,26 +1,12 @@
-# x86 PXE: dnsmasq serves TFTP only (port=0), and terraform/network/unifi/folly/k8s.tf points netboot at
-# boot/ipxe.efi. iPXE fetches kernels and initrds over HTTP, since TFTP is too slow for them.
-# Nix does not generate /var/lib/tftpboot; restore it from backup or `nix build .#netboot`.
-{ ... }:
+# spore's nginx default server, `spore-pxe`: /var/lib/tftpboot and the signed native-boot files
+# (./spore-native-boot.nix) over HTTP, open only to the Anchor network (forge's rackpi5 fallback) and the future
+# network, never the Kubernetes network. ./talos-boot.nix, on every anchor, runs dnsmasq's TFTP and
+# serves the Talos boot files on the bootstrap VLAN.
+{ lib, ... }:
+let
+  lab = import ../lib/anchor.nix;
+in
 {
-  systemd.tmpfiles.rules = [
-    "d /var/lib/tftpboot 0755 root root -"
-  ];
-
-  services.dnsmasq = {
-    enable = true;
-    resolveLocalQueries = false;
-    settings = {
-      port = 0;
-      enable-tftp = true;
-      tftp-root = "/var/lib/tftpboot";
-      tftp-max = 100;
-      # TFTP data leaves UDP/69 on a server-chosen port; bound it so the firewall admits it
-      # without a conntrack helper.
-      tftp-port-range = "30000,30099";
-    };
-  };
-
   services.nginx = {
     enable = true;
     virtualHosts."spore-pxe" = {
@@ -47,14 +33,13 @@
     openFirewall = true;
   };
 
-  networking.firewall = {
-    allowedTCPPorts = [ 80 ];
-    allowedUDPPorts = [ 69 ]; # TFTP request port
-    allowedUDPPortRanges = [
-      {
-        from = 30000;
-        to = 30099;
-      }
-    ];
-  };
+  networking.firewall.extraCommands =
+    lib.concatMapStrings
+      (cidr: ''
+        iptables -A nixos-fw -p tcp -s ${cidr} --dport 80 -j nixos-fw-accept
+      '')
+      [
+        lab.cidr
+        lab.futureCidr
+      ];
 }

@@ -16,8 +16,11 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 ## Hard rules
 
 - Change live infrastructure only through git. Author the desired state here,
-  and Flux, Atlantis and the host rebuilds apply it. Change live state by hand
-  only when the owner asks, even when a runbook has the steps.
+  and Flux, Atlantis and the host rebuilds apply it. A folly node's lifecycle
+  is in NetBox: only the owner sets a device's `desired_action` or its
+  `decommissioning` status, and fleetd acts on it as Flux acts on
+  git. Change live state by hand only when the owner asks, even when a runbook
+  has the steps.
 - Flux owns the kthx engine's namespace and prerequisites. The engine owns each
   built app's `app-<name>` namespace and DNS records. It also owns the app's
   releases in `spindrift-apps`, its Argo `Application` objects in `argo` on
@@ -52,6 +55,7 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
 | Kubernetes | Flux | After a merge to `main` |
 | NixOS | `nixos-rebuild` | On a deploy, and at the daily auto-upgrade from `main` on hosts that have one |
 | Wiki | `.github/workflows/wiki.yml` to Cloudflare Pages | After a merge to `main` |
+| folly node lifecycle | fleetd on spore, from NetBox | When the owner sets a device's `desired_action` or `decommissioning` status |
 
 [How changes ship](docs/platform/how-changes-ship.md) has each path and its
 exceptions.
@@ -90,12 +94,17 @@ Read these values from their file. Do not copy them.
 
 | Facts | Source |
 | --- | --- |
-| Cluster addresses and CIDRs, API server endpoints, BGP ASNs | `clusters/<site>/config/cluster-topology.json` |
-| Lab CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/lab-topology.json` |
+| Cluster addresses and CIDRs, API server endpoints, BGP ASNs, and offsite's node addresses | `clusters/<site>/config/cluster-topology.json` |
+| Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
+| folly's nodes: name, serial, model, class, switch port, address, BMC | `clusters/folly/inventory/nodes.yaml`, which `terraform/netbox/folly` applies into NetBox |
+| folly's node lifecycle and runtime facts: status, `desired_action`, MACs, attestation | NetBox at `https://capsule.<tailnet>` |
 
-Each file is a Flux ConfigMap whose `data` values are all strings, so a list or
-a number is written as a string. [Topology](docs/reference/topology.md) says
-what reads each file.
+Each topology file is a Flux ConfigMap whose `data` values are all strings, so
+a list or a number is written as a string. [Topology](docs/reference/topology.md)
+says what reads each file. Edit the nodes file by hand in a pull request.
+Terraform, Talos, Nix and the render script read it, and a runtime fact comes
+from NetBox when it is needed.
+[Hardware inventory](docs/reference/inventory.md) says what reads it.
 
 ## Where to read more
 

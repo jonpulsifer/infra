@@ -59,6 +59,20 @@ MIGRATIONS: tuple[str, ...] = (
         body TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE account_map (
+        key TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL,
+        decided_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE ocr (
+        sha256 TEXT PRIMARY KEY,
+        pages TEXT NOT NULL,
+        read_at TEXT NOT NULL
+    );
+    """,
 )
 
 
@@ -212,6 +226,30 @@ class Store:
             "SELECT 1 FROM files WHERE sha256 = ? AND action = ?", (sha256, action)
         ).fetchone()
         return row is not None
+
+    def account_map(self) -> dict[str, str]:
+        """Which ledger account a source resolves to, by `tally.load` key, as decided earlier."""
+        rows = self.conn.execute("SELECT key, account_id FROM account_map ORDER BY key")
+        return {k: a for k, a in rows}
+
+    def remember_account(self, key: str, account_id: str) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO account_map VALUES (?, ?, ?)",
+                (key, account_id, _now().isoformat()),
+            )
+
+    def ocr_pages(self, sha256: str) -> list[str] | None:
+        """The page texts OCR read from a scan, by the scan's hash, so a scan is read once."""
+        row = self.conn.execute("SELECT pages FROM ocr WHERE sha256 = ?", (sha256,)).fetchone()
+        return None if row is None else [str(p) for p in json.loads(row[0])]
+
+    def put_ocr_pages(self, sha256: str, pages: Sequence[str]) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT OR REPLACE INTO ocr VALUES (?, ?, ?)",
+                (sha256, json.dumps(list(pages)), _now().isoformat()),
+            )
 
     def save_snapshot(self, ledger: Ledger) -> None:
         with self._tx() as c:

@@ -1,6 +1,6 @@
 ---
 # The Windows desktops, scraped through a hand-written EndpointSlice. Addresses
-# come from lab-topology, as in terraform/network/unifi/folly/windows-hosts.tf.
+# come from anchor-topology, as in terraform/network/unifi/folly/windows-hosts.tf.
 apiVersion: discovery.k8s.io/v1
 kind: EndpointSlice
 metadata:

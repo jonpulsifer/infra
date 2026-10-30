@@ -31,12 +31,16 @@ targets() {
     path=${path%\\}
     [[ -n "$path" ]] || continue
     case "$path" in
-      flake.nix | flake.lock | nix/* | apps/ddnsd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/lab-topology.json | .github/workflows/nix-ci.yaml)
+      flake.nix | flake.lock | nix/* | apps/ddnsd/* | apps/fleetd/* | clusters/folly/config/cluster-topology.json | clusters/offsite/config/cluster-topology.json | clusters/folly/config/anchor-topology.json | .github/workflows/nix-ci.yaml)
         target_set["nix:flake-check"]=1
         ;;
       # spore mirrors the Talos release that talos.tf names and checks it against the committed certs,
       # and the HookOS package reads netboot.json.
       clusters/folly/talos/talos.tf | clusters/folly/talos/netboot.json | clusters/folly/talos/secureboot/* | .github/scripts/talos-uki-verify.sh)
+        target_set["nix:flake-check"]=1
+        ;;
+      # spore's SPIRE node aliases and fleetd's inventory read the nodes file.
+      clusters/folly/inventory/nodes.yaml)
         target_set["nix:flake-check"]=1
         ;;
     esac
@@ -47,13 +51,26 @@ targets() {
           target_set["terraform:$root"]=1
         done < <(terraform_roots)
         ;;
-      clusters/folly/config/lab-topology.json | terraform/network/unifi/folly/clients.yaml)
+      clusters/folly/config/anchor-topology.json)
         target_set["terraform:terraform/network/unifi/folly"]=1
+        target_set["terraform:terraform/netbox/folly"]=1
+        ;;
+      terraform/network/unifi/folly/clients.yaml)
+        target_set["terraform:terraform/network/unifi/folly"]=1
+        ;;
+      clusters/folly/inventory/nodes.yaml)
+        target_set["terraform:terraform/netbox/folly"]=1
+        target_set["terraform:terraform/network/unifi/folly"]=1
+        target_set["terraform:clusters/folly/talos"]=1
         ;;
       clusters/*/config/cluster-topology.json)
         # The site's Talos root reads this file, once that root exists.
         root="clusters/$(cut -d/ -f2 <<<"$path")/talos"
         compgen -G "$root/*.tf" >/dev/null && target_set["terraform:$root"]=1
+        # folly's NetBox root reads its node prefix and API server address.
+        if [[ "$path" == clusters/folly/* ]] && compgen -G "terraform/netbox/folly/*.tf" >/dev/null; then
+          target_set["terraform:terraform/netbox/folly"]=1
+        fi
         ;;
       *.tf | *.tftest.hcl | */.terraform.lock.hcl)
         target=$(terraform_root_for_path "$path" || true)

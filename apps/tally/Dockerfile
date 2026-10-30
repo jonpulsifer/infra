@@ -4,7 +4,7 @@
 # web app. The context is the repo root, because the web is the `tally-web`
 # workspace and turbo prune reads the root lockfile. Dockerfile.ocr is this
 # image plus the `ocr` extra; keep the two in step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:56fb738564e8423e1d3268cfb300200f306cfb2eecc38867a453713c7aa0ff0e AS bun
+FROM cgr.dev/chainguard/node:latest-dev@sha256:06ec4316c47dee00fbd9c0270cae73fddff2ac84f010467c89ce252c3883379c AS bun
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
@@ -31,7 +31,7 @@ RUN bun run --cwd apps/tally/web build \
 
 # The builder and the runner share one Python image, so the virtualenv's
 # interpreter links resolve in both.
-FROM python:3.13-slim-trixie@sha256:81c118faaca296a46b46a7dd7f3bf7575a956d8a4af22623b3de2ff504a3e89b AS python
+FROM python:3.13-slim-trixie@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb AS python
 ENV PYTHONDONTWRITEBYTECODE=1 \
   PYTHONUNBUFFERED=1
 

@@ -9,9 +9,11 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Deploy a NixOS host](deploy-a-nixos-host.md): deploy a host's configuration or restore its previous generation
 - [Install Talos on a node](install-talos-on-a-node.md): boot a NixOS node into the Talos installer with kexec, and check its volumes
-- [Enroll a Talos node](enroll-a-talos-node.md): wipe a folly node, boot it from the network, approve its enrollment, and return it to the Kubernetes VLAN
-- [Reprovision a Talos node](reprovision-a-talos-node.md): wipe a folly node that has AMT and reinstall Talos through Tinkerbell, started by a pull request
-- [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, HTTP-boot UKI, iPXE and HookOS, and check what the build publishes
+- [Prepare a machine](prepare-a-machine.md): set a new folly machine's firmware and enroll the lab's Secure Boot keys over PXE
+- [Provision a node](provision-a-node.md): declare a new folly machine in NetBox and install it as a Talos worker through its `desired_action`
+- [Reprovision a node](reprovision-a-node.md): reinstall, attest again or wipe an installed folly node by its `desired_action`
+- [Retire a node](retire-a-node.md): drain a folly worker, set its NetBox device to `decommissioning`, and drop it from the exports
+- [Build the signed Talos images](build-the-signed-talos-images.md): build folly's Secure Boot installer, ISO, iPXE and HookOS, and check what the build publishes
 - [Change the forge EEPROM](change-the-forge-eeprom.md): change forge's boot settings and keep its HTTP boot fallback
 - [Install a Windows desktop](install-a-windows-desktop.md): install and update the owner's Windows configuration
 - [Install Windows monitoring](install-windows-monitoring.md): add a desktop to folly's Prometheus and repair its agents
@@ -32,6 +34,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Recover a re-created database](recover-a-re-created-database.md): bring a database back when its `Cluster` is created again under the same name
 - [Restore a volume](restore-a-volume.md): restore the files of a volume from a Velero backup
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
+- [Migrate Garage to three nodes](migrate-garage-to-three-nodes.md): move folly's backup store from spore alone to a replication factor 3 cluster on the anchors
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
 
 ## Cloud and network
@@ -45,6 +48,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 
 - [Manage SOPS secrets](manage-sops-secrets.md): restore the operator age key, edit a SOPS file, add a host, and rotate the key
 - [Initialize OpenBao](initialize-openbao.md): initialize a new OpenBao instance and store its recovery key
+- [Make a YubiKey a DevID CA](set-up-a-devid-ca-yubikey.md): generate a DevID CA key on an anchor's YubiKey, certify it with Atlantis, and write the certificate into the card
 
 ## Apps
 

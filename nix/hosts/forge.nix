@@ -1,14 +1,16 @@
 # forge: NVMe-rooted aarch64 build host: Nix remote builder, native arm64 OCI builds, and a
-# harmonia cache for the Pi fleet. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
+# harmonia cache for the Pi fleet, and one of the three anchors that run the lab's DNS and NTP. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
-  lab = import ../lib/lab.nix;
+  lab = import ../lib/anchor.nix;
 in
 {
   imports = [
+    ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
     ../services/build-host.nix
+    ../services/garage.nix
     ../system/sops.nix
   ];
 
@@ -18,6 +20,14 @@ in
     binaryCache = "harmonia";
     # sops-nix's default path for sops.secrets."harmonia-cache-key" below.
     binaryCacheSigningKeyPath = "/run/secrets/harmonia-cache-key";
+  };
+
+  homelab.garage = {
+    enable = true;
+    site = "folly";
+    dataDir = "/var/lib/garage";
+    clustered = true;
+    bootstrap = false;
   };
 
   sops.defaultSopsFile = ../secrets/forge.sops.yaml;

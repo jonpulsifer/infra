@@ -14,7 +14,7 @@ The lab runs two Kubernetes clusters on Talos Linux nodes: `folly` at home and `
 | Bootstrap root | The OpenTofu root module that installs CoreDNS, `flux-operator` and the `FluxInstance`, the object that `flux-operator` installs Flux from | Atlantis |
 | Flux | Applies `clusters/` from the `infra` GitRepository | The `flux-system` namespace |
 | Shared controllers | CloudNativePG, External Secrets, Kyverno and others | Both clusters |
-| Storage | `local-path` volumes, and NFS volumes from [spore](../hosts/spore.md) | Both clusters, NFS on folly |
+| Storage | `local-path` volumes on each node's `data` volume | Both clusters |
 | GPU plugin | Offers riptide's GPU to pods | folly |
 
 ## How state reaches a cluster
@@ -44,10 +44,9 @@ On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/
 
 | Output | Where | Use |
 | --- | --- | --- |
-| Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. It carries no enrollment arguments. |
+| Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. Its UKI's `talos.config` is `CONFIG_URL` in the workflow: a node's first boot from disk, which has no STATE, fetches its config by the install code in META `0x0b`, and every later boot loads the config from STATE. sd-boot's "Reset to maintenance mode" entry wipes STATE but not META, so that boot polls the URL with a burned code instead of entering maintenance mode. It carries no OAuth arguments. |
 | ISO | `metal-amd64-secureboot.iso` on the release `talos-folly/<version>` | Enrolls the Secure Boot keys at the machine, and rescues a node |
-| HTTP-boot UKI | `metal-amd64-secureboot-uki.efi` on the same release | Boots an unenrolled node into the enrollment server's OAuth device flow at `enroll.lolwtf.ca`. It halts on a disk that has Talos installed. |
-| iPXE | `ipxe-amd64-secureboot.efi` on the same release | Chains Smee's script for the booting MAC. [Talos boot](nixos/talos-boot.md#netboot-images) has the details. |
+| iPXE | `ipxe-amd64-secureboot.efi` on the same release | Chains Smee's script for the booting MAC, or boots HookOS from its own menu. [Talos boot](nixos/talos-boot.md#netboot-images) has the details. |
 | HookOS UKI | `hookos-amd64-secureboot-uki.efi` on the same release | Runs the Tinkerbell agent, which wipes a disk before a reinstall |
 
 A push to `main` rebuilds them when the version, the extensions, the kernel arguments, the public keys, `clusters/folly/talos/netboot.json` or the pipeline change. Nothing builds while `netboot.json` pins the all-zero agent digest, which the containers workflow's delivery replaces. The nodes still run the Image Factory installer that `terraform/modules/talos-cluster/main.tf` names. [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md) is the procedure.

@@ -1,0 +1,23 @@
+apiVersion: v1alpha1
+auto: "off"
+hostname: riptide
+kind: HostnameConfig
+---
+apiVersion: v1alpha1
+installer:
+    image: ghcr.io/x/installer:v1
+kind: UnattendedInstallConfig
+provisioning:
+    diskSelector:
+        match: disk.dev_path == "/dev/nvme0n1"
+    wipe: true
+---
+machine:
+    certSANs:
+        - riptide.example.test
+---
+apiVersion: v1alpha1
+kind: KubeNodeConfig
+labels:
+    bgp-enabled: "true"
+    example.test/tpm: "true"

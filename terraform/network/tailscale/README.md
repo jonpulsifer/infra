@@ -32,7 +32,7 @@ A change to `policy.hujson` alone also autoplans, because the Atlantis autoplan 
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.3.1 |
+| <a name="provider_onepassword"></a> [onepassword](#provider\_onepassword) | 3.4.1 |
 | <a name="provider_tailscale"></a> [tailscale](#provider\_tailscale) | 0.29.2 |
 
 ## Modules

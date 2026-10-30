@@ -68,7 +68,7 @@ If a resource is different on each cluster, such as a BGP peer or a Gateway list
 4. If you add a file to `clusters/base/flux-system/`, list it in `clusters/base/flux-system/kustomization.yaml`.
 
 > [!NOTE]
-> Only folly's `storage` and `monitoring` read `lab-topology`.
+> Only folly's `storage` and `monitoring` read `anchor-topology`.
 
 5. Make sure that each cluster substitutes each `${VAR}` and decrypts each `.sops.yaml` file in the directory.
 

@@ -90,9 +90,24 @@ def test_an_unrecognised_pdf_is_a_parse_error(tmp_path):
 
 
 def test_a_recognised_unparsed_family_names_itself(tmp_path):
-    path = write_pdf(tmp_path / "s.pdf", [["Statement of Account"] * 3, ["Solium Capital"] * 3])
-    with pytest.raises(ParseError, match="shareworks statement: recognised"):
+    path = write_pdf(tmp_path / "s.pdf", [["Quarterly report"] * 3, ["PWL Capital Inc."] * 3])
+    with pytest.raises(ParseError, match="pwl statement: recognised"):
         PdfParser().parse(path)
+
+
+def test_importing_one_parser_first_does_not_hide_the_others(monkeypatch):
+    import importlib
+
+    import tally.parsers as registry
+
+    monkeypatch.setattr(registry, "_REGISTRY", [])
+    monkeypatch.setattr(registry, "_LOADED", False)
+    for name in ("csv_", "ofx", "xlsx", "pdf"):
+        monkeypatch.delitem(sys.modules, f"tally.parsers.{name}", raising=False)
+    importlib.import_module("tally.parsers.pdf")  # a direct import registers PdfParser alone
+    assert [type(p).__name__ for p in registry._REGISTRY] == ["PdfParser"]
+    names = {type(p).__name__ for p in registry.parsers()}
+    assert {"CsvParser", "OfxParser", "XlsxParser", "PdfParser"} <= names
 
 
 def test_a_broken_file_is_unreadable_not_a_crash(tmp_path):

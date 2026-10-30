@@ -22,6 +22,15 @@ spec:
       annotations:
         backup.velero.io/backup-volumes: data
     spec:
+      # No node is tainted, so this term keeps the volume off the control-plane
+      # node's disk, which etcd shares.
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
       automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
@@ -77,4 +86,4 @@ spec:
       volumes:
         - name: data
           persistentVolumeClaim:
-            claimName: smiirl-data
+            claimName: smiirl-data-local

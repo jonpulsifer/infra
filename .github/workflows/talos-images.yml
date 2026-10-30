@@ -8,15 +8,18 @@ on:
     branches: [main]
     paths: &paths
       - clusters/folly/talos/**
-      - clusters/folly/config/lab-topology.json
+      - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
+      # HookOS's fleet_attest_url reads this.
+      - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
       - .github/scripts/talos-image-inputs_test.sh
       - .github/scripts/talos-images-build.sh
+      - .github/scripts/talos-installer-verify.sh
+      - .github/scripts/talos-installer-verify_test.sh
       - .github/scripts/talos-netboot-build.sh
       - .github/scripts/talos-netboot-verify.sh
-      - .github/scripts/talos-uki-ipxe.sh
       - .github/scripts/talos-uki-verify.sh
       - .github/workflows/talos-images.yml
   pull_request:
@@ -35,7 +38,9 @@ permissions:
 env:
   SITE: folly
   ROOT: clusters/folly/talos
-  ENROLL_HOST: enroll.lolwtf.ca
+  # The installer's UKI fetches a new node's config from here on its first boot. Talos fills in
+  # ${uuid} and ${code}, and Actions expands only ${{ }}.
+  CONFIG_URL: 'https://enroll.lolwtf.ca/talos/config?uuid=${uuid}&code=${code}'
   INSTALLER_REPO: ghcr.io/jonpulsifer/talos-installer-folly
   OP_ITEM: op://homelab/talos-secureboot
 
@@ -91,11 +96,11 @@ jobs:
             tf=$(mktemp)
             git show "$rev:$ROOT/talos.tf" >"$tf" || return 1
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
-            git show "$rev:clusters/folly/config/lab-topology.json" | jq -r .data.SPORE_BOOTSTRAP_IP || return 1
+            git show "$rev:clusters/folly/config/anchor-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
+              terraform/network/tailscale/fleet.tf.json \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
-              .github/scripts/talos-uki-ipxe.sh \
               .github/workflows/talos-images.yml
           }
           build=false
@@ -136,6 +141,8 @@ jobs:
           version: v0.21.6
       - name: Install the signature tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool
+      - name: Test the installer check
+        run: bash .github/scripts/talos-installer-verify_test.sh
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
@@ -186,11 +193,11 @@ jobs:
           echo "KEYS=$keys" >>"$GITHUB_ENV"
           echo "HOOKOS_KEYS=$hookos" >>"$GITHUB_ENV"
 
-      - name: Build the installer, ISO and UKI
+      - name: Build the installer and ISO
         run: |
           set -euo pipefail
           bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" >"$RUNNER_TEMP/inputs.json"
-          bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$ENROLL_HOST"
+          bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$CONFIG_URL"
 
       - name: Build and sign iPXE and HookOS
         run: |
@@ -210,25 +217,17 @@ jobs:
             fi
           done
 
-      - name: The UKI must verify against the committed certificate
+      - name: The installer's UKI must verify and fetch its config by code
         run: |
           set -euo pipefail
-          uki="$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi"
-          bash .github/scripts/talos-uki-verify.sh "$ROOT/secureboot/uki-signing-cert.pem" "$uki"
-          objcopy -O binary --only-section=.cmdline "$uki" "$RUNNER_TEMP/cmdline"
-          tr -d '\0' <"$RUNNER_TEMP/cmdline" >"$RUNNER_TEMP/cmdline.txt"
-          grep -q "talos.config=https://$ENROLL_HOST/config" "$RUNNER_TEMP/cmdline.txt" || {
-            echo "::error::the UKI command line lacks the enrollment URL"
-            exit 1
-          }
+          bash .github/scripts/talos-installer-verify.sh "$ROOT/secureboot/uki-signing-cert.pem" \
+            "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$CONFIG_URL" | tee "$RUNNER_TEMP/installer.txt"
           {
-            echo "### UKI command line"
+            echo "### Installer UKI command line"
             echo '```'
-            cat "$RUNNER_TEMP/cmdline.txt"
+            sed -n 's/^.*: command line: //p' "$RUNNER_TEMP/installer.txt"
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
-          bash .github/scripts/talos-uki-ipxe.sh "$RUNNER_TEMP/cmdline.txt" \
-            >"$RUNNER_TEMP/out/metal-amd64-secureboot-uki.ipxe"
 
       - name: iPXE and HookOS must verify against the committed certificates
         run: |
@@ -242,12 +241,12 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: Keep the UKI for a look when a check fails
+      - name: Keep the installer for a look when a check fails
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: metal-amd64-secureboot-uki
-          path: ${{ runner.temp }}/out/metal-amd64-secureboot-uki.efi
+          name: installer-amd64-secureboot
+          path: ${{ runner.temp }}/out/installer-amd64-secureboot.tar
           if-no-files-found: ignore
           retention-days: 3
 
@@ -261,8 +260,8 @@ jobs:
       # Releases in this repository are immutable, and a tag name that an
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
-      # once. The mirror on spore takes the newest release of the version.
-      - name: Publish the UKI, its iPXE script, ISO, iPXE and HookOS
+      # once. The mirror on each anchor takes the newest release of the version.
+      - name: Publish the ISO, iPXE and HookOS
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -271,8 +270,6 @@ jobs:
           notes="Signed Talos $VERSION boot assets for $SITE, built from $GITHUB_SHA."
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
-            "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.efi" \
-            "$RUNNER_TEMP/out/metal-amd64-secureboot-uki.ipxe" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
             "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
             "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"

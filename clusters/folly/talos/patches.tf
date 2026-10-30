@@ -40,6 +40,14 @@ locals {
       }
       filesystem = { type = "xfs" }
     }),
+    # Time from the anchors' VIPs, never the internet.
+    yamlencode({
+      apiVersion = "v1alpha1"
+      kind       = "TimeSyncConfig"
+      ntp = {
+        servers = [module.anchor_topology.data.NS1_IP, module.anchor_topology.data.NS2_IP]
+      }
+    }),
     # The ports of Vector's loopback socket sources. machine.logging has no
     # 1.14 document, so it stays a v1alpha1 fragment.
     join("\n---\n", [
@@ -137,10 +145,10 @@ locals {
   ]
 
   # EPHEMERAL's cap differs per node; the data volume takes what is left.
-  ephemeral_patch = { for name, n in local.nodes : name => yamlencode({
+  ephemeral_patch = { for class, c in local.classes : class => yamlencode({
     apiVersion   = "v1alpha1"
     kind         = "VolumeConfig"
     name         = "EPHEMERAL"
-    provisioning = { maxSize = n.ephemeral }
+    provisioning = { maxSize = c.ephemeral }
   }) }
 }

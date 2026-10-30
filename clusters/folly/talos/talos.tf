@@ -13,6 +13,10 @@ terraform {
       source  = "1Password/onepassword"
       version = "~> 3.0"
     }
+    netbox = {
+      source  = "e-breuninger/netbox"
+      version = "~> 5.8"
+    }
   }
 }
 
@@ -36,49 +40,80 @@ locals {
   # The vault the Atlantis 1Password service account reads.
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 
-  node_addresses = jsondecode(module.topology.data.NODE_ADDRESSES)
-
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version = "v1.14.4"
+  talos_version = "v1.14.5"
 
   # Signed with the lab's Secure Boot keys, with the extensions below. The
   # image build publishes one per Talos version, tagged with the version.
   secureboot_installer = "ghcr.io/jonpulsifer/talos-installer-folly:${local.talos_version}"
 
-  # install is a CEL disk selector. ephemeral caps EPHEMERAL so that the
-  # data user volume takes the rest of the one disk. A node with installer
-  # boots the signed UKI; its generation changes when it is reinstalled from
-  # new media.
-  nodes = {
-    optiplex = {
-      role       = "controlplane"
-      install    = "disk.dev_path == \"/dev/sda\""
-      ephemeral  = "100GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+  # Each class's role and patches; the nodes file names each node's class
+  # (nodes.tf). ephemeral caps EPHEMERAL so that the
+  # data user volume takes the rest of the one disk. Every class boots the
+  # signed UKI; the generation changes when a class is reinstalled from new
+  # media, or when every node's recorded install must be re-created without
+  # rebooting a node already on the version: Create upgrades only a node
+  # whose running version differs. fleet-controller renders a node of a class from the
+  # class_inputs output below.
+  classes = {
+    controlplane = {
+      role      = "controlplane"
+      ephemeral = "100GiB"
     }
-    riptide = {
-      role       = "worker"
-      install    = "disk.dev_path == \"/dev/nvme0n1\""
-      ephemeral  = "80GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+    worker-g5 = {
+      role      = "worker"
+      ephemeral = "80GiB"
     }
-    shale = {
-      role       = "worker"
-      install    = "disk.dev_path == \"/dev/sda\""
-      ephemeral  = "128GiB"
-      installer  = local.secureboot_installer
-      generation = "secureboot-1"
+    worker-g2 = {
+      role      = "worker"
+      ephemeral = "128GiB"
     }
   }
+  install_generation = "secureboot-2"
 
-  # TPM 2.0 nodes: riptide's discrete TPM, optiplex's Intel PTT.
-  tpm_nodes = ["optiplex", "riptide"]
+  # The nodes are the declared machines NetBox holds active or failed: a
+  # failed one is quarantined, not gone, and stays managed. A node being installed stays
+  # planned until it fetches its config: fleet-controller renders that config
+  # and the root applies none until NetBox holds the node active, so its
+  # talos_machine is planned away and back across a reinstall, by design. A
+  # control plane installs as a worker does, and joins the cluster. The
+  # install disk is the nodes file's.
+  nodes = { for name, m in local.machines : name => {
+    class = m.class
+    role  = local.classes[m.class].role
+  } if contains(["active", "failed"], m.status) }
 
-  # Nodes whose running STATE and EPHEMERAL are encrypted. A node joins only
-  # after a reinstall formats them encrypted; both still run plain volumes.
-  encrypted_nodes = []
+  # The TPM 2.0 nodes, which seal disks and attest.
+  tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
+
+  # A TPM node's running STATE and EPHEMERAL are encrypted, except these, which
+  # were installed with plain volumes and keep them until a reinstall. Talos
+  # refuses to mount a plain volume that its config calls encrypted.
+  plain_nodes     = ["optiplex"]
+  encrypted_nodes = [for name in local.tpm_nodes : name if !contains(local.plain_nodes, name)]
+
+  # What fleet-controller renders a fresh install from, per class: the
+  # module's patch lists in order, the node document rendered by the
+  # controller between them, then the class's own. mise run
+  # render-class-inputs writes it to clusters/folly/fleet/class-inputs.json.
+  class_inputs = { for class, c in local.classes : class => {
+    machine_type       = c.role
+    cluster_name       = module.talos.render_inputs.cluster_name
+    cluster_endpoint   = module.talos.render_inputs.cluster_endpoint
+    talos_contract     = module.talos.render_inputs.talos_contract
+    kubernetes_version = module.talos.render_inputs.kubernetes_version
+    installer_image    = local.secureboot_installer
+    dns_zone           = module.talos.render_inputs.dns_zone
+    config_patches = concat(
+      module.talos.render_inputs.cluster_patches,
+      c.role == "controlplane" ? module.talos.render_inputs.controlplane_patches : [],
+    )
+    tpm_patches   = module.talos.render_inputs.tpm_patches
+    class_patches = [local.ephemeral_patch[class]]
+    labels        = {}
+    tpm_labels    = module.talos.render_inputs.tpm_labels
+    node_network  = module.talos.render_inputs.node_network
+  } }
 }
 
 module "talos" {
@@ -105,14 +140,23 @@ module "talos" {
 
   nodes = { for name, n in local.nodes : name => {
     role               = n.role
-    address            = local.node_addresses[name]
-    install            = n.install
-    patches            = [local.ephemeral_patch[name]]
-    installer_image    = try(n.installer, null)
-    install_generation = try(n.generation, null)
+    address            = local.machines[name].address
+    install            = "disk.dev_path == \"${local.machines[name].disk}\""
+    patches            = [local.ephemeral_patch[n.class]]
+    installer_image    = local.secureboot_installer
+    install_generation = local.install_generation
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes
+
+  # Every node carries its inventory address statically, so the Kubernetes
+  # network's DHCP holds no reservation for it. The resolvers are the
+  # anchors' DNS VIPs, as that network's DHCP hands out.
+  static_addresses = true
+  nameservers = [
+    module.anchor_topology.data.NS1_IP,
+    module.anchor_topology.data.NS2_IP,
+  ]
 
   cluster_patches      = local.cluster_patches
   controlplane_patches = local.controlplane_patches
@@ -128,9 +172,9 @@ output "installer_image" {
   value       = module.talos.node_installer_images
 }
 
-output "machine_inputs" {
-  description = "Per node, the inputs of talosctl gen config other than the secrets bundle. The enrollment server renders a node's config from them."
-  value       = module.talos.machine_inputs
+output "class_inputs" {
+  description = "Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. fleet-controller renders a node's config from its class's entry and NetBox's facts about the node."
+  value       = local.class_inputs
 }
 
 output "nodes" {

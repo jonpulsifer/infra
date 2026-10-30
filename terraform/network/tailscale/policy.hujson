@@ -51,6 +51,7 @@
 		"tag:pi4":          ["autogroup:admin"],
 		"tag:lab-host":     ["autogroup:admin"],
 		"tag:ci":           ["autogroup:admin"],
+		"tag:gcp":          ["autogroup:admin"],
 		"tag:kthx-ingress": ["tag:k8s-operator"],
 	},
 
@@ -180,6 +181,11 @@
 			"src":    "jonathan@pulsifer.ca",
 			"accept": ["tag:kthx-ingress:443"],
 			"proto":  "tcp",
+		},
+		{
+			"src":   "tag:gcp",
+			"deny":  ["tag:pi4:22", "tag:lab-host:22", "jonathan@pulsifer.ca:22"],
+			"proto": "tcp",
 		},
 	],
 

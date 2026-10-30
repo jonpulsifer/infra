@@ -1,6 +1,6 @@
 ---
 title: Verify a Talos cluster
-description: Check a cluster that runs Talos after a rebuild or an upgrade, from the nodes and Cilium to federation, backups, OpenBao, the sandbox runtimes, the GPU, NFS and Falco.
+description: Check a cluster that runs Talos after a rebuild or an upgrade, from the nodes and Cilium to federation, backups, OpenBao, the sandbox runtimes, the GPU and Falco.
 ---
 
 Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md), and after a Talos or Kubernetes upgrade. Each section checks one layer, so a failure points at its layer. Run the sections in order.
@@ -12,7 +12,7 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 
 - Get `kubectl` access, and the cluster's context in `~/.talos/config`, as [Get cluster admin access](get-cluster-admin-access.md) describes.
 
-`<site>` is `folly` or `offsite`, and `<addr>` is a node's entry in `NODE_ADDRESSES` in `clusters/<site>/config/cluster-topology.json`.
+`<site>` is `folly` or `offsite`, and `<addr>` is a node's address: on folly its `address` in `clusters/folly/inventory/nodes.yaml`, the [nodes file](../reference/inventory.md), and on offsite its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`.
 
 ## Check the nodes
 
@@ -198,15 +198,7 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
    Result: `1`, and a `Running` jellyfin pod on riptide.
 
 5. Play a video in jellyfin that needs a transcode. Make sure that the dashboard shows hardware transcoding.
-6. Make sure that the NFS volumes mount over NFSv4.2.
-
-   ```bash
-   talosctl --context <site> -n <addr> mounts | grep nfs
-   ```
-
-   Result: `nfs4` lines with `vers=4.2`.
-
-7. Make sure that Falco runs on each node.
+6. Make sure that Falco runs on each node.
 
    ```bash
    kubectl --context <site> -n falco get pods -o wide

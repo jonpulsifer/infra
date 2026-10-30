@@ -1,6 +1,6 @@
 ---
 title: capsule
-description: A Raspberry Pi 5 on NVMe that is one of the two lab DNS resolvers and time servers.
+description: A Raspberry Pi 5 on NVMe that is one of the three lab DNS and time anchors, and runs NetBox.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
@@ -13,20 +13,21 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-capsule is a Raspberry Pi 5 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. With [spore](spore.md), it serves [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time). `nix/hosts/capsule.nix` configures it.
+capsule is a Raspberry Pi 5 on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts. With [spore](spore.md) and [forge](forge.md), it serves [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time). `nix/hosts/capsule.nix` configures it.
 
 ## What it runs
 
-- CoreDNS from `nix/services/coredns-sinkhole.nix`
-- chrony from `nix/services/ntp-server.nix`
+- CoreDNS from `nix/services/coredns-sinkhole.nix` and chrony from `nix/services/ntp-server.nix`, both through `nix/profiles/anchor.nix`
+- A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
+- [NetBox](../platform/netbox.md), with its PostgreSQL and Redis, on the tailnet only (`nix/services/netbox.nix`)
 
-`clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown` and `CapsuleChronyDown`.
+`clusters/folly/monitoring/capsule.yaml` declares the alerts `CapsuleCoreDnsDown`, `CapsuleChronyDown`, and those of [NetBox](../platform/netbox.md#operate).
 
 ## Reach
 
 Reach it at `capsule.lolwtf.ca` or [`capsule.<tailnet>`](index.md#reach-a-host).
 
-Rowbutt's sandboxes on offsite reach Lab Net hosts with capsule as their ssh jump host. offsite's Kubernetes ranges reach Lab Net only on capsule's port 22. See [Routing and firewall](../platform/network/routing-and-firewall.md).
+Rowbutt's sandboxes on offsite reach the Anchor network hosts with capsule as their ssh jump host. offsite's Kubernetes ranges reach the Anchor network only on capsule's ports 22 and 8080. See [Routing and firewall](../platform/network/routing-and-firewall.md).
 
 ## Quirks
 

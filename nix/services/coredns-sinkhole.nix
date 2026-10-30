@@ -1,6 +1,7 @@
 { inputs, lib, ... }:
 let
   fleet = import ../lib/fleet.nix;
+  lab = import ../lib/anchor.nix;
   # CoreDNS forwards over TLS; the host itself uses the local resolver first
   # and these same endpoints as recovery if CoreDNS is unavailable.
   upstreams = [
@@ -41,6 +42,10 @@ in
           # also public records, but answering them here keeps the page
           # reachable without the WAN.
           10.3.0.84 api.smiirl.com counter.${fleet.dnsZone} smiirl.${fleet.dnsZone}
+          # The Kubernetes network's DHCP names the anchors as resolvers, so a
+          # machine that netboots there reaches fleetd's enrollment name at spore's
+          # bootstrap address (./fleetd.nix). Its public name keeps its certificate.
+          ${lab.bootstrap.hosts.spore} enroll.${fleet.dnsZone}
           # The hosts plugin caps TTL at 65535 seconds. /etc/hosts is an
           # immutable Nix-store file, so polling it for changes only burns I/O.
           ttl 65535

@@ -18,9 +18,9 @@ folly := {
 		"CLUSTER_DNS": "10.10.0.254",
 		"CILIUM_NATIVE_ROUTING_CIDR": "10.0.0.0/9",
 		"LB_RANGE": "10.3.0.64/26",
+		"K8S_DHCP_CIDR": "10.3.0.48/28",
 		"BGP_GATEWAY_ASN": "64512",
 		"BGP_CILIUM_ASN": "64513",
-		"NODE_ADDRESSES": `{"optiplex":"10.3.0.10","shale":"10.3.0.11","riptide":"10.3.0.12"}`,
 	},
 }
 
@@ -74,6 +74,24 @@ test_comma_separated_dns_list_satisfies_the_contract if {
 	count(deny) == 0 with input as [wrap(multiple_dns, "multiple-dns.json")]
 }
 
+test_folly_requires_a_dhcp_cidr if {
+	"folly.json: K8S_DHCP_CIDR is required on folly" in deny with input as [wrap(without_fact(folly, "K8S_DHCP_CIDR"), "folly.json")]
+}
+
+test_dhcp_cidr_must_be_canonical if {
+	"folly.json: K8S_DHCP_CIDR must be a canonical IPv4 CIDR" in deny with input as [wrap(with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.49/28"), "folly.json")]
+}
+
+test_dhcp_cidr_must_be_inside_the_node_cidr if {
+	"folly.json: K8S_DHCP_CIDR must be inside K8S_NODE_CIDR" in deny with input as [wrap(with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.64/28"), "folly.json")]
+}
+
+test_dhcp_cidr_must_not_hold_the_gateway_or_the_api_server if {
+	low := with_fact(folly, "K8S_DHCP_CIDR", "10.3.0.0/28")
+	"folly.json: K8S_DHCP_CIDR must not contain ROUTER_IP" in deny with input as [wrap(low, "folly.json")]
+	"folly.json: K8S_DHCP_CIDR must not contain API_SERVER_IP" in deny with input as [wrap(low, "folly.json")]
+}
+
 test_trailing_comma_dns_is_denied_with_local_diagnostic if {
 	trailing_comma_dns := with_fact(folly, "CLUSTER_DNS", "10.10.0.254,")
 	"multiple-dns.json: CLUSTER_DNS entries must not be empty" in deny with input as [wrap(trailing_comma_dns, "multiple-dns.json")]
@@ -90,22 +108,22 @@ test_overlapping_lb_range_is_denied_with_local_diagnostic if {
 }
 
 test_node_addresses_that_are_not_a_json_object_are_denied if {
-	list_of_nodes := with_fact(folly, "NODE_ADDRESSES", `["10.3.0.10"]`)
+	list_of_nodes := with_fact(offsite, "NODE_ADDRESSES", `["10.89.0.10"]`)
 	"list.json: NODE_ADDRESSES must be a JSON object of hostname to IPv4 address" in deny with input as [wrap(list_of_nodes, "list.json")]
 }
 
 test_node_outside_the_node_cidr_is_denied_with_local_diagnostic if {
-	stray_node := with_fact(folly, "NODE_ADDRESSES", `{"optiplex":"10.3.0.10","stray":"10.89.0.11"}`)
+	stray_node := with_fact(offsite, "NODE_ADDRESSES", `{"retrofit":"10.89.0.10","stray":"10.3.0.11"}`)
 	"stray.json: NODE_ADDRESSES value for stray must be in K8S_NODE_CIDR" in deny with input as [wrap(stray_node, "stray.json")]
 }
 
 test_two_nodes_at_one_address_are_denied if {
-	shared_address := with_fact(folly, "NODE_ADDRESSES", `{"optiplex":"10.3.0.10","shale":"10.3.0.10"}`)
-	"shared.json: NODE_ADDRESSES gives 10.3.0.10 to both optiplex and shale" in deny with input as [wrap(shared_address, "shared.json")]
+	shared_address := with_fact(offsite, "NODE_ADDRESSES", `{"retrofit":"10.89.0.10","oldschool":"10.89.0.10"}`)
+	"shared.json: NODE_ADDRESSES gives 10.89.0.10 to both oldschool and retrofit" in deny with input as [wrap(shared_address, "shared.json")]
 }
 
 test_api_server_that_is_not_a_node_is_denied if {
-	api_vip := with_fact(folly, "API_SERVER_IP", "10.3.0.9")
+	api_vip := with_fact(offsite, "API_SERVER_IP", "10.89.0.9")
 	"vip.json: API_SERVER_IP must be the address of a node in NODE_ADDRESSES" in deny with input as [wrap(api_vip, "vip.json")]
 }
 
@@ -115,4 +133,14 @@ test_cross_cluster_address_space_collision_is_denied if {
 		wrap(folly, "folly.json"),
 		wrap(offsite_lb_overlaps_folly_pods, "offsite.json"),
 	]
+}
+
+test_folly_with_node_addresses_is_denied if {
+	hand_kept := with_fact(folly, "NODE_ADDRESSES", `{"optiplex":"10.3.0.10"}`)
+	"hand.json: NODE_ADDRESSES must not be set on folly; its node addresses come from the NetBox export" in deny with input as [wrap(hand_kept, "hand.json")]
+}
+
+test_offsite_without_node_addresses_is_denied if {
+	no_nodes := without_fact(offsite, "NODE_ADDRESSES")
+	"no-nodes.json: NODE_ADDRESSES is required" in deny with input as [wrap(no_nodes, "no-nodes.json")]
 }

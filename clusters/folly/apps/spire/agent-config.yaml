@@ -1,4 +1,8 @@
 ---
+# spire-devid-init renders agent.conf into the pod with one node attestor:
+# tpm_devid.conf when the attest service serves the node an LDevID that checks
+# out, else tpm.conf. It fills @DATA_DIR@ with /var/lib/spire-agent for the EK
+# attestor and its tpm_devid subdirectory for the LDevID one.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,7 +14,7 @@ metadata:
 data:
   agent.conf: |
     agent {
-      data_dir = "/var/lib/spire-agent"
+      data_dir = "@DATA_DIR@"
       log_level = "INFO"
       server_address = "spore.lolwtf.ca"
       server_port = "8081"
@@ -20,14 +24,11 @@ data:
     }
 
     plugins {
-      NodeAttestor "tpm" {
-        plugin_cmd = "/opt/spire/plugins/tpm_attestor_agent"
-        plugin_data {}
-      }
+      @NODE_ATTESTOR@
 
       KeyManager "disk" {
         plugin_data {
-          directory = "/var/lib/spire-agent"
+          directory = "@DATA_DIR@"
         }
       }
 
@@ -46,3 +47,33 @@ data:
       live_path = "/live"
       ready_path = "/ready"
     }
+  # The boxboat plugin: the TPM's EK hash, on spore's allow list.
+  tpm.conf: |
+    NodeAttestor "tpm" {
+      plugin_cmd = "/opt/spire/plugins/tpm_attestor_agent"
+      plugin_data {}
+    }
+  # SPIRE's own plugin. It loads the LDevID key under a fresh SRK from the TCG
+  # H-1 or H-2 template, so the blobs must be wrapped by that SRK.
+  tpm_devid.conf: |
+    NodeAttestor "tpm_devid" {
+      plugin_data {
+        tpm_device_path = "/dev/tpmrm0"
+        devid_cert_path = "/run/spire/devid/devid.crt.pem"
+        devid_pub_path = "/run/spire/devid/devid.pub.blob"
+        devid_priv_path = "/run/spire/devid/devid.priv.blob"
+      }
+    }
+---
+# fleetd's DevID listener on spore, for GET /devid/<serial> and the renewal. Empty keeps every
+# agent on the EK attestor.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spire-attest
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spire-agent
+    app.kubernetes.io/part-of: spire
+data:
+  ATTEST_URL: "http://${SPORE_IP}:8444"

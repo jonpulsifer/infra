@@ -1,0 +1,136 @@
+# Alerts on fleetd (apps/fleetd) and the boot plane on spore. The cluster cannot reach the
+# bootstrap VLAN, and fleetd's ports admit only the Anchor network, so spore's node exporter carries
+# the series: talos-boot-check (nix/services/talos-boot.nix), fleetd-metrics' copy of fleetd's
+# /metrics and fleetd's own attestation file (nix/services/fleetd.nix). They carry
+# job="node-exporter".
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: fleetd
+  namespace: monitoring
+  labels:
+    lolwtf.ca/service: fleetd
+    release: prom-stack
+spec:
+  groups:
+    - name: fleetd
+      rules:
+        - alert: BootFilesNotServed
+          expr: (talos_boot_serving{instance="spore"} == 0) or absent(talos_boot_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: spore does not serve the Talos boot files
+            description: "dnsmasq is down, nginx does not serve HookOS at spore's bootstrap address, or spore exports no talos-boot-check metrics, so firmware on the Kubernetes network cannot load the signed iPXE or HookOS. Check dnsmasq and nginx on spore (nix/services/talos-boot.nix)."
+        - alert: EnrollmentNameNotServed
+          expr: (talos_boot_https_serving{instance="spore"} == 0) or absent(talos_boot_https_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: fleetd does not serve the enrollment name
+            description: "fleetd is down, has no trusted certificate for the enrollment name, or spore exports no talos-boot-check metrics, so HookOS cannot attest and an installed node cannot fetch its config. Read journalctl -u fleetd and the ACME renewal on spore (nix/services/fleetd.nix)."
+        # Every node's renewal and daily check reach the DevID listener on spore, which fleetd
+        # binds apart from the boot listener.
+        - alert: FleetdDevIDNotServing
+          expr: (fleetd_devid_serving{instance="spore"} == 0) or absent(fleetd_devid_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: fleetd does not answer on its DevID listener
+            description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+        # An intake whose attestation fails while no run expects the machine in HookOS, such as a
+        # worker that fell back to PXE, is refused and records nothing; the owner reads why.
+        - alert: TalosAttestUnattendedBootFailed
+          expr: increase(talos_attest_verdicts_total{reason="unattended-boot"}[1h]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: "A machine booted HookOS unprompted and failed attestation"
+            description: "A node booted HookOS while no run expected it, and its attestation failed. fleetd refused it and recorded nothing, so it keeps its identity. Read the device's NetBox journal and journalctl -u fleetd on spore, and look for a BIOS reset or a disk fault."
+        - alert: BootMirrorStale
+          expr: time() - talos_boot_mirror_last_success_timestamp_seconds > 6 * 3600
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "The Talos boot mirror on {{ $labels.instance }} has not verified a release for 6 hours"
+            description: "talos-boot-mirror.service fails, or has never succeeded. spore serves its last verified release. A Talos version bump fails the mirror until that version's release exists."
+        # An install reboots into the disk within minutes and fetches its config on first boot.
+        # fleetd drops a config unread after its TTL, two hours, so the alert clears then.
+        - alert: FleetInstallPending
+          expr: max by (instance) (fleet_install_configs_oldest_age_seconds{job="node-exporter"}) > 1800
+          for: 2m
+          labels:
+            severity: warning
+          annotations:
+            message: A rendered Talos config has waited 30 minutes for its node
+            description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the provision Workflow and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+        - alert: TalosAttestQuarantined
+          expr: (talos_attest_machine_status{status="quarantined"} == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: critical
+          annotations:
+            message: "{{ $labels.machine }} failed attestation and is quarantined"
+            description: "fleetd refused {{ $labels.machine }}, and its LDevID is withdrawn. Read the reason in GET /machines on fleetd's admin API or in /var/lib/fleetd/attest/verdicts.jsonl, as docs/runbooks/provision-a-node.md says."
+        - alert: TalosAttestWaitingForApproval
+          expr: (talos_attest_machine_status{status="pending-approval"} == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }} waits for the owner to approve its EK on first intake"
+            description: "NetBox pins no EK hash for {{ $labels.machine }}. Approve it on fleetd's admin API on spore, as docs/runbooks/provision-a-node.md says."
+        # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
+        # this fires only after a week of failed renewals. The newest expiry counts.
+        - alert: TalosAttestLDevIDExpiring
+          expr: max by (machine) (talos_attest_ldevid_expiry_timestamp_seconds) - time() < 23 * 86400
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s LDevID expires within 23 days"
+            description: "tpm-reattest has not renewed {{ $labels.machine }}'s LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
+        # tpm-reattest sends a LAK-signed quote every day, the daily check or a renewal, and the
+        # newest pass counts. A missing TPM, a transport error and a timeout never
+        # quarantine; they land here. Only machines that are Kubernetes nodes count, so a retired
+        # machine's record stays quiet.
+        - alert: TalosAttestNotChecked
+          expr: (time() - max by (machine) (talos_attest_last_checked_timestamp_seconds) > 26 * 3600) and on (machine) label_replace(kube_node_info, "machine", "$1", "node", "(.*)")
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }} has not passed a TPM quote check in 26 hours"
+            description: "fleetd has recorded no passing daily check of {{ $labels.machine }}. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+        # A check the node failed after its TPM's proof quarantines it, and TalosAttestQuarantined fires
+        # too; one refused before the proof (a forged, replayed or foreign quote) records nothing. Each
+        # fires for an hour after the newest such check.
+        - alert: TalosAttestCheckFailed
+          expr: time() - max by (machine, verdict) (talos_attest_check_last_timestamp_seconds{verdict!~"pass|failed-no-quarantine"}) < 3600
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s daily check ended in {{ $labels.verdict }}"
+            description: "quarantine: the TPM quoted a boot that misses fleetd's renewal policy: NetBox's attest_verdict reads quarantined, and fleetd serves no LDevID for it and cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u fleetd on spore."
+        # A control-plane node whose proven boot misses the policy is never quarantined, since that
+        # revokes the identity of the node that serves the cluster's API. Its newest record keeps
+        # this firing until a passing quote clears it.
+        - alert: TalosAttestCheckFailed
+          expr: (talos_attest_failed_no_quarantine == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: critical
+            verdict: failed-no-quarantine
+          annotations:
+            message: "Control-plane node {{ $labels.machine }} failed attestation and is not quarantined"
+            description: "{{ $labels.machine }}'s TPM quoted a boot that misses fleetd's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u fleetd on spore, then reinstall or fix the node; the next passing check clears this."
+        # The newest passing quote decides. A PCR 0 change the BIOS version
+        # does not explain alerts and never quarantines; the owner explains it in NetBox.
+        - alert: TalosAttestPCR0Changed
+          expr: (talos_attest_pcr0_changed == 1) and on (instance, machine) (talos_attest_last_checked_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_last_checked_timestamp_seconds))
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s PCR 0 changed at the same BIOS version"
+            description: "{{ $labels.machine }}'s firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."

@@ -6,11 +6,12 @@ that needs them, so the CLI starts while any of them is unfinished.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
-import hashlib
 import inspect
 import json
 import os
+import sys
 from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -28,6 +29,10 @@ from rich.text import Text
 
 from tally import config
 from tally.classify.base import Result
+from tally.files import guarded as _guarded
+from tally.files import is_archive as archive
+from tally.files import sha256 as _sha256
+from tally.files import walk
 from tally.model import (
     DuplicateFinding,
     ImportPreview,
@@ -44,6 +49,7 @@ if TYPE_CHECKING:
     import httpx
 
     from tally.classify.cascade import TallyCascade
+    from tally.load import Report
     from tally.parsers import Parser
 
 app = typer.Typer(no_args_is_help=True, help="A privacy-first household ledger.")
@@ -52,7 +58,6 @@ app.add_typer(rules_app, name="rules")
 console = Console()
 err = Console(stderr=True)
 UNCATEGORIZED = "uncategorized"
-ARCHIVES = frozenset({".zip", ".7z", ".rar", ".tar", ".gz", ".tgz", ".bz2", ".xz"})
 _LOOPBACK = frozenset({"127.0.0.1", "::1", "localhost"})
 _OFF = ("", "0", "false")
 
@@ -119,21 +124,6 @@ def _table(title: str, columns: Sequence[str], rows: Iterable[Sequence[object]])
     return table
 
 
-def _guarded(path: Path, settings: config.Settings) -> bool:
-    return config.is_excluded(path, settings.exclude) or config.is_excluded(
-        path.resolve(), settings.exclude
-    )
-
-
-def archive(path: Path) -> bool:
-    """An archive may hold anything, identity documents included, so tally never opens one."""
-    return path.suffix.lower() in ARCHIVES
-
-
-def _sha256(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 # inventory
 
 
@@ -188,33 +178,6 @@ class Inventory:
                 for (reason, ext), n in sorted(self.errors.items())
             ],
         }
-
-
-def walk(root: Path, settings: config.Settings) -> tuple[list[Path], int, int]:
-    """Files under `root` that may be opened, plus counts of the excluded and the hidden.
-
-    Excluded directories are pruned before descent, so nothing inside one is listed.
-    """
-    keep: list[Path] = []
-    excluded = hidden = 0
-    for dirpath, dirnames, filenames in os.walk(root):
-        here = Path(dirpath)
-        for d in list(dirnames):
-            if d.startswith("."):
-                hidden += 1
-                dirnames.remove(d)
-            elif _guarded(here / d, settings):
-                excluded += 1
-                dirnames.remove(d)
-        for name in filenames:
-            path = here / name
-            if name.startswith("."):
-                hidden += 1
-            elif _guarded(path, settings):
-                excluded += 1
-            else:
-                keep.append(path)
-    return sorted(keep), excluded, hidden
 
 
 def _family(parser: Parser, pf: ParsedFile) -> str:
@@ -611,6 +574,236 @@ def push(
             store.mark_file(sha, "pushed", pid)
     console.print(Text(f"{len(send)} files pushed. Preview {pid}"))
     console.print(Text(str(url)))
+
+
+# load
+
+
+def _server(settings: config.Settings, token: str) -> httpx.Client:
+    import httpx
+
+    return httpx.Client(
+        base_url=settings.server_url,
+        transport=_transport(),
+        timeout=httpx.Timeout(600.0, connect=10.0),
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+
+def _detail(exc: httpx.HTTPStatusError) -> str:
+    """The server's own reason, which names an upload by position and never a row."""
+    try:
+        detail = exc.response.json().get("detail")
+    except ValueError:
+        return ""
+    return str(detail)[:200] if detail else ""
+
+
+def _overrides(pairs: Sequence[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for pair in pairs:
+        name, eq, account_id = pair.rpartition("=")
+        if not eq or not name or not account_id:
+            raise _fail(f"--account takes FILE=ACCOUNT_ID, not {pair!r}", 2)
+        out[name] = account_id
+    return out
+
+
+def _examples(names: Iterable[str], limit: int = 3) -> str:
+    shown = list(names)
+    tail = f", and {len(shown) - limit} more" if len(shown) > limit else ""
+    return ", ".join(shown[:limit]) + tail
+
+
+def _print_report(report: Report) -> None:
+    from tally.load import totals
+
+    sums = totals(report)
+    what = "would be added" if report.dry_run else "added"
+    console.print(
+        Text(
+            f"{sums['files']} files in {len(report.batches)} batches: {sums['added']} rows {what},"
+            f" {sums['held'] + sums['dropped']} already held, {report.already} files"
+            f" already loaded, {report.twins} twins,"
+            f" {report.excluded} excluded. The ledger holds {report.transactions} rows.",
+            style="bold",
+        )
+    )
+    if report.batches:
+        console.print(
+            _table(
+                "Batches",
+                (
+                    "source",
+                    "files",
+                    "rows",
+                    "held",
+                    "new",
+                    "added",
+                    "dropped",
+                    "unmatched in overlap",
+                    "transfers",
+                    "to confirm",
+                    "uncategorised",
+                    "assertions",
+                    "holdings",
+                ),
+                (
+                    (
+                        b.shape,
+                        b.files,
+                        b.rows,
+                        b.held,
+                        b.new,
+                        b.added,
+                        b.dropped,
+                        b.unmatched_in_overlap,
+                        b.transfers_auto,
+                        b.transfers_open,
+                        b.uncategorised,
+                        b.assertions,
+                        b.holdings,
+                    )
+                    for b in report.batches
+                ),
+            )
+        )
+    if report.accounts:
+        names = report.ledger_accounts
+        console.print(
+            _table(
+                "Accounts decided",
+                ("file", "account"),
+                ((f, names.get(a, a)) for f, a in sorted(report.accounts.items())),
+            )
+        )
+    names = report.ledger_accounts
+    if report.ladders:
+        off = [ladder for ladder in report.ladders if not ladder.holds]
+        if off:
+            err.print(
+                Text(
+                    f"{len(off)} accounts do not sum to the balances their statements assert",
+                    style="bold red",
+                )
+            )
+        console.print(
+            _table(
+                "Balance check (span: positive means money in is missing, negative money out"
+                " or counted twice; periods off with a span of 0 is a date shift)",
+                ("account", "from", "to", "statements", "periods off", "span difference"),
+                (
+                    (
+                        names.get(ladder.account_id, ladder.account_id),
+                        ladder.date_from,
+                        ladder.date_to,
+                        ladder.assertions,
+                        ladder.periods_off,
+                        ladder.span_difference,
+                    )
+                    for ladder in report.ladders
+                ),
+            )
+        )
+    if report.unclear:
+        err.print(Text(f"{len(report.unclear)} files need an account", style="bold red"))
+        console.print(
+            _table(
+                "Needs an account (re-run with --account FILE=ACCOUNT_ID)",
+                ("file", "why", "candidates"),
+                (
+                    (u.shown, u.reason, ", ".join(names.get(c, c) for c in u.candidates))
+                    for u in report.unclear
+                ),
+            )
+        )
+    if report.skipped:
+        err.print(Text(f"{len(report.skipped)} files not read", style="bold yellow"))
+        reasons = Counter(s.reason for s in report.skipped)
+        console.print(
+            _table(
+                "Not read",
+                ("reason", "files", "for example"),
+                (
+                    (r, n, _examples(s.name for s in report.skipped if s.reason == r))
+                    for r, n in reasons.most_common()
+                ),
+            )
+        )
+    if report.uncategorised:
+        err.print(
+            Text(f"{report.uncategorised} rows in the ledger have no category", style="yellow")
+        )
+    if not report.discrepancies:
+        console.print(Text("No discrepancies.", style="green"))
+
+
+@app.command()
+def load(
+    ctx: typer.Context,
+    root: Annotated[Path | None, typer.Argument(help="Defaults to the import root.")] = None,
+    dry_run: Annotated[
+        bool, typer.Option(help="Decide and report against a copy; send no row.")
+    ] = False,
+    force: Annotated[bool, typer.Option(help="Send files already loaded.")] = False,
+    account: Annotated[
+        list[str] | None, typer.Option(help="FILE=ACCOUNT_ID for a file that needs an account.")
+    ] = None,
+    as_json: Annotated[bool, typer.Option("--json", help="Machine-readable report.")] = False,
+) -> None:
+    """Load every file under ROOT into the server's ledger, once, and show what disagrees.
+
+    A file already loaded is skipped by its hash; a row already held is never
+    added twice. Exits 3 when something needs the owner: an account whose rows
+    do not sum to the balances its statements assert, or a file that needs an
+    account. Files that could not be read are listed.
+    """
+    import httpx
+
+    from tally import load as loader
+
+    settings = _settings(ctx)
+    root = (root or settings.import_root).expanduser()
+    if not root.is_dir():
+        raise _fail(f"{root} is not a directory", 2)
+    token = settings.token()
+    if not token:
+        raise _fail("no server token: set TALLY_TOKEN or token_command", 2)
+    overrides = _overrides(account or ())
+    say = (lambda _: None) if as_json else (lambda m: err.print(Text(m, style="dim")))
+    # OCR's libraries log to stdout; with --json that stream is the report, so it is lent
+    # to stderr for the run.
+    quiet = contextlib.redirect_stdout(sys.stderr) if as_json else contextlib.nullcontext()
+    try:
+        with quiet, _server(settings, token) as http, Store.open(settings.db_path) as store:
+            remote = loader.Remote(http, dedupe_window_days=settings.dedupe_window_days)
+            target: loader.Target = remote
+            if dry_run:
+                target = loader.Local(
+                    remote.ledger(),
+                    dedupe_window_days=settings.dedupe_window_days,
+                    transfer_window_days=settings.transfer_window_days,
+                )
+            report = loader.run(
+                root,
+                settings,
+                target,
+                store,
+                dry_run=dry_run,
+                force=force,
+                overrides=overrides,
+                say=say,
+            )
+    except httpx.HTTPStatusError as exc:
+        raise _fail(f"the server refused: HTTP {exc.response.status_code} {_detail(exc)}") from exc
+    except httpx.TransportError as exc:
+        raise _fail(f"the server at {settings.server_url} is unreachable") from exc
+    if as_json:
+        typer.echo(json.dumps(report.as_json(), indent=2))
+    else:
+        _print_report(report)
+    if report.discrepancies:
+        raise typer.Exit(3)
 
 
 # report

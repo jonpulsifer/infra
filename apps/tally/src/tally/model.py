@@ -36,13 +36,19 @@ class AccountKind(StrEnum):
     asset = "asset"
 
 
+Currency = Literal["CAD", "USD"]
+
+
 class Account(Model):
     id: str
     name: str
     institution: str
     kind: AccountKind
     since: date
-    currency: Literal["CAD"] = "CAD"
+    currency: Currency = Field(
+        default="CAD",
+        description="Every amount, balance and snapshot of this account is in this currency.",
+    )
 
 
 class Flow(StrEnum):
@@ -150,6 +156,19 @@ class ParsedRow(Model):
     balance_after: Decimal | None = Field(
         default=None, description="A running balance the row carried, if the file had one."
     )
+    tags: tuple[str, ...] = Field(
+        default=(),
+        description="Trusted hints the file carried, `<prefix>:<group>/<category>` for a category"
+        " the owner chose by hand and `<prefix>:transfer` for a transfer.",
+    )
+
+
+class AccountHint(Model):
+    """What a file says about an account its rows name, for the account the import creates."""
+
+    hint: str
+    name: str
+    kind: AccountKind | None = None
 
 
 class ParsedFile(Model):
@@ -160,9 +179,11 @@ class ParsedFile(Model):
     institution: str | None
     account_hint: str | None
     account_kind_hint: AccountKind | None = None
+    accounts: tuple[AccountHint, ...] = ()
     rows: tuple[ParsedRow, ...]
     assertions: tuple[BalanceAssertion, ...] = ()
     holdings: tuple[HoldingSnapshot, ...] = ()
+    currency: Currency = "CAD"
     profile_id: str | None = Field(default=None, description="The CSV profile that parsed it.")
     sha256: str
     date_from: date | None
@@ -183,6 +204,7 @@ class PreviewFile(Model):
     scanned: bool | None = None
     needs_account: bool = False
     account_kind: AccountKind | None = None
+    currency: Currency = "CAD"
 
 
 class DuplicateFinding(Model):
@@ -235,6 +257,19 @@ class ImportPreview(Model):
     model_calls: int
     holdings: tuple[HoldingSnapshot, ...] = ()
     assertions: tuple[BalanceAssertion, ...] = ()
+    new_accounts: tuple[Account, ...] = Field(
+        default=(), description="Accounts the files name that the ledger lacks."
+    )
+    new_categories: tuple[Category, ...] = Field(
+        default=(), description="Categories the files' trusted tags need that the ledger lacks."
+    )
+    seed_rules: tuple[Rule, ...] = Field(
+        default=(), description="Rules the files' trusted tags imply, for the ledger to keep."
+    )
+    held_ids: tuple[str, ...] = Field(
+        default=(),
+        description="Ids of incoming rows the ledger already holds; nothing drafts them.",
+    )
 
 
 class Member(Model):

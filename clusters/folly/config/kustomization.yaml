@@ -3,7 +3,7 @@ kind: Kustomization
 resources:
   - ../../base
   - cluster-topology.json
-  - lab-topology.json
+  - anchor-topology.json
   - cluster-secrets.sops.yaml
 patches:
   - path: cluster-settings.yaml

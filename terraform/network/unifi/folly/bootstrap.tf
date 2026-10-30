@@ -1,88 +1,72 @@
 locals {
-  bootstrap_cidr = "${cidrhost(local.lab_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.lab_topology.BOOTSTRAP_CIDR)[1]}"
-  spore_boot_ip  = local.lab_topology.SPORE_BOOTSTRAP_IP
+  bootstrap_cidr = "${cidrhost(local.anchor_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.anchor_topology.BOOTSTRAP_CIDR)[1]}"
 
-  # The switch ports that run MAC auth, and each node's enrolled state: the
-  # network its RADIUS user puts it on. A reinstall flips a node to bootstrap,
-  # and the install reboot's link flap moves it.
-  mab_ports = {
-    shale    = 12
-    riptide  = 8
-    optiplex = 10
-  }
-  enrolled = {
-    shale    = "kubernetes"
-    riptide  = "kubernetes"
-    optiplex = "kubernetes"
-  }
-  mab_networks = {
-    kubernetes = unifi_network.k8s
-    bootstrap  = unifi_network.bootstrap
+  # spore's bootstrap address, where it serves TFTP, the boot files, Smee,
+  # Tink and fleetd (nix/services/talos-boot.nix, nix/services/fleetd.nix).
+  boot_server = local.anchor_topology.SPORE_BOOTSTRAP_IP
+
+  # The Kubernetes network's DHCP boot option: the signed iPXE that dnsmasq
+  # serves over TFTP on spore.
+  boot_option = {
+    enabled  = true
+    server   = local.boot_server
+    filename = "talos/folly/ipxe-amd64-secureboot.efi"
   }
 
-  # The nodes whose switch port runs MAC auth. Any name turns switch-wide
-  # 802.1X on. Add a node only after the gateway's RADIUS server listens:
-  # `ss -lunp | grep :1812` over SSH names a freeradius process (it is no
-  # systemd unit there), and the Default RADIUS profile has RADIUS assigned
-  # VLAN on for wired. Otherwise the node loses the network at its next link
-  # flap. riptide goes first; optiplex is the control plane. An empty set keeps
-  # every port on its open Kubernetes trunk, and is also the revert.
-  mab_enforced = toset(["riptide"])
+  # The switch port of each anchor, read from the live switch.
+  anchor_ports = {
+    capsule = 5
+    spore   = 7
+    forge   = 9
+  }
 
-  # Nodes whose port carries the bootstrap VLAN untagged with no 802.1X, for a
-  # reinstall. With tagged VLAN management "block_all", the switch (USL24P,
-  # 7.5.15) forwarded none of the node's untagged frames.
-  boot_native = toset(["shale"])
+  # Every node port is a Kubernetes port: each declared node's switch_port,
+  # named for the node, and the free rack ports where a new box may be
+  # cabled. A node carries its address statically, so a port needs neither
+  # MAC auth nor a reservation.
+  free_node_ports = [4, 12, 20, 24]
+  node_ports = merge(
+    { for port in local.free_node_ports : tostring(port) => "node" },
+    { for node, m in local.nodes : tostring(m.switch_port) => node },
+  )
 
   switch = local.clients.switches["USW 24 PoE"]
 }
 
+# spore's bootstrap address lives here: every node netboots from it across
+# the gateway (kubernetes_to_boot in firewall.tf). No switch port carries the
+# network untagged, so it has no DHCP.
 resource "unifi_network" "bootstrap" {
-  name                = "bootstrap"
-  subnet              = local.bootstrap_cidr
-  vlan                = tonumber(local.lab_topology.BOOTSTRAP_VLAN)
-  domain_name         = local.lab_domain
-  setting_preference  = "manual"
-  auto_scale          = false
-  lte_lan             = false
-  network_isolation   = true
-  multicast_dns       = false
-  ipv6_interface_type = "none"
+  name               = "bootstrap"
+  subnet             = local.bootstrap_cidr
+  vlan               = tonumber(local.anchor_topology.BOOTSTRAP_VLAN)
+  domain_name        = local.lab_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  network_isolation  = true
+  multicast_dns      = false
+  ipv6 = {
+    interface_type = "none"
+  }
 
-  # HP's UEFI PXE ignores Smee's ProxyDHCP offer and needs the boot file in the
-  # address offer, so UniFi names spore's signed iPXE. A MAC with no Hardware
-  # object gets that iPXE, and Smee answers its script request with nothing.
   dhcp_server = {
-    enabled     = true
-    leasetime   = "1h0m0s"
-    start       = cidrhost(local.bootstrap_cidr, 2)
-    stop        = cidrhost(local.bootstrap_cidr, 10)
-    dns_enabled = true
-    dns_servers = [local.spore_boot_ip]
-    tftp_server = local.spore_boot_ip
-    boot = {
-      enabled  = true
-      server   = local.spore_boot_ip
-      filename = "talos/folly/ipxe-amd64-secureboot.efi"
-    }
+    enabled = false
   }
 
   lifecycle {
     precondition {
       condition = contains(
-        [for i in range(11, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
-        local.spore_boot_ip,
+        [for i in range(2, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1])) - 1) : cidrhost(local.bootstrap_cidr, i)],
+        local.boot_server,
       )
-      error_message = "lab-topology.json's SPORE_BOOTSTRAP_IP must be in BOOTSTRAP_CIDR above the DHCP pool, which ends at host 10."
+      error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP must be a host address in BOOTSTRAP_CIDR other than the gateway."
     }
   }
 }
 
-# The controller's Default profile is the one the switch-wide setting points at.
-# The API refuses to modify it (CannotModifyDefaultRadiusProfile), so its
-# "RADIUS assigned VLAN" for wired networks is turned on once in the UI
-# (Settings > Profiles > RADIUS > Default). The removed block drops the
-# earlier import from state without touching the controller.
+# The controller's Default RADIUS profile was imported once; the removed
+# block drops it from state without touching the controller.
 removed {
   from = unifi_radius_profile.default
 
@@ -91,38 +75,14 @@ removed {
   }
 }
 
+# No port runs 802.1X or MAC auth. The setting depends on the switch, so its
+# ports leave the MAC auth profile before 802.1X turns off switch-wide.
 resource "unifi_setting" "global_switch" {
   global_switch = {
-    dot1x_portctrl_enabled = length(local.mab_enforced) > 0
+    dot1x_portctrl_enabled = false
   }
-}
 
-# The switch-wide 802.1X fallback network is bootstrap, set in the console: the
-# provider has no field for it. A MAC that RADIUS rejects, or that gets no
-# answer, lands there. RADIUS answers every known user with a VLAN, so the
-# native network applies only on a mistake, and it fails into bootstrap too.
-resource "unifi_port_profile" "mab" {
-  name                  = "MAC auth"
-  native_networkconf_id = unifi_network.bootstrap.id
-  forward               = "native"
-  tagged_vlan_mgmt      = "block_all"
-  dot1x_ctrl            = "mac_based"
-  dot1x_idle_timeout    = "5m"
-}
-
-# UniFi MAC auth wants the MAC, upper case with no separators, as both name and
-# password. vlan is set beside network_id because the provider derives it only
-# at create.
-resource "unifi_radius_user" "node" {
-  for_each = local.mab_ports
-
-  name               = upper(replace(local.clients.k8s[each.key].mac, ":", ""))
-  password           = upper(replace(local.clients.k8s[each.key].mac, ":", ""))
-  tunnel_type        = 13
-  tunnel_medium_type = 6
-  tunnel_config_type = "802.1x"
-  network_id         = local.mab_networks[local.enrolled[each.key]].id
-  vlan               = local.mab_networks[local.enrolled[each.key]].vlan
+  depends_on = [unifi_device.usw_24_poe]
 }
 
 import {
@@ -137,62 +97,55 @@ resource "unifi_device" "usw_24_poe" {
   forget_on_destroy = false
   allow_adoption    = false
 
-  # spore keeps Lab Net untagged and its PoE, and gains the bootstrap VLAN
-  # tagged for its proxy DHCP, TFTP and HTTP. The provider cannot write
+  # Each anchor keeps the Anchor network untagged and its PoE. spore gains the
+  # bootstrap VLAN tagged for TFTP, HTTP, HTTPS, DNS, NTP and Smee's proxy
+  # DHCP; capsule and forge serve nothing there. The provider cannot write
   # tagged_networkconf_ids, so the custom list names what to leave off.
-  port_override {
-    index                 = 7
-    name                  = "spore"
-    poe_mode              = "auto"
-    dot1x_ctrl            = "force_authorized"
-    forward               = "customize"
-    native_networkconf_id = unifi_network.lab.id
-    tagged_vlan_mgmt      = "custom"
-    excluded_networkconf_ids = [
-      unifi_network.fml.id,
-      unifi_network.k8s.id,
-      unifi_network.future.id,
-      unifi_network.iot.id,
-    ]
-  }
-
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if contains(local.mab_enforced, node) }
+    for_each = local.anchor_ports
     content {
-      index           = port_override.value
-      name            = port_override.key
-      port_profile_id = unifi_port_profile.mab.id
+      index    = port_override.value
+      name     = port_override.key
+      poe_mode = "auto"
+      dot1x = {
+        ctrl = "force_authorized"
+      }
+      forward               = "customize"
+      native_networkconf_id = unifi_network.lab.id
+      tagged_vlan_mgmt      = "custom"
+      excluded_networkconf_ids = concat(
+        [
+          unifi_network.fml.id,
+          unifi_network.k8s.id,
+          unifi_network.future.id,
+          unifi_network.iot.id,
+        ],
+        port_override.key == "spore" ? [] : [unifi_network.bootstrap.id],
+      )
     }
   }
 
+  # A node port carries the Kubernetes network untagged and nothing else. The
+  # controller stores a native network with every tagged VLAN blocked as
+  # forward native.
   dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if !contains(local.mab_enforced, node) && !contains(local.boot_native, node) }
+    for_each = local.node_ports
     content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
+      index                 = tonumber(port_override.key)
+      name                  = port_override.value
+      forward               = "native"
       native_networkconf_id = unifi_network.k8s.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
+      tagged_vlan_mgmt      = "block_all"
+      dot1x = {
+        ctrl = "force_authorized"
+      }
     }
   }
 
-  dynamic "port_override" {
-    for_each = { for node, port in local.mab_ports : node => port if contains(local.boot_native, node) }
-    content {
-      index                 = port_override.value
-      name                  = port_override.key
-      forward               = "customize"
-      native_networkconf_id = unifi_network.bootstrap.id
-      tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
+  lifecycle {
+    precondition {
+      condition     = length(setintersection(keys(local.node_ports), [for p in values(local.anchor_ports) : tostring(p)])) == 0
+      error_message = "A node's switch_port in clusters/folly/inventory/nodes.yaml, or a free node port, is an anchor's port."
     }
   }
-
-  # A port turns MAC auth on only after its user, the profile's VLAN assignment
-  # and the switch-wide 802.1X setting exist.
-  depends_on = [
-    unifi_radius_user.node,
-    unifi_setting.global_switch,
-  ]
 }

@@ -72,10 +72,10 @@ Use this runbook to find, connect to, inspect or restart a Postgres database, an
 ## Restart a database
 
 > [!NOTE]
-> Each live `Cluster` has one instance and no standby instance.
+> folly's `tally-db` and `tronbyt` each run two instances on two nodes, so a node can go down while the other instance serves. Every other live `Cluster` has one instance and no standby.
 
 > [!CAUTION]
-> A restart stops the database until its pod is ready again.
+> On a one-instance `Cluster`, a restart stops the database until its pod is ready again. On a two-instance `Cluster`, CNPG restarts the standby, switches over, then restarts the old primary.
 
 1. Restart the database.
 

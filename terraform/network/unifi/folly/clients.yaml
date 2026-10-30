@@ -17,6 +17,107 @@ switches:
     mac: 74:ac:b9:1a:fb:f2
     model: USL24P
 
+# Adopted UniFi access points that aps.tf imports by MAC. `roles` lists the AP
+# groups the AP belongs to; a WLAN is assigned to a group, never to an AP.
+# `where` is the AP's place on the property. The Beacon HD named Wart is
+# offline and is not declared.
+aps:
+  Lab:
+    mac: 70:a7:41:9e:e2:95
+    model: UAP6MP
+    where: garage, second-floor office
+    roles: [people, things]
+    band_steering: "off"
+    outdoor_mode: "off"
+  Wall Unit:
+    mac: 8c:30:66:9a:9a:0e
+    model: UDMA69B
+    where: house, meshed
+    roles: [people, things, guest]
+  Express 7:
+    mac: 8c:30:66:9e:e7:06
+    model: UDMA69B
+    where: house, meshed
+    roles: [people, things, guest]
+    band_steering: "off"
+    outdoor_mode: "off"
+  Gym:
+    mac: 68:d7:9a:44:0c:d9
+    model: UFLHD
+    where: gym pergola, outdoors
+    roles: [people, things]
+    band_steering: prefer_5g
+    outdoor_mode: "on"
+    # Garden coverage. A 40 MHz cell on a quiet block is plenty for a phone
+    # outside and halves the footprint; min RSSI sends it home at the door.
+    radios:
+      - name: ra0
+        radio: ng
+        channel: "1"
+        ht: 20
+        tx_power_mode: low
+        min_rssi_enabled: true
+        min_rssi: -75
+        antenna_gain: 3
+        antenna_id: -1
+        vwire_enabled: true
+      - name: rai0
+        radio: na
+        channel: "52"
+        ht: 40
+        tx_power_mode: auto
+        min_rssi_enabled: false
+        antenna_gain: 3
+        antenna_id: -1
+        vwire_enabled: true
+  Chicken Coop:
+    mac: 68:d7:9a:44:04:e1
+    model: UFLHD
+    where: chicken coop, outdoors
+    roles: [things]
+    band_steering: "off"
+    outdoor_mode: "off"
+    # The 5 GHz radio is off because it has never had a client here. The 2.4 GHz
+    # radio keeps auto power and a floor no client can fall below: the Tempest
+    # hub lives on it and a real floor drops it before it reports a signal, and
+    # it has no nearer 2.4 GHz radio until the Express 7's is enabled. The
+    # provider does not write min_rssi_enabled: false, so the floor stays
+    # enabled at the controller's default.
+    radios:
+      - name: ra0
+        radio: ng
+        channel: "6"
+        ht: 20
+        tx_power_mode: auto
+        min_rssi_enabled: true
+        min_rssi: -90
+        antenna_gain: 3
+        antenna_id: -1
+        hard_noise_floor_enabled: false
+        sens_level_enabled: false
+        loadbalance_enabled: false
+        vwire_enabled: true
+      - name: rai0
+        radio: na
+        channel: auto
+        ht: 80
+        tx_power_mode: disabled
+        min_rssi_enabled: false
+        min_rssi: -90
+        antenna_gain: 3
+        antenna_id: -1
+        hard_noise_floor_enabled: false
+        sens_level_enabled: false
+        loadbalance_enabled: false
+        vwire_enabled: true
+  Driveway:
+    mac: e0:63:da:85:9a:59
+    model: UFLHD
+    where: front of the garage, outdoors
+    roles: []
+    band_steering: "off"
+    outdoor_mode: default
+
 unmanaged-infra:
   Wall Unit PoE Switch:
     mac: 18:8b:45:3a:ea:4b
@@ -27,37 +128,6 @@ lab:
     mac: 74:83:c2:6e:80:6a
     ip: 5
     dev-id: 3687
-  nuc-wifi:
-    mac: d0:c6:37:4d:c2:fe
-    dev-id: 3592
-    skip_forget_on_destroy: false
-    hostname: nuc-wifi
-    ip: 30
-
-# A node's address is NODE_ADDRESSES in clusters/folly/config/cluster-topology.json;
-# k8s.tf reserves it on the MAC here. The offsite nodes are in
-# ../offsite/clients.yaml.
-k8s:
-  nuc:
-    mac: 1c:69:7a:01:2a:ef
-    dev-id: 3592
-    skip_forget_on_destroy: false
-  800g3-2:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: ac:e2:d3:0c:fb:b5
-  optiplex:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: 14:b3:1f:2b:57:85
-  riptide:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: 38:22:e2:2d:96:44
-  shale:
-    dev-id: 2847
-    skip_forget_on_destroy: false
-    mac: ec:8e:b5:72:35:24
 
 rpis:
   pikvm:

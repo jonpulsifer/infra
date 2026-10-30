@@ -353,8 +353,8 @@ resource "unifi_firewall_policy" "nest_k8s_to_folly_k8s" {
   }
 }
 
-# Rowbutt's offsite sandboxes reach Lab Net hosts through capsule. The route is OFFSITE-OUT
-# in bgp-folly.conf; this is the only Vpn -> Lab Net opening, so keep it to one port.
+# Rowbutt's offsite sandboxes reach the Anchor network hosts through capsule. The route is OFFSITE-OUT
+# in bgp-folly.conf; this is the only Vpn -> Anchor network opening, so keep it to one port.
 resource "unifi_firewall_policy" "nest_k8s_to_capsule_ssh" {
   name                 = "Allow Nest k8s to Capsule SSH"
   action               = "ALLOW"
@@ -373,8 +373,34 @@ resource "unifi_firewall_policy" "nest_k8s_to_capsule_ssh" {
 
   destination = {
     matching_target    = "IP"
-    ips                = ["${local.lab.hosts.capsule}/32"]
+    ips                = ["${local.anchor.hosts.capsule}/32"]
     port               = "22"
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+}
+
+# Atlantis on offsite reaches NetBox's API on capsule's nginx. Same sources and zones as the ssh policy.
+resource "unifi_firewall_policy" "nest_k8s_to_capsule_netbox" {
+  name                 = "Allow Nest k8s to Capsule NetBox"
+  action               = "ALLOW"
+  protocol             = "tcp"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = local.nest_k8s_cidrs
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.vpn.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = ["${local.anchor.hosts.capsule}/32"]
+    port               = "8080"
     port_matching_type = "SPECIFIC"
     zone_id            = unifi_firewall_zone.lab.id
   }
@@ -415,7 +441,7 @@ resource "unifi_firewall_policy" "lab_clients_to_nest_k8s" {
 
   source = {
     matching_target    = "IP"
-    ips                = [local.lab.cidr]
+    ips                = [local.anchor.cidr]
     port_matching_type = "ANY"
     zone_id            = unifi_firewall_zone.lab.id
   }
@@ -526,38 +552,10 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   }
 }
 
-# The bootstrap VLAN reaches spore on its own subnet, which the switch carries and
-# the gateway never filters, the gateway's DHCP, the enrollment server's VIP, and
-# the internet, where a Talos install pulls its installer image. Nothing else on
-# the LAN or in the cluster's VIP range. The controller appends each policy to its
-# zone pair, so each block depends on its allow to be created after it.
-locals {
-  enroll_ips = ["${local.topology.ENROLL_VIP}/32"]
-}
-
-resource "unifi_firewall_policy" "bootstrap_dhcp" {
-  name                 = "Allow Bootstrap DHCP"
-  action               = "ALLOW"
-  protocol             = "udp"
-  ip_version           = "IPV4"
-  create_allow_respond = false
-  enabled              = true
-  logging              = false
-
-  source = {
-    matching_target    = "ANY"
-    port_matching_type = "ANY"
-    zone_id            = unifi_firewall_zone.bootstrap.id
-  }
-
-  destination = {
-    matching_target    = "ANY"
-    port               = "67"
-    port_matching_type = "SPECIFIC"
-    zone_id            = data.unifi_firewall_zone.gateway.id
-  }
-}
-
+# The bootstrap network holds only spore's boot address.
+# From there it reaches the anchors on its own subnet, which the switch carries
+# and the gateway never filters, and the internet; nothing else on the LAN or
+# in the cluster's VIP range.
 resource "unifi_firewall_policy" "bootstrap_block_gateway" {
   name                 = "Block Bootstrap to Gateway"
   action               = "BLOCK"
@@ -577,35 +575,6 @@ resource "unifi_firewall_policy" "bootstrap_block_gateway" {
     matching_target    = "ANY"
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.gateway.id
-  }
-
-  depends_on = [unifi_firewall_policy.bootstrap_dhcp]
-}
-
-# VIPs are in no zone, so the enrollment server's address is an External
-# destination. The controller refuses an auto-reply rule towards External, so
-# the reply is the explicit RESPOND_ONLY policy below.
-resource "unifi_firewall_policy" "bootstrap_to_enroll" {
-  name                 = "Allow Bootstrap to Enrollment"
-  action               = "ALLOW"
-  protocol             = "tcp"
-  ip_version           = "IPV4"
-  create_allow_respond = false
-  enabled              = true
-  logging              = false
-
-  source = {
-    matching_target    = "ANY"
-    port_matching_type = "ANY"
-    zone_id            = unifi_firewall_zone.bootstrap.id
-  }
-
-  destination = {
-    matching_target    = "IP"
-    ips                = local.enroll_ips
-    port               = "443"
-    port_matching_type = "SPECIFIC"
-    zone_id            = data.unifi_firewall_zone.external.id
   }
 }
 
@@ -632,44 +601,26 @@ resource "unifi_firewall_policy" "bootstrap_block_lb" {
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.external.id
   }
-
-  depends_on = [unifi_firewall_policy.bootstrap_to_enroll]
 }
 
-# The node behind the VIP answers from the Kubernetes VLAN, so the reply is
-# Lab-zone traffic, which Lab -> Bootstrap blocks by default.
-resource "unifi_firewall_policy" "enroll_reply_to_bootstrap" {
-  name                  = "Allow Enrollment replies to Bootstrap"
-  action                = "ALLOW"
-  protocol              = "tcp"
-  ip_version            = "IPV4"
-  connection_state_type = "RESPOND_ONLY"
-  create_allow_respond  = false
-  enabled               = true
-  logging               = false
-
-  source = {
-    matching_target    = "IP"
-    ips                = local.enroll_ips
-    port               = "443"
-    port_matching_type = "SPECIFIC"
-    zone_id            = unifi_firewall_zone.lab.id
+# A node netboots and runs its Tinkerbell Workflows on the Kubernetes network,
+# so Lab reaches spore's boot services on its bootstrap address. TCP: 80 for
+# nginx's UKI and HookOS, 443 for fleetd's enroll.lolwtf.ca, 7080 for Smee's
+# per-MAC iPXE script and 42113 for the Tink server that HookOS's agent polls.
+# UDP: 69 for the signed iPXE over TFTP, 123 for chrony, and 514 for HookOS's
+# syslog. Lab and
+# Bootstrap are custom zones, so the controller creates each reply rule. A reply
+# rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
+# (tftp-single-port in nix/services/talos-boot.nix).
+resource "unifi_firewall_policy" "kubernetes_to_boot" {
+  for_each = {
+    tcp = "80,443,7080,42113"
+    udp = "69,123,514"
   }
 
-  destination = {
-    matching_target    = "ANY"
-    port_matching_type = "ANY"
-    zone_id            = unifi_firewall_zone.bootstrap.id
-  }
-}
-
-# Intel AMT shares a node's NIC and MAC, so it follows the node onto the bootstrap
-# VLAN during a reinstall. The owner's MeshCommander on the future network keeps
-# the node's console and power there; nothing else reaches Bootstrap.
-resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
-  name                 = "Allow future to Bootstrap AMT"
+  name                 = "Allow Kubernetes to Boot ${upper(each.key)}"
   action               = "ALLOW"
-  protocol             = "tcp"
+  protocol             = each.key
   ip_version           = "IPV4"
   create_allow_respond = true
   enabled              = true
@@ -677,14 +628,15 @@ resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
 
   source = {
     matching_target    = "NETWORK"
-    network_ids        = [unifi_network.future.id]
+    network_ids        = [unifi_network.k8s.id]
     port_matching_type = "ANY"
-    zone_id            = data.unifi_firewall_zone.internal.id
+    zone_id            = unifi_firewall_zone.lab.id
   }
 
   destination = {
-    matching_target    = "ANY"
-    port               = "16992-16995"
+    matching_target    = "IP"
+    ips                = ["${local.boot_server}/32"]
+    port               = each.value
     port_matching_type = "SPECIFIC"
     zone_id            = unifi_firewall_zone.bootstrap.id
   }

@@ -5,3 +5,5 @@ cards: reference
 ---
 
 Reference pages are for lookup. They define the lab's terms, name the files that hold its network facts, and set the rules for writing these pages.
+
+[Folly node lifecycle and trust design](folly-design.md) explains the component relationships, design choices, experiments and threat boundaries.

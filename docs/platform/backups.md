@@ -9,7 +9,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd` | A NixOS service on [spore](../hosts/spore.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd`, and folly's `netbox` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
@@ -33,15 +33,40 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 - The etcd jobs delete snapshots older than 14 days.
 - GCS has object versioning, and keeps a deleted or replaced object 30 days.
 
+## Garage cluster
+
+folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name `s3.lolwtf.ca`, the S3 VIP (`S3_VIP` in `clusters/folly/config/anchor-topology.json`). keepalived from `nix/services/anchor-vips.nix` holds the VIP on capsule, then forge, then spore, and moves it off an anchor whose Garage loses its quorum or stops answering S3. `AnchorS3VipDown` fires when no anchor holds the VIP and serves. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
+
 ## Credentials
 
-1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
+1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
 
 ## Volumes
 
+Every claim on folly uses `local-path`, a `local` volume on one node's `data` volume. No pod mounts storage from a host outside the cluster, so a stopped anchor does not hang a pod. A claim lives on one node, so Velero is the copy of a claim that has no second instance. [Restore a volume](../runbooks/restore-a-volume.md) recovers it on another node.
+
 Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `local` volume with [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md) before relying on its backup.
 
+## Volume coverage
+
+Velero runs in opt-in mode: `defaultVolumesToFsBackup` is `false`, so it copies a volume with kopia only when the running pod names it in `backup.velero.io/backup-volumes`. Every claim on folly has one of three answers.
+
+| Answer | Claims | Why |
+| --- | --- | --- |
+| Velero | `jellyfin-config`, `prom-stack-grafana`, `smiirl-data`, `tronbyt-data`, `data-vault-openbao-0` | The state is not in the repo and cannot be rebuilt. Grafana keeps what the UI adds, such as public dashboard links; its dashboards and data sources come from the repo. |
+| CloudNativePG | `tally-db-*`, `tronbyt-*` | The barman-cloud plugin archives base backups and WAL, so Velero skips them. |
+| Excluded | Prometheus, VictoriaLogs and Tempo volumes | Metrics, logs and traces history. Losing it costs history only. Rules, alerts and dashboards come from the repo. |
+| Excluded | `valkey-applol-cache-0-0-data` | A cache that the kthx engine owns. |
+| Excluded | `hajimari-config`, `dump-data-dump-nfs-0` | Empty. Hajimari reads its settings from a ConfigMap, and `dump` is scratch space. |
+| Excluded | `pvc-nfs-provisioner-nfs-subdir-external-provisioner` | A mount handle for the NFS export. The data lives on spore. |
+
+Velero skips a pod that is not running when the backup starts, and records a warning. A volume that the warnings name goes uncovered for that night.
+
+`mise run backup:coverage [context]` lists each claim with its answer and fails when a claim has none. `scripts/backup-coverage.exclusions` holds each excluded claim and its reason.
+
 ## Rules
+
+- Give a new PVC a pod annotation `backup.velero.io/backup-volumes`, or a line in `scripts/backup-coverage.exclusions` that says why it needs no backup. Run `mise run backup:coverage` before you merge.
 
 - Keep `backup-crypt` in 1Password. Without it the GCS copy cannot be read.
 - Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale` and `BackupJobFailed` watch only those.
@@ -50,9 +75,10 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 
 ## Where it lives
 
-- `nix/services/garage.nix`: Garage on spore
+- `nix/services/garage.nix`: Garage on the anchors
 - `clusters/<site>/etcd-snapshot/`: the etcd snapshots
 - `clusters/offsite/garage/`: offsite's Garage
+- `scripts/backup-coverage.sh`, `scripts/backup-coverage.exclusions`: the volume coverage check
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
 - `clusters/base/platform/kthx-engine-target/backup/`: the store the kthx Datastores archive to
 - `clusters/offsite/apps/restore-drill/`, `clusters/folly/apps/restore-drill/`: the restore drill
@@ -66,5 +92,6 @@ Velero skips a PVC bound to a hostPath volume. Migrate any such claim to a `loca
 - [Recover a re-created database](../runbooks/recover-a-re-created-database.md)
 - [Restore a volume](../runbooks/restore-a-volume.md)
 - [Restore etcd on Talos](../runbooks/restore-etcd-on-talos.md)
+- [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md)
 - [Restore from the GCS copy](../runbooks/restore-from-the-gcs-copy.md)
 - [Migrate a local-path volume](../runbooks/migrate-a-local-path-volume.md)

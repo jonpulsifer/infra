@@ -17,10 +17,11 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "switchboard",
-    "talos-enroll",
     "tally",
     "tally-ocr",
     "tink-agent-autoid",
+    "tink-attest",
+    "tink-reprovision-tools",
     "weather"
   ],
   "deploy": {
@@ -68,9 +69,6 @@
       "clusters/folly/apps/pbx/switchboard.yaml",
       "clusters/offsite/apps/elevenlabs/switchboard.yaml"
     ],
-    "talos-enroll": [
-      "clusters/folly/apps/talos-enroll/02-deployment.yaml"
-    ],
     "tally": [
       "clusters/folly/apps/tally/deployment.yaml"
     ],
@@ -79,6 +77,12 @@
     ],
     "tink-agent-autoid": [
       "clusters/folly/talos/netboot.json"
+    ],
+    "tink-attest": [
+      "clusters/folly/apps/spire/tpm-reattest.yaml"
+    ],
+    "tink-reprovision-tools": [
+      "clusters/folly/tinkerbell/template.yaml"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"

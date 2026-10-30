@@ -21,6 +21,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel
 
+from tally import fx
 from tally.model import (
     AccountKind,
     Category,
@@ -91,7 +92,14 @@ def taxonomy(ledger: Ledger) -> Taxonomy:
 
 
 def months(ledger: Ledger) -> list[str]:
-    return sorted({month_key(t.date) for t in ledger.transactions})
+    """Every month the ledger says something about: a row, a snapshot, a valuation, a balance."""
+    dated = (
+        *(t.date for t in ledger.transactions),
+        *(h.date for h in ledger.holdings),
+        *(v.date for v in ledger.valuations),
+        *(a.date for a in ledger.assertions),
+    )
+    return sorted({month_key(d) for d in dated})
 
 
 def _in_months(m: str, start: str | None, end: str | None) -> bool:
@@ -246,6 +254,7 @@ def net_worth_series(ledger: Ledger) -> list[NetWorthPoint]:
     bal = balances_by_month(ledger)
     cash_ids = [a.id for a in ledger.accounts if a.kind in _CASH_KINDS]
     by_kind = {k: [a.id for a in ledger.accounts if a.kind is k] for k in AccountKind}
+    currency = {a.id: a.currency for a in ledger.accounts}
     points: list[NetWorthPoint] = []
     for m in months(ledger):
         end = _month_end(m)
@@ -255,7 +264,7 @@ def net_worth_series(ledger: Ledger) -> list[NetWorthPoint]:
         for i in by_kind[AccountKind.investment]:
             snap = _latest((h for h in ledger.holdings if h.account_id == i), end)
             if snap is not None:
-                investments += snap.total
+                investments += fx.to_cad(snap.total, currency[i], snap.date)
                 estimated |= month_key(snap.date) != m
         for i in by_kind[AccountKind.asset]:
             val = _latest((v for v in ledger.valuations if v.account_id == i), end)

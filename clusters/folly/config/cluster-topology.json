@@ -17,9 +17,8 @@
     "CLUSTER_DNS": "10.10.0.254",
     "CILIUM_NATIVE_ROUTING_CIDR": "10.0.0.0/9",
     "LB_RANGE": "10.3.0.64/26",
-    "ENROLL_VIP": "10.3.0.90",
+    "K8S_DHCP_CIDR": "10.3.0.48/28",
     "BGP_GATEWAY_ASN": "64512",
-    "BGP_CILIUM_ASN": "64513",
-    "NODE_ADDRESSES": "{\"optiplex\":\"10.3.0.10\",\"shale\":\"10.3.0.11\",\"riptide\":\"10.3.0.12\"}"
+    "BGP_CILIUM_ASN": "64513"
   }
 }

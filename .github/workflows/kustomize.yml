@@ -9,7 +9,8 @@ on:
       - 'clusters/**'
       - 'packages/charts/**'
       - 'terraform/network/unifi/folly/clients.yaml'
-      - 'scripts/render-tinkerbell-nodes.sh'
+      - 'scripts/render-spire-devid-ca.sh'
+      - 'terraform/pki/certs/folly-devid-ca.pem'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
@@ -18,7 +19,8 @@ on:
       - 'clusters/**'
       - 'packages/charts/**'
       - 'terraform/network/unifi/folly/clients.yaml'
-      - 'scripts/render-tinkerbell-nodes.sh'
+      - 'scripts/render-spire-devid-ca.sh'
+      - 'terraform/pki/certs/folly-devid-ca.pem'
       - '.github/scripts/render-cluster-apps.sh'
       - '.github/scripts/check-prometheus-rules.sh'
       - '.github/workflows/kustomize.yml'
@@ -36,9 +38,9 @@ jobs:
     runs-on: ${{ inputs.runner || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
           install_args: helm kubectl yq promtool
       - run: bash .github/scripts/render-cluster-apps.sh
       - run: bash .github/scripts/check-prometheus-rules.sh
-      - run: bash scripts/render-tinkerbell-nodes.sh --check
+      - run: bash scripts/render-spire-devid-ca.sh --check

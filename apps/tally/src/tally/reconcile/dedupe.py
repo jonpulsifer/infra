@@ -11,6 +11,12 @@ Files in one import are deduped in order: each file is matched against the
 ledger plus the new rows of the files before it, with consumption reset per
 file, so overlapping exports collapse without one file's rows eating another's.
 
+A row may carry a closed `Period`: a statement period whose rows are known to
+add up to the balances the institution asserted at both ends of it. Two rows
+in disjoint closed periods are never fuzzy duplicates, because each period
+already counts its own; this keeps a repeated purchase on either side of a
+statement date. A row with no period is matched as usual.
+
 A pending incoming row that matches a posted one is a duplicate. A posted
 incoming row that matches a pending one is a replacement: the finding's reason
 starts with "replaces pending", the incoming row stays in `DedupeResult.new`,
@@ -25,7 +31,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
@@ -35,6 +41,9 @@ from tally.model import DuplicateFinding, ParsedRow, Transaction, cents
 from tally.reconcile.identity import dedupe_key, normalise_descriptor, transaction_id
 
 Tier = Literal["fitid", "fuzzy"]
+
+type Period = tuple[date, date]
+"""A closed statement period, after its first date and through its second."""
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,7 @@ class _Row:
     fitid: str | None
     pending: bool
     index: int | None = None
+    period: Period | None = None
 
 
 @dataclass(frozen=True)
@@ -74,10 +84,18 @@ def find_duplicates(
     window_days: int = 3,
     sources: Sequence[str] | None = None,
     account_id: str | None = None,
+    periods: Sequence[Period | None] | None = None,
+    existing_periods: Mapping[str, Period] | None = None,
 ) -> list[DuplicateFinding]:
     """See `dedupe`; this returns the findings only."""
     result = dedupe(
-        existing, incoming, window_days=window_days, sources=sources, account_id=account_id
+        existing,
+        incoming,
+        window_days=window_days,
+        sources=sources,
+        account_id=account_id,
+        periods=periods,
+        existing_periods=existing_periods,
     )
     return list(result.findings)
 
@@ -89,19 +107,26 @@ def dedupe(
     window_days: int = 3,
     sources: Sequence[str] | None = None,
     account_id: str | None = None,
+    periods: Sequence[Period | None] | None = None,
+    existing_periods: Mapping[str, Period] | None = None,
 ) -> DedupeResult:
     """Match incoming rows to the ledger.
 
     `sources` names the file of each incoming row; without it the rows are one
     file and no within-batch pass runs. `account_id` is the account of any
     ParsedRow without an `account_hint` (a CSV import names its account).
+    `periods` gives each incoming row its closed period or None, and
+    `existing_periods` gives ledger rows theirs by id.
     """
     if window_days < 0:
         raise ValueError("window_days must be non-negative")
     if sources is not None and len(sources) != len(incoming):
         raise ValueError("sources must name one file per incoming row")
-    rows = _incoming_rows(incoming, sources, account_id)
-    pool = [_from_transaction(t) for t in existing]
+    if periods is not None and len(periods) != len(incoming):
+        raise ValueError("periods must give one entry per incoming row")
+    rows = _incoming_rows(incoming, sources, account_id, periods)
+    held = existing_periods or {}
+    pool = [_from_transaction(t, period=held.get(t.id)) for t in existing]
     findings: list[DuplicateFinding] = []
     new: list[int] = []
     replaces: dict[int, str] = {}
@@ -138,7 +163,9 @@ def _index(row: _Row) -> int:
     return row.index
 
 
-def _from_transaction(t: Transaction, index: int | None = None) -> _Row:
+def _from_transaction(
+    t: Transaction, index: int | None = None, period: Period | None = None
+) -> _Row:
     return _Row(
         id=t.id,
         account_id=t.account_id,
@@ -148,6 +175,7 @@ def _from_transaction(t: Transaction, index: int | None = None) -> _Row:
         fitid=t.fitid,
         pending=t.pending,
         index=index,
+        period=period,
     )
 
 
@@ -155,12 +183,14 @@ def _incoming_rows(
     incoming: Sequence[ParsedRow | Transaction],
     sources: Sequence[str] | None,
     account_id: str | None,
+    periods: Sequence[Period | None] | None,
 ) -> list[_Row]:
     seen: Counter[tuple[str, str]] = Counter()
     rows: list[_Row] = []
     for i, item in enumerate(incoming):
+        period = periods[i] if periods else None
         if isinstance(item, Transaction):
-            rows.append(_from_transaction(item, i))
+            rows.append(_from_transaction(item, i, period))
             continue
         account = item.account_hint or account_id
         if account is None:
@@ -169,7 +199,9 @@ def _incoming_rows(
         slot = (sources[i] if sources else "", dedupe_key(account, item.date, amount, norm))
         rid = transaction_id(account, item.date, amount, item.descriptor, occurrence=seen[slot])
         seen[slot] += 1
-        rows.append(_Row(rid, account, item.date, amount, norm, item.fitid, item.pending, i))
+        rows.append(
+            _Row(rid, account, item.date, amount, norm, item.fitid, item.pending, i, period)
+        )
     return rows
 
 
@@ -219,7 +251,7 @@ def _match_fuzzy(
         for p in by_amount.get((row.account_id, row.cents), []):
             other = pool[p]
             days = abs((row.date - other.date).days)
-            if days > window_days or _fitids_conflict(row, other):
+            if days > window_days or _fitids_conflict(row, other) or _closed_apart(row, other):
                 continue
             distance = 1.0 - SequenceMatcher(None, row.norm, other.norm).ratio()
             pairs.append(((days, distance, _preference(row, other), _index(row), p), p, row))
@@ -240,6 +272,12 @@ def _preference(row: _Row, other: _Row) -> tuple[bool, bool]:
 
 def _fitids_conflict(a: _Row, b: _Row) -> bool:
     return bool(a.fitid and b.fitid and a.fitid != b.fitid and a.norm != b.norm)
+
+
+def _closed_apart(a: _Row, b: _Row) -> bool:
+    if a.period is None or b.period is None:
+        return False
+    return a.period[1] <= b.period[0] or b.period[1] <= a.period[0]
 
 
 def _is_replacement(m: _Match) -> bool:

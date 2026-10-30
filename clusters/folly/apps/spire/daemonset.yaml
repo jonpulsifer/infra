@@ -8,10 +8,11 @@ metadata:
     app.kubernetes.io/name: spire-agent
     app.kubernetes.io/part-of: spire
   annotations:
-    # The agent reads its config only at startup. Only a first attestation
-    # reads spire-bundle, which spore rewrites on every CA rotation, so a
-    # bundle change restarts no agent.
-    configmap.reloader.stakater.com/reload: spire-agent
+    # The agent reads its config only at startup, and the init container picks
+    # its node attestor then. Only a first attestation reads spire-bundle,
+    # which spore rewrites on every CA rotation, so a bundle change restarts no
+    # agent.
+    configmap.reloader.stakater.com/reload: spire-agent,spire-attest
 spec:
   selector:
     matchLabels:
@@ -34,14 +35,59 @@ spec:
       # The Talos root labels the nodes whose TPM 2.0 is on.
       nodeSelector:
         lolwtf.ca/tpm: "true"
+      initContainers:
+        # Fetches the node's LDevID from the attest service by SMBIOS serial
+        # and renders agent.conf with tpm_devid, or with the EK attestor when
+        # ATTEST_URL is empty or the LDevID is missing or does not check out.
+        - name: devid-init
+          # One literal with the agent's image, which CD rewrites.
+          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:322391528aaa403e47a71112c8162e2e99176a08b3f3ebb5083d01a807afad1a
+          imagePullPolicy: IfNotPresent
+          command: ["/opt/spire/bin/spire-devid-init"]
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: ATTEST_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: spire-attest
+                  key: ATTEST_URL
+                  optional: true
+          # product_serial is 0400 root.
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: config
+              mountPath: /run/spire/config
+              readOnly: true
+            - name: dmi
+              mountPath: /host/dmi
+              readOnly: true
+            - name: devid
+              mountPath: /run/spire/devid
+            - name: agent-config
+              mountPath: /run/spire/agent
       containers:
         - name: spire-agent
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/spire-agent-tpm…@sha256:` string, so keep it one
           # literal. The zero digest stands until main builds the first image.
-          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:43f737b3e805033b4024cdf060500306a0a9111cdbcea82ab16626c7f0b9d526
+          image: ghcr.io/jonpulsifer/spire-agent-tpm:latest@sha256:322391528aaa403e47a71112c8162e2e99176a08b3f3ebb5083d01a807afad1a
           imagePullPolicy: IfNotPresent
-          args: ["-config", "/run/spire/config/agent.conf"]
+          args: ["-config", "/run/spire/agent/agent.conf"]
           env:
             - name: MY_NODE_NAME
               valueFrom:
@@ -76,8 +122,11 @@ spec:
             limits:
               memory: 256Mi
           volumeMounts:
-            - name: config
-              mountPath: /run/spire/config
+            - name: agent-config
+              mountPath: /run/spire/agent
+              readOnly: true
+            - name: devid
+              mountPath: /run/spire/devid
               readOnly: true
             - name: bundle
               mountPath: /run/spire/bundle
@@ -92,6 +141,22 @@ spec:
         - name: config
           configMap:
             name: spire-agent
+        # The rendered agent.conf and the LDevID files. The blobs are wrapped
+        # by this TPM's SRK, so they are useless anywhere else.
+        - name: agent-config
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        - name: devid
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # The SMBIOS system serial, Talos's SystemInformation serialnumber.
+        # /sys/class/dmi/id links here.
+        - name: dmi
+          hostPath:
+            path: /sys/devices/virtual/dmi/id
+            type: Directory
         - name: bundle
           configMap:
             name: spire-bundle

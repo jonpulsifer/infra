@@ -81,7 +81,7 @@ spec:
             severity: critical
           annotations:
             message: CoreDNS sinkhole on capsule is down
-            description: "coredns.service is not active on capsule. One half of the production DNS sinkhole pair is unavailable."
+            description: "coredns.service is not active on capsule. One of the three DNS anchors is unavailable."
         - alert: CapsuleChronyDown
           expr: (node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="capsule", name="chronyd.service", state="active"})
           for: 5m
@@ -89,4 +89,15 @@ spec:
             severity: critical
           annotations:
             message: NTP server on capsule is down
-            description: "chronyd.service is not active on capsule. Clients configured to use time.lolwtf.ca have lost one half of the redundant NTP pair."
+            description: "chronyd.service is not active on capsule. Clients configured to use time.lolwtf.ca have lost one of the three NTP anchors."
+        - alert: CapsuleNetboxDown
+          expr: |
+            max by (name) (node_systemd_unit_state{instance="capsule", name=~"(netbox|netbox-rq|netbox-serve|postgresql|redis-netbox)\\.service", state="active"}) == 0
+            or
+            absent(node_systemd_unit_state{instance="capsule", name="netbox.service", state="active"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ if $labels.name }}{{ $labels.name }}{{ else }}netbox.service{{ end }} on capsule is not active"
+            description: "NetBox, its PostgreSQL, Redis or RQ worker, or the Tailscale serve that publishes it is down on capsule. The UI and API at https://capsule.<tailnet> fail, and intake that writes NetBox stops; the clusters keep running. `systemctl status` and `journalctl -u` on the unit show why."

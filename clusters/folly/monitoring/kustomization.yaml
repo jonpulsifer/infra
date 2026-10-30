@@ -10,12 +10,14 @@ resources:
   - victoria-logs-route.yaml
   - capsule.yaml
   - spore.yaml
+  - forge.yaml
+  - anchor-vips.yaml
   - tempo.yaml
   - flameboss.yaml
   - flameboss-rules.yaml
   - mate-sandbox-reader.yaml
   - pbx-rules.yaml
-  - talos-enroll-rules.yaml
+  - fleetd-rules.yaml
   - ../../base/monitoring
   - secret.sops.yaml
  # - unpoller

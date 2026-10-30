@@ -1,7 +1,7 @@
 # Each patch is one talosctl --config-patch-<type> file, in this order.
 # config_patches is what a running node gets; install_patches is the render
-# for a fresh install, which the machine_inputs output and the enrollment
-# server's talosctl render use.
+# for a fresh install, which the install_inputs output and the parity check
+# use; fleet-controller renders the same from render_inputs.
 locals {
   config_patches = { for name, n in var.nodes : name => concat(
     [local.cluster_patch],
@@ -40,12 +40,27 @@ resource "terraform_data" "install" {
   for_each = var.nodes
 
   input = each.value.install_generation
+
+  lifecycle {
+    # A static address outside the node prefix, or with no resolver, would
+    # cut the node off at its next apply, and one in the DHCP pool would
+    # collide with a netbooting machine's lease.
+    precondition {
+      condition = !var.static_addresses || (
+        length(var.nameservers) > 0 &&
+        cidrhost("${each.value.address}/${local.node_prefix_length}", 0) == cidrhost(local.topology.K8S_NODE_CIDR, 0) &&
+        try(cidrhost("${each.value.address}/${split("/", local.topology.K8S_DHCP_CIDR)[1]}", 0) != cidrhost(local.topology.K8S_DHCP_CIDR, 0), true)
+      )
+      error_message = "With static_addresses, every node's address must be in K8S_NODE_CIDR and outside K8S_DHCP_CIDR, and nameservers must name a resolver."
+    }
+  }
 }
 
-# The control plane is configured first; talos_cluster bootstraps etcd on it;
-# workers follow. An image change upgrades in the same order.
+# The bootstrap control plane is configured first; talos_cluster bootstraps
+# etcd on it; the joining control planes and the workers follow. An image
+# change upgrades in the same order.
 resource "talos_machine" "controlplane" {
-  for_each = local.controlplanes
+  for_each = local.bootstrap
 
   node                     = each.value.address
   client_configuration_wo  = ephemeral.talos_client_configuration.this.client_configuration
@@ -73,7 +88,7 @@ resource "talos_machine" "controlplane" {
 resource "talos_cluster" "this" {
   depends_on = [talos_machine.controlplane]
 
-  node                    = local.controlplane.address
+  node                    = local.topology.API_SERVER_IP
   client_configuration_wo = ephemeral.talos_client_configuration.this.client_configuration
   kubernetes_version      = var.kubernetes_version
 
@@ -83,11 +98,36 @@ resource "talos_cluster" "this" {
   }
 
   lifecycle {
-    # API_SERVER_IP is the control plane's own address (no VIP).
+    # API_SERVER_IP is the bootstrap control plane's own address (no VIP).
     precondition {
-      condition     = local.controlplane.address == local.topology.API_SERVER_IP
-      error_message = "The control plane address must equal API_SERVER_IP in cluster-topology.json."
+      condition     = length(local.bootstrap) == 1
+      error_message = "One applied control plane's address must equal API_SERVER_IP in cluster-topology.json."
     }
+  }
+}
+
+# A control plane other than the bootstrap one joins etcd through the cluster
+# it serves, so it is configured after talos_cluster, like a worker.
+resource "talos_machine" "joining" {
+  for_each   = local.joining
+  depends_on = [talos_cluster.this]
+
+  node                     = each.value.address
+  client_configuration_wo  = ephemeral.talos_client_configuration.this.client_configuration
+  machine_configuration_wo = ephemeral.talos_machine_configuration.node[each.key].machine_configuration
+  image                    = local.node_installer_image[each.key]
+  reboot_mode              = each.value.reboot_mode
+  drain_on_upgrade         = false
+
+  ignore_kubernetes_upgrade_drift = true
+
+  timeouts = {
+    create = "40m"
+    update = "90m"
+  }
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.install[each.key]]
   }
 }
 

@@ -202,6 +202,89 @@ def test_fuzzy_duplicates_are_flagged_and_dropped_only_on_accept():
     assert [t.id for t in dropped.transactions] == ["old"]
 
 
+def test_a_replaced_row_gives_way_and_the_incoming_keeps_its_category_and_transfer():
+    old = existing("old", "card", JAN, "-12.34", "SHOP A", category="shopping").model_copy(
+        update={"transfer_id": "xf1", "tags": ("ynab:Fun/Shops",)}
+    )
+    led = make_ledger([old])
+    posted = row(date(2030, 1, 12), "-12.34", "SHOP A 0042")
+    p = preview([parsed("stmt.pdf", [posted], fmt="pdf")], led, Stub())
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    after = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    (t,) = after.transactions
+    assert t.id == dup.transaction_id and t.date == date(2030, 1, 12)
+    assert (t.category_id, t.transfer_id, t.tags) == ("shopping", "xf1", ("ynab:Fun/Shops",))
+    # the retired row never comes back: the same preview applied again changes nothing
+    again = apply(
+        after, preview([parsed("stmt.pdf", [posted], fmt="pdf")], after, Stub()), Decisions()
+    )
+    assert [x.id for x in again.transactions] == [t.id]
+    # a replacement is not a drop: the same finding accepted instead keeps the old row
+    dropped = apply(led, p, Decisions(accept_findings=frozenset({dup.id})))
+    assert [x.id for x in dropped.transactions] == ["old"]
+
+
+def test_an_authoritative_statement_retires_the_rows_of_its_span_it_does_not_list():
+    listed = existing("listed", "card", date(2030, 1, 5), "-20.00", "SHOP A", category="shopping")
+    phantom = existing("phantom", "card", date(2030, 1, 9), "-7.00", "NOT ON STATEMENT")
+    partner = existing("partner", "chq", date(2030, 1, 9), "7.00", "TRANSFER IN")
+    phantom = phantom.model_copy(update={"transfer_id": "xf9"})
+    partner = partner.model_copy(update={"transfer_id": "xf9"})
+    outside = existing("outside", "card", date(2030, 2, 9), "-9.00", "LATER")
+    led = make_ledger([listed, phantom, partner, outside])
+    stmt = parsed(
+        "jan.pdf",
+        [row(date(2030, 1, 6), "-20.00", "SHOP A 0042")],
+        fmt="pdf",
+        assertions=[
+            BalanceAssertion(
+                account_id="card", date=date(2030, 1, 31), balance=D("-20.00"), origin="jan.pdf"
+            )
+        ],
+    )
+    stmt = stmt.model_copy(update={"date_from": date(2030, 1, 1), "date_to": date(2030, 1, 31)})
+    p = preview([stmt], led, Stub())
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    after = apply(
+        led,
+        p,
+        Decisions(replace_findings=frozenset({dup.id}), authoritative_files=frozenset({"jan.pdf"})),
+    )
+    ids = {t.id for t in after.transactions}
+    assert "phantom" not in ids and "listed" not in ids
+    assert {"partner", "outside", dup.transaction_id} <= ids
+    # a ledger row the statement holds under the very same id is listed, not retired
+    same = row(date(2030, 1, 20), "-3.00", "PAYMENT THANK YOU")
+    same_id = transaction_id("card", same.date, -300, same.descriptor)
+    held = existing(same_id, "card", same.date, "-3.00", "PAYMENT THANK YOU")
+    led2 = make_ledger([listed, phantom, held])
+    stmt2 = stmt.model_copy(update={"rows": (*stmt.rows, same)})
+    p2 = preview([stmt2], led2, Stub())
+    assert same_id in p2.held_ids
+    after2 = apply(led2, p2, Decisions(authoritative_files=frozenset({"jan.pdf"})))
+    ids2 = {t.id for t in after2.transactions}
+    assert same_id in ids2 and "phantom" not in ids2
+    assert next(t for t in after.transactions if t.id == "partner").transfer_id is None
+    # without the authority, the unlisted row stays
+    kept = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    assert "phantom" in {t.id for t in kept.transactions}
+
+
+def test_a_row_the_file_states_again_is_never_given_way_by_a_repeat_purchase():
+    first = row(date(2030, 1, 20), "-3.00", "COFFEE BAR")
+    held_id = transaction_id("card", first.date, -300, first.descriptor)
+    led = make_ledger([existing(held_id, "card", first.date, "-3.00", "COFFEE BAR")])
+    again = row(date(2030, 1, 23), "-3.00", "COFFEE BAR")
+    # two statements: the first states the held row again, the next holds the repeat
+    files = [parsed("jan.pdf", [first], fmt="pdf"), parsed("feb.pdf", [again], fmt="pdf")]
+    p = preview(files, led, Stub())
+    assert p.held_ids == (held_id,)
+    (dup,) = [f for f in p.findings if isinstance(f, DuplicateFinding)]
+    assert dup.matches_id == held_id
+    after = apply(led, p, Decisions(replace_findings=frozenset({dup.id})))
+    assert {t.date for t in after.transactions} == {first.date, again.date}
+
+
 def test_fitid_duplicates_drop_unless_dismissed():
     old = existing("old", "card", JAN, "-20.00", "SHOP B", fitid="F-1")
     led = make_ledger([old])
@@ -640,3 +723,148 @@ def test_a_string_withheld_at_apply_keeps_no_model_answer():
     (t,) = after.transactions
     assert (t.category_id, t.source) == ("uncategorized", Source.manual)
     assert not [r for r in after.rules if r.created_from == "model"]
+
+
+# trusted tags: a register the owner categorised by hand
+
+
+def tagged(on, amount, descriptor, *tags, hint="Test Card"):
+    return ParsedRow(account_hint=hint, date=on, amount=D(amount), descriptor=descriptor, tags=tags)
+
+
+def register(rows):
+    from tally.model import AccountHint
+
+    hints = dict.fromkeys(r.account_hint for r in rows if r.account_hint)
+    return ParsedFile(
+        name="Register.csv",
+        format="csv",
+        institution="YNAB",
+        account_hint=None,
+        accounts=tuple(
+            AccountHint(hint=h, name=h, kind=AccountKind.credit if "Card" in h else None)
+            for h in hints
+        ),
+        rows=tuple(rows),
+        sha256="5" * 64,
+        date_from=min(r.date for r in rows),
+        date_to=max(r.date for r in rows),
+    )
+
+
+def test_trusted_tags_keep_their_category_grow_the_tree_and_seed_rules():
+    rows = [
+        tagged(JAN, "-4.50", "Lantern Cafe", "ynab:Everyday/Coffee"),
+        tagged(JAN, "-9.00", "Lantern Cafe", "ynab:Everyday/Coffee"),
+        tagged(JAN, "-30.00", "Widget Shop", "ynab:Odd Group/Widgets"),
+        tagged(JAN, "-100.00", "Transfer : Test Chequing", "ynab:transfer"),
+        tagged(JAN, "100.00", "Transfer : Test Card", "ynab:transfer", hint="Test Chequing"),
+        tagged(JAN, "-5.00", "Lantern Cafe"),
+        tagged(JAN, "-7.00", "Nothing Known"),
+    ]
+    stub = Stub()
+    led = make_ledger(rules=())
+    got = preview([register(rows)], led, stub)
+
+    by_desc = {(t.descriptor, t.amount): t for t in got.new_transactions}
+    assert by_desc[("Lantern Cafe", D("-4.50"))].category_id == "coffee"
+    assert by_desc[("Lantern Cafe", D("-4.50"))].source is Source.manual
+    assert by_desc[("Lantern Cafe", D("-4.50"))].tags == ("ynab:Everyday/Coffee",)
+    widgets = by_desc[("Widget Shop", D("-30.00"))].category_id
+    assert widgets not in {c.id for c in led.categories}
+    assert {c.id for c in got.new_categories} >= {widgets}
+    assert all(c.id not in {x.id for x in led.categories} for c in got.new_categories)
+    # the untagged coffee row matches the rule the tagged rows seeded, in this same preview
+    assert by_desc[("Lantern Cafe", D("-5.00"))].category_id == "coffee"
+    assert by_desc[("Lantern Cafe", D("-5.00"))].source is Source.rule
+    assert {r.match for r in got.seed_rules} == {"lantern cafe", "widget shop"}
+    assert all(r.created_from == "seed" for r in got.seed_rules)
+    # the transfer pair is stamped under the transfer root, and only the unknown row is asked
+    legs = [t for t in got.new_transactions if t.descriptor.startswith("Transfer")]
+    assert {t.category_id for t in legs} == {"transfer"}
+    assert [r.descriptor for r in stub.requests] == ["Nothing Known"]
+    # the register's accounts carry their names and kinds
+    assert {(a.name, a.kind) for a in got.new_accounts} == {
+        ("Test Card", AccountKind.credit),
+        ("Test Chequing", AccountKind.chequing),
+    }
+
+    after = apply(led, got, Decisions())
+    assert widgets in {c.id for c in after.categories}
+    assert {r.match for r in after.rules} == {"lantern cafe", "widget shop"}
+    assert {a.name for a in after.accounts} >= {"Test Card", "Test Chequing"}
+    assert {t.account_id for t in after.transactions} <= {a.id for a in after.accounts}
+    assert next(t for t in after.transactions if t.transfer_id).category_id == "transfer"
+
+    again = apply(after, preview([register(rows)], after, stub), Decisions())
+    assert again.categories == after.categories
+    assert again.rules == after.rules
+    assert len(again.transactions) == len(after.transactions)
+
+
+def test_a_trusted_tag_whose_category_the_ledger_lacks_is_added_before_classifying():
+    rows = [tagged(JAN, "-1.00", "Odd Vendor", "ynab:Odd Group/Widgets")]
+    got = preview([register(rows)], make_ledger(rules=()), Stub())
+    (txn,) = got.new_transactions
+    assert txn.category_id == got.new_categories[-1].id
+    assert not got.findings
+
+
+def card_statement(name, opening, closing, rows):
+    """A card statement: rows posted after the opening date through the closing date."""
+    assertions = [
+        BalanceAssertion(account_id="card", date=on, balance=D(balance), origin=name)
+        for on, balance in (opening, closing)
+    ]
+    return parsed(name, rows, fmt="pdf", assertions=assertions)
+
+
+FEB = date(2030, 2, 10)
+FARE = "TRANSIT FARE"
+JANUARY = card_statement(
+    "jan.pdf",
+    (date(2029, 12, 10), "0.00"),
+    (JAN, "-10.00"),
+    [row(date(2030, 1, 5), "-3.25", "BUS"), row(date(2030, 1, 9), "-6.75", FARE)],
+)
+FEBRUARY = card_statement(
+    "feb.pdf", (JAN, "-10.00"), (FEB, "-16.75"), [row(date(2030, 1, 11), "-6.75", FARE)]
+)
+
+
+def dups(p):
+    return [f for f in p.findings if isinstance(f, DuplicateFinding)]
+
+
+def test_a_repeat_purchase_either_side_of_a_statement_date_is_kept_in_one_import():
+    p = preview([JANUARY, FEBRUARY], make_ledger(), Stub())
+    assert dups(p) == []
+    after = apply(make_ledger(), p, Decisions())
+    assert len(after.transactions) == 3
+    assert tally.reconcile.balances.check(after.transactions, after.assertions) == []
+
+
+def test_a_repeat_purchase_is_kept_against_a_statement_the_ledger_already_reconciles():
+    first = make_ledger()
+    led = apply(first, preview([JANUARY], first, Stub()), Decisions())
+    p = preview([FEBRUARY], led, Stub())
+    assert dups(p) == []
+    assert len(apply(led, p, Decisions()).transactions) == 3
+
+
+def test_a_statement_that_does_not_reconcile_is_still_deduped():
+    unanchored = FEBRUARY.model_copy(update={"assertions": FEBRUARY.assertions[1:]})
+    off = card_statement(
+        "feb.pdf", (JAN, "-10.00"), (FEB, "-99.00"), [row(date(2030, 1, 11), "-6.75", FARE)]
+    )
+    for second in (unanchored, off):
+        (dup,) = dups(preview([JANUARY, second], make_ledger(), Stub()))
+        assert dup.tier == "fuzzy"
+
+
+def test_an_export_overlapping_a_reconciled_statement_is_still_deduped():
+    first = make_ledger()
+    led = apply(first, preview([JANUARY], first, Stub()), Decisions())
+    export = parsed("card.csv", [row(date(2030, 1, 11), "-6.75", FARE)])
+    (dup,) = dups(preview([export], led, Stub()))
+    assert dup.tier == "fuzzy"

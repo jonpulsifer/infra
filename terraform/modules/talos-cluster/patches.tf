@@ -10,7 +10,7 @@ locals {
 
   # Every node: no Flannel, CIDRs and the kubelet resolver address from the
   # topology ConfigMap.
-  cluster_patch = join("\n---\n", [
+  cluster_patch = join("\n---\n", concat([
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "KubeFlannelCNIConfig"
@@ -33,16 +33,36 @@ locals {
       workloadIsolation = var.workload_isolation
     }),
     # CoreDNS forwards to ROUTER_IP itself, so no pod resolves through the
-    # host DNS proxy, whose BPF-masquerade trap then never applies.
-    yamlencode({
-      apiVersion = "v1alpha1"
-      kind       = "ResolverConfig"
-      hostDNS = {
-        enabled              = true
-        forwardKubeDNSToHost = false
-      }
-    }),
-  ])
+    # host DNS proxy, whose BPF-masquerade trap then never applies. A node
+    # with a static address takes its resolvers and search domain from here,
+    # as a DHCP lease would give them.
+    var.static_addresses ? yamlencode(merge(local.resolver, {
+      nameservers   = [for a in var.nameservers : { address = a }]
+      searchDomains = { domains = [local.dns_zone] }
+    })) : yamlencode(local.resolver),
+  ], local.node_link_alias))
+
+  resolver = {
+    apiVersion = "v1alpha1"
+    kind       = "ResolverConfig"
+    hostDNS = {
+      enabled              = true
+      forwardKubeDNSToHost = false
+    }
+  }
+
+  # A static address goes on the node's one physical NIC, which Talos names
+  # by this alias whatever the kernel calls it. The selector matches every
+  # physical link, so it names one only on a box with a single NIC; on a box
+  # with two, Talos skips the alias and the node keeps its default DHCP.
+  node_link          = "net0"
+  node_prefix_length = tonumber(split("/", local.topology.K8S_NODE_CIDR)[1])
+  node_link_alias = var.static_addresses ? [yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "LinkAliasConfig"
+    name       = local.node_link
+    selector   = { match = "true" }
+  })] : []
 
   # Control plane: no kube-proxy and no Talos CoreDNS (the bootstrap root's
   # kube-dns Service at CLUSTER_DNS is the resolver); Talos rejects both kinds
@@ -87,9 +107,9 @@ locals {
     n.taints,
   ) }
 
-  # Per node: hostname, install target, and its labels and taints. The
-  # control plane drops its LB-exclusion label too.
-  node_docs = { for name, n in var.nodes : name => [
+  # Per node: hostname, install target, its labels and taints, and its
+  # static address. The control plane drops its LB-exclusion label too.
+  node_docs = { for name, n in var.nodes : name => concat([
     # The generator emits auto: stable, and Talos rejects auto beside hostname.
     yamlencode({
       apiVersion = "v1alpha1"
@@ -125,7 +145,18 @@ locals {
       },
       length(local.node_taints[name]) > 0 ? { taints = local.node_taints[name] } : {},
     )),
-  ] }
+  ], local.node_link_config[name]) }
+
+  # The node's address on its NIC and the default route through the gateway,
+  # where Talos would otherwise run DHCP on the unconfigured link.
+  node_link_config = { for name, n in var.nodes : name => var.static_addresses ? [yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "LinkConfig"
+    name       = local.node_link
+    up         = true
+    addresses  = [{ address = "${n.address}/${local.node_prefix_length}" }]
+    routes     = [{ gateway = local.topology.ROUTER_IP }]
+  })] : [] }
 
   # A fresh install formats STATE and EPHEMERAL, so the install render of a
   # TPM node encrypts them. A running node keeps the volumes it was installed
@@ -133,12 +164,22 @@ locals {
   # encrypted, so only a node reinstalled encrypted carries the documents.
   node_patch_install = { for name, n in var.nodes : name => join("\n---\n", concat(
     local.node_docs[name],
-    contains(var.tpm_nodes, name) ? local.tpm_volume_patches : [],
+    contains(var.tpm_nodes, name) ? concat(local.tpm_volume_patches, [local.tpm_no_kexec_patch]) : [],
   )) }
   node_patch = { for name, n in var.nodes : name => join("\n---\n", concat(
     local.node_docs[name],
+    contains(var.tpm_nodes, name) ? [local.tpm_no_kexec_patch] : [],
     contains(var.encrypted_nodes, name) ? local.tpm_volume_patches : [],
   )) }
+
+  # A kexec skips systemd-stub, which puts the UKI's PCR signing key in
+  # /.extra, so the TPM cannot unseal STATE and the boot loops. With kexec off,
+  # every reboot, the one after install included, goes through the firmware.
+  tpm_no_kexec_patch = yamlencode({
+    apiVersion = "v1alpha1"
+    kind       = "SysctlConfig"
+    params     = { "kernel.kexec_load_disabled" = "1" }
+  })
 
   # A TPM node's STATE and EPHEMERAL are LUKS2 volumes whose key the TPM seals
   # to PCR 7 and to the PCR 11 policy signed by the UKI's PCR signing key.

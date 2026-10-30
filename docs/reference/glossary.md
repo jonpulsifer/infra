@@ -8,6 +8,7 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | Term | Meaning | Page |
 | --- | --- | --- |
 | Agent token | A 90-day credential that lets an agent call the kthx MCP endpoint | [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md) |
+| Anchor network | The folly network for the anchors and other lab hosts | [Network](../platform/network.md#networks) |
 | App | In kthx, a source and the Components deployed from it | [Built apps](../apps/kthx/built-apps.md#concepts) |
 | Apps Gateway | The Gateway, with its own VIP, that serves kthx Apps on a cluster | [Ingress and DNS](../platform/network/ingress-and-dns.md#public-names) |
 | ARC | Actions Runner Controller, which runs the self-hosted GitHub Actions runners | [Build and release](../platform/build-and-release.md) |
@@ -44,7 +45,6 @@ This page defines the lab's own terms, and the tool terms that have a lab-specif
 | kthx | The lab's hosting product, with quick sites and built apps | [kthx](../apps/kthx.md) |
 | kthx Apps tunnel | The Cloudflare Tunnel named `spindrift`, for public kthx names | [Ingress and DNS](../platform/network/ingress-and-dns.md#public-names) |
 | kthx engine | The controller in `apps/kthx-engine` that builds and deploys built apps | [kthx](../apps/kthx.md#how-it-works) |
-| Lab Net | The folly network for lab hosts | [Network](../platform/network.md#networks) |
 | Lab resolvers | capsule and spore, which serve lab DNS and time | [Ingress and DNS](../platform/network/ingress-and-dns.md#lab-dns-and-time) |
 | mate | The code name and process of Rowbutt | [How Rowbutt works](../apps/mate/how-it-works.md) |
 | `nest` | folly's console name for offsite | [Network](../platform/network.md) |

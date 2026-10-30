@@ -1,5 +1,5 @@
 # folly's network parameters from clusters/folly/config/cluster-topology.json; edit addresses there.
-# The NFS exports on spore admit these ranges. apiServerCA is folly's pinned cluster CA.
+# apiServerCA is folly's pinned cluster CA.
 let
   d = (builtins.fromJSON (builtins.readFile ../../clusters/folly/config/cluster-topology.json)).data;
 in

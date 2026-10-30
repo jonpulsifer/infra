@@ -52,7 +52,7 @@ The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each
 - `clusters/<site>/monitoring/`: `kube-prometheus.yaml` and the rules of one cluster. folly's also holds its scrape targets and `grafana-dashboards/`.
 - `clusters/<site>/monitoring-crds/` and `clusters/base/monitoring-crds/`: the Prometheus Operator CRDs. kube-prometheus-stack installs none.
 - `clusters/folly/apps/k6/`: the k6 operator, CronJob and test script
-- `clusters/folly/config/lab-topology.json`: the host and desktop addresses
+- `clusters/folly/config/anchor-topology.json`: the host and desktop addresses
 
 ## Related
 

@@ -15,7 +15,7 @@ Remote access is a Tailscale tailnet that the owner uses to reach both sites' pr
 | CI identity | Lets the `nixos-deploy` workflow join as `tag:ci` with a GitHub OIDC token | GitHub Actions |
 | forge OAuth client | Enrolls forge as `tag:lab-host` | forge |
 
-The Kubernetes nodes run no Tailscale client (`nix/system/tailscale-disable.nix`), so tailnet traffic reaches each site through its Connector. folly's LAN networks are Management and Lab Net, and offsite's is Default.
+The Kubernetes nodes run no Tailscale client (`nix/system/tailscale-disable.nix`), so tailnet traffic reaches each site through its Connector. folly's LAN networks are Management and the Anchor network, and offsite's is Default.
 
 OpenTofu stores the forge client's secret in 1Password. After the Atlantis apply, copy it into forge's SOPS file as `tailscale-auth-key`.
 
@@ -28,8 +28,9 @@ OpenTofu stores the forge client's secret in 1Password. After the Atlantis apply
 | `tag:folly` | offsite's node subnet, VIPs and Default network |
 | `tag:offsite` | folly's node subnet and VIPs |
 | `tag:ci` | `tag:pi4` devices on TCP port 22 |
+| `tag:gcp` | Nothing |
 
-The Connectors carry `tag:k8s`, `tag:k8s-<site>`, and `tag:folly` or `tag:offsite`. `autoApprovers` accepts routes from `tag:k8s-folly` and `tag:k8s-offsite` without review. `devices.tf` also gives `tag:folly` to spore and nuc, and `tag:offsite` to desktop-g7i75ls. No host sheet covers nuc or desktop-g7i75ls. `offsite-bell` is an `ipset` in `policy.hujson`, and no UniFi root declares its subnet.
+The Connectors carry `tag:k8s`, `tag:k8s-<site>`, and `tag:folly` or `tag:offsite`. `autoApprovers` accepts routes from `tag:k8s-folly` and `tag:k8s-offsite` without review. `devices.tf` also gives `tag:offsite` to desktop-g7i75ls, which no host sheet covers. `offsite-bell` is an `ipset` in `policy.hujson`, and no UniFi root declares its subnet.
 
 ## Rules
 

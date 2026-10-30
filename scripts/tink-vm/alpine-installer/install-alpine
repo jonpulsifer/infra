@@ -1,0 +1,66 @@
+#!/bin/sh
+# Writes this image's Alpine to DISK: a GPT with an EFI system partition that holds the signed UKI
+# and an ext4 root labelled alpine-root (the label the UKI's command line names), then unpacks
+# PAYLOAD, the node's own files, over the root and adds a firmware boot entry named Alpine. It runs
+# with /dev and efivarfs from HookOS and no network.
+set -eu
+log() {
+  echo "install-alpine: $*"
+  for t in /dev/tty0 /dev/ttyS0; do echo "install-alpine: $*" >"$t" 2>/dev/null || true; done
+}
+
+: "${DISK:?DISK names the disk to install to}"
+: "${PAYLOAD:?PAYLOAD names the node payload tarball}"
+[ -b "$DISK" ] || {
+  log "$DISK is not a block device"
+  exit 1
+}
+[ -s "$PAYLOAD" ] || {
+  log "no payload at $PAYLOAD"
+  exit 1
+}
+case $DISK in
+  *[0-9]) part=${DISK}p ;;
+  *) part=$DISK ;;
+esac
+
+log "partitioning $DISK"
+sgdisk --zap-all "$DISK" >/dev/null
+sgdisk -n 1:0:+512M -t 1:ef00 -c 1:ESP -n 2:0:0 -t 2:8304 -c 2:alpine-root "$DISK" >/dev/null
+blockdev --rereadpt "$DISK" || partx -u "$DISK" || true
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -b "${part}2" ] && break
+  sleep 1
+done
+[ -b "${part}2" ] || {
+  log "${part}2 did not appear"
+  exit 1
+}
+
+mkfs.vfat -F 32 -n ALPINE-ESP "${part}1" >/dev/null
+mkfs.ext4 -q -F -L alpine-root "${part}2"
+
+mnt=$(mktemp -d)
+mount "${part}2" "$mnt"
+trap 'umount "$mnt/boot/efi" 2>/dev/null || true; umount "$mnt" 2>/dev/null || true' EXIT
+log "writing the root"
+tar -C "$mnt" -xpf /alpine-rootfs.tar
+tar -C "$mnt" -xzpf "$PAYLOAD" --no-overwrite-dir
+release=$(cat "$mnt/etc/alpine-release")
+mount "${part}1" "$mnt/boot/efi"
+mkdir -p "$mnt/boot/efi/EFI/Linux" "$mnt/boot/efi/EFI/BOOT"
+cp /alpine.efi "$mnt/boot/efi/EFI/Linux/alpine.efi"
+# The removable-media path boots the disk when the firmware has lost every boot entry.
+cp /alpine.efi "$mnt/boot/efi/EFI/BOOT/BOOTX64.EFI"
+sync
+umount "$mnt/boot/efi" "$mnt"
+trap - EXIT
+
+if ! mountpoint -q /sys/firmware/efi/efivars; then
+  mount -t efivarfs efivarfs /sys/firmware/efi/efivars
+fi
+for n in $(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} Alpine\([[:space:]].*\)\{0,1\}$/\1/p'); do
+  efibootmgr -q -b "$n" -B
+done
+efibootmgr -q -c -d "$DISK" -p 1 -L Alpine -l '\EFI\Linux\alpine.efi'
+log "installed Alpine $release to $DISK"

@@ -30,5 +30,7 @@ spec:
         name: cluster-settings
       - kind: ConfigMap
         name: cluster-topology
+      - kind: ConfigMap
+        name: anchor-topology
       - kind: Secret
         name: cluster-secrets

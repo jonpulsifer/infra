@@ -15,7 +15,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from typing import Protocol
+from typing import Literal, Protocol
 
 from tally.model import AccountKind, BalanceAssertion, HoldingSnapshot, ParsedRow, Position
 from tally.parsers import ParseError
@@ -100,6 +100,7 @@ class Statement:
     rows: tuple[ParsedRow, ...] = ()
     assertions: tuple[BalanceAssertion, ...] = ()
     holdings: tuple[HoldingSnapshot, ...] = ()
+    currency: Literal["CAD", "USD"] = "CAD"
 
 
 class Family(Protocol):
@@ -114,13 +115,21 @@ class Family(Protocol):
 
 
 def families() -> tuple[Family, ...]:
-    from tally.parsers.statements import questrade, scotia_portfolio, scotia_visa, unparsed
+    from tally.parsers.statements import (
+        questrade,
+        scotia_chequing,
+        scotia_portfolio,
+        scotia_visa,
+        shareworks,
+        unparsed,
+    )
 
     return (
         questrade.FAMILY,
         scotia_visa.FAMILY,
         scotia_portfolio.FAMILY,
-        unparsed.SHAREWORKS,
+        scotia_chequing.FAMILY,
+        shareworks.FAMILY,
         unparsed.PWL,
     )
 

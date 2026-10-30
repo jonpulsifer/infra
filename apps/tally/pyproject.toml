@@ -9,13 +9,13 @@ dependencies = [
   "pydantic>=2.11,<3",
   "ofxtools>=1.1,<2",
   "typer>=0.15,<1",
-  "rich>=13,<15",
+  "rich>=15,<16",
   "httpx>=0.28,<1",
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.34,<1",
   "sqlalchemy>=2.0,<3",
   "psycopg[binary]>=3.2,<4",
-  "cryptography>=44,<47",
+  "cryptography>=50,<51",
   "python-multipart>=0.0.20,<1",
   "pdfplumber>=0.11,<1",
   "openpyxl>=3.1,<4",
@@ -30,10 +30,10 @@ tally = "tally.cli:app"
 
 [dependency-groups]
 dev = [
-  "pytest>=8,<9",
+  "pytest>=9,<10",
   "pytest-asyncio>=0.25,<2",
   "ruff>=0.11,<1",
-  "mypy>=1.14,<2",
+  "mypy>=2.4,<3",
   "hypothesis>=6,<7",
 ]
 

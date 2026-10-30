@@ -1,4 +1,4 @@
-# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, Talos boot assets, DNS and NTP.
+# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, Talos boot assets, fleetd, DNS and NTP.
 # First boot grows root to a fixed cap and gives the disk tail to the nfs-data partition at /nfs/data.
 {
   config,
@@ -7,12 +7,36 @@
   ...
 }:
 let
-  # Each Talos node's TPM EK public key hash, read on the node (docs/platform/identity.md).
-  tpmNodes = {
+  # The EK public key hash read on each node that attests by EK, the fallback for a node with no
+  # LDevID (docs/platform/identity.md).
+  ekHashes = {
+    optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
+  # With tpm_devid on, a node attests by the LDevID that fleetd issues it, whose subject
+  # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
+  # its OU (the class) or O (the site), so each node in the nodes file with a TPM 2.0 gets its own
+  # alias, and a new node needs a spore deploy. A failed or retired node keeps its alias until its
+  # entry goes, and fleetd refuses it an LDevID.
+  devidNodes = lib.attrNames (
+    lib.filterAttrs (_: n: n.tpm or null == "2.0") (import ../lib/inventory.nix { inherit lib; })
+  );
+  tpmNodes = lib.sort lib.lessThan (lib.unique (lib.attrNames ekHashes ++ devidNodes));
   trustDomain = config.homelab.spire.trustDomain;
   nodeID = name: "spiffe://${trustDomain}/node/${name}";
+  # One alias per node and attestor: an agent matches a node entry only when it has every selector.
+  nodeAliases =
+    lib.mapAttrsToList (name: hash: {
+      spiffeID = nodeID name;
+      selectors = [ "tpm:pub_hash:${hash}" ];
+    }) ekHashes
+    ++ lib.optionals config.homelab.spire.devid.enable (
+      map (name: {
+        spiffeID = nodeID name;
+        key = "tpm_devid";
+        selectors = [ "tpm_devid:subject:cn:${name}" ];
+      }) devidNodes
+    );
   # Kubernetes service accounts that get an SVID on every TPM node.
   workloads = [
     {
@@ -31,18 +55,21 @@ let
 in
 {
   imports = [
+    ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
-    ../services/coredns-sinkhole.nix
+    ../services/fleetd.nix
     ../services/garage.nix
     ../services/nfs-server.nix
-    ../services/ntp-server.nix
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
-    ../services/spore-talos-boot.nix
+    ../services/talos-boot.nix
     ../services/tinkerbell.nix
     ../system/sops.nix
   ];
+
+  # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
+  homelab.fleetd.installs = true;
 
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
@@ -52,21 +79,37 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
+  # The YubiKey 5 that holds the DevID CA key fleetd issues every LDevID with.
+  homelab.devidCa.yubikey.enable = true;
+  homelab.devidCa.yubikey.serial = 9758244;
+
+  # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
+  # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
   homelab.garage = {
     enable = true;
     site = "folly";
-    dataDir = "/nfs/data/garage";
+    dataDir = "/nfs/data/garage-ha";
+    clustered = true;
   };
 
   homelab.spire = {
     bundleNotifier.enable = true;
     enable = true;
-    ekHashes = lib.attrValues tpmNodes;
+    ekHashes = lib.attrValues ekHashes;
+    # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
+    # certificate of each file.
+    devid.enable = true;
+    fleetEntries = {
+      enable = true;
+      inherit workloads;
+    };
+    devid.caChains = [
+      ../../terraform/pki/certs/folly-devid-ca-software.pem
+      ../../terraform/pki/certs/folly-devid-ca-spore.pem
+      ../../terraform/pki/certs/folly-devid-ca-capsule.pem
+    ];
     entries =
-      lib.mapAttrsToList (name: hash: {
-        spiffeID = nodeID name;
-        selectors = [ "tpm:pub_hash:${hash}" ];
-      }) tpmNodes
+      nodeAliases
       ++ lib.concatMap (
         name:
         map (w: {
@@ -77,7 +120,7 @@ in
             "k8s:sa:${w.sa}"
           ];
         }) workloads
-      ) (lib.attrNames tpmNodes);
+      ) tpmNodes;
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;
@@ -95,6 +138,13 @@ in
 
   # The rackpi5 target is wired in nix/lib/registry.nix, where its piBootImg is in scope.
   services.spore.enable = true;
+
+  # Paths no unit reads, about 2G that the capped root cannot spare. The Talos boot mirror keeps its
+  # releases under /var/lib/talos-boot (../services/talos-boot.nix).
+  systemd.tmpfiles.rules = [
+    "R /var/lib/spore-talos-boot"
+    "r /var/lib/prometheus-node-exporter-text-files/spore-talos-boot.prom"
+  ];
 
   sdImage.expandOnBoot = false;
 

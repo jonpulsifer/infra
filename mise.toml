@@ -29,7 +29,7 @@ shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
 # The client for the Talos roots; move it with their talos_version.
-talosctl = "1.14.4"
+talosctl = "1.14.5"
 yq = "latest"
 # tally (apps/tally) is the first Python app: uv owns its env, lockfile and Python.
 uv = "latest"
@@ -80,6 +80,16 @@ run = ["uv run ruff check .", "uv run ruff format --check .", "uv run mypy", "uv
 description = "Run the tally API with the synthetic ledger on :8081 (apps/tally)"
 dir = "apps/tally"
 run = "uv run tally serve --synthetic --port 8081"
+
+[tasks."tally:load"]
+description = "Load ~/finance into the live tally ledger, once, and show what disagrees (apps/tally)"
+dir = "apps/tally"
+run = "scripts/load.sh"
+
+[tasks."tally:ocr"]
+description = "Install tally's OCR extra and Docling's models locally, so tally:load reads scans (apps/tally)"
+dir = "apps/tally"
+run = "scripts/ocr-models.sh"
 
 [tasks.kthx]
 description = "Run the kthx CLI from this checkout"
@@ -136,29 +146,33 @@ run = [
 description = "Firing Alertmanager alerts on every cluster (optional substring filter)"
 run = "bash scripts/alerts.sh"
 
-[tasks.render-machine-inputs]
-description = "Write talos-enroll's per-node render inputs from the folly Talos root, with no state, and the nodes' MACs from the UniFi client list"
-run = "bash scripts/render-machine-inputs.sh"
+[tasks.render-class-inputs]
+description = "Write fleetd's per-class render inputs to clusters/folly/fleet/ from the folly Talos root, with no state and each node's status from NetBox, and the MACs NetBox holds for spore's netboot links"
+run = "bash scripts/render-class-inputs.sh"
 
-[tasks.render-tinkerbell-nodes]
-description = "Write each folly node's MAC, address and install disk, and the HookOS URL, for the Tinkerbell objects in clusters/folly/tinkerbell/ (--check compares)"
-run = "bash scripts/render-tinkerbell-nodes.sh"
+[tasks."inventory:check"]
+description = "Compare each folly node's NetBox device with what the node reports over the Talos API; exits 1 on drift"
+run = "bash scripts/inventory.sh check"
 
-[tasks."enroll:approve"]
-description = "Approve the Talos enrollment whose code the machine's console shows, over the tailnet (args: <code> <node>)"
-run = "bash scripts/enroll.sh approve"
+[tasks."inventory:observe"]
+description = "Print a folly node's observed inventory entry (args: [--insecure] <address>)"
+run = "bash scripts/inventory.sh observe"
 
-[tasks."enroll:deny"]
-description = "Deny a waiting Talos machine by its uuid over the tailnet (args: <uuid>)"
-run = "bash scripts/enroll.sh deny"
+[tasks."attest:approve"]
+description = "Show the first intake that waits for a serial on fleetd, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
+run = "bash scripts/attest.sh approve"
 
-[tasks."enroll:pending"]
-description = "List the Talos enrollments that wait for approval or for their config fetch"
-run = "bash scripts/enroll.sh pending"
+[tasks."attest:pending"]
+description = "List the first intakes that wait for approval on fleetd"
+run = "bash scripts/attest.sh pending"
 
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
 run = "bash .github/scripts/render-cluster-apps.sh"
+
+[tasks."backup:coverage"]
+description = "List how each PVC on a cluster is backed up and fail on an uncovered one (arg: [context], default folly)"
+run = "bash scripts/backup-coverage.sh"
 
 [tasks."k8s:check-rules"]
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
@@ -257,6 +271,22 @@ FML_DERIVE_RS="$PWD/apps/fml-derive-rs/target/release/fml-derive" \
 [tasks."pki:attest"]
 description = "Check a ceremony transcript: canonical form, hash chain, share structure, certificate chain (set TRANSCRIPT)"
 run = "go -C apps/fml-attest run . ${TRANSCRIPT:-../fml-ceremony/testdata/transcript.example.json}"
+
+[tasks."devid:yubikey:init"]
+description = "Make an anchor's YubiKey a DevID CA: new PIV secrets in SOPS and 1Password, an RSA-2048 key generated on the card, and its CSR in terraform/pki/csr (arg: <host>)"
+run = "bash scripts/devid-ca-yubikey.sh init"
+
+[tasks."devid:yubikey:install"]
+description = "Write the DevID CA certificate that terraform/pki issued into the anchor's YubiKey and sign through ykcs11 (arg: <host>)"
+run = "bash scripts/devid-ca-yubikey.sh install"
+
+[tasks."devid:bundle"]
+description = "Write terraform/pki/certs/folly-devid-ca.pem from every issuing DevID CA certificate beside it"
+run = "bash scripts/devid-ca-yubikey.sh bundle"
+
+[tasks."devid:test"]
+description = "Test the DevID CA script's firmware policy, ykman parsing, secrets and bundle"
+run = "bash scripts/devid-ca-yubikey_test.sh"
 
 [tasks."docs:check"]
 description = "Docs contract: renderer validation, referenced paths exist, no archaeology, references into the wiki resolve"

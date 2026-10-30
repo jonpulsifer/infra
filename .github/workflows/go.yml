@@ -19,13 +19,18 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
+      - 'apps/fleetd/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/talos-enroll/**'
+      - 'images/spire-agent-tpm/devid-init/**'
+      # fleetd's tests read these.
+      - 'clusters/folly/talos/secureboot/**'
+      - 'nix/services/spire/roots/**'
+      - 'packages/pkcs11signer/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -34,13 +39,18 @@ on:
       - 'apps/bosun/**'
       - 'apps/ddnsd/**'
       - 'apps/flameboss/**'
+      - 'apps/fleetd/**'
       - 'apps/fml-attest/**'
       - 'apps/fml-ceremony/**'
       - 'apps/fml-pki/**'
       - 'apps/kthx-engine-verifier/**'
       - 'apps/netbench/**'
       - 'apps/smiirl/**'
-      - 'apps/talos-enroll/**'
+      - 'images/spire-agent-tpm/devid-init/**'
+      # fleetd's tests read these.
+      - 'clusters/folly/talos/secureboot/**'
+      - 'nix/services/spire/roots/**'
+      - 'packages/pkcs11signer/**'
       - 'terraform/pki/certs/**'
       - 'terraform/pki/oidc/**'
       - '.github/workflows/go.yml'
@@ -62,13 +72,15 @@ jobs:
           - apps/bosun
           - apps/ddnsd
           - apps/flameboss
+          - apps/fleetd
           - apps/fml-attest
           - apps/fml-ceremony
           - apps/fml-pki
           - apps/kthx-engine-verifier
           - apps/netbench
           - apps/smiirl
-          - apps/talos-enroll
+          - images/spire-agent-tpm/devid-init
+          - packages/pkcs11signer
     defaults:
       run:
         working-directory: ${{ matrix.module }}
@@ -80,6 +92,15 @@ jobs:
           # Most of these modules are stdlib-only and have no go.sum, which
           # setup-go's default cache looks for and fails without.
           cache: false
+      # fleetd's software TPM (go-tpm-tools/simulator) links libcrypto.
+      - if: matrix.module == 'apps/fleetd'
+        run: dpkg -s libssl-dev >/dev/null 2>&1 || (sudo apt-get update -q && sudo apt-get install -yq libssl-dev)
+      # pkcs11signer's tests sign on a SoftHSM2 token, and fail rather than skip without it.
+      - if: matrix.module == 'packages/pkcs11signer'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q softhsm2
+          echo PKCS11SIGNER_REQUIRE_SOFTHSM=1 >> "$GITHUB_ENV"
       - run: go build ./...
       - run: go vet ./...
       # -race, because bosun's pool is reached from the poll loop, every

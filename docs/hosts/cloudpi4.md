@@ -13,7 +13,7 @@ specs:
   os: NixOS 26.05 (Yarara)
 ---
 
-cloudpi4 is a wired Raspberry Pi 4 on [Lab Net](../platform/network.md#networks), folly's network for lab hosts. It is a test DNS resolver and an iperf3 server. `nix/hosts/cloudpi4.nix` configures it.
+cloudpi4 is a wired Raspberry Pi 4 on [the Anchor network](../platform/network.md#networks), folly's network for lab hosts. It is a test DNS resolver and an iperf3 server. `nix/hosts/cloudpi4.nix` configures it.
 
 ## What it runs
 

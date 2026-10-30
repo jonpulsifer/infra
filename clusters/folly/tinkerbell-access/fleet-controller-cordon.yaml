@@ -1,0 +1,110 @@
+---
+# fleetd on spore cordons a node it quarantined as this account, whose name
+# is the one its sealed token names. RBAC lets it patch nodes, and the admission policy below
+# narrows that to a cordon. Its token is `fleetd/folly-cordon-token`
+# in nix/secrets/spore.sops.yaml.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleet-controller-cordon
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: fleet-controller-cordon
+subjects:
+  - kind: ServiceAccount
+    name: fleet-controller-cordon
+    namespace: kube-system
+---
+# The token controller fills this Secret with a token that does not expire.
+# spore runs outside the cluster, so it cannot mount a bound token.
+apiVersion: v1
+kind: Secret
+type: kubernetes.io/service-account-token
+metadata:
+  name: fleet-controller-cordon-token
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+  annotations:
+    kubernetes.io/service-account.name: fleet-controller-cordon
+---
+# The account's node updates leave the node unschedulable and change no
+# label, annotation or taint: a cordon, never an uncordon or a relabel.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["nodes"]
+  matchConditions:
+    - name: fleet-controller-cordon
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:kube-system:fleet-controller-cordon"
+  validations:
+    - expression: >-
+        has(object.spec.unschedulable) && object.spec.unschedulable == true
+      reason: Forbidden
+      message: fleet-controller-cordon may only leave a node unschedulable.
+    - expression: >-
+        has(object.metadata.labels) == has(oldObject.metadata.labels) &&
+        (!has(object.metadata.labels) || object.metadata.labels == oldObject.metadata.labels)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's labels.
+    - expression: >-
+        has(object.metadata.annotations) == has(oldObject.metadata.annotations) &&
+        (!has(object.metadata.annotations) || object.metadata.annotations == oldObject.metadata.annotations)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's annotations.
+    - expression: >-
+        has(object.spec.taints) == has(oldObject.spec.taints) &&
+        (!has(object.spec.taints) || object.spec.taints == oldObject.spec.taints)
+      reason: Forbidden
+      message: fleet-controller-cordon may not change a node's taints.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fleet-controller-cordon
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  policyName: fleet-controller-cordon
+  validationActions: [Deny]
+  matchResources: {}

@@ -18,11 +18,13 @@ output "nodes" {
   value       = { for name, n in var.nodes : name => n.address }
 }
 
-# Everything but the secrets bundle that a node's config is rendered from, for
-# talosctl gen config: one --config-patch-<control-plane|worker> per patch, in
-# order. tofu console evaluates it with a local backend and no state, where a
-# node whose installer comes from the schematic is unknown.
-output "machine_inputs" {
+# Everything but the secrets bundle that a node's fresh install is rendered
+# from, for talosctl gen config: one --config-patch-<control-plane|worker> per
+# patch, in order. .github/scripts/talos-render-parity.sh renders each node
+# from it with the provider, with talosctl, and through the enrollment
+# server's class render, and fails on a byte of difference. tofu console
+# evaluates it with a local backend and no state.
+output "install_inputs" {
   description = "Per node: machine_type, cluster_name, cluster_endpoint, talos_contract, kubernetes_version and the ordered config_patches of a fresh install."
   value = { for name, n in var.nodes : name => {
     machine_type       = n.role
@@ -32,4 +34,30 @@ output "machine_inputs" {
     kubernetes_version = var.kubernetes_version
     config_patches     = local.install_patches[name]
   } }
+}
+
+# What a fresh install's config is rendered from, short of the node's own
+# documents and the secrets: fleet-controller renders a node of a class
+# from these, in this order, with the node document between the cluster
+# patches and the class's own. The node document it renders (hostname,
+# install target, certSANs, labels, static address) mirrors node_docs in patches.tf, and the
+# parity check above holds the two together.
+output "render_inputs" {
+  description = "cluster_name, cluster_endpoint, talos_contract, kubernetes_version, dns_zone, the cluster and control-plane patch lists in order, the TPM node patches of a fresh install, the TPM node label, and the link, prefix length and gateway of a static address (null without static_addresses)."
+  value = {
+    node_network = var.static_addresses ? {
+      link          = local.node_link
+      prefix_length = local.node_prefix_length
+      gateway       = local.topology.ROUTER_IP
+    } : null
+    cluster_name         = local.topology.CLUSTER_NAME
+    cluster_endpoint     = local.cluster_endpoint
+    talos_contract       = var.talos_contract
+    kubernetes_version   = var.kubernetes_version
+    dns_zone             = local.dns_zone
+    cluster_patches      = concat([local.cluster_patch], var.cluster_patches)
+    controlplane_patches = concat([local.controlplane_patch], var.controlplane_patches)
+    tpm_patches          = concat(local.tpm_volume_patches, [local.tpm_no_kexec_patch])
+    tpm_labels           = { "lolwtf.ca/tpm" = "true" }
+  }
 }

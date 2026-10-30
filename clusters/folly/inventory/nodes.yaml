@@ -1,0 +1,85 @@
+# folly's Kubernetes nodes, as git declares them. Edit this file by hand in a
+# pull request; terraform/netbox/folly applies it into NetBox. A change to this
+# file alone gets no Atlantis autoplan, so comment
+# `atlantis plan -d terraform/netbox/folly` on the pull request.
+#
+# models holds what every machine of a model shares, keyed by its NetBox device
+# type slug: name is the SMBIOS model and the device type's model, manufacturer
+# its NetBox slug, interface the NIC the device type's template names, disk the
+# Talos install disk, tpm the TPM spec version (only 2.0 seals disks and
+# attests), amt whether it has Intel AMT, and secure_boot the firmware state it
+# boots in. A node may set disk, tpm, amt or secure_boot to override its model.
+#
+# nodes holds one entry per node, keyed by its name: model is a key of models,
+# serial the serial on its label, class its Talos class (controlplane,
+# worker-g5 or worker-g2), switch_port the switch port its cable reaches,
+# address its IPv4 address inside K8S_NODE_CIDR in ../config/cluster-topology.json,
+# and bmc its out-of-band management (amt or none).
+#
+# Runtime facts stay out of this file: MACs, EK hashes, attestation results,
+# BIOS versions, the lifecycle status and desired_action live in NetBox, where
+# the services and the owner write them.
+#
+# Keep every value a scalar on its own line, two spaces in for a key and four
+# for a field, with no flow collections or nested blocks.
+models:
+  dell-optiplex-3050:
+    name: OptiPlex 3050
+    manufacturer: dell
+    interface: enp1s0
+    disk: /dev/sda
+    tpm: "2.0"
+    amt: false
+    secure_boot: false
+  hp-elitedesk-800-g2-dm-35w:
+    name: HP EliteDesk 800 G2 DM 35W
+    manufacturer: hp
+    interface: eno1
+    disk: /dev/sda
+    tpm: "1.2"
+    amt: true
+    secure_boot: true
+  hp-elitedesk-800-g5-desktop-mini:
+    name: HP EliteDesk 800 G5 Desktop Mini
+    manufacturer: hp
+    interface: eno1
+    disk: /dev/nvme0n1
+    tpm: "2.0"
+    amt: true
+    secure_boot: true
+nodes:
+  optiplex:
+    model: dell-optiplex-3050
+    serial: 66BT7M2
+    class: controlplane
+    switch_port: 10
+    address: 10.3.0.10
+    bmc: none
+  shale:
+    model: hp-elitedesk-800-g2-dm-35w
+    serial: MXL6372537
+    class: worker-g2
+    switch_port: 6
+    address: 10.3.0.11
+    bmc: amt
+  riptide:
+    model: hp-elitedesk-800-g5-desktop-mini
+    serial: MXL0172Q6L
+    class: worker-g5
+    switch_port: 8
+    address: 10.3.0.12
+    bmc: amt
+  swell:
+    model: hp-elitedesk-800-g5-desktop-mini
+    serial: MXL0154VD6
+    class: worker-g5
+    switch_port: 4
+    address: 10.3.0.13
+    bmc: amt
+  surge:
+    model: hp-elitedesk-800-g5-desktop-mini
+    serial: MXL0443HPB
+    class: worker-g5
+    switch_port: 12
+    address: 10.3.0.14
+    bmc: amt
