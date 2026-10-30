@@ -68,16 +68,18 @@ locals {
 }
 
 resource "unifi_network" "bootstrap" {
-  name                = "bootstrap"
-  subnet              = local.bootstrap_cidr
-  vlan                = tonumber(local.anchor_topology.BOOTSTRAP_VLAN)
-  domain_name         = local.lab_domain
-  setting_preference  = "manual"
-  auto_scale          = false
-  lte_lan             = false
-  network_isolation   = true
-  multicast_dns       = false
-  ipv6_interface_type = "none"
+  name               = "bootstrap"
+  subnet             = local.bootstrap_cidr
+  vlan               = tonumber(local.anchor_topology.BOOTSTRAP_VLAN)
+  domain_name        = local.lab_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  network_isolation  = true
+  multicast_dns      = false
+  ipv6 = {
+    interface_type = "none"
+  }
 
   # HP's UEFI PXE ignores Smee's ProxyDHCP offer and needs the boot file in the
   # address offer, so UniFi names the signed iPXE at the boot VIP. A MAC with
@@ -85,18 +87,22 @@ resource "unifi_network" "bootstrap" {
   # nothing. The short lease expires a bootstrap address within a minute of the
   # port moving to the Kubernetes VLAN, which flips without a link flap.
   dhcp_server = {
-    enabled     = true
-    leasetime   = "1m0s"
-    start       = cidrhost(local.bootstrap_cidr, 2)
-    stop        = cidrhost(local.bootstrap_cidr, 10)
-    dns_enabled = true
+    enabled   = true
+    leasetime = "1m0s"
+    start     = cidrhost(local.bootstrap_cidr, 2)
+    stop      = cidrhost(local.bootstrap_cidr, 10)
     # Every anchor's CoreDNS answers on its bootstrap address, and a client
     # tries the next resolver itself. The boot VIP follows nginx, not CoreDNS.
-    dns_servers = local.anchor_boot_ips
+    dns = {
+      enabled = true
+      servers = local.anchor_boot_ips
+    }
     # The anchors' chrony, so an installing node keeps time without the
     # internet. UniFi takes two NTP servers, so the VIP stands for all three.
-    ntp_enabled = true
-    ntp_servers = [local.boot_vip]
+    ntp = {
+      enabled = true
+      servers = [local.boot_vip]
+    }
     tftp_server = local.boot_vip
     boot        = local.boot_option
   }
@@ -142,8 +148,10 @@ resource "unifi_port_profile" "mab" {
   native_networkconf_id = unifi_network.bootstrap.id
   forward               = "native"
   tagged_vlan_mgmt      = "block_all"
-  dot1x_ctrl            = "mac_based"
-  dot1x_idle_timeout    = "5m"
+  dot1x = {
+    ctrl         = "mac_based"
+    idle_timeout = "5m"
+  }
 }
 
 # UniFi MAC auth wants the MAC, upper case with no separators, as both name and
@@ -152,13 +160,15 @@ resource "unifi_port_profile" "mab" {
 resource "unifi_radius_user" "node" {
   for_each = local.mab_ports
 
-  name               = upper(replace(local.machines[each.key].mac, ":", ""))
-  password           = upper(replace(local.machines[each.key].mac, ":", ""))
-  tunnel_type        = 13
-  tunnel_medium_type = 6
-  tunnel_config_type = "802.1x"
-  network_id         = contains(local.quarantined, each.key) ? unifi_network.bootstrap.id : unifi_network.k8s.id
-  vlan               = contains(local.quarantined, each.key) ? unifi_network.bootstrap.vlan : unifi_network.k8s.vlan
+  name     = upper(replace(local.machines[each.key].mac, ":", ""))
+  password = upper(replace(local.machines[each.key].mac, ":", ""))
+  tunnel = {
+    type        = 13
+    medium_type = 6
+    config_type = "802.1x"
+  }
+  network_id = contains(local.quarantined, each.key) ? unifi_network.bootstrap.id : unifi_network.k8s.id
+  vlan       = contains(local.quarantined, each.key) ? unifi_network.bootstrap.vlan : unifi_network.k8s.vlan
 }
 
 import {
@@ -180,10 +190,12 @@ resource "unifi_device" "usw_24_poe" {
   dynamic "port_override" {
     for_each = local.anchor_ports
     content {
-      index                 = port_override.value
-      name                  = port_override.key
-      poe_mode              = "auto"
-      dot1x_ctrl            = "force_authorized"
+      index    = port_override.value
+      name     = port_override.key
+      poe_mode = "auto"
+      dot1x = {
+        ctrl = "force_authorized"
+      }
       forward               = "customize"
       native_networkconf_id = unifi_network.lab.id
       tagged_vlan_mgmt      = "custom"
@@ -213,7 +225,9 @@ resource "unifi_device" "usw_24_poe" {
       forward               = "customize"
       native_networkconf_id = unifi_network.k8s.id
       tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
+      dot1x = {
+        ctrl = "force_authorized"
+      }
     }
   }
 
@@ -234,7 +248,9 @@ resource "unifi_device" "usw_24_poe" {
       forward               = "customize"
       native_networkconf_id = unifi_network.bootstrap.id
       tagged_vlan_mgmt      = "auto"
-      dot1x_ctrl            = "force_authorized"
+      dot1x = {
+        ctrl = "force_authorized"
+      }
     }
   }
 

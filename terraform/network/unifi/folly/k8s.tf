@@ -32,24 +32,28 @@ locals {
 }
 
 resource "unifi_network" "k8s" {
-  name                = "Kubernetes"
-  subnet              = local.node_cidr
-  vlan                = 8
-  domain_name         = local.lab_domain
-  setting_preference  = "manual"
-  auto_scale          = false
-  lte_lan             = false
-  network_isolation   = true
-  multicast_dns       = false
-  ipv6_interface_type = "none"
+  name               = "Kubernetes"
+  subnet             = local.node_cidr
+  vlan               = 8
+  domain_name        = local.lab_domain
+  setting_preference = "manual"
+  auto_scale         = false
+  lte_lan            = false
+  network_isolation  = true
+  multicast_dns      = false
+  ipv6 = {
+    interface_type = "none"
+  }
 
   dhcp_server = {
-    enabled     = true
-    leasetime   = local.one_day
-    start       = cidrhost(local.node_cidr, 2)
-    stop        = cidrhost(local.node_cidr, 62)
-    dns_enabled = true
-    dns_servers = local.dns_servers
+    enabled   = true
+    leasetime = local.one_day
+    start     = cidrhost(local.node_cidr, 2)
+    stop      = cidrhost(local.node_cidr, 62)
+    dns = {
+      enabled = true
+      servers = local.dns_servers
+    }
     # A known node netboots here, from the anchors on their bootstrap addresses
     # through the policy kubernetes_to_boot in firewall.tf. The resolvers above
     # are the anchors' CoreDNS, which answers enroll.lolwtf.ca with the boot VIP.

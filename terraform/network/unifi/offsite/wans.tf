@@ -15,6 +15,13 @@ resource "unifi_wan" "internet_1" {
     type   = "weighted"
     weight = 50
   }
+
+  # Provider 0.60 reads dns.ipv6 back as unknown and then PUTs a payload
+  # this controller rejects (api.err.InvalidPayload), so the block stays
+  # out of the diff.
+  lifecycle {
+    ignore_changes = [dns.ipv6]
+  }
 }
 
 resource "unifi_wan" "internet_2" {

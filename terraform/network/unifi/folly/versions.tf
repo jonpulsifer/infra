@@ -11,7 +11,7 @@ terraform {
     }
     unifi = {
       source  = "ubiquiti-community/unifi"
-      version = "~> 0.59"
+      version = "~> 0.60"
     }
     onepassword = {
       source  = "1password/onepassword"
