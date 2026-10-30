@@ -380,6 +380,32 @@ resource "unifi_firewall_policy" "nest_k8s_to_capsule_ssh" {
   }
 }
 
+# Atlantis on offsite reaches NetBox's API on capsule's nginx. Same sources and zones as the ssh policy.
+resource "unifi_firewall_policy" "nest_k8s_to_capsule_netbox" {
+  name                 = "Allow Nest k8s to Capsule NetBox"
+  action               = "ALLOW"
+  protocol             = "tcp"
+  ip_version           = "BOTH"
+  create_allow_respond = true
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = local.nest_k8s_cidrs
+    port_matching_type = "ANY"
+    zone_id            = data.unifi_firewall_zone.vpn.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = ["${local.anchor.hosts.capsule}/32"]
+    port               = "8080"
+    port_matching_type = "SPECIFIC"
+    zone_id            = unifi_firewall_zone.lab.id
+  }
+}
+
 resource "unifi_firewall_policy" "folly_k8s_to_nest_k8s" {
   name                 = "Allow Folly k8s to Nest k8s"
   action               = "ALLOW"
