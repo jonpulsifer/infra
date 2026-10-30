@@ -3,11 +3,11 @@ title: Hardware inventory
 description: NetBox's record of each folly Kubernetes node as hardware, the file it exports for the code that reads it, and the check that compares it with the machines.
 ---
 
-[NetBox](../platform/netbox.md) is the single source of truth for folly's Kubernetes nodes as hardware. Each node is a device with the role `kubernetes-node` that holds its serial, model, NIC and MAC, its cable to a switch port, and the custom fields for its SKU, BIOS version, install disk, TPM version, Intel AMT and expected Secure Boot state, its Talos class and its BMC type. A node's address is the device's primary IPv4, which the export carries as `address`. The UniFi reservation and DNS record, and the Talos root, read it from the export, and `mise run netbox:check` fails when a node's address is outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json`, as [Topology](topology.md) describes, or is shared.
+[NetBox](../platform/netbox.md) is the single source of truth for folly's Kubernetes nodes as hardware. Each node is a device with the role `kubernetes-node` that holds its serial, model, NIC and MAC, its cable to a switch port, and the custom fields for its SKU, BIOS version, install disk, TPM version, Intel AMT and expected Secure Boot state, its Talos class and its BMC type. A node's address is the device's primary IPv4, which the export carries as `address`. The UniFi DNS record and the Talos root, which sets it statically on the node, read it from the export, and `mise run netbox:check` fails when a node's address is outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json`, as [Topology](topology.md) describes, or is shared.
 
 ## Export
 
-`clusters/folly/inventory/machines.yaml` is NetBox's export: every folly device with the role `kubernetes-node` and the status `planned`, `active` or `failed`, keyed by name and ordered by address. A device in `decommissioning` or `offline` is not exported, nor is a stub, a `planned` device with no serial or no MAC that fleet-controller has not bound to a machine. Beside the hardware keys, each node has `class` (the `talos_class` field: `controlplane`, `worker-g5` or `worker-g2`), `status`, `address`, `bmc`, `ek_hash` and `ek_hash_ecc`. `bmc.type` is the `bmc_type` field (`none` or `amt`); `bmc.address` is the device's out-of-band address, or the node's own address for AMT when NetBox holds none. Never edit it by hand. Change the device in NetBox, then:
+`clusters/folly/inventory/machines.yaml` is NetBox's export: every folly device with the role `kubernetes-node` and the status `planned`, `active` or `failed`, keyed by name and ordered by address. A device in `decommissioning` or `offline` is not exported, nor is a stub, a `planned` device with no serial or no MAC that fleet-controller has not bound to a machine. Beside the hardware keys, each node has `class` (the `talos_class` field: `controlplane`, `worker-g5` or `worker-g2`), `status`, `address`, `bmc`, `ek_hash` and `ek_hash_ecc`. `bmc.type` is the `bmc_type` field (`none`, `amt` or `redfish`); `bmc.address` is the device's out-of-band address, or the node's own address for AMT when NetBox holds none. Never edit it by hand. Change the device in NetBox, then:
 
 ```sh
 mise run netbox:export
@@ -21,8 +21,8 @@ capsule's hourly drift job compares NetBox's export with the file on `main` and 
 
 | Reader | What it takes | Where |
 | --- | --- | --- |
-| UniFi | `mac` for the node's DHCP reservation and its MAC auth RADIUS user, `switch_port` for `mab_ports` | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
-| Talos | `disk` for the install selector, `tpm` for `tpm_nodes` | `clusters/folly/talos/talos.tf` |
+| UniFi | `address` for the node's DNS record, `switch_port` for its node port | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
+| Talos | `address` for the node's static address, `disk` for the install selector, `tpm` for `tpm_nodes` | `clusters/folly/talos/talos.tf` |
 | spore's netboot links | `mac`, written to `clusters/folly/fleet/node-macs.json` | `scripts/render-class-inputs.sh`, `nix/services/tinkerbell.nix` |
 | Tinkerbell | nothing from this file: [fleet-controller](../apps/fleet-controller.md) reads the MAC, install disk and BMC of each device from NetBox itself | `apps/fleet-controller` |
 
@@ -38,7 +38,7 @@ A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d 
 
 ## Rules
 
-- A node's address is its NetBox primary IPv4. The UniFi plan fails on a node with no MAC. A `planned` node gets a reservation and a DNS record once it has a MAC, a switch port and an address; an `active` or `failed` node gets both with an address.
+- A node's address is its NetBox primary IPv4, which its Talos config sets statically. It lies outside `K8S_DHCP_CIDR`, or the UniFi plan fails. A `planned` node with an address, and an `active` or `failed` node, gets a DNS record.
 - Record `tpm_version` as the spec version the firmware reports, `2.0` or `1.2`. Only a TPM 2.0 node seals its disks and attests.
 - Record `secure_boot_expected` as the state the node is expected to boot in. The check flags a node that boots in any other.
 - Retire a node by moving its device to `decommissioning` or `offline` and merging the export that drops it.

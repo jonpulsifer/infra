@@ -76,7 +76,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
    Result: `wrote clusters/folly/inventory/machines.yaml`, with no entry for `<node>`.
 
 2. If `nix/hosts/spore.nix` pins an EK hash for `<node>`, remove it.
-3. To keep MAC auth on the node's switch port, add the port to `spare_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no list names keeps its last override, an open Kubernetes port.
+3. To keep the node's switch port a node port, add it to `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no block names keeps its last override.
 4. Make sure that the export and the topology agree.
 
    ```bash
@@ -87,7 +87,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 5. Open a pull request. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos`.
 
-   Result: the plans delete the node's RADIUS user, its DNS record and its `talos_machine`.
+   Result: the plans delete the node's DNS record and its `talos_machine`.
 
 6. Comment `atlantis apply`.
 7. Deploy spore from `main`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
@@ -96,7 +96,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 | System | What happens to the node |
 | --- | --- |
-| UniFi | The apply deletes its RADIUS user, so the switch puts its MAC on the bootstrap fallback if it connects again |
+| UniFi | The apply deletes its DNS record, and its switch port keeps its Kubernetes override |
 | SPIRE | spore drops its LDevID alias at the deploy, so no workload entry names it. talos-attest renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
 | Talos | The Talos root stops managing the node |
 | Tinkerbell | fleet-controller deletes its `Hardware` and `Machine` |

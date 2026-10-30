@@ -24,9 +24,9 @@ The boot check passes when dnsmasq is active and nginx serves HookOS at the anch
 
 ## Boot path
 
-UniFi's DHCP on the bootstrap network and on the Kubernetes network names `BOOT_VIP` as the TFTP and boot server, so a known node netboots on the Kubernetes network and an unknown machine on the bootstrap fallback. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE shows its own menu, whose default chains the same HookOS from `BOOT_VIP`, and the agent waits for a Workflow. [Tinkerbell](tinkerbell.md#boot-path) has the details. HookOS is about 200 MB, too large for TFTP, so it goes over HTTP.
+UniFi's DHCP on the Kubernetes network names `BOOT_VIP` as the TFTP and boot server, so every machine on a node port netboots there, known or not. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at `SPORE_BOOTSTRAP_IP`. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE shows its own menu, whose default chains the same HookOS from `BOOT_VIP`, and the agent waits for a Workflow. [Tinkerbell](tinkerbell.md#boot-path) has the details. HookOS is about 200 MB, too large for TFTP, so it goes over HTTP.
 
-The bootstrap network's DHCP names every anchor's bootstrap address as a resolver and `BOOT_VIP` as the NTP server. The Kubernetes network's DHCP names the anchors' DNS addresses, and folly's Talos nodes take time from them. CoreDNS and chrony answer on every interface of each anchor, and CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP` on each.
+The bootstrap network has no DHCP: it holds the anchors' boot addresses and `BOOT_VIP`. The Kubernetes network's DHCP names the anchors' DNS addresses, and folly's Talos nodes take time from them. CoreDNS and chrony answer on every interface of each anchor, and CoreDNS answers `enroll.lolwtf.ca` with `BOOT_VIP` on each.
 
 ## Netboot images
 
@@ -75,7 +75,7 @@ The cluster cannot reach the bootstrap VLAN, so each anchor's node exporter carr
 - `nix/services/anchor-vips.nix`: the keepalived `boot` instance and its VRRP firewall
 - `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `<HOST>_BOOTSTRAP_IP`, `BOOT_VIP`
-- `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network's DHCP, the boot option and the anchors' switch ports
+- `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network, the boot option and the switch ports
 - `terraform/network/unifi/folly/k8s.tf`: the Kubernetes network's DHCP
 - `terraform/network/unifi/folly/firewall.tf`: the policies `kubernetes_to_boot`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
