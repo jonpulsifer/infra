@@ -321,6 +321,9 @@ in
         FLEET_INTERVAL = "2m";
         FLEET_WORKFLOW_TTL = "168h";
         FLEET_CONFIG_TTL = "2h";
+        # Rendered configs wait in this tmpfs, which RuntimeDirectoryPreserve keeps across a
+        # restart, such as the one a HookOS command-line change brings, and a reboot drops.
+        FLEET_CONFIG_DIR = "${runDir}/configs";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
         FLEET_MODEL_MAP = builtins.toJSON cfg.modelMap;
@@ -369,7 +372,8 @@ in
         StateDirectory = "fleetd";
         StateDirectoryMode = "0750";
         RuntimeDirectory = "fleetd";
-        RuntimeDirectoryMode = "0750";
+        RuntimeDirectoryMode = "0700";
+        RuntimeDirectoryPreserve = "yes";
         ReadWritePaths = [ metricsDir ];
         UMask = "0027";
         Restart = "always";
@@ -432,7 +436,8 @@ in
 
     # fleetd's /metrics, for node-exporter's textfile collector (../profiles/anchor.nix), since its port
     # admits only the Anchor network. A fleetd that does not answer leaves the file empty, so its
-    # series go absent.
+    # series go absent. fleetd_devid_serving probes the DevID listener on its own, since every
+    # node's renewal and daily check reach it there.
     systemd.services.fleetd-metrics = {
       description = "Export fleetd's metrics through node-exporter";
       serviceConfig = {
@@ -454,6 +459,15 @@ in
         metrics=$(mktemp ${metricsDir}/.fleetd.XXXXXX)
         trap 'rm -f "$metrics"' EXIT
         curl --fail --silent --max-time 5 http://127.0.0.1:${toString cfg.webhookPort}/metrics > "$metrics" || : > "$metrics"
+        devid=0
+        if curl --fail --silent --output /dev/null --max-time 5 http://127.0.0.1:${toString devidPort}/healthz; then
+          devid=1
+        fi
+        {
+          printf '# HELP fleetd_devid_serving Whether fleetd answers /healthz on its DevID listener.\n'
+          printf '# TYPE fleetd_devid_serving gauge\n'
+          printf 'fleetd_devid_serving %s\n' "$devid"
+        } >> "$metrics"
         # node_exporter reads the textfile directory as its own user.
         chmod 0644 "$metrics"
         mv "$metrics" ${metricsDir}/fleetd.prom

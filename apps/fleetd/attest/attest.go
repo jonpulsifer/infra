@@ -58,6 +58,12 @@ type Verifier struct {
 	// Installer, when set, renders an intake pass's Talos config under an
 	// install code that the confirm answers, and starts its install.
 	Installer Installer
+	// Expected, when set, says whether a machine is expected in HookOS: a
+	// planned device, or one with an unfinished Workflow. An intake that
+	// fails the policy while nobody expects it, such as a worker that fell
+	// back to PXE after a BIOS reset, is refused and records nothing; it
+	// errs when it cannot say, which counts as unexpected.
+	Expected func(ctx context.Context, serial string) (bool, error)
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -434,6 +440,9 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 		return protocol.Verdict{}, fail(reasonSession, "no open session %q", id)
 	}
 	refuse := func(err error) (protocol.Verdict, error) {
+		if v.unattended(ctx, s) {
+			return protocol.Verdict{}, v.unattendedBoot(ctx, s, err)
+		}
 		return protocol.Verdict{}, v.refuse(ctx, &s.machine, s.claim, s.eks, err)
 	}
 
@@ -561,6 +570,39 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 		chain = append(chain, c.Raw)
 	}
 	return protocol.Verdict{Verdict: protocol.VerdictPass, LDevIDCert: ldevidCert.Raw, LAKCert: lakCert.Raw, Chain: chain}, nil
+}
+
+// unattended says whether an intake session's machine boots HookOS without
+// fleetd expecting it there. Only Expected decides; without it, every intake
+// failure after the TPM's proof quarantines as before.
+func (v *Verifier) unattended(ctx context.Context, s *session) bool {
+	if v.Expected == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	ok, err := v.Expected(ctx, s.claim.Serial)
+	if err != nil {
+		v.Log.Warn("whether the machine is expected in HookOS", "serial", s.claim.Serial, "err", err)
+		return true
+	}
+	return !ok
+}
+
+// unattendedBoot refuses an unexpected HookOS boot's failed intake: it
+// records nothing, so the node keeps its verdict and its identity, and it
+// journals the device and counts the reason for the owner's alert.
+func (v *Verifier) unattendedBoot(ctx context.Context, s *session, cause error) error {
+	detail := cause.Error()
+	if v.NetBox != nil && s.machine.NetBoxID != 0 {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		comment := plain("fleetd: an unexpected HookOS boot failed attestation and was refused; nothing was recorded, and the node keeps its identity: " + detail)
+		if err := v.NetBox.journal(ctx, s.machine.NetBoxID, "warning", comment); err != nil {
+			v.Log.Warn("journal an unattended boot", "machine", s.machine.Name, "err", err)
+		}
+	}
+	return v.reject(&s.machine, s.claim, fail(reasonUnattended, "%s booted HookOS while no run expected it, and its attestation failed: %s", s.machine.Name, detail))
 }
 
 // confirmPlanned looks the planned device up again and binds the box to the

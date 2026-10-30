@@ -52,6 +52,7 @@ func run(log *slog.Logger) error {
 	srv.V.Installer = attest.InstallerFunc(func(ctx context.Context, req attest.InstallRequest) error {
 		return r.Admit(ctx, fleet.RenderRequest{Serial: req.Serial, UUID: req.UUID, Node: req.Node, Class: req.Class, Code: req.Code})
 	})
+	srv.V.Expected = r.Expected
 
 	var secret []byte
 	if f := os.Getenv("FLEET_WEBHOOK_SECRET_FILE"); f != "" {
@@ -73,56 +74,51 @@ func run(log *slog.Logger) error {
 	})
 	control.Handle("GET /metrics", r.Metrics)
 
-	var tlsConfig *tls.Config
+	var kp *keyPair
 	if cert, key := os.Getenv("FLEETD_TLS_CERT"), os.Getenv("FLEETD_TLS_KEY"); cert != "" || key != "" {
 		if cert == "" || key == "" {
 			return errors.New("FLEETD_TLS_CERT and FLEETD_TLS_KEY go together")
 		}
-		kp := &keyPair{cert: cert, key: key}
-		if _, err := kp.get(nil); err != nil {
-			return fmt.Errorf("the boot listener's certificate: %w", err)
-		}
-		tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: kp.get}
+		kp = &keyPair{cert: cert, key: key}
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	server := func(h http.Handler) *http.Server {
+		// WriteTimeout bounds a whole answer; a render waits on talosctl for
+		// up to 20 seconds.
+		return &http.Server{
+			Handler: h, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute,
+		}
+	}
+	// The DevID listener, which every node's renewal and daily check reach,
+	// and the others bind first and on their own: the boot listener's
+	// certificate or address never takes them down.
 	listeners := []struct {
 		addr    string
 		mode    fs.FileMode
 		handler http.Handler
-		tls     *tls.Config
-		// write bounds a whole answer; a render waits on talosctl for up
-		// to 20 seconds.
-		write time.Duration
 	}{
-		{env("FLEETD_BOOT_ADDR", ":8443"), 0o660, bootHandler(srv, r.Installer), tlsConfig, time.Minute},
-		{env("ATTEST_DEVID_ADDR", ":8444"), 0o660, srv.DevIDHandler(), nil, time.Minute},
-		{env("ATTEST_ADMIN_ADDR", ":8445"), 0o600, srv.Admin(), nil, time.Minute},
-		{env("FLEET_WEBHOOK_ADDR", ":8446"), 0o660, control, nil, time.Minute},
+		{env("ATTEST_DEVID_ADDR", ":8444"), 0o660, srv.DevIDHandler()},
+		{env("ATTEST_ADMIN_ADDR", ":8445"), 0o600, srv.Admin()},
+		{env("FLEET_WEBHOOK_ADDR", ":8446"), 0o660, control},
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-	servers := make([]*http.Server, 0, len(listeners))
+	servers := make([]*http.Server, 0, len(listeners)+1)
 	errc := make(chan error, len(listeners))
 	for _, l := range listeners {
 		ln, err := attest.Listen(l.addr, l.mode)
 		if err != nil {
 			return err
 		}
-		s := &http.Server{
-			Handler: l.handler, TLSConfig: l.tls,
-			ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-			WriteTimeout: l.write, IdleTimeout: 2 * time.Minute,
-		}
+		s := server(l.handler)
 		servers = append(servers, s)
-		log.Info("listening", "addr", l.addr, "tls", l.tls != nil)
-		go func() {
-			if l.tls != nil {
-				errc <- s.ServeTLS(ln, "", "")
-				return
-			}
-			errc <- s.Serve(ln)
-		}()
+		log.Info("listening", "addr", l.addr)
+		go func() { errc <- s.Serve(ln) }()
 	}
+	boot := server(bootHandler(srv, r.Installer))
+	servers = append(servers, boot)
+	go serveBoot(ctx, log, boot, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
 	go srv.V.RunBackfill(ctx, 10*time.Minute)
 	go r.Loop(ctx, trigger)
 	if r.Installer != nil {
@@ -180,6 +176,43 @@ func newFleet() (*fleet.Reconciler, error) {
 		return nil, err
 	}
 	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Now: time.Now}, nil
+}
+
+// serveBoot serves the boot listener, with TLS when kp is set. Until its
+// certificate reads and its address binds, such as before the ACME unit
+// writes the certificate or networkd configures the bootstrap address, it
+// tries again every retry, and a listener that fails later binds again.
+func serveBoot(ctx context.Context, log *slog.Logger, s *http.Server, addr string, kp *keyPair, retry time.Duration) {
+	if kp != nil {
+		s.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12, GetCertificate: kp.get}
+	}
+	for {
+		err := func() error {
+			if kp != nil {
+				if _, err := kp.get(nil); err != nil {
+					return fmt.Errorf("the certificate: %w", err)
+				}
+			}
+			ln, err := attest.Listen(addr, 0o660)
+			if err != nil {
+				return err
+			}
+			log.Info("listening", "addr", addr, "tls", kp != nil)
+			if kp != nil {
+				return s.ServeTLS(ln, "", "")
+			}
+			return s.Serve(ln)
+		}()
+		if errors.Is(err, http.ErrServerClosed) {
+			return
+		}
+		log.Error("the boot listener is down; it tries again", "addr", addr, "err", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(retry):
+		}
+	}
 }
 
 // bootHandler serves what a netbooting machine and a first boot reach: the

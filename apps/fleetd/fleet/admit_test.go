@@ -555,3 +555,42 @@ func TestAdmitGivesUpWhileAPassRuns(t *testing.T) {
 		t.Fatalf("admit after the pass: %d %s", code, why)
 	}
 }
+
+// fleetd expects a machine in HookOS when its device is planned or its last
+// run has not finished; an active node with no run, or a finished one, is
+// not expected, and neither is a serial NetBox lacks.
+func TestExpected(t *testing.T) {
+	run := "attest-swell-1699990000"
+	for _, c := range []struct {
+		name   string
+		status string
+		last   any
+		state  string
+		serial string
+		want   bool
+	}{
+		{name: "planned", status: "planned", want: true},
+		{name: "active with no run", status: "active"},
+		{name: "active with a running run", status: "active", last: run, state: "STATE_RUNNING", want: true},
+		{name: "active with a finished run", status: "active", last: run, state: "STATE_SUCCESS"},
+		{name: "active with a pruned run", status: "active", last: run},
+		{name: "unknown serial", status: "active", serial: "NOPE"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := declared(map[string]any{"last_workflow": c.last})
+			d["status"] = map[string]any{"value": c.status}
+			at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+			if c.state != "" {
+				at.kube.objects[wfBase+run] = workflowObject(run, "swell", "attest", testNow.UTC().Format(time.RFC3339), c.state)
+			}
+			serial := boxSerial
+			if c.serial != "" {
+				serial = c.serial
+			}
+			got, err := at.r.Expected(context.Background(), serial)
+			if err != nil || got != c.want {
+				t.Fatalf("Expected = %v, %v; want %v", got, err, c.want)
+			}
+		})
+	}
+}

@@ -23,7 +23,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 
 | Variable | Default | Serves |
 | --- | --- | --- |
-| `FLEETD_BOOT_ADDR` | `:8443` | The device flow under `/attest/` and `GET /talos/config`, with TLS when `FLEETD_TLS_CERT` and `FLEETD_TLS_KEY` name the enrollment name's certificate and key, which fleetd reads again when the certificate file changes |
+| `FLEETD_BOOT_ADDR` | `:8443` | The device flow under `/attest/` and `GET /talos/config`, with TLS when `FLEETD_TLS_CERT` and `FLEETD_TLS_KEY` name the enrollment name's certificate and key, which fleetd reads again when the certificate file changes. Until the certificate reads and the address binds, fleetd tries again every 10 seconds; the other listeners bind on their own |
 | `ATTEST_DEVID_ADDR` | `:8444` | `GET /devid/`, `GET /verdict/` and the renewal routes, for the cluster's nodes |
 | `ATTEST_ADMIN_ADDR` | `:8445` | The admin API. `unix:<path>` makes a socket with mode 0600 |
 | `FLEET_WEBHOOK_ADDR` | `:8446` | `POST /webhook`, `GET /healthz` and `GET /metrics` |
@@ -60,6 +60,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them nothing renders |
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
 | `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's |
+| `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
 | `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker with a class and an address that never ran a Workflow starts its provision |
 | `FLEET_MODEL_MAP` | the G5 mini | JSON `{"<SMBIOS model>": {"class", "bmc", "disk", "tpm", "amt", "secure_boot"}}` an admitted device gets what it lacks from |
@@ -73,7 +74,9 @@ for a check the machine's TPM signed for: the boot evidence after credential act
 and after the LAK's signature on a renewal. Everything refused before that proof, a wrong MAC, an
 unknown or mismatched EK, a failed activation, a quote the LAK did not sign, a quarantined, `failed`,
 `decommissioning` or `offline` device, is `refused`: counted, audited and journaled, and recorded
-against no machine. A serial is 1 to 64 printable ASCII characters, else 400. With NetBox configured
+against no machine. An intake that fails after the TPM's proof while no run expects the machine in
+HookOS, a device that is not `planned` with no unfinished Workflow, is `refused` with the reason
+`unattended-boot`: it records nothing and journals the device. A serial is 1 to 64 printable ASCII characters, else 400. With NetBox configured
 and not answering, every request is 503 `refused`.
 
 | Route | Does |
@@ -118,12 +121,13 @@ and gives up when its context ends.
 ## Config
 
 `GET /talos/config?uuid=<uuid>&code=<code>` answers the config whole with `Cache-Control: no-store`.
-The first response whose bytes are all written burns it, sets the device `active` and writes
-`attest_consumed_at`; a release NetBox refuses is retried each pass and journaled once. HEAD and
+The first response whose bytes are all written burns it; after the answer, fleetd sets the device
+`active` and writes `attest_consumed_at`, and a release NetBox refuses is retried each pass and
+journaled once. One fetch claims a config at a time. HEAD and
 other methods are 405, `If-None-Match` and `If-Modified-Since` are 400, and a Range is ignored. A
 machine has one config at a time: a new render burns the old code. A spent code stays refused for
-a day. A fetch with another code is journaled at most every ten minutes per machine. Configs live
-in memory only.
+a day. A fetch with another code is journaled at most every ten minutes per machine. With
+`FLEET_CONFIG_DIR`, configs survive a restart with their TTL and burn state.
 
 ## NetBox contract
 

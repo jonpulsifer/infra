@@ -211,6 +211,7 @@ const (
 	reasonLDevID         = "ldevid"
 	reasonStatus         = "status"
 	reasonDevID          = "devid-on-file"
+	reasonUnattended     = "unattended-boot"
 	reasonNetBox         = "netbox-unavailable"
 	reasonSerial         = "invalid-serial"
 	reasonIntakeRate     = "intake-rate"

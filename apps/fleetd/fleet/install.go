@@ -54,6 +54,10 @@ type Installer struct {
 	prepared   bool
 	journaled  map[string]time.Time
 	unreleased map[string]bool
+	// releasing names the codes whose release runs now, so a pass's retry
+	// and a fetch's release never write it twice.
+	releasing map[string]bool
+	inflight  sync.WaitGroup
 }
 
 // notFoundEvery is how often a machine's 404s may reach its journal.
@@ -299,12 +303,42 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("served %s's config at %s; it is dropped", served.Node, timestamp(now))
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 30*time.Second)
-	defer cancel()
-	if err := i.release(ctx, served); err != nil {
-		i.releaseFailed(ctx, served, err)
+	// The answer is complete, so the release runs after the handler: a slow
+	// NetBox never holds the node's fetch, and a release that fails is
+	// retried by the next pass.
+	i.inflight.Add(1)
+	go func() {
+		defer i.inflight.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		i.releaseOnce(ctx, served)
+		i.pending()
+	}()
+}
+
+// Drain waits for the releases that fetches started.
+func (i *Installer) Drain() { i.inflight.Wait() }
+
+// releaseOnce releases a served config unless another release of it runs.
+func (i *Installer) releaseOnce(ctx context.Context, p Pending) {
+	i.mu.Lock()
+	if i.releasing == nil {
+		i.releasing = map[string]bool{}
 	}
-	i.pending()
+	if i.releasing[p.Code] {
+		i.mu.Unlock()
+		return
+	}
+	i.releasing[p.Code] = true
+	i.mu.Unlock()
+	defer func() {
+		i.mu.Lock()
+		delete(i.releasing, p.Code)
+		i.mu.Unlock()
+	}()
+	if err := i.release(ctx, p); err != nil {
+		i.releaseFailed(ctx, p, err)
+	}
 }
 
 // notFound journals a fetch with a code other than the one rendered for the
@@ -359,9 +393,7 @@ func (i *Installer) Tick(ctx context.Context) {
 		}
 	}
 	for _, p := range i.Configs.Unreleased() {
-		if err := i.release(ctx, p); err != nil {
-			i.releaseFailed(ctx, p, err)
-		}
+		i.releaseOnce(ctx, p)
 	}
 	i.pending()
 }

@@ -155,6 +155,33 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 	return r.Installer.Render(ctx, req)
 }
 
+// Expected says whether fleetd expects the machine with the serial in
+// HookOS: its device is planned, or its last run has not finished. A serial
+// NetBox does not hold is not expected; a failed lookup is an error.
+func (r *Reconciler) Expected(ctx context.Context, serial string) (bool, error) {
+	d, err := r.NetBox.BySerial(ctx, r.Config.Site, serial)
+	if errors.Is(err, ErrNoDevice) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if d.Status == "planned" {
+		return true, nil
+	}
+	if d.LastWorkflow == "" {
+		return false, nil
+	}
+	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return !Finished(wf.State()), nil
+}
+
 // provisionRunning says whether the device's last_workflow is a provision
 // that has not finished, such as the run that netbooted it.
 func (r *Reconciler) provisionRunning(ctx context.Context, d Device) bool {

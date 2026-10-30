@@ -115,8 +115,10 @@ func TestTemplateRendersAWorkflowWithoutInstallKeys(t *testing.T) {
 	old := provisionMap(t)
 	delete(old, "install")
 	delete(old, "installer_image")
+	delete(old, "attest")
 	env := renderTemplate(t, old).Tasks[0].Environment
-	if env["INSTALL"] != "false" || env["INSTALLER_IMAGE"] != "" {
+	// A Workflow without the attest key fails closed: it attests.
+	if env["INSTALL"] != "false" || env["INSTALLER_IMAGE"] != "" || env["ATTEST"] != "true" {
 		t.Fatalf("a Workflow without install keys: %v", env)
 	}
 }
@@ -216,7 +218,7 @@ func TestWipeWaitsForTheBootsPass(t *testing.T) {
 	dir := t.TempDir()
 	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
 	attested, code := filepath.Join(dir, "attested"), filepath.Join(dir, "install_code")
-	run := func(attest, install string, files ...string) string {
+	run := func(attest, wipe, install string, files ...string) string {
 		os.Remove(attested)
 		os.Remove(code)
 		for _, f := range files {
@@ -227,24 +229,28 @@ func TestWipeWaitsForTheBootsPass(t *testing.T) {
 		for k, v := range wf.Tasks[0].Environment {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
-		cmd.Env = append(cmd.Env, "ATTEST="+attest, "INSTALL="+install, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dir, "disk"))
+		cmd.Env = append(cmd.Env, "ATTEST="+attest, "WIPE="+wipe, "INSTALL="+install, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dir, "disk"))
 		out, _ := cmd.CombinedOutput()
 		return string(out)
 	}
 	for _, c := range []struct {
-		attest, install string
-		files           []string
-		want            string
+		attest, wipe, install string
+		files                 []string
+		want                  string
 	}{
-		{"true", "true", nil, "did not pass attestation"},
-		{"true", "true", []string{code}, "did not pass attestation"},
-		{"true", "true", []string{attested}, "no install code"},
-		{"true", "true", []string{attested, code}, "is not a block device"},
-		{"true", "false", []string{attested}, "is not a block device"},
-		{"false", "false", nil, "is not a block device"},
+		{"true", "true", "true", nil, "did not pass attestation"},
+		{"true", "true", "true", []string{code}, "did not pass attestation"},
+		{"true", "true", "true", []string{attested}, "no install code"},
+		{"true", "true", "true", []string{attested, code}, "is not a block device"},
+		{"true", "true", "false", []string{attested}, "is not a block device"},
+		{"false", "true", "false", nil, "is not a block device"},
+		// An attest run fails when the boot's attestation did.
+		{"true", "false", "false", nil, "did not pass attestation"},
+		{"true", "false", "false", []string{attested}, "nothing wiped this run"},
+		{"false", "false", "false", nil, "nothing wiped this run"},
 	} {
-		if out := run(c.attest, c.install, c.files...); !strings.Contains(out, c.want) {
-			t.Errorf("attest %s install %s with %v: %q, want %q", c.attest, c.install, c.files, out, c.want)
+		if out := run(c.attest, c.wipe, c.install, c.files...); !strings.Contains(out, c.want) {
+			t.Errorf("attest %s wipe %s install %s with %v: %q, want %q", c.attest, c.wipe, c.install, c.files, out, c.want)
 		}
 	}
 }

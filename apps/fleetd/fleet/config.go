@@ -187,9 +187,12 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		Models:  cfg.Models,
 		NetBox:  netbox,
 		Kube:    kube,
-		Configs: &Configs{},
+		Configs: &Configs{Dir: os.Getenv("FLEET_CONFIG_DIR")},
 		Metrics: metrics,
 		Now:     time.Now,
+	}
+	if err := in.Configs.Load(); err != nil {
+		return nil, fmt.Errorf("FLEET_CONFIG_DIR: %w", err)
 	}
 	var err error
 	if in.TTL, err = time.ParseDuration(env("FLEET_CONFIG_TTL", "2h")); err != nil || in.TTL <= 0 {

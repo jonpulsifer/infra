@@ -104,6 +104,7 @@ func (it *installTest) fetch(method, uuid, code string, header map[string]string
 	}
 	w := httptest.NewRecorder()
 	it.in.ServeHTTP(w, r)
+	it.in.Drain()
 	return w
 }
 
@@ -610,5 +611,104 @@ func TestAConfigIsServedOnceToConcurrentFetches(t *testing.T) {
 	}
 	if it.held(testCode) {
 		t.Fatal("the config was not burned")
+	}
+}
+
+// The answer goes out before NetBox hears of it: a NetBox that hangs never
+// holds the node's fetch of a config that is already burned, and the next
+// pass retries the release.
+func TestTheConfigIsAnsweredBeforeItsRelease(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	hang := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	defer slow.Close()
+	good := *it.in.NetBox
+	it.in.NetBox = &NetBox{URL: slow.URL, Token: "nbt_x.y", Client: slow.Client()}
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		it.in.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/talos/config?uuid="+testUUID+"&code="+testCode, nil))
+		done <- w.Code
+	}()
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Fatalf("the fetch answered %d", code)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the fetch waited on NetBox")
+	}
+	close(hang)
+	it.in.Drain()
+	it.in.NetBox = &good
+	if len(it.in.Configs.Unreleased()) != 1 {
+		t.Fatal("the release that NetBox did not take was dropped")
+	}
+	it.in.Tick(context.Background())
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" || len(it.in.Configs.Unreleased()) != 0 {
+		t.Fatalf("the pass did not retry the release: %v", p)
+	}
+}
+
+// A restart keeps every config in the runtime directory with its TTL and
+// burn state: an unread config is served after it, a served one waits for
+// its release, and a spent code stays spent.
+func TestConfigsSurviveARestart(t *testing.T) {
+	dir := t.TempDir()
+	it := newInstallTest(t, "planned", nil)
+	it.in.Configs = &Configs{Dir: dir}
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	restart := func() *Configs {
+		c := &Configs{Dir: dir}
+		if err := c.Load(); err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	it.in.Configs = restart()
+	p, cfg, ok := it.in.Configs.Get(testUUID, testCode, it.now)
+	if !ok || !strings.Contains(string(cfg), "riptide") || p.TTL != 2*time.Hour || !p.Rendered.Equal(testNow) {
+		t.Fatalf("after a restart: %+v %q %v", p, cfg, ok)
+	}
+	if fi, err := os.Stat(filepath.Join(dir, testUUID+".json")); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("the record's mode: %v %v", fi, err)
+	}
+	// Served, then NetBox refuses the release, then a restart.
+	it.nb.failPatch = true
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
+	it.in.Configs = restart()
+	if u := it.in.Configs.Unreleased(); len(u) != 1 || u[0].Fetched.IsZero() {
+		t.Fatalf("the served config's release was lost: %+v", u)
+	}
+	if _, _, ok := it.in.Configs.Get(testUUID, testCode, it.now); ok || !it.in.Configs.Spent(testUUID, testCode) {
+		t.Fatal("a served code came back after a restart")
+	}
+	it.nb.failPatch = false
+	it.in.Tick(context.Background())
+	if _, err := os.Stat(filepath.Join(dir, testUUID+".json")); !os.IsNotExist(err) {
+		t.Fatalf("the released record stayed: %v", err)
+	}
+	if !restart().Spent(testUUID, testCode) {
+		t.Fatal("a restart forgot the spent code")
+	}
+	// A config past its TTL at a restart expires on the next pass.
+	it.nb.set("status", map[string]any{"value": "planned"})
+	req := goodRequest()
+	req.Code = strings.Repeat("Y", 43)
+	if code, why := it.render(req); code != 201 {
+		t.Fatal(code, why)
+	}
+	it.now = testNow.Add(3 * time.Hour)
+	it.in.Configs = restart()
+	it.in.Tick(context.Background())
+	if _, ok := it.in.Configs.Holds(testUUID); ok || it.in.Metrics.Expired.Load() != 1 {
+		t.Fatal("a config past its TTL survived the restart")
 	}
 }

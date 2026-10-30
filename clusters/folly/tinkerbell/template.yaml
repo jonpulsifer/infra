@@ -2,8 +2,9 @@
 # attest, wipe, retire and install (each true/false) and installer_image. HookOS attests on every
 # boot, before tink-agent waits for work (images/tink-agent-autoid), so no action attests: an
 # intake pass's confirm is where fleetd starts the provision and answers the install code. A run
-# with attest true wipes nothing unless this boot passed, which the entrypoint marks in
-# /worker/fleet/attested, and a run that installs wipes nothing without the install code. With fleetd's
+# with attest true fails unless this boot passed, which the entrypoint marks in
+# /worker/fleet/attested, before it wipes anything; a Workflow without the key attests. A run that
+# installs wipes nothing without the install code. With fleetd's
 # installs on, a provision of a worker class wipes, installs Talos and boots the disk; a provision
 # fleetd does not install (installs off, a control plane, a TPM 1.2 node) wipes, and the node boots
 # the network into HookOS (the iPXE default item) until a Workflow runs; an attest only netboots
@@ -40,7 +41,7 @@ spec:
         environment:
           DISK: "{{ index .Hardware.Disks 0 }}"
           MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
-          ATTEST: '{{ or (index . "attest") "false" }}'
+          ATTEST: '{{ or (index . "attest") "true" }}'
           WIPE: "{{ .wipe }}"
           RETIRE: "{{ .retire }}"
           # Tinkerbell renders with missingkey=error, so a Workflow from a controller that sets no
@@ -61,15 +62,16 @@ spec:
               - |
                 set -eu
                 log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
-                if [ "$WIPE" != true ]; then
-                  log "nothing wiped this run"
-                  exit 0
-                fi
-                # The boot's attestation gates the wipe of a run that attests, and the install
-                # code the wipe of a run that installs, so a refused machine keeps its disk.
+                # A run that attests fails when this boot's attestation did, before it wipes
+                # anything, and the install code gates the wipe of a run that installs, so a
+                # refused machine keeps its disk.
                 if [ "$ATTEST" = true ] && [ ! -e "$ATTESTED_FILE" ]; then
                   log "this boot did not pass attestation; nothing wiped"
                   exit 1
+                fi
+                if [ "$WIPE" != true ]; then
+                  log "nothing wiped this run"
+                  exit 0
                 fi
                 if [ "$INSTALL" = true ] && [ ! -s "$INSTALL_CODE_FILE" ]; then
                   log "no install code; nothing wiped"

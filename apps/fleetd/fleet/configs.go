@@ -3,8 +3,14 @@ package fleet
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -41,17 +47,124 @@ type Pending struct {
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
 
-// Configs holds the rendered configs in memory, one per machine. Nothing is
-// written to disk: a restart drops every unread config, and the node's fetch
-// is then a 404 that a new provision answers.
+// Configs holds the rendered configs, one per machine. With Dir set, each
+// record and its bytes are also kept as <uuid>.json in Dir, a tmpfs, with
+// the burned codes in burned.json, so a restart of the service, such as a
+// deploy, keeps every config with its TTL and burn state; a reboot drops
+// them. Without Dir they live in memory alone.
 //
 // A code whose config is gone, served, expired or replaced, is burned: a
 // hash of it is kept for burnFor, and Put refuses it.
 type Configs struct {
+	Dir string
+
 	mu      sync.Mutex
 	pending map[string]Pending
 	bytes   map[string][]byte
 	burned  map[string]time.Time
+}
+
+// configFile is one machine's record in Dir.
+type configFile struct {
+	Pending Pending `json:"pending"`
+	Config  []byte  `json:"config,omitempty"`
+}
+
+const burnedFile = "burned.json"
+
+// writeAtomic writes a file whole under a temporary name, mode 0600, and
+// renames it into place.
+func writeAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// persist writes the machine's record and the burned codes to Dir, or
+// removes the record the machine no longer has. The caller holds mu.
+func (c *Configs) persist(uuid string) error {
+	if c.Dir == "" {
+		return nil
+	}
+	path := filepath.Join(c.Dir, uuid+".json")
+	var err error
+	if p, ok := c.pending[uuid]; ok {
+		var b []byte
+		if b, err = json.Marshal(configFile{Pending: p, Config: c.bytes[uuid]}); err == nil {
+			err = writeAtomic(path, b)
+		}
+	} else if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+		err = rerr
+	}
+	b, merr := json.Marshal(c.burned)
+	if merr == nil {
+		merr = writeAtomic(filepath.Join(c.Dir, burnedFile), b)
+	}
+	return errors.Join(err, merr)
+}
+
+// keep is persist for a change that already stands in memory: a failure is
+// logged, and the next change of the machine writes it again.
+func (c *Configs) keep(uuid string) {
+	if err := c.persist(uuid); err != nil {
+		log.Printf("talos-config: keep %s's record: %v", uuid, err)
+	}
+}
+
+// Load reads Dir's records and burned codes, as a restart finds them. A
+// record that does not parse is skipped and logged.
+func (c *Configs) Load() error {
+	if c.Dir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(c.Dir, 0o700); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	if b, err := os.ReadFile(filepath.Join(c.Dir, burnedFile)); err == nil {
+		if err := json.Unmarshal(b, &c.burned); err != nil {
+			return fmt.Errorf("%s: %w", burnedFile, err)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	entries, err := os.ReadDir(c.Dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		uuid, ok := strings.CutSuffix(name, ".json")
+		if !ok || name == burnedFile || !uuidPattern.MatchString(uuid) {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(c.Dir, name))
+		var f configFile
+		if err == nil {
+			err = json.Unmarshal(b, &f)
+		}
+		if err != nil || f.Pending.UUID != uuid {
+			log.Printf("talos-config: skip %s: %v", name, err)
+			continue
+		}
+		c.pending[uuid] = f.Pending
+		if f.Pending.Fetched.IsZero() {
+			c.bytes[uuid] = f.Config
+		}
+	}
+	return nil
 }
 
 // ErrBurned is a render for a code whose config is already gone.
@@ -100,8 +213,19 @@ func (c *Configs) Put(p Pending, cfg []byte) error {
 		}
 	}
 	p.Fetched = time.Time{}
+	old, hadOld := c.pending[p.UUID]
+	oldBytes := c.bytes[p.UUID]
 	c.pending[p.UUID] = p
 	c.bytes[p.UUID] = append([]byte(nil), cfg...)
+	if err := c.persist(p.UUID); err != nil {
+		if hadOld {
+			c.pending[p.UUID], c.bytes[p.UUID] = old, oldBytes
+		} else {
+			delete(c.pending, p.UUID)
+			delete(c.bytes, p.UUID)
+		}
+		return fmt.Errorf("keep the config: %w", err)
+	}
 	return nil
 }
 
@@ -167,6 +291,7 @@ func (c *Configs) Burn(uuid, code string, at time.Time) (Pending, bool) {
 	c.pending[uuid] = p
 	delete(c.bytes, uuid)
 	c.burn(uuid, code, at)
+	c.keep(uuid)
 	return p, true
 }
 
@@ -177,6 +302,7 @@ func (c *Configs) Released(p Pending) {
 	c.init()
 	if cur, ok := c.pending[p.UUID]; ok && cur.Code == p.Code && !cur.Fetched.IsZero() {
 		delete(c.pending, p.UUID)
+		c.keep(p.UUID)
 	}
 }
 
@@ -200,6 +326,7 @@ func (c *Configs) Expire(now time.Time) []Pending {
 			delete(c.pending, uuid)
 			delete(c.bytes, uuid)
 			c.burn(p.UUID, p.Code, now)
+			c.keep(uuid)
 			out = append(out, p)
 		}
 	}

@@ -79,6 +79,47 @@ tests:
               message: fleetd does not serve the enrollment name
               description: "fleetd is down, has no trusted certificate for the enrollment name, or spore exports no talos-boot-check metrics, so HookOS cannot attest and an installed node cannot fetch its config. Read journalctl -u fleetd and the ACME renewal on spore (nix/services/fleetd.nix)."
 
+  # fleetd's DevID listener answers until minute 10, then stops.
+  - interval: 1m
+    input_series:
+      - series: 'fleetd_devid_serving{instance="spore",job="node-exporter"}'
+        values: 1x9 0x31
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: FleetdDevIDNotServing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: FleetdDevIDNotServing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              job: node-exporter
+            exp_annotations:
+              message: fleetd does not answer on its DevID listener
+              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+
+  # A worker falls back to PXE at minute 10 and its unattended boot is refused.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_verdicts_total{instance="spore",verdict="refused",reason="unattended-boot"}'
+        values: 0x10 1x50
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestUnattendedBootFailed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: TalosAttestUnattendedBootFailed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              verdict: refused
+              reason: unattended-boot
+            exp_annotations:
+              message: "A machine booted HookOS unprompted and failed attestation"
+              description: "A node booted HookOS while no run expected it, and its attestation failed. fleetd refused it and recorded nothing, so it keeps its identity. Read the device's NetBox journal and journalctl -u fleetd on spore, and look for a BIOS reset or a disk fault."
+
   # spore has not mirrored a release in seven hours.
   - interval: 1m
     input_series:

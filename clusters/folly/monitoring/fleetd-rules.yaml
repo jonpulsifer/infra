@@ -31,6 +31,25 @@ spec:
           annotations:
             message: fleetd does not serve the enrollment name
             description: "fleetd is down, has no trusted certificate for the enrollment name, or spore exports no talos-boot-check metrics, so HookOS cannot attest and an installed node cannot fetch its config. Read journalctl -u fleetd and the ACME renewal on spore (nix/services/fleetd.nix)."
+        # Every node's renewal and daily check reach the DevID listener on spore, which fleetd
+        # binds apart from the boot listener.
+        - alert: FleetdDevIDNotServing
+          expr: (fleetd_devid_serving{instance="spore"} == 0) or absent(fleetd_devid_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: fleetd does not answer on its DevID listener
+            description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+        # An intake whose attestation fails while no run expects the machine in HookOS, such as a
+        # worker that fell back to PXE, is refused and records nothing; the owner reads why.
+        - alert: TalosAttestUnattendedBootFailed
+          expr: increase(talos_attest_verdicts_total{reason="unattended-boot"}[1h]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: "A machine booted HookOS unprompted and failed attestation"
+            description: "A node booted HookOS while no run expected it, and its attestation failed. fleetd refused it and recorded nothing, so it keeps its identity. Read the device's NetBox journal and journalctl -u fleetd on spore, and look for a BIOS reset or a disk fault."
         - alert: BootMirrorStale
           expr: time() - talos_boot_mirror_last_success_timestamp_seconds > 6 * 3600
           for: 15m

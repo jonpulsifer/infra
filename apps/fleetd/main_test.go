@@ -1,15 +1,18 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"io"
 	"log/slog"
 	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -90,5 +93,48 @@ func TestKeyPairFollowsARenewal(t *testing.T) {
 	kp.checked = time.Time{}
 	if c, err := kp.get(nil); err != nil || c == nil {
 		t.Fatalf("a broken renewal dropped the certificate: %v", err)
+	}
+}
+
+// The boot listener waits for its certificate instead of failing fleetd:
+// with none at start it serves nothing, and once the ACME unit writes one it
+// binds and answers, without a restart.
+func TestBootListenerWaitsForItsCertificate(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	dir := t.TempDir()
+	kp := &keyPair{cert: filepath.Join(dir, "cert.pem"), key: filepath.Join(dir, "key.pem")}
+	srv := &attest.Server{V: &attest.Verifier{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	s := &http.Server{Handler: bootHandler(srv, http.NotFoundHandler())}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go serveBoot(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), s, addr, kp, 20*time.Millisecond)
+	defer s.Close()
+
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	time.Sleep(100 * time.Millisecond)
+	if resp, err := client.Get("https://" + addr + "/healthz"); err == nil {
+		resp.Body.Close()
+		t.Fatal("the boot listener answered with no certificate")
+	}
+	writeCert(t, dir, "enroll")
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		resp, err := client.Get("https://" + addr + "/healthz")
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("healthz: %d", resp.StatusCode)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the boot listener never came up: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
