@@ -26,8 +26,8 @@ func TestTemplatesMatchTheirReferences(t *testing.T) {
 	spireSRK.ECCParameters.Point.XRaw = []byte{}
 	spireSRK.ECCParameters.Point.YRaw = []byte{}
 	for name, c := range map[string]struct{ got, want tpm2.Public }{
-		"RSA EK": {EKTemplateRSA, tools.DefaultEKTemplateRSA()},
-		"ECC EK": {EKTemplateECC, tools.DefaultEKTemplateECC()},
+		"RSA EK": {DefaultEKTemplateRSA(), tools.DefaultEKTemplateRSA()},
+		"ECC EK": {DefaultEKTemplateECC(), tools.DefaultEKTemplateECC()},
 		"SRK":    {SRKTemplate, spireSRK},
 	} {
 		if !bytes.Equal(encode(t, c.got), encode(t, c.want)) {
