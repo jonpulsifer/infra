@@ -146,7 +146,7 @@ func (n *NetBox) AssignIP(ctx context.Context, id int, address string, nic int, 
 }
 
 // Switch is a NetBox device with the role switch and the MACs of its
-// interfaces, which UniFi names it by.
+// interfaces, one of which is the chassis ID its LLDP frames carry.
 type Switch struct {
 	ID   int
 	Name string
@@ -247,7 +247,7 @@ func (n *NetBox) SwitchPort(ctx context.Context, switchID, port int) (int, error
 var ErrPortTaken = errors.New("the switch port has another cable")
 
 // Cable makes one cable between the two interfaces, replacing any cable
-// either has to somewhere else, when steal says that what UniFi sees beats
+// either has to somewhere else, when steal says that what LLDP reports beats
 // what NetBox holds; without it, a taken switch port is ErrPortTaken. It
 // says whether it made one, and which links it replaced.
 func (n *NetBox) Cable(ctx context.Context, a, b int, steal bool) (bool, []string, error) {

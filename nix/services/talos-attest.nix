@@ -298,6 +298,8 @@ in
             proxyPass = "http://unix:${publicSocket}:/";
             extraConfig = ''
               proxy_set_header X-Forwarded-For $remote_addr;
+              # talos-attest records a machine's attested address only when it is this one.
+              proxy_set_header X-Real-IP $remote_addr;
               client_max_body_size 1m;
             '';
           };

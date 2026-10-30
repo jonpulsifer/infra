@@ -34,7 +34,10 @@ type Config struct {
 	StoreNV bool
 	// PCRs to quote in the SHA-256 bank.
 	PCRs []int
-	Logf func(format string, args ...any)
+	// Network, when set, gives the facts that go with the evidence, signed
+	// by the session's AK. It may block: the TPM work runs before it.
+	Network func() *protocol.Network
+	Logf    func(format string, args ...any)
 }
 
 // Result is what a pass leaves. InstallCode is the confirm's install code,
@@ -187,6 +190,15 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	evidence.LDevID = protocol.Certified{Public: ldPub, Attestation: certAttest, Signature: certSig}
 	evidence.LDevIDBlobs = protocol.Blobs{Public: ldPub, Private: ldPriv}
 	evidence.AKBlobs = protocol.Blobs{Public: akPub, Private: akPriv}
+	if cfg.Network != nil {
+		if n := cfg.Network(); n != nil {
+			sig, err := akSign(rw, ak, scheme, protocol.NetworkData(started.Nonce, *n))
+			if err != nil {
+				return nil, fmt.Errorf("sign the network facts: %w", err)
+			}
+			evidence.Network, evidence.NetworkSignature = n, sig
+		}
+	}
 
 	var verdict protocol.Verdict
 	if err := post(ctx, cfg, strings.Replace(protocol.PathEvidence, "{session}", started.Session, 1), evidence, &verdict); err != nil {
@@ -209,17 +221,9 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	}
 	// The device flow is plain HTTP: the AK's signature is what lets this
 	// machine, and no one who saw the session, confirm it.
-	digest, ticket, err := tpm2.Hash(rw, tpm2.AlgSHA256, append(append([]byte{}, started.Nonce...), protocol.ConfirmLabel...), tpm2.HandleOwner)
-	if err != nil {
-		return res, fmt.Errorf("hash the confirm: %w", err)
-	}
-	confirmSig, err := tpm2.Sign(rw, ak, "", digest, ticket, &scheme)
+	rawConfirmSig, err := akSign(rw, ak, scheme, append(append([]byte{}, started.Nonce...), protocol.ConfirmLabel...))
 	if err != nil {
 		return res, fmt.Errorf("sign the confirm: %w", err)
-	}
-	rawConfirmSig, err := confirmSig.Encode()
-	if err != nil {
-		return res, err
 	}
 	confirm := protocol.ConfirmRequest{NVIndexes: res.NVIndexes, Signature: rawConfirmSig}
 	var confirmed protocol.ConfirmResponse
@@ -241,6 +245,21 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	res.InstallCode = base64.RawURLEncoding.EncodeToString(code)
 	logf("install code unwrapped with the %s EK", eks[i].alg)
 	return res, nil
+}
+
+// akSign has the restricted AK sign SHA-256 of data. TPM2_Hash's ticket
+// vouches that data is no TPM-generated structure, without which a
+// restricted key signs nothing.
+func akSign(rw io.ReadWriter, ak tpmutil.Handle, scheme tpm2.SigScheme, data []byte) ([]byte, error) {
+	digest, ticket, err := tpm2.Hash(rw, tpm2.AlgSHA256, data, tpm2.HandleOwner)
+	if err != nil {
+		return nil, fmt.Errorf("hash: %w", err)
+	}
+	sig, err := tpm2.Sign(rw, ak, "", digest, ticket, &scheme)
+	if err != nil {
+		return nil, err
+	}
+	return sig.Encode()
 }
 
 func indexOf(eks []ek, hash string) int {

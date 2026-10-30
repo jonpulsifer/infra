@@ -7,6 +7,7 @@ package protocol
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"time"
 )
 
@@ -132,6 +133,45 @@ type EvidenceRequest struct {
 	// after the disk is wiped.
 	LDevIDBlobs Blobs `json:"ldevid_blobs"`
 	AKBlobs     Blobs `json:"ak_blobs"`
+	// Network is where the machine is plugged in, and NetworkSignature the
+	// session's AK signing NetworkDigest of it, a TPMT_SIGNATURE. The
+	// service records the facts on a pass only when the signature holds.
+	Network          *Network `json:"network,omitempty"`
+	NetworkSignature []byte   `json:"network_signature,omitempty"`
+}
+
+// LLDP is what the switch says of the port the machine's boot NIC is
+// plugged into, from one LLDP frame.
+type LLDP struct {
+	ChassisID       string `json:"chassis_id"`
+	PortID          string `json:"port_id"`
+	PortDescription string `json:"port_description,omitempty"`
+	SystemName      string `json:"system_name,omitempty"`
+}
+
+// Network is the attest action's view of the boot NIC: its IPv4 address
+// and the switch port LLDP names, when a frame arrived.
+type Network struct {
+	Address string `json:"address,omitempty"`
+	LLDP    *LLDP  `json:"lldp,omitempty"`
+}
+
+// NetworkLabel follows the session's nonce in what the AK signs over the
+// network facts.
+const NetworkLabel = "network"
+
+// NetworkData is what the AK signs over: the session's nonce, NetworkLabel
+// and SHA-256 of the facts' JSON. It stays short enough for TPM2_Hash.
+func NetworkData(nonce []byte, n Network) []byte {
+	b, _ := json.Marshal(n)
+	sum := sha256.Sum256(b)
+	return append(append(append([]byte{}, nonce...), NetworkLabel...), sum[:]...)
+}
+
+// NetworkDigest is SHA-256 over NetworkData.
+func NetworkDigest(nonce []byte, n Network) []byte {
+	sum := sha256.Sum256(NetworkData(nonce, n))
+	return sum[:]
 }
 
 // Verdict is the service's answer to evidence, and its refusal body.

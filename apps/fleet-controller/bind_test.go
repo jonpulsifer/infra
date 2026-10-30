@@ -2,16 +2,13 @@ package main
 
 import (
 	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
-// The UniFi fixture, testdata/unifi-stat-sta.json, sees rackMAC on port 5
-// and prepMAC on port 24, the prep station, both on the switch switchMAC.
+// An intake of rackMAC reports port 5 by LLDP, and one of prepMAC port 24,
+// the prep station, both on the switch switchMAC.
 const (
 	rackMAC   = "38:22:e2:aa:bb:05"
 	prepMAC   = "38:22:e2:aa:bb:01"
@@ -74,13 +71,29 @@ func switchIfaces() []map[string]any {
 
 func switchPortID(p int) int { return 200 + p }
 
+// lldpReport is what an intake of the MAC reports at the time: the port the
+// switch's LLDP frame names, in the shape a USW-24-PoE sends.
+func lldpReport(mac string, at time.Time) map[string]any {
+	port, name := 5, "rack-5"
+	if mac == prepMAC {
+		port, name = 24, "provisioning"
+	}
+	a := map[string]any{}
+	for k, v := range (Report{At: at, Address: "10.9.0.150", Serial: boxSerial, LLDP: &LLDP{
+		ChassisID: switchMAC, PortID: fmt.Sprintf("Port %d", port), PortDescription: name, SystemName: "USW-24-PoE",
+	}}).annotations() {
+		a[k] = v
+	}
+	return a
+}
+
 func intakeObjects(mac, state string) map[string]Object {
 	slug := MACSlug(mac)
 	created := testNow.Add(-time.Hour).UTC().Format(time.RFC3339)
 	hw := Object{
 		"metadata": map[string]any{"name": slug, "creationTimestamp": created,
 			"labels":      map[string]any{ManagedLabel: FieldManager, NodeLabel: slug, IntakeLabel: "true"},
-			"annotations": map[string]any{SerialAnnotation: boxSerial},
+			"annotations": lldpReport(mac, testNow.Add(-time.Hour)),
 		},
 		"spec": map[string]any{
 			"disks":      []any{map[string]any{"device": "/dev/sda"}},
@@ -96,24 +109,11 @@ type bindTest struct {
 	r    *Reconciler
 	nb   *fakeNetBox
 	kube *fakeKube
-	hits int
 }
 
 func newBindTest(t *testing.T, mac string, devices []map[string]any, ifaces []map[string]any) (*bindTest, func()) {
 	t.Helper()
-	fixture, err := os.ReadFile("testdata/unifi-stat-sta.json")
-	if err != nil {
-		t.Fatal(err)
-	}
 	bt := &bindTest{}
-	unifi := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/proxy/network/api/s/default/stat/sta" || r.Header.Get("X-API-KEY") != "k3y" {
-			http.Error(w, `{"meta":{"rc":"error","msg":"api.err.LoginRequired"},"data":[]}`, http.StatusUnauthorized)
-			return
-		}
-		bt.hits++
-		w.Write(fixture)
-	}))
 	bt.nb = &fakeNetBox{
 		apply:     true,
 		devices:   devices,
@@ -125,9 +125,29 @@ func newBindTest(t *testing.T, mac string, devices []map[string]any, ifaces []ma
 	bt.kube = &fakeKube{objects: intakeObjects(mac, "STATE_SUCCESS")}
 	r, done := newTest(t, bt.nb, bt.kube)
 	r.Config.AutoProvision = true
-	r.UniFi = &UniFi{URL: unifi.URL, Key: "k3y", Client: unifi.Client()}
 	bt.r = r
-	return bt, func() { done(); unifi.Close() }
+	// The intake run's pass attested the machine's port half an hour ago,
+	// after its Workflow was made.
+	bt.attest(mac, testNow.Add(-30*time.Minute))
+	return bt, done
+}
+
+// attest sets the node's attested network fields as talos-attest writes them
+// on a pass at the time: rackMAC on port 5, prepMAC on port 24.
+func (bt *bindTest) attest(mac string, at time.Time) {
+	n := bt.node()
+	if n == nil {
+		return
+	}
+	port := "Port 5"
+	if mac == prepMAC {
+		port = "Port 24"
+	}
+	cf := n["custom_fields"].(map[string]any)
+	cf["attested_address"] = "10.9.0.150"
+	cf["attested_switch"] = strings.ToUpper(switchMAC)
+	cf["attested_switch_port"] = port
+	cf["attested_network_at"] = at.UTC().Format(time.RFC3339)
 }
 
 func (bt *bindTest) reconcile(t *testing.T) {
@@ -243,8 +263,8 @@ func TestBindWithoutStubAllocatesTheNextFreeAddress(t *testing.T) {
 	bt, done := newBindTest(t, rackMAC, []map[string]any{intakeDevice(g5, nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
 	bt.reconcile(t)
-	// 10.3.0.1 is reserved, and UniFi sees a printer on 10.3.0.2.
-	if ip, _ := bt.node()["primary_ip4"].(map[string]any); ip == nil || ip["address"] != "10.3.0.13/26" {
+	// 10.3.0.1 is reserved.
+	if ip, _ := bt.node()["primary_ip4"].(map[string]any); ip == nil || ip["address"] != "10.3.0.2/26" {
 		t.Fatalf("primary_ip4 %v", bt.node()["primary_ip4"])
 	}
 	ip := bt.nb.ips[0]
@@ -301,6 +321,7 @@ func TestBindNeverAutoProvisionsAControlPlane(t *testing.T) {
 			defer done()
 			if devices := setup(bt); devices != nil {
 				bt.nb.devices = devices
+				bt.attest(rackMAC, testNow.Add(-30*time.Minute))
 			}
 			if err := bt.r.Reconcile(t.Context()); err != nil {
 				t.Fatal(err)
@@ -374,20 +395,87 @@ func TestBindAtThePrepStationLeavesATakenPortAlone(t *testing.T) {
 	}
 }
 
-func TestBindAllocatesNothingWhileUniFiIsDown(t *testing.T) {
+func TestBindWithoutLLDPLeavesTheCable(t *testing.T) {
 	bt, done := newBindTest(t, rackMAC, []map[string]any{intakeDevice(g5, nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
-	bt.r.UniFi.Key = "wrong"
-	if err := bt.r.Reconcile(t.Context()); err == nil {
-		t.Fatal("a pass that could not check addresses reported no error")
+	for _, f := range []string{"attested_switch", "attested_switch_port", "attested_network_at"} {
+		bt.node()["custom_fields"].(map[string]any)[f] = nil
 	}
-	if len(bt.nb.ips) != 0 || bt.intakeGone(rackMAC) {
-		t.Errorf("ips %v objects %v", bt.nb.ips, bt.kube.objects)
-	}
-	bt.r.UniFi.Key = "k3y"
 	bt.reconcile(t)
-	if len(bt.nb.ips) != 1 || !bt.intakeGone(rackMAC) {
-		t.Errorf("after UniFi came back: ips %v", bt.nb.ips)
+	if len(bt.nb.cables) != 0 || bt.cf("desired_action") != "provision" || !bt.intakeGone(rackMAC) {
+		t.Errorf("cables %v desired_action %v", bt.nb.cables, bt.cf("desired_action"))
+	}
+	if !bt.journal("no switch port for the device, and no cable: talos-attest recorded no attested switch port") {
+		t.Errorf("journals %v", bt.nb.journals)
+	}
+}
+
+// DC mode: a stub's expected_port refuses a machine whose pass attested no
+// port, as it refuses one on another port.
+func TestBindWithoutLLDPRefusesAnExpectedPort(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 5)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.node()["custom_fields"].(map[string]any)["attested_switch_port"] = "eth4"
+	bt.reconcile(t)
+	if len(bt.nb.patches) != 0 || len(bt.nb.deleted) != 0 || bt.intakeGone(rackMAC) {
+		t.Errorf("a refused binding wrote: patches %v deleted %v", bt.nb.patches, bt.nb.deleted)
+	}
+	if !bt.journal("its intake pass attested no switch port, and stub swell expects port 5") {
+		t.Errorf("journals %v", bt.nb.journals)
+	}
+}
+
+// DC mode: a host on the bootstrap network forges the intake's LLDP to name
+// the port a stub expects. The claim counts for nothing: the pass attested
+// another port, and nothing binds.
+func TestBindIgnoresAForgedIntakePort(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.kube.get(hwBase + MACSlug(rackMAC)).metadata()["annotations"].(map[string]any)[LLDPPortAnnotation] = "Port 7"
+	bt.reconcile(t)
+	if len(bt.nb.patches) != 0 || len(bt.nb.deleted) != 0 || len(bt.nb.cables) != 0 {
+		t.Errorf("a forged port bound: patches %v deleted %v cables %v", bt.nb.patches, bt.nb.deleted, bt.nb.cables)
+	}
+	if !bt.journal("on port 5, expected 7 (stub swell)") {
+		t.Errorf("journals %v", bt.nb.journals)
+	}
+}
+
+// The intake's claim reaches the journal only as plain text: NetBox renders
+// journal entries as Markdown.
+func TestBindJournalsTheClaimedPortAsPlainText(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC, []map[string]any{intakeDevice(g5, nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.kube.get(hwBase + MACSlug(rackMAC)).metadata()["annotations"].(map[string]any)[LLDPPortAnnotation] = "Port 9 **[x](http://y)**"
+	bt.reconcile(t)
+	if !bt.journal("the intake claimed port Port 9") || !bt.cabledTo(5) {
+		t.Fatalf("journals %v", bt.nb.journals)
+	}
+	for _, j := range bt.nb.journals {
+		if c := j["comments"].(string); strings.ContainsAny(c, "*[]`") {
+			t.Errorf("a journal entry carries Markdown: %s", c)
+		}
+	}
+}
+
+// A port attested before this intake's Workflow existed is another boot's,
+// and says nothing of where the machine is now.
+func TestBindIgnoresAnAttestedPortFromBeforeTheIntake(t *testing.T) {
+	bt, done := newBindTest(t, rackMAC,
+		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 5)},
+		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.attest(rackMAC, testNow.Add(-2*time.Hour))
+	bt.reconcile(t)
+	if len(bt.nb.patches) != 0 || len(bt.nb.deleted) != 0 {
+		t.Errorf("a stale port bound: patches %v deleted %v", bt.nb.patches, bt.nb.deleted)
+	}
+	if !bt.journal("its intake pass attested no switch port, and stub swell expects port 5") {
+		t.Errorf("journals %v", bt.nb.journals)
 	}
 }
 
@@ -398,7 +486,7 @@ func TestBindAtThePrepStationWithoutAPortLeavesTheCable(t *testing.T) {
 	if len(bt.nb.cables) != 0 {
 		t.Errorf("cabled to the prep station: %v", bt.nb.cables)
 	}
-	if !bt.journal("no cable until UniFi sees it on a rack port") || bt.cf("desired_action") != "provision" {
+	if !bt.journal("no cable until an intake pass on a rack port attests it") || bt.cf("desired_action") != "provision" {
 		t.Errorf("journals %v", bt.nb.journals)
 	}
 }
@@ -535,14 +623,45 @@ func TestFillPortCablesANodeOnItsRackPort(t *testing.T) {
 	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
 	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	defer done()
-	bt.kube.objects = map[string]Object{}
+	bt.attest(rackMAC, testNow)
 	bt.reconcile(t)
-	if !bt.cabledTo(5) || !bt.journal("UniFi sees the node on a rack port") {
+	if !bt.cabledTo(5) || !bt.journal("its intake pass attested a rack port") {
 		t.Errorf("interface %v journals %v", bt.nb.ifaceByID(nodeNIC), bt.nb.journals)
 	}
 	bt.reconcile(t)
-	if len(bt.nb.cables) != 1 || bt.hits != 1 {
-		t.Errorf("a cabled node was cabled again: %v, UniFi read %d times", bt.nb.cables, bt.hits)
+	if len(bt.nb.cables) != 1 {
+		t.Errorf("a cabled node was cabled again: %v", bt.nb.cables)
+	}
+}
+
+func TestFillPortIgnoresAnOldReport(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	defer done()
+	bt.attest(rackMAC, testNow.Add(-2*time.Hour))
+	bt.reconcile(t)
+	if len(bt.nb.cables) != 0 {
+		t.Errorf("an old report cabled the node: %v", bt.nb.cables)
+	}
+}
+
+// The attested port holds another device's cable in NetBox: the node gets no
+// cable, the other one stays, and the owner reads the conflict.
+func TestFillPortNeverStealsACable(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
+	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC), nic(60, 61, "eth0", "38:22:e2:00:00:61")})
+	defer done()
+	port5 := bt.nb.ifaceByID(switchPortID(5))
+	port5["cable"] = map[string]any{"id": 77}
+	port5["link_peers"] = []any{map[string]any{"id": 60, "name": "eth0", "device": map[string]any{"name": "shale"}}}
+	bt.attest(rackMAC, testNow)
+	bt.reconcile(t)
+	bt.reconcile(t)
+	if len(bt.nb.cables) != 0 || len(bt.nb.deleted) != 0 || port5["cable"] == nil {
+		t.Errorf("a port with another cable was taken: cables %v deleted %v", bt.nb.cables, bt.nb.deleted)
+	}
+	if n := len(bt.nb.journals); n != 1 || !bt.journal("is cabled to another device in NetBox; no cable, and the other cable stays") {
+		t.Errorf("journals %v", bt.nb.journals)
 	}
 }
 
@@ -552,7 +671,7 @@ func TestFillPortJournalsANodeOffItsExpectedPort(t *testing.T) {
 	cabled["cable"] = map[string]any{"id": 77}
 	bt, done := newBindTest(t, rackMAC, []map[string]any{d}, []map[string]any{cabled})
 	defer done()
-	bt.kube.objects = map[string]Object{}
+	bt.attest(rackMAC, testNow)
 	bt.reconcile(t)
 	bt.reconcile(t)
 	if len(bt.nb.journals) != 1 || !bt.journal("on port 5, expected 7") || len(bt.nb.cables) != 0 {
@@ -564,35 +683,10 @@ func TestFillPortIgnoresThePrepStation(t *testing.T) {
 	d := nbDevice(nodeID, "swell", "staged", boxSerial, g5, nil)
 	bt, done := newBindTest(t, prepMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
 	defer done()
-	bt.kube.objects = map[string]Object{}
+	bt.attest(prepMAC, testNow)
 	bt.reconcile(t)
 	if len(bt.nb.cables) != 0 {
 		t.Errorf("cabled to the prep station: %v", bt.nb.cables)
-	}
-}
-
-func TestUniFiStationsFixture(t *testing.T) {
-	bt, done := newBindTest(t, rackMAC, nil, nil)
-	defer done()
-	stations, err := bt.r.UniFi.Stations(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(stations) != 5 {
-		t.Fatalf("%d stations", len(stations))
-	}
-	for mac, want := range map[string]int{rackMAC: 5, prepMAC: 24, "38:22:e2:2d:96:44": 3} {
-		sw, port, ok := Port(stations, mac)
-		if !ok || sw != switchMAC || port != want {
-			t.Errorf("%s: %s %d %v", mac, sw, port, ok)
-		}
-	}
-	if _, _, ok := Port(stations, "da:a1:19:12:34:56"); ok {
-		t.Error("a wireless client has a switch port")
-	}
-	bad := &UniFi{URL: bt.r.UniFi.URL, Key: "wrong", Client: bt.r.UniFi.Client}
-	if _, err := bad.Stations(t.Context()); err == nil {
-		t.Error("a refused key read stations")
 	}
 }
 

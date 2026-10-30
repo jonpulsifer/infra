@@ -1,6 +1,7 @@
 // fleet-intake tells fleet-controller that a machine booted HookOS, before tink-agent waits for
-// work. It posts the machine's DMI facts, its boot NIC's MAC and its disks to the intake URL, logs
-// each answer's HTTP status and never a body, and exits. entry.sh starts tink-agent whatever the
+// work. It posts the machine's DMI facts, its boot NIC's MAC, its disks and the switch port the
+// switch's LLDP frame names to the intake URL, logs each answer's HTTP status and never a body, and
+// exits. It listens for LLDP for at most 35 seconds while it reads the rest. entry.sh starts tink-agent whatever the
 // outcome. The tink-agent image has no shell, curl or lsblk, so this is a static binary.
 //
 // usage: fleet-intake [boot NIC MAC]
@@ -42,6 +43,7 @@ type Facts struct {
 	SKU    string `json:"sku"`
 	BIOS   string `json:"bios"`
 	Disks  []Disk `json:"disks"`
+	LLDP   *LLDP  `json:"lldp,omitempty"`
 }
 
 func main() {
@@ -55,7 +57,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fleet-intake: fleet_intake_url is empty, nothing posted")
 		return
 	}
+	if mac == "" {
+		mac = bootMAC("/sys")
+	}
+	lldp := make(chan *LLDP, 1)
+	go func() { lldp <- neighbour("/sys", mac, lldpWait, os.Stderr) }()
 	facts := collect("/sys", mac)
+	facts.LLDP = <-lldp
 	body, err := json.Marshal(facts)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "fleet-intake: %v\n", err)

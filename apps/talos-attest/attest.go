@@ -550,6 +550,7 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	rec.LAKSerial = serialHex(lakCert)
 	rec.AttestedAt = now
 	rec.BootApplications = bootApplications(events)
+	rec.Network = v.attestedNetwork(ctx, s, req)
 	files := map[string][]byte{
 		fileLDevIDCert: v.CA.LeafPEM(ldevidCert),
 		fileLAKCert:    v.CA.LeafPEM(lakCert),

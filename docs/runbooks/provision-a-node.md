@@ -23,12 +23,12 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
    mise run netbox:declare --stub <node> --class worker-g5 --serial <serial> [--port <rack port>] [--address <addr>]
    ```
 
-   Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows.
+   Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows. `--port` gives the node its cable at the prep station; without it, the cable comes from an intake pass on a rack port.
 
 2. If talos-attest admits serials no stub names, `--serial` is optional: a class-only stub names the next machine. Open its window if needed: `mise run fleet:intake open 2h`.
 3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9. On this port the installed Talos boots and fetches its config, then stalls with DNS i/o timeouts, because its resolvers are on the Anchor network, which the bootstrap VLAN cannot reach. The move to the rack port is the fix, and the node joins after it.
 
-   Result: the controller creates `Hardware <mac>` and an attest-only `Workflow intake-<mac>-<unix seconds>`.
+   Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
 
 4. [Watch the run](#watch-the-run), and [approve the first intake](#approve-a-first-intake) if it waits.
 
@@ -44,7 +44,7 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
    Result: the node has a RADIUS user, a DHCP reservation and a DNS record.
 
-9. Move the node to its rack port, which runs MAC auth, and power-cycle it. Without `--port`, the controller cables it from UniFi.
+9. Move the node to its rack port, which runs MAC auth. If it keeps its bootstrap address, power-cycle it.
 10. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 11. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
 12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
@@ -60,13 +60,15 @@ mise run netbox:declare <node> <serial> <mac> <switch port> <addr>
 
 It refuses a malformed name or MAC, a missing port, and an address outside `K8S_NODE_CIDR`, or held by another device or stub. The `planned` device gets the MAC, a cable and `<addr>`; run it with no arguments for the options, whose defaults are the G5 mini's. Commit the export diff it prints in a pull request.
 
-1. Connect the machine to the prep station's port.
+1. Connect the machine to the prep station's port, and power it on.
+
+   Result: it boots HookOS, which phones home and waits for work.
+
 2. In NetBox, set `desired_action` to `provision`.
 
-   Result: `last_workflow` names `provision-<node>-<unix seconds>`, and the status stays `planned`.
+   Result: `last_workflow` names `provision-<node>-<unix seconds>`, the status stays `planned`, and the machine waiting in HookOS takes the run, so nobody presses its power button. Its pass writes `attested_address`, and a run that follows within 15 minutes, such as a second `provision`, is powered on by Rufio through AMT at that address.
 
-3. Power on the machine by hand.
-4. [Watch the run](#watch-the-run), then continue from step 6 above.
+3. [Watch the run](#watch-the-run), then continue from step 6 above.
 
 ## Provision a control plane
 
@@ -119,6 +121,8 @@ With no pin, the console shows `attest: FAILED` with `pending-approval`.
 | The journal says the model is not in `FLEET_MODEL_MAP` | An unknown model has no class | Set `talos_class` and `desired_action`, or extend `homelab.fleetController.modelMap` |
 | No `Hardware <mac>` appears | The MAC is known, or the intake was refused | Read `fleet.intake` in `journalctl -u fleet-controller` on spore |
 | `desired_action` stays set | The controller is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
+| The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attest action | Give the stub `--port`, or check that the switch sends LLDP |
+| The journal says a port `is cabled to another device in NetBox` | NetBox holds another device's cable on the attested port | Correct the cables in NetBox; the controller never removes one |
 | `install: no install code` | Attest withheld the code | Read the `attest.install` audit line, then set `desired_action` again |
 | The audit line says 409 | No `talos_class`, or `class-inputs.json` lacks it | Set the class, or run `mise run render-class-inputs` |
 

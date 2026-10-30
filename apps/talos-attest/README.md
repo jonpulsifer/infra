@@ -78,7 +78,7 @@ costs nothing.
 | Route | Does |
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname and SMBIOS manufacturer, model, SKU and BIOS, its EKs (DER public key and the NV certificate) and a new AK with its creation proof. Finds the machine in NetBox, else in the inventory; a serial NetBox never saw gets its device once activation succeeds. Refuses a `failed`, `decommissioning` or `offline` device. Checks each EK certificate against `roots/`, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a 32-byte nonce and one credential challenge per EK. A `planned` device with no pin passes the pin check when every EK has a manufacturer certificate. |
-| `POST /v1/attest/{session}/evidence` | Takes each activated secret, a quote over PCRs 0 to 7 qualified by the nonce, the PCR values, the event log, the LDevID key certified by the AK with the nonce, and both keys' blobs. Checks them, replays the log, applies `policy.yaml`, and issues the LDevID and LAK certificates with the subject `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. |
+| `POST /v1/attest/{session}/evidence` | Takes each activated secret, a quote over PCRs 0 to 7 qualified by the nonce, the PCR values, the event log, the LDevID key certified by the AK with the nonce, both keys' blobs, and optionally `network` (`{address, lldp: {chassis_id, port_id, port_description, system_name}}`) with `network_signature`, the session's AK signing SHA-256 over the nonce, `network` and SHA-256 of the facts' JSON. Checks them, replays the log, applies `policy.yaml`, and issues the LDevID and LAK certificates with the subject `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Network facts without a good signature are logged and dropped; the pass stands. |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes the machine used and `signature`, the session's AK signing SHA-256 over the nonce and `confirm` (a TPMT_SIGNATURE, ECDSA). A wrong signature is 403 `refused` and leaves the session open; an unsigned confirm, from an older client, confirms and gets no install code. Evidence posted for a passed session is 404 and leaves it open, and a new start for the machine keeps a pass that waits for its confirm for five minutes. Records the confirm and answers `{status}`, with the install code wrapped to the TPM as [Install code](#install-code) says |
 | `GET /devid/{serial}` | The LDevID of the newest verdict, if it is a pass: `node`, `serial`, `ldevid_cert_pem` (leaf then DevID CA), `lak_cert_pem`, `chain_pem`, `ldevid_pub_blob_b64` (TPMT_PUBLIC), `ldevid_priv_blob_b64` (TPM2B_PRIVATE without its size), `ak_pub_blob_b64`, `ak_priv_blob_b64`, `srk`, `ek_hashes`, `rsa_ek_cert`, `attested_at`, `confirmed`. 404 otherwise. |
 | `GET /devid/{serial}/{file}` | One of `ldevid.crt`, `lak.crt`, `chain.pem`, `ldevid.pub`, `ldevid.priv`, `ak.pub`, `ak.priv`, raw |
@@ -194,6 +194,27 @@ without the value, and with no code it removes a code an earlier run left.
 
 An intake pass also writes the validated SMBIOS UUID to the device's
 `smbios_uuid`, once NetBox defines that field (`scripts/netbox-seed.sh`).
+
+## Network facts
+
+`tink-attest` runs in the host's network namespace (the Template's
+`namespaces.network: host`). While the TPM works it listens on the boot NIC
+for the switch's LLDP frame, for at most 35 seconds, and reads the NIC's
+IPv4 address; the session's AK signs both with the evidence. The address
+counts only when it is the one the evidence came from: the `X-Real-IP` that
+the anchor's nginx sets on the unix socket only it reaches, or the TCP peer
+of a request on a TCP listener, whose own `X-Real-IP` is ignored. Another
+address is dropped, the port kept, and the device's journal says why. On a
+pass whose signature holds, the service writes `attested_address`, `attested_switch`
+(the chassis ID), `attested_switch_port` (the port ID) and
+`attested_network_at` (the pass's time) to each of those fields NetBox
+defines (`scripts/netbox-seed.sh`). A fact the pass lacks clears its field,
+and a renewal writes none. fleet-controller dials a `planned` or `staged`
+machine's AMT at the address, and cables the machine to the port; the
+facts are as true as the HookOS that booted, which the quote proves, and the
+switch that sent the frame. The parser in `lldp/` is a copy of the one in
+`images/tink-agent-autoid/intake`, whose Docker context cannot reach this
+module.
 
 ## Audit
 

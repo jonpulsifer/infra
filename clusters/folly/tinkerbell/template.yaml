@@ -73,7 +73,11 @@ spec:
                 fi
           # At the end of a full intake talos-attest answers the install code, which tink-attest
           # writes to /tmp/fleet/install_code for the install action.
+          # The host's network namespace lets it read the boot NIC's address and the switch's LLDP
+          # frame, which it reports signed by the session's AK.
           - name: attest
+            namespaces:
+              network: host
             image: ghcr.io/jonpulsifer/tink-attest@sha256:3df9661f3b4d5dd5e0d7149c2ad422ff811bbd6977a5f7d4258caffad63cefc1
             timeout: 600
             volumes:

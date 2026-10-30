@@ -272,7 +272,9 @@ in
           return 200;
         '';
         # HookOS's agent (images/tink-agent-autoid) posts a machine's facts before it waits for
-        # work; fleet-controller answers on its Anchor address, which every anchor reaches.
+        # work; fleet-controller answers on its Anchor address, which every anchor reaches. The
+        # machine's address, its AMT's while it is on the bootstrap VLAN, goes in X-Real-IP, which
+        # the controller trusts from the Anchor network only.
         "= ${talosConfig.intakePath}" = {
           proxyPass = "${intakeServer}/intake";
           extraConfig = ''
@@ -281,7 +283,7 @@ in
             }
             client_max_body_size 16k;
             access_log off;
-            proxy_set_header X-Forwarded-For $remote_addr;
+            proxy_set_header X-Real-IP $remote_addr;
             proxy_connect_timeout 5s;
           '';
         };

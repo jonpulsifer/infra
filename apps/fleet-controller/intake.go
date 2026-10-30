@@ -9,20 +9,25 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Intake takes a new machine's phone-home from HookOS. The agent image posts
-// the machine's MAC, SMBIOS identity and disks before it waits for work; for
-// a MAC neither NetBox nor Tinkerbell knows, the controller creates a
-// Hardware and an attest-only Workflow, so the machine attests without
-// anybody typing its facts. The call is unauthenticated and a claim: it makes
-// only Tinkerbell objects, never a NetBox device, and talos-attest's verdict
-// is the gate. Rate limits bound it per MAC, per source address and in the
-// intakes it creates.
+// Intake takes a machine's phone-home from HookOS. The agent image posts the
+// machine's MAC, SMBIOS identity, disks and the switch port LLDP names before
+// it waits for work; for a MAC neither NetBox nor Tinkerbell knows, the
+// controller creates a Hardware and an attest-only Workflow, so the machine
+// attests without anybody typing its facts. For a MAC a Hardware of the
+// controller's holds, it records the report, the port and the address the
+// call came from, on that Hardware, for diagnostics: no Machine, cable or
+// port check follows from it. The call is unauthenticated and a claim: it
+// makes only Tinkerbell objects, never a NetBox device, and talos-attest's
+// verdict is the gate.
+// Rate limits bound it per MAC, per source address and in the intakes it
+// creates.
 type Intake struct {
 	Config  *Config
 	NetBox  *NetBox
@@ -31,9 +36,7 @@ type Intake struct {
 	Now     func() time.Time
 	// PerMAC is the least time between two calls for one MAC, PerSource the
 	// most calls from one address per Window, and Global the most intakes
-	// created per Window. The source is nginx's X-Forwarded-For, which a
-	// caller on the Anchor network can set itself, so the per-MAC and global
-	// limits are the bound.
+	// created per Window. The source is the machine's address (client).
 	PerMAC    time.Duration
 	PerSource int
 	Global    int
@@ -74,6 +77,7 @@ type IntakeRequest struct {
 	SKU    string       `json:"sku"`
 	BIOS   string       `json:"bios"`
 	Disks  []IntakeDisk `json:"disks"`
+	LLDP   *LLDP        `json:"lldp"`
 }
 
 var (
@@ -117,6 +121,18 @@ func (q *IntakeRequest) validate() string {
 	for _, d := range q.Disks {
 		if !blockNamePattern.MatchString(d.Name) || d.Size < 0 || !printable(d.Tran, 16) {
 			return "a disk is not a kernel block device name, a size in bytes and a transport"
+		}
+	}
+	// The switch's words are no reason to refuse the machine: an unusable
+	// LLDP report is dropped, and the intake goes without a port.
+	if l := q.LLDP; l != nil {
+		l.ChassisID, l.PortID = strings.TrimSpace(l.ChassisID), strings.TrimSpace(l.PortID)
+		l.PortDescription, l.SystemName = strings.TrimSpace(l.PortDescription), strings.TrimSpace(l.SystemName)
+		if mac, err := net.ParseMAC(l.ChassisID); err == nil {
+			l.ChassisID = mac.String()
+		}
+		if !l.valid() {
+			q.LLDP = nil
 		}
 	}
 	return ""
@@ -225,18 +241,30 @@ func (in *Intake) create() (bool, func()) {
 	}
 }
 
-// source is the caller's address: the first X-Forwarded-For entry nginx
-// set, else the connection's.
-func source(r *http.Request) string {
-	if f := r.Header.Get("X-Forwarded-For"); f != "" {
-		first, _, _ := strings.Cut(f, ",")
-		return strings.TrimSpace(first)
-	}
+// client is the caller's address, and whether it is the machine's. A peer
+// among the proxies, the anchors' Anchor addresses, is an anchor's nginx,
+// which sets X-Real-IP from its own peer: that header is the machine's
+// address. A peer anywhere else is the machine itself, and its X-Real-IP is
+// ignored, since any caller can send one. A proxy's call without the header
+// is the proxy's.
+func (in *Intake) client(r *http.Request) (string, bool) {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		return r.RemoteAddr
+		host = r.RemoteAddr
 	}
-	return host
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return host, false
+	}
+	peer = peer.Unmap()
+	if !in.Config.Proxies[peer.String()] {
+		return peer.String(), true
+	}
+	real, err := netip.ParseAddr(strings.TrimSpace(r.Header.Get("X-Real-IP")))
+	if err != nil {
+		return peer.String(), false
+	}
+	return real.Unmap().String(), true
 }
 
 func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -257,14 +285,19 @@ func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		intakeReply(w, http.StatusBadRequest, map[string]string{"reason": why})
 		return
 	}
-	ok, release := in.admit(req.MAC, source(r))
+	addr, machine := in.client(r)
+	ok, release := in.admit(req.MAC, addr)
 	if !ok {
 		in.Metrics.IntakeLimited.Add(1)
 		intakeReply(w, http.StatusTooManyRequests, map[string]string{"reason": "too many intakes; try again later"})
 		return
 	}
 	d := Device{Name: MACSlug(req.MAC), Serial: req.Serial, MAC: req.MAC}
-	state, workflow, err := in.intake(r.Context(), req)
+	rep := Report{At: in.Now(), Serial: req.Serial, LLDP: req.LLDP}
+	if machine {
+		rep.Address = addr
+	}
+	state, workflow, err := in.intake(r.Context(), req, rep)
 	if errors.Is(err, errIntakesFull) {
 		release()
 		in.Metrics.IntakeLimited.Add(1)
@@ -279,34 +312,57 @@ func (in *Intake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if workflow == "" {
+		// A known MAC made nothing, so its slot goes back: a stranger's
+		// post for the MAC never locks the machine's own out.
+		release()
 		in.Metrics.IntakeKnown.Add(1)
-		Audit("fleet.intake", in.Config.Site, d, "", "known: "+state)
+		Audit("fleet.intake", in.Config.Site, d, "", "known: "+state+"; "+rep.String())
 		intakeReply(w, http.StatusOK, map[string]string{"state": "known"})
 		return
 	}
 	in.Metrics.IntakeCreated.Add(1)
-	Audit("fleet.intake", in.Config.Site, d, workflow, fmt.Sprintf("intake: %s %s, uuid %s", req.Model, req.Serial, req.UUID))
+	Audit("fleet.intake", in.Config.Site, d, workflow, fmt.Sprintf("intake: %s %s, uuid %s; %s", req.Model, req.Serial, req.UUID, rep.String()))
 	intakeReply(w, http.StatusCreated, map[string]string{"state": "intake", "workflow": workflow})
 }
 
-// intake answers why a MAC is known, or makes its Hardware and Workflow and
+// intake answers why a MAC is known and records the report on each Hardware
+// that holds it, or makes its Hardware, with the report, and Workflow and
 // names the Workflow.
-func (in *Intake) intake(ctx context.Context, req IntakeRequest) (string, string, error) {
+func (in *Intake) intake(ctx context.Context, req IntakeRequest, rep Report) (string, string, error) {
 	known, err := in.NetBox.HasMAC(ctx, req.MAC)
 	if err != nil {
 		return "", "", fmt.Errorf("NetBox: %w", err)
-	}
-	if known {
-		return "a NetBox device has the MAC", "", nil
 	}
 	hardware, err := in.Kube.List(ctx, HardwareResource, "")
 	if err != nil {
 		return "", "", fmt.Errorf("list Hardware: %w", err)
 	}
+	var holders, managed []string
 	for _, h := range hardware {
-		if hardwareMAC(h) == req.MAC {
-			return "Hardware " + h.Name() + " has the MAC", "", nil
+		if hardwareMAC(h) != req.MAC {
+			continue
 		}
+		holders = append(holders, h.Name())
+		if h.Labels()[ManagedLabel] == FieldManager {
+			managed = append(managed, h.Name())
+		}
+	}
+	if known || len(holders) > 0 {
+		state := "a NetBox device has the MAC"
+		if !known {
+			state = "Hardware " + holders[0] + " has the MAC"
+		}
+		// The report is a claim, kept for diagnostics, and only on the
+		// controller's own Hardware.
+		for _, name := range managed {
+			if err := in.Kube.Annotate(ctx, HardwareResource, name, rep.annotations()); err != nil && !errors.Is(err, ErrNotFound) {
+				return "", "", fmt.Errorf("record the report on Hardware %s: %w", name, err)
+			}
+		}
+		if len(managed) > 0 {
+			state += "; recorded on Hardware " + strings.Join(managed, ", ")
+		}
+		return state, "", nil
 	}
 	model := in.Config.Models[req.Model]
 	disk := installDisk(req.Disks, model)
@@ -317,7 +373,7 @@ func (in *Intake) intake(ctx context.Context, req IntakeRequest) (string, string
 	if !ok {
 		return "", "", errIntakesFull
 	}
-	hw := in.Config.IntakeHardware(req, disk)
+	hw := in.Config.IntakeHardware(req, disk, rep)
 	if err := in.Kube.Apply(ctx, HardwareResource, hw); err != nil {
 		release()
 		return "", "", fmt.Errorf("apply Hardware: %w", err)
@@ -357,21 +413,26 @@ func (o Object) annotation(key string) string {
 }
 
 // IntakeHardware is the Hardware of a machine that phoned home: named for
-// its MAC, labelled as an intake, with the claim's serial, UUID and model as
-// annotations, and the same HookOS chain as a device's. Its netboot flags are
-// on for as long as it exists: the intake run needs them, and after it the
-// machine netboots back into HookOS to take its provision. The binding
-// deletes it.
-func (c Config) IntakeHardware(req IntakeRequest, disk string) Object {
+// its MAC, labelled as an intake, with the claim's serial, UUID and model and
+// the intake's report as annotations, and the same HookOS chain as a
+// device's. Its netboot flags are on for as long as it exists: the intake run
+// needs them, and after it the machine netboots back into HookOS to take its
+// provision. The binding deletes it.
+func (c Config) IntakeHardware(req IntakeRequest, disk string, rep Report) Object {
 	name := MACSlug(req.MAC)
 	hw := c.Hardware(Device{Name: name, MAC: req.MAC, Disk: disk, BMCType: "none"}, true)
 	meta := hw.metadata()
 	meta["labels"].(map[string]any)[IntakeLabel] = "true"
-	meta["annotations"] = map[string]any{
-		SerialAnnotation: req.Serial,
-		UUIDAnnotation:   req.UUID,
-		ModelAnnotation:  req.Model,
+	annotations := map[string]any{}
+	for k, v := range rep.annotations() {
+		if v != nil {
+			annotations[k] = v
+		}
 	}
+	annotations[SerialAnnotation] = req.Serial
+	annotations[UUIDAnnotation] = req.UUID
+	annotations[ModelAnnotation] = req.Model
+	meta["annotations"] = annotations
 	return hw
 }
 

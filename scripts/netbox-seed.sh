@@ -114,6 +114,10 @@ seed_custom_fields() {
     {"name": "attest_verdict", "label": "Attest verdict", "type": "text", "group_name": "Identity", "weight": 270, "description": "attested, quarantined: <reason>, or pending-approval"},
     {"name": "attest_consumed_at", "label": "Attest consumed at", "type": "datetime", "group_name": "Identity", "weight": 280, "description": "When the node fetched the install config fleet-controller rendered for its last attestation"},
     {"name": "pcr0_by_bios", "label": "PCR 0 by BIOS version", "type": "json", "group_name": "Identity", "weight": 290, "description": "The SHA-256 PCR 0 the running node quoted under each BIOS version it reported, recorded by talos-attest; edit an entry to explain a change"},
+    {"name": "attested_address", "label": "Attested address", "type": "text", "group_name": "Identity", "weight": 291, "description": "The boot NIC IPv4 address the node reported at its last intake pass, signed by its AK; fleet-controller dials its AMT there while it is on the bootstrap network"},
+    {"name": "attested_switch", "label": "Attested switch", "type": "text", "group_name": "Identity", "weight": 292, "description": "The LLDP chassis ID of the switch the node reported at its last intake pass, signed by its AK"},
+    {"name": "attested_switch_port", "label": "Attested switch port", "type": "text", "group_name": "Identity", "weight": 293, "description": "The LLDP port ID the node reported at its last intake pass, signed by its AK; fleet-controller cables the node to it"},
+    {"name": "attested_network_at", "label": "Attested network at", "type": "datetime", "group_name": "Identity", "weight": 294, "description": "When talos-attest recorded the attested address and switch port"},
     {"name": "expected_port", "label": "Expected port", "type": "integer", "group_name": "Fleet", "weight": 340, "validation_minimum": 1, "description": "The switch port a stub expects its machine on; fleet-controller binds a machine off the intake port only on this port"}
   ]')
   while read -r field; do

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/talos-attest/protocol"
 )
 
 // Record is one machine's attestation state, machines/<name>/record.json.
@@ -72,6 +74,9 @@ type Record struct {
 	// quote showed for PCR 0. Neither is kept on disk.
 	check bool
 	pcr0  *pcr0Seen
+	// Network is where the machine was plugged in at an intake pass, as
+	// its AK signed it: its address and its switch port.
+	Network *protocol.Network `json:"network,omitempty"`
 }
 
 // Statuses a record can hold.

@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strconv"
 	"strings"
 	"sync"
@@ -356,13 +357,48 @@ func (f *fakeKube) handler() http.Handler {
 		body, _ := io.ReadAll(r.Body)
 		switch r.Method {
 		case http.MethodPatch:
-			if ct := r.Header.Get("Content-Type"); ct != "application/apply-patch+yaml" {
+			var o Object
+			json.Unmarshal(body, &o)
+			old, exists := f.objects[r.URL.Path]
+			switch ct := r.Header.Get("Content-Type"); ct {
+			case "application/apply-patch+yaml":
+				// Annotations another field manager wrote outlive an apply
+				// that does not set them.
+				if exists {
+					kept, _ := old.metadata()["annotations"].(map[string]any)
+					applied, _ := o.metadata()["annotations"].(map[string]any)
+					for k, v := range kept {
+						if _, set := applied[k]; !set {
+							if applied == nil {
+								applied = map[string]any{}
+								o.metadata()["annotations"] = applied
+							}
+							applied[k] = v
+						}
+					}
+				}
+				f.objects[r.URL.Path] = o
+			case "application/merge-patch+json":
+				if !exists {
+					http.NotFound(w, r)
+					return
+				}
+				a, _ := old.metadata()["annotations"].(map[string]any)
+				if a == nil {
+					a = map[string]any{}
+					old.metadata()["annotations"] = a
+				}
+				for k, v := range o.metadata()["annotations"].(map[string]any) {
+					if v == nil {
+						delete(a, k)
+					} else {
+						a[k] = v
+					}
+				}
+			default:
 				http.Error(w, "content type "+ct, http.StatusUnsupportedMediaType)
 				return
 			}
-			var o Object
-			json.Unmarshal(body, &o)
-			f.objects[r.URL.Path] = o
 			w.Write([]byte("{}"))
 		case http.MethodPost:
 			var o Object
@@ -497,6 +533,7 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 		RedfishPort: 443, AMTPort: 16992,
 		Models: DefaultModels, IntakeTTL: 24 * time.Hour, IntakePort: 24,
 		NodePrefix: "10.3.0.0/26", NodeReserved: map[string]bool{"10.3.0.1": true},
+		BootstrapPrefix: netip.MustParsePrefix("10.9.0.0/24"), BootstrapReserved: map[string]bool{"10.9.0.11": true, "10.9.0.14": true},
 	}
 	now := testNow
 	r := &Reconciler{
@@ -671,6 +708,216 @@ func TestPlannedDeviceWithOOBIPGetsAMachineButStillBootsByHand(t *testing.T) {
 	boot := kube.get(wfBase + kube.workflows()[0])["spec"].(map[string]any)["bootOptions"].(map[string]any)
 	if _, has := boot["bootMode"]; has {
 		t.Errorf("a planned device got Rufio's boot: %v", boot)
+	}
+}
+
+// reportedHardware is a device's Hardware as a HookOS boot leaves it: the
+// intake's report from addr, at, for the serial.
+func reportedHardware(name, addr, serial string, at time.Time) Object {
+	a := map[string]any{}
+	for k, v := range (Report{At: at, Address: addr, Serial: serial}).annotations() {
+		if v != nil {
+			a[k] = v
+		}
+	}
+	return Object{"metadata": map[string]any{
+		"name": name, "annotations": a,
+		"labels": map[string]any{ManagedLabel: FieldManager, NodeLabel: name},
+	}}
+}
+
+// attested is the network fields talos-attest writes on a pass at the time.
+func attested(addr string, at time.Time) map[string]any {
+	return map[string]any{
+		"attested_address": addr, "attested_switch": "F4:E2:C6:00:00:01", "attested_switch_port": "Port 24",
+		"attested_network_at": at.UTC().Format(time.RFC3339),
+	}
+}
+
+func machineHost(m Object) any {
+	return m["spec"].(map[string]any)["connection"].(map[string]any)["host"]
+}
+
+func TestPlannedAMTDeviceIsPoweredAtItsAttestedAddress(t *testing.T) {
+	swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
+	swellHardware := strings.Replace(hwPath, "riptide", "swell", 1)
+	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", attested("10.9.0.150", testNow.Add(-5*time.Minute)))}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m := kube.get(swellMachine)
+	if m == nil || machineHost(m) != "10.9.0.150" {
+		t.Fatalf("Machine %v", m)
+	}
+	if _, has := kube.get(swellHardware)["spec"].(map[string]any)["bmcRef"]; !has {
+		t.Error("the Hardware names no Machine")
+	}
+	wf := kube.get(wfBase + kube.workflows()[0])
+	if boot := wf["spec"].(map[string]any)["bootOptions"].(map[string]any); boot["bootMode"] != "netboot" {
+		t.Errorf("bootOptions %v", boot)
+	}
+	if wf.annotation(BMCAddressAnnotation) != "10.9.0.150" {
+		t.Errorf("the run pins %q", wf.annotation(BMCAddressAnnotation))
+	}
+	if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), "Rufio powers it on through AMT at 10.9.0.150") {
+		t.Errorf("journals %v", nb.journals)
+	}
+}
+
+// Only a fresh bootstrap address that the machine's AK signed puts its
+// Machine there. An intake's claim, as a stranger who knows the MAC and the
+// serial posts it from another address, never does.
+func TestBootstrapMachineIgnoresWhatItCannotTrust(t *testing.T) {
+	for name, c := range map[string]struct {
+		cf    map[string]any
+		claim bool
+		oob   string
+	}{
+		"an intake's claim only": {claim: true},
+		"stale":                  {cf: attested("10.9.0.150", testNow.Add(-20*time.Minute))},
+		"from the future":        {cf: attested("10.9.0.150", testNow.Add(time.Hour))},
+		"outside the prefix":     {cf: attested("10.3.0.99", testNow.Add(-time.Minute))},
+		"an anchor's address":    {cf: attested("10.9.0.14", testNow.Add(-time.Minute))},
+		"redfish":                {cf: mergeFields(attested("10.9.0.150", testNow.Add(-time.Minute)), map[string]any{"bmc_type": "redfish"})},
+		"oob_ip wins":            {cf: attested("10.9.0.150", testNow.Add(-time.Minute)), oob: "10.4.0.6"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := device("swell", "planned", "provision", c.cf)
+			if c.oob != "" {
+				d["oob_ip"] = map[string]any{"address": c.oob + "/24"}
+			}
+			nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+			kube := &fakeKube{}
+			if c.claim {
+				kube.objects = map[string]Object{strings.Replace(hwPath, "riptide", "swell", 1): reportedHardware("swell", "10.9.0.66", "MXL0172Q6L", testNow.Add(-time.Minute))}
+			}
+			r, done := newTest(t, nb, kube)
+			defer done()
+			if err := r.Reconcile(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			m := kube.get(strings.Replace(mPath, "riptide", "swell", 1))
+			switch {
+			case c.oob != "" && (m == nil || machineHost(m) != c.oob):
+				t.Errorf("Machine %v, want one at oob_ip", m)
+			case c.oob == "" && m != nil:
+				t.Errorf("Machine %v", m)
+			}
+			wf := kube.get(wfBase + kube.workflows()[0])
+			if _, has := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)["bootMode"]; has || wf.annotation(BMCAddressAnnotation) != "" {
+				t.Errorf("the run is Rufio's: %v", wf)
+			}
+		})
+	}
+}
+
+func mergeFields(a, b map[string]any) map[string]any {
+	for k, v := range b {
+		a[k] = v
+	}
+	return a
+}
+
+// A staged device may still sit on the bootstrap network after its install;
+// an active one is on its Kubernetes address.
+func TestStagedDeviceUsesItsAttestedBootstrapAddress(t *testing.T) {
+	for status, want := range map[string]string{"staged": "10.9.0.150", "active": "10.3.0.12"} {
+		cf := mergeFields(attested("10.9.0.150", testNow.Add(-time.Minute)), map[string]any{"last_workflow": "provision-swell-1"})
+		nb := &fakeNetBox{devices: []map[string]any{device("swell", status, "attest", cf)}, ifaces: riptideIfaces()}
+		kube := &fakeKube{}
+		r, done := newTest(t, nb, kube)
+		if err := r.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if m := kube.get(strings.Replace(mPath, "riptide", "swell", 1)); m == nil || machineHost(m) != want {
+			t.Errorf("%s: Machine %v, want %s", status, m, want)
+		}
+		boot := kube.get(wfBase + kube.workflows()[0])["spec"].(map[string]any)["bootOptions"].(map[string]any)
+		if boot["bootMode"] != "netboot" {
+			t.Errorf("%s: bootOptions %v", status, boot)
+		}
+		done()
+	}
+}
+
+// The attested address ages out while the run is going: its Machine stays at
+// the address the Workflow pinned until the run finishes.
+func TestBootstrapMachineIsPinnedForTheRun(t *testing.T) {
+	swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
+	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", attested("10.9.0.150", testNow.Add(-5*time.Minute)))}, ifaces: riptideIfaces()}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	clock := testNow
+	r.Now = func() time.Time { return clock }
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	name := kube.workflows()[0]
+	clock = clock.Add(time.Hour)
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if m := kube.get(swellMachine); m == nil || machineHost(m) != "10.9.0.150" {
+		t.Fatalf("mid-run Machine %v", m)
+	}
+	if names := kube.workflows(); len(names) != 1 || names[0] != name {
+		t.Fatalf("workflows %v", names)
+	}
+	kube.setState(name, "STATE_SUCCESS")
+	nb.set("desired_action", "none")
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if m := kube.get(swellMachine); m != nil {
+		t.Errorf("the Machine outlived its run and its address: %v", m)
+	}
+}
+
+// The pin follows the lease: a pass during the run from another bootstrap
+// address moves the Machine there, and one from the device's own Kubernetes
+// address, once its RADIUS user has moved it, ends the pin.
+func TestBootstrapPinTracksTheLease(t *testing.T) {
+	for status, after := range map[string]any{"staged": "10.3.0.12", "planned": nil} {
+		t.Run(status, func(t *testing.T) {
+			swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
+			cf := mergeFields(attested("10.9.0.150", testNow.Add(-5*time.Minute)), map[string]any{"last_workflow": "provision-swell-1"})
+			nb := &fakeNetBox{devices: []map[string]any{device("swell", status, "provision", cf)}, ifaces: riptideIfaces()}
+			kube := &fakeKube{}
+			r, done := newTest(t, nb, kube)
+			defer done()
+			clock := testNow
+			r.Now = func() time.Time { return clock }
+			pass := func(addr string, at time.Time) {
+				t.Helper()
+				nb.set("attested_address", addr)
+				nb.set("attested_network_at", at.UTC().Format(time.RFC3339))
+				if err := r.Reconcile(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.Reconcile(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			name := kube.workflows()[0]
+			kube.objects[wfBase+name].metadata()["creationTimestamp"] = testNow.UTC().Format(time.RFC3339)
+			clock = testNow.Add(2 * time.Minute)
+			pass("10.9.0.151", testNow.Add(time.Minute))
+			if m := kube.get(swellMachine); m == nil || machineHost(m) != "10.9.0.151" {
+				t.Fatalf("after a new lease: Machine %v", m)
+			}
+			pass("10.3.0.12", testNow.Add(90*time.Second))
+			m := kube.get(swellMachine)
+			switch {
+			case after == nil && m != nil:
+				t.Errorf("a planned device kept a Machine at %v", machineHost(m))
+			case after != nil && (m == nil || machineHost(m) != after):
+				t.Errorf("on its Kubernetes address: Machine %v, want %v", m, after)
+			}
+		})
 	}
 }
 

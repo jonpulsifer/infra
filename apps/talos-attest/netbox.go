@@ -106,6 +106,11 @@ type netboxDevice struct {
 		SMBIOSUUID json.RawMessage `json:"smbios_uuid"`
 		// PCR0ByBIOS is nil when NetBox defines no pcr0_by_bios field.
 		PCR0ByBIOS json.RawMessage `json:"pcr0_by_bios"`
+		// The attested network fields, nil when NetBox does not define one.
+		AttestedAddress    json.RawMessage `json:"attested_address"`
+		AttestedSwitch     json.RawMessage `json:"attested_switch"`
+		AttestedSwitchPort json.RawMessage `json:"attested_switch_port"`
+		AttestedNetworkAt  json.RawMessage `json:"attested_network_at"`
 	} `json:"custom_fields"`
 }
 
@@ -615,6 +620,9 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 				fields["smbios_uuid"] = u
 			}
 		}
+		if !r.Renewed {
+			networkFields(d, r, fields)
+		}
 		if d.Status.Value == statusPlanned {
 			patch["status"] = statusStaged
 		}
@@ -688,6 +696,38 @@ func pcr0Fields(d netboxDevice, r Record, fields map[string]any) [][2]string {
 		notes = append(notes, [2]string{"warning", fmt.Sprintf("talos-attest: PCR 0 at BIOS %s is %s, not the %s on record, and no BIOS update explains it. Not quarantined: once the change is explained, set this BIOS version's entry in pcr0_by_bios to the new value", bios, p.PCR0, plain(cur))})
 	}
 	return notes
+}
+
+// networkFields writes where an intake pass found the machine plugged in, as
+// its AK signed it, into each network field NetBox defines. A pass without
+// a fact clears its field, so no older address or port outlives a newer
+// pass. fleet-controller dials a planned or staged machine's AMT at the
+// address and cables it to the port.
+func networkFields(d netboxDevice, r Record, fields map[string]any) {
+	var addr, chassis, port, at any
+	if n := r.Network; n != nil {
+		if n.Address != "" {
+			addr = n.Address
+		}
+		if n.LLDP != nil {
+			chassis, port = n.LLDP.ChassisID, n.LLDP.PortID
+		}
+		at = r.AttestedAt.UTC().Format(time.RFC3339)
+	}
+	for _, f := range []struct {
+		name    string
+		defined json.RawMessage
+		value   any
+	}{
+		{"attested_address", d.CustomFields.AttestedAddress, addr},
+		{"attested_switch", d.CustomFields.AttestedSwitch, chassis},
+		{"attested_switch_port", d.CustomFields.AttestedSwitchPort, port},
+		{"attested_network_at", d.CustomFields.AttestedNetworkAt, at},
+	} {
+		if f.defined != nil {
+			fields[f.name] = f.value
+		}
+	}
 }
 
 // journalLater posts a journal entry on its own: the journal is history,
