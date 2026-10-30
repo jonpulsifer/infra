@@ -58,7 +58,7 @@ No resources.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Installer image each folly node runs. |
-| <a name="output_class_inputs"></a> [class\_inputs](#output\_class\_inputs) | Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. The enrollment server renders a node's config from its class's entry and NetBox's facts about the node. |
+| <a name="output_class_inputs"></a> [class\_inputs](#output\_class\_inputs) | Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. fleet-controller renders a node's config from its class's entry and NetBox's facts about the node. |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Node name to address, as applied. |
 | <a name="output_schematic_id"></a> [schematic\_id](#output\_schematic\_id) | Image Factory schematic of folly's nodes without a signed installer. The kexec and PXE assets must use the same ID. |
 <!-- END_TF_DOCS -->

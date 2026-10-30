@@ -40,7 +40,7 @@ locals {
   machines       = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version = "v1.14.4"
+  talos_version = "v1.14.5"
 
   # Signed with the lab's Secure Boot keys, with the extensions below. The
   # image build publishes one per Talos version, tagged with the version.
@@ -50,7 +50,9 @@ locals {
   # the inventory export's class key. ephemeral caps EPHEMERAL so that the
   # data user volume takes the rest of the one disk. Every class boots the
   # signed UKI; the generation changes when a class is reinstalled from new
-  # media. The enrollment server renders a node of a class from the
+  # media, or when every node's recorded install must be re-created without
+  # rebooting a node already on the version: Create upgrades only a node
+  # whose running version differs. fleet-controller renders a node of a class from the
   # class_inputs output below.
   classes = {
     controlplane = {
@@ -66,7 +68,7 @@ locals {
       ephemeral = "128GiB"
     }
   }
-  install_generation = "secureboot-1"
+  install_generation = "secureboot-2"
 
   # The nodes are the export's active, staged and failed machines: a failed
   # one is quarantined, not gone, and stays managed. A staged worker is
@@ -90,10 +92,10 @@ locals {
   plain_nodes     = ["optiplex"]
   encrypted_nodes = [for name in local.tpm_nodes : name if !contains(local.plain_nodes, name)]
 
-  # What the enrollment server renders a fresh install from, per class: the
-  # module's patch lists in order, the node document rendered by the server
-  # between them, then the class's own. mise run render-class-inputs writes
-  # it to clusters/folly/apps/talos-enroll/class-inputs.json.
+  # What fleet-controller renders a fresh install from, per class: the
+  # module's patch lists in order, the node document rendered by the
+  # controller between them, then the class's own. mise run
+  # render-class-inputs writes it to clusters/folly/fleet/class-inputs.json.
   class_inputs = { for class, c in local.classes : class => {
     machine_type       = c.role
     cluster_name       = module.talos.render_inputs.cluster_name
@@ -162,7 +164,7 @@ output "installer_image" {
 }
 
 output "class_inputs" {
-  description = "Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. The enrollment server renders a node's config from its class's entry and NetBox's facts about the node."
+  description = "Per class, the inputs of talosctl gen config other than the node's own documents and the secrets. fleet-controller renders a node's config from its class's entry and NetBox's facts about the node."
   value       = local.class_inputs
 }
 

@@ -52,19 +52,19 @@ locals {
       role       = "controlplane"
       install    = "disk.dev_path == \"/dev/sda\""
       ephemeral  = "100GiB"
-      generation = "v1.14.4-1"
+      generation = "v1.14.5-1"
     }
     oldschool = {
       role       = "worker"
       install    = "disk.dev_path == \"/dev/sda\""
       ephemeral  = "100GiB"
-      generation = "v1.14.4-1"
+      generation = "v1.14.5-1"
     }
     hotrod = {
       role       = "worker"
       install    = "disk.dev_path == \"/dev/nvme0n1\""
       ephemeral  = "64GiB"
-      generation = "v1.14.4-1"
+      generation = "v1.14.5-1"
       labels     = { "lolwtf.ca/sandbox" = "true" }
       taints     = { "lolwtf.ca/sandbox" = "true:NoSchedule" }
     }
@@ -86,7 +86,7 @@ module "talos" {
   site = "offsite"
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version  = "v1.14.4"
+  talos_version  = "v1.14.5"
   talos_contract = "v1.14"
   # renovate: datasource=docker depName=ghcr.io/siderolabs/kubelet
   kubernetes_version = "v1.36.3"
