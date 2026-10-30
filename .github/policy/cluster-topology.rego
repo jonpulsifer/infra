@@ -278,6 +278,51 @@ deny contains msg if {
 	msg := sprintf("%s: CILIUM_NATIVE_ROUTING_CIDR must contain %s", [doc_path(i), key])
 }
 
+# folly's nodes carry static addresses, so the Kubernetes network's DHCP pool
+# is K8S_DHCP_CIDR, a part of the node prefix that no static address and
+# neither the gateway nor the API server takes.
+has_dhcp_cidr(i) if is_string(doc_data(i).K8S_DHCP_CIDR)
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	doc_data(i).CLUSTER_NAME == folly_cluster
+	not fact_ok(doc_data(i), "K8S_DHCP_CIDR")
+	msg := sprintf("%s: K8S_DHCP_CIDR is required on folly", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	has_dhcp_cidr(i)
+	facts := doc_data(i)
+	not is_canonical_cidr(facts.K8S_DHCP_CIDR)
+	msg := sprintf("%s: K8S_DHCP_CIDR must be a canonical IPv4 CIDR", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	has_dhcp_cidr(i)
+	facts := doc_data(i)
+	is_canonical_cidr(facts.K8S_DHCP_CIDR)
+	is_canonical_cidr(facts.K8S_NODE_CIDR)
+	not net.cidr_contains(facts.K8S_NODE_CIDR, facts.K8S_DHCP_CIDR)
+	msg := sprintf("%s: K8S_DHCP_CIDR must be inside K8S_NODE_CIDR", [doc_path(i)])
+}
+
+deny contains msg if {
+	some i, _ in docs
+	all_facts_present(i)
+	has_dhcp_cidr(i)
+	facts := doc_data(i)
+	is_canonical_cidr(facts.K8S_DHCP_CIDR)
+	some key in {"API_SERVER_IP", "ROUTER_IP"}
+	ipv4_to_int(facts[key])
+	net.cidr_contains(facts.K8S_DHCP_CIDR, facts[key])
+	msg := sprintf("%s: K8S_DHCP_CIDR must not contain %s", [doc_path(i), key])
+}
+
 has_node_addresses(i) if is_string(doc_data(i).NODE_ADDRESSES)
 
 deny contains msg if {
