@@ -189,3 +189,34 @@ spec:
           annotations:
             message: "{{ $labels.machine }}'s LDevID expires within 23 days"
             description: "tpm-reattest has not renewed {{ $labels.machine }}'s LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
+        # tpm-reattest sends a LAK-signed quote every day, the daily check or a renewal, and the
+        # newest pass across the anchors counts. A missing TPM, a transport error and a timeout never
+        # quarantine; they land here. Only machines that are Kubernetes nodes count, so a retired
+        # machine's record stays quiet.
+        - alert: TalosAttestNotChecked
+          expr: (time() - max by (machine) (talos_attest_last_checked_timestamp_seconds) > 26 * 3600) and on (machine) label_replace(kube_node_info, "machine", "$1", "node", "(.*)")
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }} has not passed a TPM quote check in 26 hours"
+            description: "No anchor has recorded a passing daily check of {{ $labels.machine }}. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+        # A check the node failed after its TPM's proof quarantines it, and TalosAttestQuarantined fires
+        # too; one refused before the proof (a forged, replayed or foreign quote) records nothing. Each
+        # fires for an hour after the newest such check on any anchor.
+        - alert: TalosAttestCheckFailed
+          expr: time() - max by (machine, verdict) (talos_attest_check_last_timestamp_seconds{verdict!="pass"}) < 3600
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s daily check ended in {{ $labels.verdict }}"
+            description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy, and NetBox has the device failed. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
+        # The newest passing quote, on whichever anchor took it, decides. A PCR 0 change the BIOS version
+        # does not explain alerts and never quarantines; the owner explains it in NetBox.
+        - alert: TalosAttestPCR0Changed
+          expr: (talos_attest_pcr0_changed == 1) and on (instance, machine) (talos_attest_last_checked_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_last_checked_timestamp_seconds))
+          labels:
+            severity: warning
+          annotations:
+            message: "{{ $labels.machine }}'s PCR 0 changed at the same BIOS version"
+            description: "{{ $labels.machine }}'s firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."

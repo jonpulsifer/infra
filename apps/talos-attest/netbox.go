@@ -104,7 +104,40 @@ type netboxDevice struct {
 		BIOSVersion  string   `json:"bios_version"`
 		// SMBIOSUUID is nil when NetBox defines no smbios_uuid field.
 		SMBIOSUUID json.RawMessage `json:"smbios_uuid"`
+		// PCR0ByBIOS is nil when NetBox defines no pcr0_by_bios field.
+		PCR0ByBIOS json.RawMessage `json:"pcr0_by_bios"`
 	} `json:"custom_fields"`
+}
+
+// pcr0Map reads pcr0_by_bios, a JSON object of BIOS version to PCR 0 hex.
+// null, or anything that is not such an object, reads as empty; an entry
+// whose value is not a string is dropped.
+func (d netboxDevice) pcr0Map() map[string]string {
+	var raw map[string]any
+	_ = json.Unmarshal(d.CustomFields.PCR0ByBIOS, &raw)
+	out := map[string]string{}
+	for bios, v := range raw {
+		if s, ok := v.(string); ok && s != "" {
+			out[bios] = strings.ToLower(s)
+		}
+	}
+	return out
+}
+
+// PCR0ByBIOS is the PCR 0 the device records for each BIOS version, and
+// whether NetBox defines the field at all.
+func (n *NetBox) PCR0ByBIOS(ctx context.Context, serial string) (map[string]string, bool, error) {
+	d, ok, err := n.device(ctx, serial)
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, fmt.Errorf("NetBox has no device with serial %s", serial)
+	}
+	if d.CustomFields.PCR0ByBIOS == nil {
+		return nil, false, nil
+	}
+	return d.pcr0Map(), true, nil
 }
 
 // nbSelect is a selection custom field, which NetBox serializes as the
@@ -514,8 +547,9 @@ func plain(s string) string {
 // Record implements Recorder: the verdict and the issued serials go to the
 // device's custom fields before the machine gets its answer. Only a pass
 // whose session proved the EKs writes the pins, and only a pass refreshes
-// sku and bios_version. A quarantine fails the device; a verdict on a
-// planned device stages it. The journal entry follows on its own.
+// sku and bios_version. A daily check's pass writes only the verdict, its
+// time and what the quote showed for PCR 0. A quarantine fails the device; a
+// pass on a planned device stages it. The journal entry follows on its own.
 func (n *NetBox) Record(ctx context.Context, r Record) error {
 	d, ok, err := n.device(ctx, r.Serial)
 	if err != nil {
@@ -527,8 +561,18 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 	fields := map[string]any{}
 	patch := map[string]any{}
 	var kind, comment string
-	switch r.Status {
-	case StatusAttested:
+	switch {
+	case r.Status == StatusAttested && r.check:
+		// A daily check issues nothing: the verdict and its time are all it
+		// writes, besides what the quote showed for PCR 0. A routine pass
+		// leaves no journal entry. A device quarantined since the check
+		// started stays as it is.
+		if d.Status.Value == statusFailed || strings.HasPrefix(d.CustomFields.Verdict, StatusQuarantined) {
+			return fmt.Errorf("%s was quarantined during the check; the pass is not recorded", d.Name)
+		}
+		fields["attest_verdict"] = StatusAttested
+		fields["last_attested"] = r.AttestedAt.UTC().Format(time.RFC3339)
+	case r.Status == StatusAttested:
 		fields["attest_verdict"] = StatusAttested
 		fields["ldevid_serial"] = r.LDevIDSerial
 		fields["ldevid_not_after"] = r.LDevIDNotAfter.UTC().Format(time.DateOnly)
@@ -573,19 +617,72 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 		if r.Renewed {
 			comment = fmt.Sprintf("talos-attest: renewed; LDevID %s, LAK %s", r.LDevIDSerial, r.LAKSerial)
 		}
-	case StatusQuarantined:
+	case r.Status == StatusQuarantined:
 		fields["attest_verdict"] = fmt.Sprintf("%s: %s", StatusQuarantined, r.Reason)
 		patch["status"] = statusFailed
 		kind, comment = "danger", fmt.Sprintf("talos-attest: quarantined (%s): %s", r.Reason, plain(strings.Join(r.Detail, "; ")))
 	default:
 		return fmt.Errorf("a record with status %q is not a verdict", r.Status)
 	}
+	var notes [][2]string
+	if r.Status == StatusAttested {
+		notes = pcr0Fields(d, r, fields)
+	}
 	patch["custom_fields"] = fields
 	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/devices/%d/", d.ID), patch, nil); err != nil {
 		return err
 	}
-	n.journalLater(ctx, d.ID, kind, comment, r.Serial)
+	if kind != "" {
+		n.journalLater(ctx, d.ID, kind, comment, r.Serial)
+	}
+	for _, note := range notes {
+		n.journalLater(ctx, d.ID, note[0], note[1], r.Serial)
+	}
 	return nil
+}
+
+// pcr0Fields records what a running node's quote showed: the BIOS version
+// it reported, and its PCR 0 under that version when pcr0_by_bios holds
+// none yet. A PCR 0 that differs from the one on file for the same version
+// is never written over: the entry stays until the owner explains the
+// change by editing it, and each check journals it again until then. It
+// answers the journal entries, by kind and comment.
+func pcr0Fields(d netboxDevice, r Record, fields map[string]any) [][2]string {
+	p := r.pcr0
+	if p == nil {
+		return nil
+	}
+	var notes [][2]string
+	bios := plain(p.BIOS)
+	if was := d.CustomFields.BIOSVersion; was != p.BIOS {
+		fields["bios_version"] = p.BIOS
+		if was != "" {
+			notes = append(notes, [2]string{"info", fmt.Sprintf("talos-attest: BIOS version is %s, was %s", bios, plain(was))})
+		}
+	}
+	if d.CustomFields.PCR0ByBIOS == nil {
+		return notes
+	}
+	// The owner's entries go back as they were; only the new key is added.
+	raw := map[string]json.RawMessage{}
+	if err := json.Unmarshal(d.CustomFields.PCR0ByBIOS, &raw); err != nil || raw == nil {
+		if string(d.CustomFields.PCR0ByBIOS) != "null" {
+			return append(notes, [2]string{"warning", "talos-attest: pcr0_by_bios is not a JSON object; PCR 0 is not recorded"})
+		}
+		raw = map[string]json.RawMessage{}
+	}
+	_, present := raw[p.BIOS]
+	switch cur, ok := d.pcr0Map()[p.BIOS]; {
+	case !ok && present:
+		// An entry the owner wrote that is not a digest stays untouched.
+	case !ok:
+		raw[p.BIOS], _ = json.Marshal(p.PCR0)
+		fields["pcr0_by_bios"] = raw
+		notes = append(notes, [2]string{"info", fmt.Sprintf("talos-attest: PCR 0 at BIOS %s recorded as %s", bios, p.PCR0)})
+	case !strings.EqualFold(cur, p.PCR0):
+		notes = append(notes, [2]string{"warning", fmt.Sprintf("talos-attest: PCR 0 at BIOS %s is %s, not the %s on record, and no BIOS update explains it. Not quarantined: once the change is explained, set this BIOS version's entry in pcr0_by_bios to the new value", bios, p.PCR0, plain(cur))})
+	}
+	return notes
 }
 
 // journalLater posts a journal entry on its own: the journal is history,
@@ -660,7 +757,7 @@ func (n *NetBox) Verdict(ctx context.Context, serial string) (protocol.Status, b
 	case statusDecommissioning, statusOffline:
 		return protocol.Status{}, false, nil
 	}
-	st := protocol.Status{Node: d.Name, Class: string(d.CustomFields.Class), Site: d.Site.Slug, UpdatedAt: d.LastUpdated}
+	st := protocol.Status{Node: d.Name, Class: string(d.CustomFields.Class), Site: d.Site.Slug, UpdatedAt: d.LastUpdated, LDevIDSerial: strings.ToLower(d.CustomFields.LDevIDSerial)}
 	switch v := d.CustomFields.Verdict; {
 	case v == StatusAttested:
 		st.Status = protocol.StatusAttested

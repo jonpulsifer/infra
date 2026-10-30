@@ -67,6 +67,7 @@ type Verifier struct {
 	mu       sync.Mutex
 	sessions map[string]*session
 	verdicts map[[2]string]uint64
+	checks   map[[2]string]checkCount
 	intakes  map[string]time.Time
 	creating map[string]*sync.Mutex
 }
@@ -87,6 +88,13 @@ type session struct {
 	renew   *Record
 	akBlobs protocol.Blobs
 	ldBlobs protocol.Blobs
+	// check is a renewal session opened for the daily check, which issues
+	// nothing; ldevidIssued is the LDevID on file's CA-signed issue time;
+	// devidFiles are the verified DevID's files, set when this anchor holds
+	// no record under the machine's name.
+	check        bool
+	ldevidIssued time.Time
+	devidFiles   map[string][]byte
 	// intakeUntil is when the window that admitted an unknown serial under
 	// the open policy closes; bind is a declared stub the pass binds to;
 	// planned is a planned device that passes on its EK certificates alone,
@@ -891,10 +899,10 @@ func confirmSigned(s *session, raw []byte) error {
 	return nil
 }
 
-// RenewStart opens a renewal: a quote nonce for the machine whose LAK is on
-// file. The caller resolves the DevID, from this anchor or a peer, since the
-// files live where the intake ran.
-func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID) (protocol.RenewStart, error) {
+// RenewStart opens a renewal, or with check the daily check: a quote nonce
+// for the machine whose LAK is on file. The caller resolves the DevID, from
+// this anchor or a peer, since the files live where the intake ran.
+func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID, check bool) (protocol.RenewStart, error) {
 	m, ok, err := v.lookupMachine(ctx, serial)
 	if err != nil {
 		return protocol.RenewStart{}, v.reject(nil, protocol.Machine{Serial: serial}, err)
@@ -916,27 +924,41 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 	if err != nil {
 		return protocol.RenewStart{}, err
 	}
+	var devidFiles map[string][]byte
 	if !found {
-		// This anchor did not run the intake; start a record from the DevID.
-		// Its hashes were proven elsewhere and never become pins from here.
-		rec = Record{Machine: m.Name, Serial: m.Serial, RSAEKCert: d.RSAEKCert, Confirmed: d.Confirmed, EKHashes: hashesByAlg(d)}
+		// This anchor did not run the intake, or NetBox renamed the machine;
+		// start a record from the DevID. Its hashes were proven elsewhere and
+		// never become pins from here. A check issues nothing, so it keeps the
+		// verified DevID's certificates and blobs as the record's files.
+		rec = Record{
+			Machine: m.Name, Serial: m.Serial, RSAEKCert: d.RSAEKCert, Confirmed: d.Confirmed, EKHashes: hashesByAlg(d),
+			Status: StatusAttested, Class: m.Class, AttestedAt: d.AttestedAt,
+			LDevIDSerial: serialHex(checked.LDevID), LDevIDNotAfter: checked.LDevID.NotAfter, LDevIDNotBefore: checked.LDevID.NotBefore, LAKSerial: serialHex(checked.LAK),
+		}
+		devidFiles = map[string][]byte{
+			fileLDevIDCert: []byte(d.LDevIDCert), fileLAKCert: []byte(d.LAKCert), fileChain: []byte(d.Chain),
+			fileLDevIDPub: d.LDevIDPublic, fileLDevIDPriv: d.LDevIDPrivate, fileAKPub: d.AKPublic, fileAKPriv: d.AKPrivate,
+		}
 	}
 	rec.EKProven = false
 	now := v.Now()
 	s := &session{
-		machine:  m,
-		claim:    protocol.Machine{Serial: m.Serial, MAC: m.MAC, UUID: rec.UUID},
-		akPublic: d.AKPublic,
-		ak:       checked.AK,
-		nonce:    v.random(32),
-		expires:  now.Add(v.SessionTTL),
-		renew:    &rec,
-		akBlobs:  protocol.Blobs{Public: d.AKPublic, Private: d.AKPrivate},
-		ldBlobs:  protocol.Blobs{Public: d.LDevIDPublic, Private: d.LDevIDPrivate},
+		machine:      m,
+		claim:        protocol.Machine{Serial: m.Serial, MAC: m.MAC, UUID: rec.UUID},
+		akPublic:     d.AKPublic,
+		ak:           checked.AK,
+		nonce:        v.random(32),
+		expires:      now.Add(v.SessionTTL),
+		renew:        &rec,
+		akBlobs:      protocol.Blobs{Public: d.AKPublic, Private: d.AKPrivate},
+		ldBlobs:      protocol.Blobs{Public: d.LDevIDPublic, Private: d.LDevIDPrivate},
+		check:        check,
+		ldevidIssued: checked.LDevID.NotBefore,
+		devidFiles:   devidFiles,
 	}
 	id := v.open(s)
-	v.Log.Info("renewal started", "machine", m.Name, "class", m.Class)
-	return protocol.RenewStart{Session: id, Nonce: s.nonce}, nil
+	v.Log.Info("renewal started", "machine", m.Name, "class", m.Class, "check", check)
+	return protocol.RenewStart{Session: id, Nonce: s.nonce, Check: check}, nil
 }
 
 // CheckedDevID is what VerifyDevID vouches for.
@@ -1057,6 +1079,9 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	if !ok || s.renew == nil {
 		return protocol.Renewed{}, fail(reasonSession, "no open renewal %q", id)
 	}
+	if s.check {
+		return v.check(ctx, s, req)
+	}
 	refuse := func(err error) (protocol.Renewed, error) {
 		return protocol.Renewed{}, v.refuse(ctx, &s.machine, s.claim, nil, err)
 	}
@@ -1092,9 +1117,12 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	rec.LDevIDNotBefore = ldevidCert.NotBefore
 	rec.LAKSerial = serialHex(lakCert)
 	rec.AttestedAt = now
+	rec.CheckedAt = now
 	rec.UpdatedAt = now
 	rec.Renewed = true
 	rec.BootApplications = bootApplications(events)
+	seen, known := v.seePCR0(ctx, s.machine.Serial, pcrs, req.BIOS)
+	v.notePCR0(&rec, seen, known)
 	files := map[string][]byte{
 		fileLDevIDCert: v.CA.LeafPEM(ldevidCert),
 		fileLAKCert:    v.CA.LeafPEM(lakCert),
@@ -1158,6 +1186,11 @@ func (v *Verifier) reject(m *Machine, claim protocol.Machine, err error) error {
 // returns err for the caller to send. Only a check the machine's own TPM
 // signed for reaches it.
 func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machine, eks []VerifiedEK, err error) error {
+	return v.quarantine(ctx, m, claim, eks, err, false)
+}
+
+// quarantine is refuse, with check marking a daily check's quarantine.
+func (v *Verifier) quarantine(ctx context.Context, m *Machine, claim protocol.Machine, eks []VerifiedEK, err error, check bool) error {
 	reason := reasonOf(err)
 	if reason == reasonInternal || reason == reasonSession {
 		return err
@@ -1170,6 +1203,7 @@ func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machin
 	rec.Status = StatusQuarantined
 	rec.Reason = reason
 	rec.Detail = []string{err.Error()}
+	rec.check = check
 	if serr := v.Store.Save(rec, nil); serr != nil {
 		v.Log.Error("record refusal", "machine", m.Name, "err", serr)
 	}
@@ -1180,7 +1214,10 @@ func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machin
 func (v *Verifier) finish(ctx context.Context, rec Record, verdict, reason string, err error) {
 	entry := map[string]any{"time": v.Now(), "machine": rec.Machine, "serial": rec.Serial, "verdict": verdict, "ek_hashes": rec.EKHashes}
 	audit := AuditEntry{Event: auditVerdict, Node: rec.Machine, Serial: rec.Serial, Class: rec.Class, Status: verdict}
-	if rec.Renewed {
+	switch {
+	case rec.check:
+		audit.Event = auditCheck
+	case rec.Renewed:
 		audit.Event = auditRenew
 	}
 	if err != nil {

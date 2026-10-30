@@ -143,35 +143,47 @@ type Verdict struct {
 
 // RenewRequest opens a renewal for the machine with this SMBIOS serial. The
 // service answers 404 when it holds no LAK for the serial, and 403 when the
-// machine's status forbids a renewal.
+// machine's status forbids a renewal. Check asks for the daily check
+// instead: the same evidence on the same routes, judged by the renewal
+// policy, recorded as a pass or a quarantine, and no new certificate.
 type RenewRequest struct {
 	Serial string `json:"serial"`
+	Check  bool   `json:"check,omitempty"`
 }
 
-// RenewStart carries the renewal's session and its quote nonce.
+// RenewStart carries the renewal's session and its quote nonce. Check is
+// true only when the service opened the daily check the request asked for:
+// a service that predates the check leaves it false, and the client then
+// sends no evidence, which that service would answer with new certificates.
 type RenewStart struct {
 	Session string `json:"session"`
 	Nonce   []byte `json:"nonce"`
+	Check   bool   `json:"check,omitempty"`
 }
 
 // RenewEvidence is a running node's boot evidence, signed by the LAK the
 // service has on file: a quote over PCRs 0 to 7 qualified by the nonce, the
 // PCR values, the event log, and the LDevID key certified by the LAK with the
 // nonce. The service replays the log as at intake and certifies the key
-// again, which may be the key it certified before.
+// again, which may be the key it certified before. BIOS is the SMBIOS BIOS
+// version the node reads, under which the service records PCR 0.
 type RenewEvidence struct {
 	Quote    Quote     `json:"quote"`
 	PCRs     []PCR     `json:"pcrs"`
 	EventLog []byte    `json:"event_log"`
 	LDevID   Certified `json:"ldevid"`
+	BIOS     string    `json:"bios,omitempty"`
 }
 
 // Renewed is a renewal's answer. Each PEM holds the leaf, then the DevID CA.
 // LAKCert is optional: a service that issues only the LDevID again leaves it
-// out.
+// out. A check's answer carries no certificate: Checked is true and
+// AttestedAt is the pass the service recorded.
 type Renewed struct {
-	LDevIDCert string `json:"ldevid_cert_pem"`
-	LAKCert    string `json:"lak_cert_pem,omitempty"`
+	LDevIDCert string    `json:"ldevid_cert_pem"`
+	LAKCert    string    `json:"lak_cert_pem,omitempty"`
+	Checked    bool      `json:"checked,omitempty"`
+	AttestedAt time.Time `json:"attested_at,omitzero"`
 }
 
 // ConfirmRequest reports that the host stored its certificates.
@@ -253,6 +265,10 @@ type Status struct {
 	Class      string    `json:"class,omitempty"`
 	Site       string    `json:"site,omitempty"`
 	ConsumedAt time.Time `json:"consumed_at,omitzero"`
+	// LDevIDSerial is the hex serial of the LDevID the verdict stands on. It
+	// binds a verdict to the certificate an anchor serves, since a daily
+	// check moves attested_at without issuing one.
+	LDevIDSerial string `json:"ldevid_serial,omitempty"`
 }
 
 // Values of Status.Status.

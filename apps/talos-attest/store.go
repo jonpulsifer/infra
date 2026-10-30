@@ -54,6 +54,18 @@ type Record struct {
 	// its separator, for pinning in the policy.
 	BootApplications []string  `json:"boot_applications,omitempty"`
 	UpdatedAt        time.Time `json:"updated_at"`
+	// CheckedAt is the running node's newest passing quote on this anchor,
+	// from a daily check or a renewal.
+	CheckedAt time.Time `json:"checked_at,omitzero"`
+	// PCR0Changed is whether that quote's PCR 0 differs from the one NetBox
+	// holds for the BIOS version the node reported.
+	PCR0Changed bool `json:"pcr0_changed,omitempty"`
+
+	// check marks a daily check's pass, which NetBox records as a verdict
+	// and a time without touching the certificate fields; pcr0 is what the
+	// quote showed for PCR 0. Neither is kept on disk.
+	check bool
+	pcr0  *pcr0Seen
 }
 
 // Statuses a record can hold.

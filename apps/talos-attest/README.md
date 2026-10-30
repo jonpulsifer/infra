@@ -96,6 +96,23 @@ again with the LAK on file, replays the running boot against the policy's
 `renew_required_authorities`, and answers `{ldevid_cert_pem, lak_cert_pem}`.
 It is 404 with no LDevID on file and 403 when the device's status forbids it.
 
+The daily check takes the same routes with `"check": true` in the start, and
+the start answers `"check": true` only when it opened one. The evidence is
+the renewal's, plus `bios`, the SMBIOS BIOS version. Before any write the
+LAK on file must sign the quote over the session's nonce and certify the
+LDevID key on file with it; a failure there is `refused` and records
+nothing. After it, a boot that misses `renew_required_authorities` and the
+rest of the policy, or a log that does not replay, is a quarantine. A pass
+answers `{checked, attested_at}`, issues nothing, and writes only
+`attest_verdict` and `last_attested`. Each passing quote from the running
+node, check or renewal, records PCR 0 under the BIOS version in the
+device's `pcr0_by_bios` JSON field when NetBox defines it: a new version
+adds an entry, and a different PCR 0 at a version on file is journaled,
+audited as `attest.pcr0` and exported as `talos_attest_pcr0_changed`, and
+never written over or quarantined. A verdict matches the LDevID an anchor
+serves by `ldevid_serial`, which `GET /verdict` carries, since a check moves
+`last_attested`.
+
 ## Intake policy
 
 Under `declared`, the default, the owner's stub is the authorization: a
@@ -179,15 +196,17 @@ An intake pass also writes the validated SMBIOS UUID to the device's
 Every decision is one JSON line on stdout, beside the structured log:
 `{event, site, node, serial, class, status, approver, reason, ts}`
 with `event` one of `attest.verdict`, `attest.issue`, `attest.renew`,
-`attest.install` and `attest.intake`, an intake pass or the window opened or
-closed through the admin API.
+`attest.check`, `attest.pcr0`, `attest.install` and `attest.intake`, an
+intake pass or the window opened or closed through the admin API.
 
 ## Renewal
 
 `tink-attest renew` runs on a running node, in the `tpm-reattest` DaemonSet
 of `clusters/folly/apps/spire/`. It reads the LDevID and LAK certificates from
-NV, and exits 0 while the LDevID expires in more than `-renew-before`
-(default `720h`), or when NV holds neither certificate. NV that holds the LAK
+NV. While the LDevID expires in more than `-renew-before` (default `720h`)
+it runs the daily check, or with `-check=false` exits 0; with neither
+certificate in NV it exits 0. It opens the TPM before anything else, and
+without one it sends nothing. NV that holds the LAK
 and no LDevID, or an index that holds no certificate, counts as due; any
 other TPM error fails the run. Otherwise it loads the LAK and
 LDevID blobs that `GET /devid/{serial}` serves, and drives the renewal routes

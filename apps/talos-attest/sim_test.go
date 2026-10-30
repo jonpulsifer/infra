@@ -45,7 +45,9 @@ type harness struct {
 	eventLog []byte
 	hashes   map[string]string
 	tamper   func(*protocol.EvidenceRequest)
-	audit    strings.Builder
+	// tamperRenew rewrites a renewal's or a check's evidence, by session.
+	tamperRenew func(session string, e *protocol.RenewEvidence)
+	audit       strings.Builder
 }
 
 type harnessOpts struct {
@@ -169,7 +171,18 @@ func writeSimNV(t *testing.T, rw io.ReadWriter, index uint32, data []byte) {
 // tamperEvidence lets a test rewrite the evidence between client and server.
 func (h *harness) tamperEvidence(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if h.tamper != nil && strings.HasSuffix(r.URL.Path, "/evidence") {
+		renewal := strings.HasPrefix(r.URL.Path, "/v1/renew/")
+		if h.tamperRenew != nil && renewal && strings.HasSuffix(r.URL.Path, "/evidence") {
+			var req protocol.RenewEvidence
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				h.t.Error(err)
+			}
+			h.tamperRenew(strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/renew/"), "/evidence"), &req)
+			b, _ := json.Marshal(req)
+			r.Body = io.NopCloser(bytes.NewReader(b))
+			r.ContentLength = int64(len(b))
+		}
+		if h.tamper != nil && !renewal && strings.HasSuffix(r.URL.Path, "/evidence") {
 			var req protocol.EvidenceRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				h.t.Fatal(err)

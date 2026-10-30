@@ -37,6 +37,10 @@ const (
 	auditVerdict = "attest.verdict"
 	auditIssue   = "attest.issue"
 	auditRenew   = "attest.renew"
+	// auditCheck is a daily check's verdict; auditPCR0 a PCR 0 the BIOS
+	// version on record does not explain.
+	auditCheck = "attest.check"
+	auditPCR0  = "attest.pcr0"
 	// auditInstall says whether an intake pass got an install code.
 	auditInstall = "attest.install"
 	// auditIntake is a pass the open intake window granted, and the window

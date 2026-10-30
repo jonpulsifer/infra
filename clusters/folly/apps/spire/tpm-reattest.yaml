@@ -1,12 +1,15 @@
 ---
-# Renews each TPM node's LDevID before it expires. A CronJob cannot pin one pod
-# to each node, so a DaemonSet runs `tink-attest renew -every 24h`: when the
-# LDevID in NV 0x01c90000 expires within 30 days, it signs a quote over PCRs 0
-# to 7 and the event log with the LAK, has the attest service certify the
-# LDevID key again on its DevID listener, stores the new certificate in NV, and
-# deletes the node's spire-agent pod, whose devid-init then fetches the new
-# certificate. The answer must chain to a DevID CA in spire-devid-ca
-# (devid-ca.yaml). TalosAttestLDevIDExpiring is the backstop.
+# Attests each TPM node every day and renews its LDevID before it expires. A
+# CronJob cannot pin one pod to each node, so a DaemonSet runs `tink-attest
+# renew -every 24h`. Each run signs a quote over PCRs 0 to 7 and the event log
+# with the LAK. When the LDevID in NV 0x01c90000 expires within 30 days, the
+# attest service certifies the LDevID key again on its DevID listener, the run
+# stores the new certificate in NV and deletes the node's spire-agent pod,
+# whose devid-init then fetches the new certificate; the answer must chain to a
+# DevID CA in spire-devid-ca (devid-ca.yaml). Otherwise the run is the daily
+# check: the service judges the same evidence, records the verdict and PCR 0 in
+# NetBox, and issues nothing. TalosAttestNotChecked and TalosAttestLDevIDExpiring
+# are the backstops.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -152,7 +155,8 @@ spec:
               value: app.kubernetes.io/name=spire-agent
           # The device cgroup refuses /dev/tpmrm0 to anything less than
           # privileged, and the node, the NV indexes and product_serial are
-          # root's.
+          # root's. bios_version, under which the service records PCR 0, is
+          # read from the same sysfs directory.
           securityContext:
             privileged: true
             runAsUser: 0

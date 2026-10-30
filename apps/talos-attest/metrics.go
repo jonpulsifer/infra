@@ -74,6 +74,40 @@ func (v *Verifier) Metrics() (string, error) {
 			fmt.Fprintf(&b, "talos_attest_last_attested_timestamp_seconds{machine=%q} %d\n", r.Machine, r.AttestedAt.Unix())
 		}
 	}
+	head("talos_attest_last_checked_timestamp_seconds", "gauge", "When each running node's quote last passed on this anchor, from the daily check or a renewal; the newest across anchors is current.")
+	for _, r := range recs {
+		if !r.CheckedAt.IsZero() {
+			fmt.Fprintf(&b, "talos_attest_last_checked_timestamp_seconds{machine=%q} %d\n", r.Machine, r.CheckedAt.Unix())
+		}
+	}
+	head("talos_attest_pcr0_changed", "gauge", "1 when the running node's newest passing quote on this anchor showed a PCR 0 that NetBox does not hold for the BIOS version it reported.")
+	for _, r := range recs {
+		if !r.CheckedAt.IsZero() {
+			val := 0
+			if r.PCR0Changed {
+				val = 1
+			}
+			fmt.Fprintf(&b, "talos_attest_pcr0_changed{machine=%q} %d\n", r.Machine, val)
+		}
+	}
+	head("talos_attest_checks_total", "counter", "Daily checks since the service started, by machine and verdict: pass, quarantine, or refused before the TPM's proof.")
+	checks := v.Checks()
+	checkKeys := make([][2]string, 0, len(checks))
+	for k := range checks {
+		checkKeys = append(checkKeys, k)
+	}
+	sort.Slice(checkKeys, func(i, j int) bool {
+		return checkKeys[i][0]+"\x00"+checkKeys[i][1] < checkKeys[j][0]+"\x00"+checkKeys[j][1]
+	})
+	for _, k := range checkKeys {
+		fmt.Fprintf(&b, "talos_attest_checks_total{machine=%q,verdict=%q} %d\n", k[0], k[1], checks[k].N)
+	}
+	// A counter born at its first refusal shows no increase() to alert on,
+	// so the time of the newest one is exported beside it.
+	head("talos_attest_check_last_timestamp_seconds", "gauge", "When each machine's newest daily check with each verdict ended on this anchor, since the service started.")
+	for _, k := range checkKeys {
+		fmt.Fprintf(&b, "talos_attest_check_last_timestamp_seconds{machine=%q,verdict=%q} %d\n", k[0], k[1], checks[k].Last.Unix())
+	}
 	head("talos_attest_ldevid_expiry_timestamp_seconds", "gauge", "When each machine's LDevID certificate expires.")
 	for _, r := range recs {
 		if r.Issued() && !r.LDevIDNotAfter.IsZero() {
