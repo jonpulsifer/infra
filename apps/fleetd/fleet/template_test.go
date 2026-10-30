@@ -218,6 +218,15 @@ func TestWipeWaitsForTheBootsPass(t *testing.T) {
 	dir := t.TempDir()
 	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
 	attested, code := filepath.Join(dir, "attested"), filepath.Join(dir, "install_code")
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A docker whose daemon holds no containers, or one installer it cannot remove.
+	stub := "#!/bin/sh\nif [ \"$1\" = ps ] && [ -e \"" + dir + "/stuck\" ]; then echo abc123; fi\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	run := func(attest, wipe, install string, files ...string) string {
 		os.Remove(attested)
 		os.Remove(code)
@@ -225,7 +234,7 @@ func TestWipeWaitsForTheBootsPass(t *testing.T) {
 			os.WriteFile(f, []byte(testCode), 0o600)
 		}
 		cmd := exec.Command(sh, "-c", script)
-		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH")}
 		for k, v := range wf.Tasks[0].Environment {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
@@ -252,5 +261,12 @@ func TestWipeWaitsForTheBootsPass(t *testing.T) {
 		if out := run(c.attest, c.wipe, c.install, c.files...); !strings.Contains(out, c.want) {
 			t.Errorf("attest %s wipe %s install %s with %v: %q, want %q", c.attest, c.wipe, c.install, c.files, out, c.want)
 		}
+	}
+	// An installer that survives its removal stops the wipe.
+	if err := os.WriteFile(filepath.Join(dir, "stuck"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out := run("false", "true", "false"); !strings.Contains(out, "installer from an earlier run is still there") {
+		t.Errorf("a leftover installer did not stop the wipe: %q", out)
 	}
 }
