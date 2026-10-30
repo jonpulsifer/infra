@@ -329,8 +329,8 @@ func TestExpireIntakes(t *testing.T) {
 		// An orphan: its Hardware is gone.
 		wfBase + "intake-aa-00-00-00-00-09-1": intakeWF("intake-aa-00-00-00-00-09-1", "aa-00-00-00-00-09", old, "STATE_SUCCESS"),
 	}}
-	// staged riptide holds the third MAC: its intake stays until it binds.
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "staged", "none", nil)}, ifaces: riptideIfaces()}
+	// Installing riptide holds the third MAC: its intake stays until it binds.
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"attest_verdict": "attested"})}, ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	if err := r.Reconcile(t.Context()); err != nil {

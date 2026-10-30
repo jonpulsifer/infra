@@ -237,9 +237,9 @@ func TestTalosctlRender(t *testing.T) {
 //	FLEET_PARITY_BUNDLE  a throwaway talosctl gen secrets bundle
 //
 // A worker goes through the throwaway-bundle path with the bundle's worker
-// subset; a control plane through the bundle. The script adds joining-cp, a
-// staged control plane, so a control plane the controller installs to join
-// the cluster is always compared.
+// subset; a control plane through the bundle. The script adds joining-cp, an
+// active control plane that joins the cluster, so a second control plane is
+// always compared.
 func TestRenderParity(t *testing.T) {
 	inputsPath, nodesPath, classPath, bundle := os.Getenv("FLEET_PARITY_INPUTS"), os.Getenv("FLEET_PARITY_NODES"), os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_PARITY_BUNDLE")
 	if inputsPath == "" || nodesPath == "" || classPath == "" || bundle == "" {

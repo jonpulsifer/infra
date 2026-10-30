@@ -183,14 +183,6 @@
 			"proto":  "tcp",
 		},
 		{
-			// The metal-dev VM (tag:gcp) has no grant of its own: it pulls
-			// from the internet, and the owner reaches its NetBox and admin
-			// APIs through the owner-to-tagged grant.
-			"src":    "jonathan@pulsifer.ca",
-			"accept": ["tag:gcp:22", "tag:gcp:8080", "tag:gcp:8443"],
-			"proto":  "tcp",
-		},
-		{
 			"src":   "tag:gcp",
 			"deny":  ["tag:pi4:22", "tag:lab-host:22", "jonathan@pulsifer.ca:22"],
 			"proto": "tcp",

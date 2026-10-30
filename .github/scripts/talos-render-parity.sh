@@ -11,11 +11,14 @@
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #
-# Beside the inventory's nodes, the root is evaluated with one more machine:
-# joining-cp, a staged control plane at a documentation address. The root
-# takes it as enrolling, as it takes a control plane that fleet-controller
-# installs to join the cluster. Its render is compared like the others, and
-# the class inputs must stay what they are with it in the root.
+# Beside the inventory's nodes, the root is evaluated with one more machine,
+# joining-cp, a control plane at a documentation address, twice. Planned, as a
+# control plane that fleet-controller installs is until it fetches its config,
+# the root applies no config to it and the committed class inputs stay current.
+# Active, the root takes it as a second control plane that joins the cluster
+# (talos_machine.joining), and every node is compared from the root's inputs
+# and the class inputs it renders then, as the export's pull request commits
+# them with mise run render-class-inputs.
 #
 # usage: talos-render-parity.sh [root]   (default clusters/folly/talos)
 
@@ -29,23 +32,26 @@ trap 'rm -rf "$work"; rm -f "$override"' EXIT
 
 # The root's backend needs credentials; a local backend with no state lets
 # tofu console evaluate the repo alone. The 1Password item is never opened.
-# The override's locals add the joining control plane.
+# The override's locals add joining-cp with the status given.
 cp_class=$(jq -r '[to_entries[] | select(.value.machine_type == "controlplane") | .key] | first // empty' "clusters/$site/fleet/class-inputs.json")
 if [[ -z "$cp_class" ]]; then
   echo "clusters/$site/fleet/class-inputs.json has no control-plane class" >&2
   exit 1
 fi
-cat >"$override" <<EOF
+joining() {
+  cat >"$override" <<EOF
 terraform {
   backend "local" {}
 }
 
 locals {
   machines = merge(yamldecode(file("\${path.module}/../inventory/machines.yaml")).machines, {
-    joining-cp = { class = "$cp_class", status = "staged", address = "192.0.2.10", disk = "/dev/nvme0n1", tpm = "2.0" }
+    joining-cp = { class = "$cp_class", status = "$1", address = "192.0.2.10", disk = "/dev/nvme0n1", tpm = "2.0" }
   })
 }
 EOF
+}
+joining planned
 export TF_DATA_DIR="$work/root-data" TF_IN_AUTOMATION=1
 tofu -chdir="$root" init -input=false -lockfile=readonly >/dev/null
 
@@ -56,6 +62,30 @@ console() {
 decode() {
   tr -d '"' | base64 -d
 }
+
+if [[ $(console 'contains(keys(local.nodes), "joining-cp")') != false ]]; then
+  echo "the root applies config to a planned control plane" >&2
+  exit 1
+fi
+
+# The committed class inputs must be what the root renders now, a planned
+# control plane beside the inventory changing nothing.
+class_inputs="clusters/$site/fleet/class-inputs.json"
+console 'base64encode(jsonencode(local.class_inputs))' | decode | jq -S . >"$work/class-inputs.json"
+if ! cmp -s "$work/class-inputs.json" "$class_inputs"; then
+  echo "STALE $class_inputs: run mise run render-class-inputs and commit" >&2
+  diff -u "$class_inputs" "$work/class-inputs.json" | head -n 40 >&2 || true
+  exit 1
+fi
+echo "ok $class_inputs is current"
+
+# From here joining-cp is active: a second control plane that joins.
+joining active
+if [[ $(console 'local.nodes["joining-cp"].role == "controlplane" && local.machines["joining-cp"].address != module.topology.data.API_SERVER_IP') != true ]]; then
+  echo "the root does not take an active joining-cp as a joining control plane" >&2
+  exit 1
+fi
+console 'base64encode(jsonencode(local.class_inputs))' | decode | jq -S . >"$work/class-inputs-joining.json"
 
 inputs="$work/inputs.json"
 echo '{}' >"$inputs"
@@ -73,20 +103,10 @@ if [[ $(jq 'length' "$inputs") -eq 0 ]]; then
   echo "no node of $root has known inputs" >&2
   exit 1
 fi
-if [[ $(console 'local.nodes["joining-cp"].enrolling') != true ]]; then
-  echo "the root does not take a staged control plane as enrolling" >&2
+if ! jq -e 'has("joining-cp")' "$inputs" >/dev/null; then
+  echo "the root has no inputs for joining-cp" >&2
   exit 1
 fi
-
-# The committed class inputs must be what the root renders now.
-class_inputs="clusters/$site/fleet/class-inputs.json"
-console 'base64encode(jsonencode(local.class_inputs))' | decode | jq -S . >"$work/class-inputs.json"
-if ! cmp -s "$work/class-inputs.json" "$class_inputs"; then
-  echo "STALE $class_inputs: run mise run render-class-inputs and commit" >&2
-  diff -u "$class_inputs" "$work/class-inputs.json" | head -n 40 >&2 || true
-  exit 1
-fi
-echo "ok $class_inputs is current"
 
 # The node facts the controller reads from NetBox, from the inventory export
 # as the root decodes it, beside the module's inputs for the same node.
@@ -206,9 +226,10 @@ for node in $(jq -r 'keys[]' "$inputs"); do
   fi
 done
 
-# fleet-controller's render of each node, against the module's.
+# fleet-controller's render of each node, against the module's, from the
+# class inputs the root renders with joining-cp active.
 FLEET_PARITY_INPUTS="$inputs" FLEET_PARITY_NODES="$work/nodes.json" \
-  FLEET_CLASS_INPUTS="$PWD/$class_inputs" FLEET_PARITY_BUNDLE="$work/secrets.yaml" \
+  FLEET_CLASS_INPUTS="$work/class-inputs-joining.json" FLEET_PARITY_BUNDLE="$work/secrets.yaml" \
   go test -C apps/fleet-controller -count=1 -run 'TestRenderParity|TestTalosctlRender' -v ./... || failed=1
 
 exit "$failed"

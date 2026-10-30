@@ -26,8 +26,7 @@ go run .
 | `FLEET_TEMPLATE` | `provision` | The Template every Workflow runs |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line its iPXE chain passes |
 | `FLEET_ATTEST_URL`, `FLEET_NTP_SERVER` | required | talos-attest's device flow and the NTP server, both in each Workflow's `hardwareMap` |
-| `FLEET_BMC_SECRETS` | `amt=bmc-amt,redfish=bmc-redfish` | The Secret per `bmc_type` that a Machine's `authSecretRef` names |
-| `FLEET_REDFISH_PORT`, `FLEET_REDFISH_INSECURE_TLS` | `443`, `false` | Redfish connection options |
+| `FLEET_BMC_SECRETS` | `amt=bmc-amt` | The Secret per `bmc_type` that a Machine's `authSecretRef` names; `bmc_type` is `amt` or `none` |
 | `FLEET_WEBHOOK_ADDR` | `:8446` | The listener for `/webhook`, `/render`, `/intake`, `/healthz` and `/metrics` |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and the controller only polls |
 | `FLEET_INTERVAL` | `2m` | Time between passes |
@@ -39,7 +38,7 @@ go run .
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision Workflow installs; off, `/render` refuses every call, since no run asks for one |
 | `FLEET_CONFIG_TTL` | `2h` | Age at which an unfetched config is deleted |
 | `FLEET_CONTROLPLANE_BUNDLE` | none | The full secrets bundle; with it a control-plane class renders and installs too. It must hold every CA key and the worker subset's values, and needs the renderer and `FLEET_BOOTSTRAP_ADDRESS` |
-| `FLEET_BOOTSTRAP_ADDRESS` | none | The address of the control plane the Talos root bootstraps etcd on, `API_SERVER_IP`; a device there never installs, and `/render` refuses it |
+| `FLEET_BOOTSTRAP_ADDRESS` | none | The address of the control plane the Talos root bootstraps etcd on, `API_SERVER_IP`; a device there never installs, `/render` refuses it, and its `provision` or `wipe` is refused with a journal entry and `desired_action` left as it is |
 | `FLEET_CONTROLPLANE_CONFIG_TTL` | `30m` | Age at which an unfetched control-plane config is deleted |
 | `FLEET_AUTO_PROVISION` | `false` | Whether a bound intake with a class and an address gets `desired_action` `provision`; the Nix module sets `true` |
 | `FLEET_MODEL_MAP` | the G5 mini as `worker-g5`, `amt`, `/dev/nvme0n1` | JSON `{"<SMBIOS model>": {"class", "bmc", "disk"}}` for an intake |
@@ -51,8 +50,8 @@ go run .
 
 ## NetBox contract
 
-Devices with role `kubernetes-node` and status `planned`, `staged`, `active`,
-`failed` or `decommissioning`. Read: `name`, `serial`, `status`,
+Devices with role `kubernetes-node` and status `planned`, `active`, `failed`
+or `decommissioning`. Read: `name`, `serial`, `status`,
 `primary_ip4`, `oob_ip`, the first physical interface's `primary_mac_address`,
 and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`,
@@ -60,15 +59,14 @@ and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `attested_address`, `attested_switch`, `attested_switch_port` and
 `attested_network_at`. A select field may be a string
 or a `{value, label}` object. Written: `desired_action` (back to `none`),
-`last_workflow`, `status` (`staged` when a provision or wipe starts on an
+`last_workflow`, `status` (`planned` when a provision or wipe starts on an
 `active` or `failed` device, `offline` after a retirement) and journal
-entries. A `planned` device stays `planned` through its first provision:
-talos-attest grants the no-click first intake only in that status and moves
-the device to `staged` itself on the verdict. A `planned` device also boots
-by hand: its Workflow carries no `bootMode`, its journal entry says to power
+entries. A `planned` device stays `planned` through its provision until its
+node fetches its config. A `planned` device whose `attest_verdict` is not
+`attested` also boots by hand: its Workflow carries no `bootMode`, its journal entry says to power
 the machine on, and it gets a Machine only with an explicit `oob_ip`, since
 an AMT address derived from a Kubernetes address it does not hold yet is
-wrong. The exception is a `planned` or `staged` `amt` device without
+wrong. The exception is a `planned` `amt` device without
 `oob_ip` whose `attested_address` is inside `FLEET_BOOTSTRAP_CIDR`, not in
 `FLEET_BOOTSTRAP_RESERVED`, and whose `attested_network_at` is younger than
 15 minutes: its Machine dials that address, and a new Workflow has `bootMode`
@@ -76,8 +74,8 @@ wrong. The exception is a `planned` or `staged` `amt` device without
 unfinished, the Machine keeps the pinned address, however old the attested
 one grows, unless a pass during the run attests another: another bootstrap
 address moves the Machine there, and any other address, such as the
-device's own once its RADIUS user moves it, ends the pin. The Machine and Rufio come for every other device once the status
-leaves `planned`. A retirement is the `retire` run, which
+device's own once its RADIUS user moves it, ends the pin. The Machine and Rufio come for every other device once its
+`attest_verdict` is `attested` or its status leaves `planned`. A retirement is the `retire` run, which
 powers the node off; the controller starts it on status `decommissioning`,
 never from `desired_action`.
 
@@ -91,7 +89,7 @@ device's config.
 `X-Fleet-Signature`, HMAC-SHA512 hex of the body with the attest secret. The
 `uuid` is the SMBIOS UUID in lower case and the `code` 43 characters of
 base64url; anything else is 400 before a path is built. 401 is a bad
-signature. 409 is a device that is unknown, not `planned` or `staged`, without
+signature. 409 is a device that is unknown, not `planned`, without
 an unfinished `provision` run with `install=true` in `last_workflow`, of
 another node, class or `smbios_uuid` than the body names, or a code already
 spent. It is also a control plane without `FLEET_CONTROLPLANE_BUNDLE`, or one
@@ -135,11 +133,11 @@ NetBox or Tinkerbell failure. Audit line `fleet.intake`, with the report.
 
 ## Binding contract
 
-A pass binds a device that is `staged` with `attest_verdict` `attested` once
+A pass binds a device that is `planned` with `attest_verdict` `attested` once
 the newest `Workflow` of the intake holding its MAC has finished. Only a MAC
 talos-attest wrote binds: an attested device with none is journaled once and
-waits, and an intake's claimed MAC is never written to NetBox. A device of any
-other status drops an intake that has stopped running. A failed intake goes
+waits, and an intake's claimed MAC is never written to NetBox. Any other
+device drops an intake that has stopped running. A failed intake goes
 after an hour, and one no device holds after `FLEET_INTAKE_TTL`. A stub is a
 `planned` device with no MAC; one that a bind marker names is promised. An `intake-*` device takes the stub
 with its serial, else the oldest (lowest id) serial-less stub whose
@@ -161,7 +159,7 @@ to the switch port (on the intake port, to `expected_port` only), and
 device's cable holds: the other cable stays, and the journal says so. The
 intake's objects are deleted last. A device whose `last_workflow` is an
 intake run gets a `Workflow` without `bootMode`, since it waits in HookOS. Audit lines `fleet.bind` and
-`fleet.autoprovision`. A `staged` or `active` device whose interface has no
+`fleet.autoprovision`. An attested `planned` or an `active` device whose interface has no
 cable is cabled to the port an `attested_network_at` younger than an hour
 names, unless that is the intake port, and one attested off its
 `expected_port` is journaled once.

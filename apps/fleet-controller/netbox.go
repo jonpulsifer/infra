@@ -69,7 +69,7 @@ type Device struct {
 // none.
 const Role = "kubernetes-node"
 
-var liveStatuses = []string{"planned", "staged", "active", "failed", "decommissioning"}
+var liveStatuses = []string{"planned", "active", "failed", "decommissioning"}
 
 func (n *NetBox) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader

@@ -16,7 +16,7 @@ A folly node is a `kubernetes-node` device in [NetBox](netbox.md). The owner sta
 7. On its first boot, Talos fetches its config by UUID and code from `/talos/config`. The controller deletes the file once nginx serves it whole, and sets the device `active`.
 8. When spore has the node's alias, its SPIRE agent attests by the LDevID and serves SVIDs.
 
-A machine NetBox does not know starts the same path itself: HookOS phones home, an attest-only run makes it a `staged` device, and fleet-controller binds it to a stub's name, gives it a class and an address, and sets `desired_action` to `provision`. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` issues a new LDevID. `wipe` erases the disk with no attestation. The status `decommissioning` starts a `retire` run, which wipes the disk and powers the node off, leaving it `offline`.
+A machine NetBox does not know starts the same path itself: HookOS phones home, an attest-only run, once the owner approves its first intake, makes it a `planned` device, and fleet-controller binds it to a stub's name, gives it a class and an address, and sets `desired_action` to `provision`. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` issues a new LDevID. `wipe` erases the disk with no attestation. The status `decommissioning` starts a `retire` run, which wipes the disk and powers the node off, leaving it `offline`.
 
 ## Who owns what
 
@@ -39,4 +39,4 @@ A machine NetBox does not know starts the same path itself: HookOS phones home, 
 ## Where to go next
 
 - [Prepare a machine](../runbooks/prepare-a-machine.md), [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md), [Retire a node](../runbooks/retire-a-node.md)
-- [Identity](identity.md), [fleet-controller](../apps/fleet-controller.md), [talos-attest](../apps/talos-attest.md), [Tinkerbell](nixos/tinkerbell.md), [NetBox](netbox.md), [Metal dev env](metal-dev.md)
+- [Identity](identity.md), [fleet-controller](../apps/fleet-controller.md), [talos-attest](../apps/talos-attest.md), [Tinkerbell](nixos/tinkerbell.md), [NetBox](netbox.md)

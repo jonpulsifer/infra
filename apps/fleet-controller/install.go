@@ -177,8 +177,8 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if d.SMBIOSUUID != "" && d.SMBIOSUUID != req.UUID {
 		return d, conflict("NetBox holds another SMBIOS UUID for the node")
 	}
-	if d.Status != "planned" && d.Status != "staged" {
-		return d, conflict("%s is %s; only a planned or staged device installs", d.Name, d.Status)
+	if d.Status != "planned" {
+		return d, conflict("%s is %s; only a planned device installs", d.Name, d.Status)
 	}
 	if !strings.HasPrefix(d.LastWorkflow, "provision-"+d.Name+"-") {
 		return d, conflict("%s has no provision run in progress (last_workflow %q)", d.Name, d.LastWorkflow)
@@ -403,7 +403,7 @@ func (i *Installer) Sweep(ctx context.Context) {
 }
 
 // release sets a device active once its config was served. A device the
-// owner moved out of planned or staged meanwhile keeps its status. The
+// owner moved out of planned meanwhile keeps its status. The
 // release is marked in the record as soon as NetBox has it, so a Drop that
 // fails is retried alone, without a second update or journal entry.
 func (i *Installer) release(ctx context.Context, p Pending) error {
@@ -413,7 +413,7 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 	}
 	status := "active"
 	comment := fmt.Sprintf("fleet-controller: the node fetched its Talos config at %s; the device is active and the file is deleted", timestamp(p.Fetched))
-	if d.Status != "planned" && d.Status != "staged" {
+	if d.Status != "planned" {
 		status = ""
 		comment = fmt.Sprintf("fleet-controller: the node fetched its Talos config at %s and the file is deleted; the status stays %s", timestamp(p.Fetched), d.Status)
 	}

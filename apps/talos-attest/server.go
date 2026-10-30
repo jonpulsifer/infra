@@ -63,8 +63,6 @@ func (s *Server) Admin() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /machines", s.machines)
 	mux.HandleFunc("POST /approve", s.approve)
-	mux.HandleFunc("GET /intake", s.intake)
-	mux.HandleFunc("POST /intake", s.setIntake)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	return s.requireApprover(mux)
 }

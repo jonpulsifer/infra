@@ -201,10 +201,6 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	if !Finished(wf.State()) {
 		return nil
 	}
-	if d.Status != "staged" || d.Verdict != "attested" {
-		why := fmt.Sprintf("fleet-controller: the intake Workflow %s ended %s and the device is %s with verdict %q; it binds once it is staged and attested", wf.Name(), wf.State(), d.Status, d.Verdict)
-		return r.journalOnce(ctx, fmt.Sprintf("bind-wait/%d/%s/%s", d.ID, d.Status, d.Verdict), d, "warning", why)
-	}
 	model, known := r.Config.Models[d.Model]
 	sw, port, portWhy := r.where(ctx, p, d, wf.Created())
 	// On the intake port the machine is at the prep station: its rack port

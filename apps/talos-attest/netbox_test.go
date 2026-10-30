@@ -348,7 +348,7 @@ func TestNetBoxLookupReadsTheDevice(t *testing.T) {
 		!st.AttestedAt.Equal(time.Date(2026, 10, 29, 1, 2, 3, 0, time.UTC)) || !st.ConsumedAt.Equal(time.Date(2026, 10, 29, 1, 10, 0, 0, time.UTC)) {
 		t.Fatalf("verdict %+v %v %v", st, ok, err)
 	}
-	f.add("swell", "SW-1", "staged", "", map[string]any{"attest_verdict": "pending-approval"})
+	f.add("swell", "SW-1", "planned", "", map[string]any{"attest_verdict": "pending-approval"})
 	if _, ok, _ := nb.Verdict(context.Background(), "SW-1"); ok {
 		t.Fatal("a pending device has a verdict")
 	}
@@ -374,15 +374,15 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 	f := newFakeNetBox(t)
 	nb := f.client()
 	claim := protocol.Machine{Serial: "mxl9999999", MAC: "AA:BB:CC:DD:EE:01", Hostname: "shoal", Manufacturer: "HP", Model: "HP EliteDesk 800 G5 Desktop Mini", SKU: "9GB06UC#ABA", BIOS: "R21 Ver. 02.20.00"}
-	m, err := nb.Create(context.Background(), claim, "")
+	m, err := nb.Create(context.Background(), claim)
 	if err != nil {
 		t.Fatal(err)
 	}
 	d := f.bySerial("MXL9999999")
-	if d == nil || d.Name != "shoal" || d.Status != "staged" || d.TypeID != 1 || d.CustomFields["sku"] != "9GB06UC#ABA" || d.CustomFields["bios_version"] != "R21 Ver. 02.20.00" {
+	if d == nil || d.Name != "shoal" || d.Status != "planned" || d.TypeID != 1 || d.CustomFields["sku"] != "9GB06UC#ABA" || d.CustomFields["bios_version"] != "R21 Ver. 02.20.00" {
 		t.Fatalf("created device %+v", d)
 	}
-	if m.Name != "shoal" || m.Status != "staged" || m.MAC != "aa:bb:cc:dd:ee:01" || m.NetBoxID != d.ID {
+	if m.Name != "shoal" || m.Status != "planned" || m.MAC != "aa:bb:cc:dd:ee:01" || m.NetBoxID != d.ID {
 		t.Fatalf("machine %+v", m)
 	}
 	if got, ok, _ := nb.Lookup(context.Background(), "MXL9999999"); !ok || got.MAC != "aa:bb:cc:dd:ee:01" {
@@ -394,7 +394,7 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 
 	// A generic hostname, an unknown model and a taken name.
 	claim2 := protocol.Machine{Serial: "SIM-NEW", MAC: "aa:bb:cc:dd:ee:02", Hostname: "hookos", Manufacturer: "Dell Inc.", Model: "OptiPlex 7010"}
-	m2, err := nb.Create(context.Background(), claim2, "")
+	m2, err := nb.Create(context.Background(), claim2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,11 +406,11 @@ func TestNetBoxCreatesADeviceOnFirstSight(t *testing.T) {
 		t.Fatalf("device type %q", f.types[d2.TypeID])
 	}
 	claim3 := protocol.Machine{Serial: "SIM-DUP", MAC: "aa:bb:cc:dd:ee:03", Hostname: "shoal", Model: "OptiPlex 7010"}
-	m3, err := nb.Create(context.Background(), claim3, "")
+	m3, err := nb.Create(context.Background(), claim3)
 	if err != nil || m3.Name != "intake-sim-dup" {
 		t.Fatalf("taken hostname: %+v %v", m3, err)
 	}
-	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}, ""); err == nil {
+	if _, err := nb.Create(context.Background(), protocol.Machine{Serial: "SIM-NOMODEL", MAC: "aa:bb:cc:dd:ee:04"}); err == nil {
 		t.Fatal("a claim with no model made a device")
 	}
 }
@@ -428,7 +428,7 @@ func TestNetBoxRecordWritesTheVerdict(t *testing.T) {
 	}
 	d := f.bySerial("SW-1")
 	cf := d.CustomFields
-	if d.Status != "staged" || cf["attest_verdict"] != "attested" || cf["ek_hash"] != strings.Repeat("1", 64) || cf["ek_hash_ecc"] != strings.Repeat("2", 64) ||
+	if d.Status != "planned" || cf["attest_verdict"] != "attested" || cf["ek_hash"] != strings.Repeat("1", 64) || cf["ek_hash_ecc"] != strings.Repeat("2", 64) ||
 		cf["ldevid_serial"] != "0a" || cf["lak_serial"] != "0b" || cf["last_attested"] != "2026-10-29T02:00:00Z" || cf["ldevid_not_after"] != "2027-01-27" || cf["sku"] != "SKU1" || cf["bios_version"] != "B1" {
 		t.Fatalf("after a pass: %s %+v", d.Status, cf)
 	}
@@ -464,14 +464,14 @@ func TestNetBoxRecordWritesTheVerdict(t *testing.T) {
 	if d := f.bySerial("SW-1"); d.CustomFields["attest_verdict"] != "quarantined: ek-hash-mismatch" || d.Status != "failed" {
 		t.Fatalf("a claim wrote over the quarantine: %s %+v", d.Status, d.CustomFields)
 	}
-	f.add("shale", "SL-1", "staged", "", nil)
+	f.add("shale", "SL-1", "planned", "", nil)
 	if err := nb.MarkPending(context.Background(), "SL-1", "no EK hash on record"); err != nil {
 		t.Fatal(err)
 	}
-	if d := f.bySerial("SL-1"); d.CustomFields["attest_verdict"] != StatusPending || d.Status != "staged" {
+	if d := f.bySerial("SL-1"); d.CustomFields["attest_verdict"] != StatusPending || d.Status != "planned" {
 		t.Fatalf("after pending: %s %+v", d.Status, d.CustomFields)
 	}
-	f.add("shoal", "SH-1", "staged", "", map[string]any{"attest_verdict": StatusAttested})
+	f.add("shoal", "SH-1", "planned", "", map[string]any{"attest_verdict": StatusAttested})
 	if err := nb.MarkPending(context.Background(), "SH-1", "a claim"); err != nil {
 		t.Fatal(err)
 	}
@@ -526,7 +526,7 @@ func TestFirstSightCreatesOneDevicePerSerial(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			m, _, err := v.firstSight(context.Background(), claim, "")
+			m, _, err := v.firstSight(context.Background(), claim)
 			ids[i], errs[i] = m.NetBoxID, err
 		}(i)
 	}

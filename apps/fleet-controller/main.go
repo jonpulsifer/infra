@@ -6,14 +6,14 @@
 // when NetBox's webhook rings, and every pass is a pure "make it so".
 //
 // A machine NetBox does not know phones home to POST /intake from HookOS and
-// gets an attest-only Workflow; once talos-attest has made it a staged,
+// gets an attest-only Workflow; once talos-attest has made it a planned,
 // attested device, the pass binds it to a stub's name and address, the
 // model's class and the switch port its intake pass attested, and provisions
 // it.
 //
 // Every HookOS boot phones home, and the report lands on the machine's
 // Hardware as diagnostics. What the controller acts on comes from the intake
-// pass, signed by the machine's AK: a planned or staged AMT device's Machine
+// pass, signed by the machine's AK: a planned AMT device's Machine
 // dials the bootstrap address it attested, and a device whose interface has
 // no cable gets one to the rack port it attested.
 package main
@@ -59,24 +59,22 @@ func readSecret(path string) (string, error) {
 
 // Config is the controller's environment.
 type Config struct {
-	Site            string
-	Namespace       string
-	Template        string
-	HookOSURL       string
-	HookOSCmdline   string
-	AttestURL       string
-	NTPServer       string
-	Interval        time.Duration
-	WorkflowTTL     time.Duration
-	BMCSecrets      map[string]string
-	RedfishPort     int
-	RedfishInsecure bool
-	AMTPort         int
+	Site          string
+	Namespace     string
+	Template      string
+	HookOSURL     string
+	HookOSCmdline string
+	AttestURL     string
+	NTPServer     string
+	Interval      time.Duration
+	WorkflowTTL   time.Duration
+	BMCSecrets    map[string]string
+	AMTPort       int
 	// Installs maps each class the controller renders to its Talos
 	// installer image, from the class inputs.
 	Installs map[string]string
 	// Bootstrap is the address of the control plane the Talos root
-	// bootstraps etcd on, set with the control-plane renders.
+	// bootstraps etcd on, from FLEET_BOOTSTRAP_ADDRESS.
 	Bootstrap string
 	// ControlPlaneClasses are the classes the class inputs render as a
 	// control plane, beside ControlPlaneClass.
@@ -115,8 +113,7 @@ func loadConfig() (Config, error) {
 		HookOSCmdline: os.Getenv("FLEET_HOOKOS_CMDLINE"),
 		AttestURL:     os.Getenv("FLEET_ATTEST_URL"),
 		NTPServer:     os.Getenv("FLEET_NTP_SERVER"),
-		BMCSecrets:    map[string]string{"amt": "bmc-amt", "redfish": "bmc-redfish"},
-		RedfishPort:   443,
+		BMCSecrets:    map[string]string{"amt": "bmc-amt"},
 		AMTPort:       16992,
 	}
 	for _, k := range []string{"FLEET_HOOKOS_URL", "FLEET_HOOKOS_CMDLINE", "FLEET_ATTEST_URL", "FLEET_NTP_SERVER"} {
@@ -131,7 +128,7 @@ func loadConfig() (Config, error) {
 	if c.WorkflowTTL, err = time.ParseDuration(env("FLEET_WORKFLOW_TTL", "168h")); err != nil || c.WorkflowTTL <= 0 {
 		return c, fmt.Errorf("FLEET_WORKFLOW_TTL must be a positive duration")
 	}
-	// FLEET_BMC_SECRETS maps a NetBox bmc_type to the Secret Rufio reads: "amt=bmc-amt,redfish=bmc-redfish".
+	// FLEET_BMC_SECRETS maps a NetBox bmc_type to the Secret Rufio reads: "amt=bmc-amt".
 	if v := os.Getenv("FLEET_BMC_SECRETS"); v != "" {
 		for _, pair := range strings.Split(v, ",") {
 			k, s, ok := strings.Cut(strings.TrimSpace(pair), "=")
@@ -141,12 +138,6 @@ func loadConfig() (Config, error) {
 			c.BMCSecrets[k] = s
 		}
 	}
-	if v := os.Getenv("FLEET_REDFISH_PORT"); v != "" {
-		if c.RedfishPort, err = strconv.Atoi(v); err != nil {
-			return c, fmt.Errorf("FLEET_REDFISH_PORT: %w", err)
-		}
-	}
-	c.RedfishInsecure = env("FLEET_REDFISH_INSECURE_TLS", "false") == "true"
 	c.AutoProvision = env("FLEET_AUTO_PROVISION", "false") == "true"
 	if c.Models, err = ParseModels(os.Getenv("FLEET_MODEL_MAP")); err != nil {
 		return c, err
@@ -164,6 +155,13 @@ func loadConfig() (Config, error) {
 	}
 	if c.BootstrapReserved, err = addressSet("FLEET_BOOTSTRAP_RESERVED"); err != nil {
 		return c, err
+	}
+	if v := os.Getenv("FLEET_BOOTSTRAP_ADDRESS"); v != "" {
+		a, err := netip.ParseAddr(v)
+		if err != nil {
+			return c, fmt.Errorf("FLEET_BOOTSTRAP_ADDRESS %q is not an address: %w", v, err)
+		}
+		c.Bootstrap = a.String()
 	}
 	if v := os.Getenv("FLEET_BOOTSTRAP_CIDR"); v != "" {
 		if c.BootstrapPrefix, err = netip.ParsePrefix(v); err != nil || !c.BootstrapPrefix.Addr().Is4() || c.BootstrapPrefix != c.BootstrapPrefix.Masked() {

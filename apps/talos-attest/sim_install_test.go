@@ -118,7 +118,7 @@ func TestIntakePassGetsAnInstallCode(t *testing.T) {
 	if bytes.Contains(answer, []byte(res.InstallCode)) || bytes.Contains(answer, []byte(base64.StdEncoding.EncodeToString(raw))) || bytes.Contains(answer, raw) {
 		t.Fatalf("the confirm answer carries the plaintext code: %s", answer)
 	}
-	if d := f.settled(t, simSerial, 2); d.CustomFields["smbios_uuid"] != simClaim.UUID || d.Status != "staged" {
+	if d := f.settled(t, simSerial, 2); d.CustomFields["smbios_uuid"] != simClaim.UUID || d.Status != "planned" {
 		t.Fatalf("NetBox after the pass: %s %+v", d.Status, d.CustomFields)
 	}
 	if !strings.Contains(h.audit.String(), `"event":"attest.install","site":"folly","node":"testbox","serial":"SIM-0001","class":"worker-g5","status":"issued"`) || strings.Contains(h.audit.String(), res.InstallCode) {

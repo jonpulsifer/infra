@@ -1,3 +1,5 @@
+# The metal dev env is gone. This file keeps the root's backend and providers, so that an
+# Atlantis plan destroys what its state still holds; delete it once that apply lands.
 locals {
   project = "homelab-ng"
   region  = "northamerica-northeast1"

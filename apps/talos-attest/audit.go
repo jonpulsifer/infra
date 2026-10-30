@@ -43,8 +43,7 @@ const (
 	auditPCR0  = "attest.pcr0"
 	// auditInstall says whether an intake pass got an install code.
 	auditInstall = "attest.install"
-	// auditIntake is a pass the open intake window granted, and the window
-	// opening or closing through the admin API.
+	// auditIntake is a pass that bound a declared stub.
 	auditIntake = "attest.intake"
 )
 

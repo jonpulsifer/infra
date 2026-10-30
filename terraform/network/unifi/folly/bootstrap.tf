@@ -30,11 +30,11 @@ locals {
   # NetBox has it failed: attestation's quarantine. A MAC RADIUS does not know
   # lands on the switch-wide fallback, bootstrap. A planned machine runs its
   # whole intake on the Kubernetes network once its export is applied, but it
-  # may have no MAC or port yet, so only planned, staged, active and failed
-  # ones with both get a user; an export without status counts as active.
+  # may have no MAC or port yet, so only planned, active and failed ones
+  # with both get a user; an export without status counts as active.
   mab_ports = {
     for node, m in local.machines : node => m.switch_port
-    if contains(["planned", "staged", "active", "failed"], try(m.status, "active")) && try(m.mac, null) != null && try(m.switch_port, null) != null
+    if contains(["planned", "active", "failed"], try(m.status, "active")) && try(m.mac, null) != null && try(m.switch_port, null) != null
   }
   quarantined = toset([for node, m in local.machines : node if try(m.status, "active") == "failed"])
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// fillPort follows a staged or active node to its rack port once it has left
+// fillPort follows an installing or active node to its rack port once it has left
 // the intake port. Each intake pass attests the port, and one younger than
 // AttestedPortTTL off the intake port cables a node whose interface has no
 // cable, unless another device's cable holds the port; the move is
@@ -15,7 +15,7 @@ import (
 // to judge.
 func (r *Reconciler) fillPort(ctx context.Context, d Device, p *bindPass) error {
 	now := r.Now()
-	if d.MAC == "" || d.NIC == 0 || (d.Status != "staged" && d.Status != "active") || !fresh(d.Attested.At, now, AttestedPortTTL) {
+	if d.MAC == "" || d.NIC == 0 || (!d.Installing() && d.Status != "active") || !fresh(d.Attested.At, now, AttestedPortTTL) {
 		return nil
 	}
 	if d.Cabled && d.ExpectedPort == 0 {

@@ -107,7 +107,7 @@ func TestPlannedMachineIsAdmittedByItsEKCertificates(t *testing.T) {
 		if len(a[simSerial]) != 2 {
 			t.Fatalf("the pass did not pin the EKs: %v", a)
 		}
-		if d := f.bySerial(simSerial); d.Status != "staged" || d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
+		if d := f.bySerial(simSerial); d.Status != "planned" || d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
 			t.Fatalf("NetBox after the pass: %s %+v", d.Status, d.CustomFields)
 		}
 	})
@@ -147,7 +147,7 @@ func TestNetBoxOutageFailsClosed(t *testing.T) {
 	}
 	// With the inventory knowing the machine, the answer is the same: NetBox has the last word.
 	f.setFailing(false, false)
-	f.add("testbox", simSerial, "staged", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatalf("after the outage: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestNetBoxOutageFailsClosed(t *testing.T) {
 func TestFailedNetBoxWriteFailsClosed(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "staged", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestFailedNetBoxWriteFailsClosed(t *testing.T) {
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("tampered boot: %+v", r.Verdict)
 	}
-	if d := f.bySerial(simSerial); d.Status != "staged" || d.CustomFields["attest_verdict"] != StatusAttested {
+	if d := f.bySerial(simSerial); d.Status != "planned" || d.CustomFields["attest_verdict"] != StatusAttested {
 		t.Fatalf("the failing write landed: %s %+v", d.Status, d.CustomFields)
 	}
 	if code, body := h.get("/verdict/" + simSerial); code != http.StatusOK || !strings.Contains(string(body), `"status":"quarantined"`) {
@@ -229,7 +229,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatal("the claim still waits after the pass")
 	}
 	d := f.settled(t, simSerial, 2)
-	if d.Name != "testbox" || d.Status != "staged" || d.CustomFields["sku"] != "TB-1" || d.CustomFields["attest_verdict"] != StatusAttested ||
+	if d.Name != "testbox" || d.Status != "planned" || d.CustomFields["sku"] != "TB-1" || d.CustomFields["attest_verdict"] != StatusAttested ||
 		d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] || d.CustomFields["ldevid_serial"] == "" || f.count() != 1 {
 		t.Fatalf("after the pass: %s %+v (%d devices)", d.Status, d.CustomFields, f.count())
 	}
@@ -261,7 +261,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Reason != reasonEKHash || r.Verdict.Verdict != protocol.VerdictRefused {
 		t.Fatalf("NetBox pin mismatch: %+v", r.Verdict)
 	}
-	if d := f.bySerial(simSerial); d.Patches != 4 || d.Status != "staged" || d.CustomFields["attest_verdict"] != StatusAttested {
+	if d := f.bySerial(simSerial); d.Patches != 4 || d.Status != "planned" || d.CustomFields["attest_verdict"] != StatusAttested {
 		t.Fatalf("a refusal wrote to NetBox: %d writes, %s %+v", d.Patches, d.Status, d.CustomFields)
 	}
 	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["ek_hash"] = h.hashes["rsa"] })
@@ -294,11 +294,11 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	if d := f.bySerial(simSerial); d.Patches != 5 || d.Status != "failed" {
 		t.Fatalf("a refusal while failed wrote to NetBox: %d writes, %s", d.Patches, d.Status)
 	}
-	f.set(simSerial, func(d *fakeDevice) { d.Status = "staged" })
+	f.set(simSerial, func(d *fakeDevice) { d.Status = "planned" })
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatalf("after the owner cleared failed: %v", err)
 	}
-	if d := f.settled(t, simSerial, 7); d.Status != "staged" || d.CustomFields["attest_verdict"] != StatusAttested {
+	if d := f.settled(t, simSerial, 7); d.Status != "planned" || d.CustomFields["attest_verdict"] != StatusAttested {
 		t.Fatalf("after the second pass: %s %+v", d.Status, d.CustomFields)
 	}
 
@@ -322,7 +322,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	if _, err := h.run("SW-PLANNED", "02:00:00:00:00:02"); err != nil {
 		t.Fatalf("planned device in NetBox: %v", err)
 	}
-	if d := f.settled(t, "SW-PLANNED", 2); d.Status != "staged" || d.CustomFields["ek_hash"] != h.hashes["rsa"] {
+	if d := f.settled(t, "SW-PLANNED", 2); d.Status != "planned" || d.CustomFields["ek_hash"] != h.hashes["rsa"] {
 		t.Fatalf("planned device after its pass: %s %+v", d.Status, d.CustomFields)
 	}
 }

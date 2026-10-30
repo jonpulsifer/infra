@@ -12,7 +12,7 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that attes
 | kube-apiserver and etcd | Store the `Hardware`, `Template`, `Workflow` and Rufio `Machine` objects. etcd listens on localhost. | spore, port 6443 |
 | Smee | Answers PXE on `bootstrap` as a proxy DHCP server, and serves each MAC's iPXE script on port 7080 | `SPORE_BOOTSTRAP_IP` |
 | Tink server and controller | Run workflows. The HookOS agent connects on port 42113. | `SPORE_BOOTSTRAP_IP` |
-| Rufio | Drives each node's BMC: Intel AMT over HTTP digest auth on port 16992, or Redfish at the device's `oob_ip` | spore |
+| Rufio | Drives each node's BMC: Intel AMT over HTTP digest auth on port 16992 | spore |
 | fleet-controller | Makes the `Hardware`, `Machine` and `Workflow` objects from NetBox | spore, port 8446 |
 
 ## Boot path

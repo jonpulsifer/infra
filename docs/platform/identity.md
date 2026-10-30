@@ -29,7 +29,7 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `staged` or `active` gets one. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy. It fails the evaluation on any line outside the export's shape.
+- The LDevID aliases follow `clusters/folly/inventory/machines.yaml`. Each machine with `tpm: "2.0"` and the status `planned` or `active` gets one. `nix/lib/inventory.nix` reads the export at evaluation, so a new machine's alias needs a spore deploy. It fails the evaluation on any line outside the export's shape.
 - Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
@@ -58,8 +58,7 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). ta
 
 | Status | Meaning | Written by |
 | --- | --- | --- |
-| `planned` | Ordered, with its serial known. It may carry `ek_hash` pins. | The owner |
-| `staged` | Intake, attestation or install in progress | talos-attest, on a verdict for a `planned` device or a new serial; fleet-controller, on a `provision` or `wipe` of an installed node; or the owner |
+| `planned` | Ordered, with its serial known, or in intake, attestation or install. It may carry `ek_hash` pins. | The owner; talos-attest, on a pass for a serial NetBox did not know; fleet-controller, on a `provision` or `wipe` of an installed node |
 | `active` | Its config is released, and it is expected Ready | fleet-controller, when the node fetches its config |
 | `failed` | Quarantined by attestation | talos-attest |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |

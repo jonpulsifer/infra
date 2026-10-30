@@ -48,13 +48,6 @@
     artifact = "googleComputeImage";
   };
 
-  # The metal dev env: a nested-virtualization GCE VM that replays folly's bootstrap VLAN
-  # (terraform/metal-dev). The image-builder workflow uploads it under the bucket's metal-dev/ prefix.
-  metal-dev = {
-    tags = [ "gcp" ];
-    artifact = "googleComputeImage";
-  };
-
   # Nothing deploys rackpi5: spore signs and serves it as forge's EEPROM HTTP boot fallback.
   rackpi5 = {
     system = "aarch64-linux";

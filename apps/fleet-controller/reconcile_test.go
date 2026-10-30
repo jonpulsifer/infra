@@ -529,9 +529,9 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 		HookOSURL: "http://10.9.0.11/hookos.efi", HookOSCmdline: "console=tty0",
 		AttestURL: "http://10.9.0.14/attest", NTPServer: "10.9.0.14",
 		Interval: time.Minute, WorkflowTTL: 7 * 24 * time.Hour,
-		BMCSecrets:  map[string]string{"amt": "bmc-amt", "redfish": "bmc-redfish"},
-		RedfishPort: 443, AMTPort: 16992,
-		Models: DefaultModels, IntakeTTL: 24 * time.Hour, IntakePort: 24,
+		BMCSecrets: map[string]string{"amt": "bmc-amt"},
+		AMTPort:    16992,
+		Models:     DefaultModels, IntakeTTL: 24 * time.Hour, IntakePort: 24,
 		NodePrefix: "10.3.0.0/26", NodeReserved: map[string]bool{"10.3.0.1": true},
 		BootstrapPrefix: netip.MustParsePrefix("10.9.0.0/24"), BootstrapReserved: map[string]bool{"10.9.0.11": true, "10.9.0.14": true},
 	}
@@ -575,12 +575,12 @@ func TestParseDeviceBMCAddress(t *testing.T) {
 	if d.BMCAddress != "10.3.0.12" || d.Address != "10.3.0.12" || d.Class != "worker-g5" || d.Status != "active" {
 		t.Fatalf("parsed %+v", d)
 	}
-	rf := device("swell", "planned", "none", map[string]any{"bmc_type": map[string]any{"value": "redfish"}})
-	rf["oob_ip"] = map[string]any{"address": "10.4.0.5/24"}
-	raw, _ = json.Marshal(rf)
+	oob := device("swell", "planned", "none", map[string]any{"bmc_type": map[string]any{"value": "amt"}})
+	oob["oob_ip"] = map[string]any{"address": "10.4.0.5/24"}
+	raw, _ = json.Marshal(oob)
 	d, _ = parseDevice(raw)
-	if d.BMCType != "redfish" || d.BMCAddress != "10.4.0.5" {
-		t.Fatalf("redfish parsed %+v", d)
+	if d.BMCType != "amt" || d.BMCAddress != "10.4.0.5" {
+		t.Fatalf("oob_ip parsed %+v", d)
 	}
 	none := device("shale", "active", "none", map[string]any{"bmc_type": "none"})
 	raw, _ = json.Marshal(none)
@@ -594,11 +594,10 @@ func TestNextStatus(t *testing.T) {
 	for _, c := range []struct {
 		action, current, want string
 	}{
-		{"provision", "active", "staged"},
-		{"provision", "failed", "staged"},
+		{"provision", "active", "planned"},
+		{"provision", "failed", "planned"},
 		{"provision", "planned", ""},
-		{"provision", "staged", ""},
-		{"wipe", "active", "staged"},
+		{"wipe", "active", "planned"},
 		{"wipe", "planned", ""},
 		{"attest", "active", ""},
 		{"attest", "planned", ""},
@@ -660,8 +659,8 @@ func TestPlannedDeviceBootsByHandAndGetsNoDerivedMachine(t *testing.T) {
 		t.Errorf("journals %v", nb.journals)
 	}
 
-	// The device leaves planned: the Machine arrives and the next run is Rufio's.
-	nb.set("status", "staged")
+	// The device passes attestation: the Machine arrives and the next run is Rufio's.
+	nb.set("attest_verdict", "attested")
 	nb.set("last_workflow", wfName)
 	kube.setState(wfName, "SUCCESS")
 	nb.set("desired_action", "attest")
@@ -670,7 +669,7 @@ func TestPlannedDeviceBootsByHandAndGetsNoDerivedMachine(t *testing.T) {
 	}
 	m := kube.get(swellMachine)
 	if m == nil {
-		t.Fatal("no Machine once the device left planned")
+		t.Fatal("no Machine once the device passed attestation")
 	}
 	if host := m["spec"].(map[string]any)["connection"].(map[string]any)["host"]; host != "10.3.0.12" {
 		t.Errorf("Machine host %v", host)
@@ -684,12 +683,12 @@ func TestPlannedDeviceBootsByHandAndGetsNoDerivedMachine(t *testing.T) {
 	}
 	boot = kube.get(wfBase + names[0])["spec"].(map[string]any)["bootOptions"].(map[string]any)
 	if boot["bootMode"] != "netboot" {
-		t.Errorf("a staged device's bootOptions %v", boot)
+		t.Errorf("an installing device's bootOptions %v", boot)
 	}
 }
 
 func TestPlannedDeviceWithOOBIPGetsAMachineButStillBootsByHand(t *testing.T) {
-	d := device("surge", "planned", "provision", map[string]any{"bmc_type": "redfish"})
+	d := device("surge", "planned", "provision", map[string]any{"bmc_type": "amt"})
 	d["oob_ip"] = map[string]any{"address": "10.4.0.6/24"}
 	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
 	kube := &fakeKube{}
@@ -781,7 +780,6 @@ func TestBootstrapMachineIgnoresWhatItCannotTrust(t *testing.T) {
 		"from the future":        {cf: attested("10.9.0.150", testNow.Add(time.Hour))},
 		"outside the prefix":     {cf: attested("10.3.0.99", testNow.Add(-time.Minute))},
 		"an anchor's address":    {cf: attested("10.9.0.14", testNow.Add(-time.Minute))},
-		"redfish":                {cf: mergeFields(attested("10.9.0.150", testNow.Add(-time.Minute)), map[string]any{"bmc_type": "redfish"})},
 		"oob_ip wins":            {cf: attested("10.9.0.150", testNow.Add(-time.Minute)), oob: "10.4.0.6"},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -821,11 +819,11 @@ func mergeFields(a, b map[string]any) map[string]any {
 	return a
 }
 
-// A staged device may still sit on the bootstrap network after its install;
-// an active one is on its Kubernetes address.
-func TestStagedDeviceUsesItsAttestedBootstrapAddress(t *testing.T) {
-	for status, want := range map[string]string{"staged": "10.9.0.150", "active": "10.3.0.12"} {
-		cf := mergeFields(attested("10.9.0.150", testNow.Add(-time.Minute)), map[string]any{"last_workflow": "provision-swell-1"})
+// An installing device may still sit on the bootstrap network after its
+// install; an active one is on its Kubernetes address.
+func TestInstallingDeviceUsesItsAttestedBootstrapAddress(t *testing.T) {
+	for status, want := range map[string]string{"planned": "10.9.0.150", "active": "10.3.0.12"} {
+		cf := mergeFields(attested("10.9.0.150", testNow.Add(-time.Minute)), map[string]any{"last_workflow": "provision-swell-1", "attest_verdict": "attested"})
 		nb := &fakeNetBox{devices: []map[string]any{device("swell", status, "attest", cf)}, ifaces: riptideIfaces()}
 		kube := &fakeKube{}
 		r, done := newTest(t, nb, kube)
@@ -881,11 +879,11 @@ func TestBootstrapMachineIsPinnedForTheRun(t *testing.T) {
 // address moves the Machine there, and one from the device's own Kubernetes
 // address, once its RADIUS user has moved it, ends the pin.
 func TestBootstrapPinTracksTheLease(t *testing.T) {
-	for status, after := range map[string]any{"staged": "10.3.0.12", "planned": nil} {
-		t.Run(status, func(t *testing.T) {
+	for verdict, after := range map[string]any{"attested": "10.3.0.12", "": nil} {
+		t.Run("verdict "+verdict, func(t *testing.T) {
 			swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
-			cf := mergeFields(attested("10.9.0.150", testNow.Add(-5*time.Minute)), map[string]any{"last_workflow": "provision-swell-1"})
-			nb := &fakeNetBox{devices: []map[string]any{device("swell", status, "provision", cf)}, ifaces: riptideIfaces()}
+			cf := mergeFields(attested("10.9.0.150", testNow.Add(-5*time.Minute)), map[string]any{"last_workflow": "provision-swell-1", "attest_verdict": verdict})
+			nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", cf)}, ifaces: riptideIfaces()}
 			kube := &fakeKube{}
 			r, done := newTest(t, nb, kube)
 			defer done()
@@ -1008,7 +1006,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	}
 	p := nb.patches[0]
 	cf := p["custom_fields"].(map[string]any)
-	if p["status"] != "staged" || cf["desired_action"] != "none" || cf["last_workflow"] != wfName {
+	if p["status"] != "planned" || cf["desired_action"] != "none" || cf["last_workflow"] != wfName {
 		t.Errorf("patch %v", p)
 	}
 	if len(nb.journals) != 1 {
@@ -1018,7 +1016,8 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	// The webhook rings on the controller's own write. NetBox now shows the reset field.
 	nb.set("desired_action", "none")
 	nb.set("last_workflow", wfName)
-	nb.set("status", "staged")
+	nb.set("status", "planned")
+	nb.set("attest_verdict", "attested")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1129,7 +1128,8 @@ func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
 
 	nb.set("desired_action", "none")
 	nb.set("last_workflow", wfName)
-	nb.set("status", "staged")
+	nb.set("status", "planned")
+	nb.set("attest_verdict", "attested")
 	for _, state := range []string{"STATE_PREPARING", "STATE_PENDING", "STATE_RUNNING", "STATE_POST"} {
 		kube.setState(wfName, state)
 		handSetAllowPXE(kube, false)
@@ -1370,5 +1370,56 @@ func TestWebhookSignature(t *testing.T) {
 	}
 	if fmt.Sprint(h.Metrics.WebhookAccepted.Load()) != "2" {
 		t.Errorf("accepted %d", h.Metrics.WebhookAccepted.Load())
+	}
+}
+
+// The control plane the Talos root bootstraps etcd on is never provisioned or
+// wiped: the run is refused once in its journal, and desired_action stays.
+func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
+	for _, action := range []string{"provision", "wipe"} {
+		t.Run(action, func(t *testing.T) {
+			nb := &fakeNetBox{devices: []map[string]any{device("optiplex", "active", action, map[string]any{"talos_class": "controlplane"})}, ifaces: riptideIfaces()}
+			kube := &fakeKube{}
+			r, done := newTest(t, nb, kube)
+			defer done()
+			r.Config.Bootstrap = "10.3.0.12"
+			for range 2 {
+				if err := r.Reconcile(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if n := kube.workflows(); len(n) != 0 {
+				t.Fatalf("workflows %v", n)
+			}
+			for _, p := range nb.patches {
+				if _, ok := p["status"]; ok {
+					t.Errorf("status written: %v", p)
+				}
+				if cf, ok := p["custom_fields"].(map[string]any); ok && cf["desired_action"] != nil {
+					t.Errorf("desired_action written: %v", p)
+				}
+			}
+			if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), action+" refused") {
+				t.Errorf("journals %v", nb.journals)
+			}
+		})
+	}
+}
+
+func TestInstallingTakesEveryAttestedVerdict(t *testing.T) {
+	for _, c := range []struct {
+		status, verdict string
+		want            bool
+	}{
+		{"planned", "attested", true},
+		{"planned", "failed-no-quarantine: policy", true},
+		{"planned", "pending-approval", false},
+		{"planned", "quarantined: ek-hash-mismatch", false},
+		{"planned", "", false},
+		{"active", "attested", false},
+	} {
+		if got := (Device{Status: c.status, Verdict: c.verdict}).Installing(); got != c.want {
+			t.Errorf("%s %q: Installing() = %v", c.status, c.verdict, got)
+		}
 	}
 }
