@@ -52,7 +52,7 @@ func passedVerdict(verdict string) bool {
 // address for it, which for AMT is the device's own declared address, from
 // the moment it has one, a planned device's included.
 func (d Device) HasBMC() bool {
-	return d.BMCType != "none" && d.BMCAddress != ""
+	return d.BMCType != "" && d.BMCType != "none" && d.BMCAddress != ""
 }
 
 // ManualBoot says whether Rufio stays out of a run: a device without a

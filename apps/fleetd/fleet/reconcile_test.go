@@ -31,16 +31,12 @@ type fakeNetBox struct {
 	pages     int
 
 	// apply makes a device PATCH change the stored device, as NetBox does.
-	apply     bool
-	failMACs  bool
-	macs      []map[string]any
-	switches  []map[string]any
-	ips       []map[string]any
-	prefixes  []map[string]any
-	available []string
-	deleted   []string
-	cables    []map[string]any
-	nextID    int
+	apply    bool
+	failMACs bool
+	macs     []map[string]any
+	switches []map[string]any
+	deleted  []string
+	nextID   int
 }
 
 func (f *fakeNetBox) id() int {
@@ -72,12 +68,6 @@ func (f *fakeNetBox) applyPatch(id string, p map[string]any) {
 			case "custom_fields":
 				for ck, cv := range v.(map[string]any) {
 					d["custom_fields"].(map[string]any)[ck] = cv
-				}
-			case "primary_ip4":
-				for _, ip := range f.ips {
-					if fmt.Sprint(ip["id"]) == fmt.Sprint(v) {
-						d["primary_ip4"] = map[string]any{"id": ip["id"], "address": ip["address"]}
-					}
 				}
 			case "status":
 				d["status"] = map[string]any{"value": v}
@@ -230,90 +220,6 @@ func (f *fakeNetBox) handler() http.Handler {
 		f.macs = append(f.macs, m)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(m)
-	})
-	mux.HandleFunc("GET /api/ipam/ip-addresses/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		results := []map[string]any{}
-		for _, ip := range f.ips {
-			if n := r.URL.Query().Get("dns_name"); n == "" || ip["dns_name"] == n {
-				results = append(results, ip)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"count": len(results), "next": nil, "results": results})
-	})
-	mux.HandleFunc("POST /api/ipam/ip-addresses/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var ip map[string]any
-		json.NewDecoder(r.Body).Decode(&ip)
-		ip["id"] = f.id()
-		f.ips = append(f.ips, ip)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(ip)
-	})
-	mux.HandleFunc("PATCH /api/ipam/ip-addresses/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var p map[string]any
-		json.NewDecoder(r.Body).Decode(&p)
-		for _, ip := range f.ips {
-			if fmt.Sprint(ip["id"]) == r.PathValue("id") {
-				for k, v := range p {
-					ip[k] = v
-				}
-				json.NewEncoder(w).Encode(ip)
-				return
-			}
-		}
-		http.NotFound(w, r)
-	})
-	mux.HandleFunc("GET /api/ipam/prefixes/", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(map[string]any{"count": len(f.prefixes), "next": nil, "results": f.prefixes})
-	})
-	mux.HandleFunc("GET /api/ipam/prefixes/{id}/available-ips/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		taken := map[string]bool{}
-		for _, ip := range f.ips {
-			taken[ip["address"].(string)] = true
-		}
-		out := []map[string]any{}
-		for _, a := range f.available {
-			if !taken[a] {
-				out = append(out, map[string]any{"family": 4, "address": a})
-			}
-		}
-		json.NewEncoder(w).Encode(out)
-	})
-	mux.HandleFunc("POST /api/dcim/cables/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var c map[string]any
-		json.NewDecoder(r.Body).Decode(&c)
-		id := f.id()
-		c["id"] = id
-		a := f.ifaceByID(int(c["a_terminations"].([]any)[0].(map[string]any)["object_id"].(float64)))
-		b := f.ifaceByID(int(c["b_terminations"].([]any)[0].(map[string]any)["object_id"].(float64)))
-		for _, pair := range [][2]map[string]any{{a, b}, {b, a}} {
-			pair[0]["cable"] = map[string]any{"id": id}
-			pair[0]["link_peers"] = []any{map[string]any{"id": pair[1]["id"], "name": pair[1]["name"], "device": pair[1]["device"]}}
-		}
-		f.cables = append(f.cables, c)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(c)
-	})
-	mux.HandleFunc("DELETE /api/dcim/cables/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		for _, i := range f.ifaces {
-			if c, ok := i["cable"].(map[string]any); ok && fmt.Sprint(c["id"]) == r.PathValue("id") {
-				i["cable"] = nil
-				i["link_peers"] = []any{}
-			}
-		}
-		f.deleted = append(f.deleted, "cable "+r.PathValue("id"))
-		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/extras/journal-entries/", func(w http.ResponseWriter, r *http.Request) {
 		var p map[string]any
@@ -529,8 +435,6 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 		Interval: time.Minute, WorkflowTTL: 7 * 24 * time.Hour,
 		BMCSecrets: map[string]string{"amt": "bmc-amt"},
 		AMTPort:    16992,
-		Models:     DefaultModels,
-		NodePrefix: "10.3.0.0/26", NodeReserved: map[string]bool{"10.3.0.1": true},
 	}
 	now := testNow
 	r := &Reconciler{

@@ -25,7 +25,6 @@ type Metrics struct {
 	RenderFailed     atomic.Int64
 	Released         atomic.Int64
 	Expired          atomic.Int64
-	Bound            atomic.Int64
 	AutoProvisioned  atomic.Int64
 
 	mu               sync.Mutex
@@ -94,7 +93,6 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_renders_failed_total", "Renders fleetd could not do.", m.RenderFailed.Load())
 	counter("fleet_install_released_total", "Devices set active after their config was served.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
-	counter("fleet_admit_bound_total", "Admissions that filled in a class, an address or a cable.", m.Bound.Load())
 	counter("fleet_admit_autoprovisioned_total", "Admissions that started a provision the owner did not ask for.", m.AutoProvisioned.Load())
 	fmt.Fprintf(w, "# HELP fleet_install_configs_pending Rendered Talos configs not served yet.\n# TYPE fleet_install_configs_pending gauge\nfleet_install_configs_pending %d\n", m.pending)
 	age := func(t time.Time) float64 {

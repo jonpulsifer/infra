@@ -154,7 +154,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	var errs []error
 	keep := map[string]bool{}
-	pass := newPassCache()
 	for _, d := range devices {
 		keep[d.Name] = true
 		if err := r.cordonQuarantined(ctx, d); err != nil {
@@ -171,7 +170,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		if err := r.device(ctx, d); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
-		if err := r.fillPort(ctx, d, pass); err != nil {
+		if err := r.checkPort(ctx, d); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
 	}

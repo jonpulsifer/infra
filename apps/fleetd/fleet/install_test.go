@@ -559,21 +559,18 @@ func TestLoadInstallerGatesControlPlanes(t *testing.T) {
 	}
 }
 
-func TestRenderRefusesATPMModelWithoutTPMVersion(t *testing.T) {
-	models := map[string]Model{"HP EliteDesk 800 G5 Desktop Mini": DefaultModels["HP EliteDesk 800 G5 Desktop Mini"]}
+func TestRenderRefusesADeviceWithoutTPMVersion(t *testing.T) {
 	for _, c := range []struct {
-		name   string
-		tpm    any
-		models map[string]Model
-		want   int
+		name string
+		tpm  any
+		want int
 	}{
-		{name: "empty tpm_version", tpm: nil, models: models, want: 409},
-		{name: "recorded tpm_version", tpm: "2.0", models: models, want: 201},
-		{name: "class without a TPM model", tpm: nil, models: map[string]Model{"x": {Class: "worker-g5"}}, want: 201},
+		{name: "empty tpm_version", tpm: nil, want: 409},
+		{name: "recorded tpm_version", tpm: "2.0", want: 201},
+		{name: "declared 1.2", tpm: "1.2", want: 201},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			it := newInstallTest(t, "planned", map[string]any{"tpm_version": c.tpm})
-			it.in.Models = c.models
 			code, reason := it.render(goodRequest())
 			if code != c.want {
 				t.Fatalf("answered %d (%s), want %d", code, reason, c.want)
