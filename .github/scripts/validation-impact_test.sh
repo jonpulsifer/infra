@@ -14,13 +14,13 @@ assert_targets() {
   fi
 }
 
-assert_targets 'both topology ConfigMaps validate Nix and each Talos root' \
+assert_targets 'both topology ConfigMaps validate Nix, each Talos root and folly NetBox' \
   $'clusters/folly/config/cluster-topology.json\nclusters/offsite/config/cluster-topology.json' \
-  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:clusters/offsite/talos'
+  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:clusters/offsite/talos\nterraform:terraform/netbox/folly'
 
 assert_targets 'every path routes when changed-files escapes the separators' \
   $'clusters/folly/config/cluster-topology.json\\\nterraform/network/unifi/offsite/k8s.tf\\\nterraform/network/tailscale/devices.tf' \
-  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:terraform/network/tailscale\nterraform:terraform/network/unifi/offsite'
+  $'nix:flake-check\nterraform:clusters/folly/talos\nterraform:terraform/netbox/folly\nterraform:terraform/network/tailscale\nterraform:terraform/network/unifi/offsite'
 
 assert_targets 'the Nix workflow validates its routing target' \
   '.github/workflows/nix-ci.yaml' \
@@ -52,7 +52,11 @@ assert_targets 'the DHCP reservation source validates its Terraform root' \
 
 assert_targets 'the lab topology ConfigMap validates Terraform and Nix consumers' \
   'clusters/folly/config/anchor-topology.json' \
-  $'nix:flake-check\nterraform:terraform/network/unifi/folly'
+  $'nix:flake-check\nterraform:terraform/netbox/folly\nterraform:terraform/network/unifi/folly'
+
+assert_targets 'the nodes file validates the NetBox root that applies it' \
+  'clusters/folly/inventory/nodes.yaml' \
+  'terraform:terraform/netbox/folly'
 
 assert_targets 'the removed Terraform JSON has no stale route' \
   'terraform/network/unifi/folly/lab.tf.json' \

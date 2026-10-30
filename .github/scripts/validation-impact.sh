@@ -51,13 +51,24 @@ targets() {
           target_set["terraform:$root"]=1
         done < <(terraform_roots)
         ;;
-      clusters/folly/config/anchor-topology.json | terraform/network/unifi/folly/clients.yaml)
+      clusters/folly/config/anchor-topology.json)
         target_set["terraform:terraform/network/unifi/folly"]=1
+        target_set["terraform:terraform/netbox/folly"]=1
+        ;;
+      terraform/network/unifi/folly/clients.yaml)
+        target_set["terraform:terraform/network/unifi/folly"]=1
+        ;;
+      clusters/folly/inventory/nodes.yaml)
+        target_set["terraform:terraform/netbox/folly"]=1
         ;;
       clusters/*/config/cluster-topology.json)
         # The site's Talos root reads this file, once that root exists.
         root="clusters/$(cut -d/ -f2 <<<"$path")/talos"
         compgen -G "$root/*.tf" >/dev/null && target_set["terraform:$root"]=1
+        # folly's NetBox root reads its node prefix and API server address.
+        if [[ "$path" == clusters/folly/* ]] && compgen -G "terraform/netbox/folly/*.tf" >/dev/null; then
+          target_set["terraform:terraform/netbox/folly"]=1
+        fi
         ;;
       *.tf | *.tftest.hcl | */.terraform.lock.hcl)
         target=$(terraform_root_for_path "$path" || true)

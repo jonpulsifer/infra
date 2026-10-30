@@ -33,8 +33,9 @@ beyond them.
   (`ATLANTIS_AUTOPLAN_FILE_LIST` in
   `clusters/offsite/apps/atlantis/helm-release.yaml`).
 - A PR that changes only a file a root reads with `file()`, such as a topology
-  JSON file, `clients.yaml`, `clusters/folly/inventory/machines.yaml` or
-  `flux-values.yaml`, gets no plan. Comment
+  JSON file, `clients.yaml`, `clusters/folly/inventory/nodes.yaml`,
+  `clusters/folly/inventory/machines.yaml` or `flux-values.yaml`, gets no
+  plan. Comment
   `atlantis plan -d <root>` on the PR.
 - `plan-hook.sh` lets only the identities in `atlantis_users` in
   `only-me.rego` plan. A comment of `atlantis apply` applies the plans and

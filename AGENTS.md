@@ -96,14 +96,16 @@ Read these values from their file. Do not copy them.
 | --- | --- |
 | Cluster addresses and CIDRs, API server endpoints, BGP ASNs, and offsite's node addresses | `clusters/<site>/config/cluster-topology.json` |
 | Anchor CIDR, the CIDR of folly's `future` network, and lab host addresses | `clusters/folly/config/anchor-topology.json` |
-| folly's node addresses, and its machines and their lifecycle: hardware, class, BMC, status, `desired_action` | NetBox at `https://capsule.<tailnet>`; `clusters/folly/inventory/machines.yaml` is its export |
+| folly's nodes: name, serial, model, class, switch port, address, BMC | `clusters/folly/inventory/nodes.yaml`, which `terraform/netbox/folly` applies into NetBox |
+| folly's node lifecycle and runtime facts: status, `desired_action`, MACs, attestation | NetBox at `https://capsule.<tailnet>`; `clusters/folly/inventory/machines.yaml` is its export |
 
 Each topology file is a Flux ConfigMap whose `data` values are all strings, so
 a list or a number is written as a string. [Topology](docs/reference/topology.md)
-says what reads each file. Terraform, Talos and the render scripts read
-NetBox's export. Never edit it by hand: change the device in NetBox, then run
+says what reads each file. Edit the nodes file by hand in a pull request.
+Terraform, Talos and the render scripts read NetBox's export. Never edit the
+export by hand: after an apply or a change in NetBox, run
 `mise run netbox:export`.
-[Hardware inventory](docs/reference/inventory.md) says what reads it.
+[Hardware inventory](docs/reference/inventory.md) says what reads each.
 
 ## Where to read more
 
