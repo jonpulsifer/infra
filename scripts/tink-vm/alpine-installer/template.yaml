@@ -1,0 +1,202 @@
+# Spike, not applied anywhere: the provision Template for a class whose OS is Alpine. It differs
+# from clusters/folly/tinkerbell/template.yaml in two actions. install runs INSTALLER_IMAGE, an
+# image that is the OS (./Dockerfile): its entrypoint writes the Alpine root, the signed UKI and the
+# node's payload to the disk and adds an Alpine boot entry. next-boot prefers that entry. Where the
+# Talos install reads an install code the attest step wrote, this one reads a payload tarball the
+# attest step would fetch with the node's LDevID (decision 1); in the spike it is put there by hand.
+# set-clock, attest, wipe-disk and reboot are the provision Template's, unchanged.
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Template
+metadata:
+  name: provision-alpine
+spec:
+  data: |
+    version: "0.1"
+    name: provision-alpine
+    global_timeout: 1800
+    tasks:
+      - name: provision
+        worker: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+        volumes:
+          - /dev:/dev
+        environment:
+          DISK: "{{ index .Hardware.Disks 0 }}"
+          MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+          ATTEST: "{{ .attest }}"
+          WIPE: "{{ .wipe }}"
+          RETIRE: "{{ .retire }}"
+          # Tinkerbell renders with missingkey=error, so a Workflow from a controller that sets no
+          # install keys reads them as no install.
+          INSTALL: '{{ or (index . "install") "false" }}'
+          INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          ATTEST_URL: "{{ .attest_url }}"
+          NTP_SERVER: "{{ .ntp_server }}"
+          PAYLOAD_FILE: /tmp/fleet/payload.tar.gz
+        actions:
+          # The attest service checks its certificate's dates against the machine's clock, and a
+          # machine off the shelf has none worth trusting. The anchors' chrony answers at the boot
+          # VIP; the RTC keeps the result for the boot that follows.
+          - name: set-clock
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 120
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "set-clock: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "set-clock: $*" >"$t" 2>/dev/null || true; done; }
+                if ! command -v ntpd >/dev/null; then
+                  log "no ntpd in the image; the clock stays $(date -u)"
+                  exit 0
+                fi
+                if timeout 30 ntpd -q -n -p "$NTP_SERVER"; then
+                  hwclock --systohc --utc || log "the RTC refused the write"
+                  log "set from $NTP_SERVER: $(date -u)"
+                else
+                  log "$NTP_SERVER did not answer; the clock stays $(date -u)"
+                fi
+          # At the end of a full intake talos-attest answers the install code, which tink-attest
+          # writes to /tmp/fleet/install_code for the install action.
+          - name: attest
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:69ec1244430e5a3dd21674a7c80d174a2dd21aca7ffa979058797d48bedab4e1
+            timeout: 600
+            volumes:
+              - /tmp/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                if [ "$ATTEST" != true ]; then
+                  for t in /dev/tty0 /dev/ttyS0; do echo "attest: skipped for this run" >"$t" 2>/dev/null || true; done
+                  exit 0
+                fi
+                mountpoint -q /sys/kernel/security || mount -t securityfs securityfs /sys/kernel/security
+                exec /usr/local/bin/tink-attest
+          - name: wipe-disk
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 600
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$WIPE" != true ]; then
+                  log "nothing wiped this run"
+                  exit 0
+                fi
+                [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
+                log "wiping every partition of $DISK"
+                for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                  wipefs --all --force "$p"
+                  dd if=/dev/zero of="$p" bs=1M count=16 conv=fsync 2>/dev/null || true
+                done
+                wipefs --all --force "$DISK"
+                sgdisk --zap-all "$DISK"
+                dd if=/dev/zero of="$DISK" bs=1M count=1 conv=fsync
+                dd if=/dev/zero of="$DISK" bs=512 count=2048 conv=fsync seek=$(( $(blockdev --getsz "$DISK") - 2048 ))
+                blockdev --rereadpt "$DISK" || true
+                if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
+                log "wiped $DISK"
+          # The installer image holds the root and the signed UKI; it has no shell work to do here
+          # beyond the install, so its entrypoint is the whole install. Its output goes to the
+          # console too, since Tinkerbell keeps no action log.
+          - name: install
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 900
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+              - /tmp/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "install: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "install: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$INSTALL" != true ]; then
+                  log "nothing installed this run"
+                  exit 0
+                fi
+                if [ ! -s "$PAYLOAD_FILE" ]; then
+                  log "no payload: the attest step fetched none"
+                  exit 1
+                fi
+                log "installing $INSTALLER_IMAGE to $DISK"
+                if docker run --rm --privileged --network none \
+                  --volume /dev:/dev \
+                  --volume /tmp/fleet:/tmp/fleet:ro \
+                  --mount type=volume,dst=/sys/firmware/efi/efivars,volume-driver=local,volume-opt=type=efivarfs,volume-opt=device=efivarfs,volume-nocopy=true \
+                  --env DISK="$DISK" --env PAYLOAD="$PAYLOAD_FILE" \
+                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1; then
+                  tail -n 5 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                else
+                  tail -n 25 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
+                  log "the installer failed; the lines above are its last output"
+                  exit 1
+                fi
+          # After an install the disk boots, preferring the installer's Alpine entry; after a wipe
+          # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
+          # each certain. A run that only attests leaves the firmware's boot order alone.
+          - name: next-boot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 120
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
+                # BootNext is a convenience: with netboot off for the node, a refused PXE falls
+                # through to the installed disk anyway, so an EFI failure here is logged, not fatal.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  log "efivarfs did not mount ($err); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if ! entries=$(efibootmgr -v 2>&1); then
+                  log "efibootmgr failed ($entries); the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ]; then
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Alpine.*/\1/p' | head -n 1)
+                  [ -n "$n" ] || n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
+                  what="the installed disk"
+                elif [ "$WIPE" = true ]; then
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  what="IPv4 network"
+                else
+                  log "nothing installed or wiped; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ -z "$n" ]; then
+                  log "no entry for $what; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if err=$(efibootmgr -q -n "$n" 2>&1); then
+                  log "Boot$n ($what) is the next boot"
+                else
+                  log "BootNext refused ($err); the firmware's boot order decides the next boot"
+                fi
+          # A retired node powers off instead, and stays off until somebody turns it on.
+          - name: reboot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
+            timeout: 120
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                key=b; what="rebooting"
+                if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
+                # A detached container reboots or powers off the node after this action reports success.
+                docker run -d --privileged --name provision-reboot \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f \
+                  sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
+                for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done
