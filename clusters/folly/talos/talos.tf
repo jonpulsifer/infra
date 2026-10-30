@@ -50,7 +50,9 @@ locals {
   # the inventory export's class key. ephemeral caps EPHEMERAL so that the
   # data user volume takes the rest of the one disk. Every class boots the
   # signed UKI; the generation changes when a class is reinstalled from new
-  # media. fleet-controller renders a node of a class from the
+  # media, or when every node's recorded install must be re-created without
+  # rebooting a node already on the version: Create upgrades only a node
+  # whose running version differs. fleet-controller renders a node of a class from the
   # class_inputs output below.
   classes = {
     controlplane = {
@@ -66,7 +68,7 @@ locals {
       ephemeral = "128GiB"
     }
   }
-  install_generation = "secureboot-1"
+  install_generation = "secureboot-2"
 
   # The nodes are the export's active, staged and failed machines: a failed
   # one is quarantined, not gone, and stays managed. A staged worker is
