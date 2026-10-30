@@ -62,6 +62,7 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [netbox_device.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
 | [netbox_device.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
 | [netbox_device_interface.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
+| [netbox_device_interface.lab_wifi](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
 | [netbox_device_interface.oldschool_node_port](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
 | [netbox_device_primary_ip.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_primary_ip) | resource |
 | [netbox_device_role.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_role) | resource |
@@ -70,8 +71,10 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [netbox_event_rule.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/event_rule) | resource |
 | [netbox_interface_template.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/interface_template) | resource |
 | [netbox_ip_address.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
+| [netbox_ip_address.lab_wifi](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
 | [netbox_ip_address.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
 | [netbox_mac_address.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/mac_address) | resource |
+| [netbox_mac_address.lab_wifi](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/mac_address) | resource |
 | [netbox_manufacturer.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/manufacturer) | resource |
 | [netbox_permission.fleetd_add](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
 | [netbox_permission.fleetd_change](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |

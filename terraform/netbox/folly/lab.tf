@@ -150,5 +150,29 @@ resource "netbox_ip_address" "lab" {
 resource "netbox_device_primary_ip" "lab" {
   for_each      = local.lab_addresses
   device_id     = netbox_device.lab[each.key].id
-  ip_address_id = netbox_ip_address.lab[each.key].id
+  ip_address_id = each.key == "homepi4" ? netbox_ip_address.lab_wifi[each.key].id : netbox_ip_address.lab[each.key].id
+}
+
+resource "netbox_device_interface" "lab_wifi" {
+  for_each  = toset(["cloudpi4", "homepi4"])
+  device_id = netbox_device.lab[each.key].id
+  name      = "wlan0"
+  type      = "ieee802.11ac"
+  tags      = [local.managed_tag]
+}
+
+resource "netbox_mac_address" "lab_wifi" {
+  for_each            = netbox_device_interface.lab_wifi
+  mac_address         = local.lab_clients.folly.rpis["${each.key}-wifi"].mac
+  device_interface_id = each.value.id
+  tags                = [local.managed_tag]
+}
+
+resource "netbox_ip_address" "lab_wifi" {
+  for_each     = netbox_device_interface.lab_wifi
+  ip_address   = "${cidrhost(local.lab_networks["folly-anchor"].prefix, local.lab_clients.folly.rpis["${each.key}-wifi"].ip)}/${split("/", local.lab_networks["folly-anchor"].prefix)[1]}"
+  status       = "active"
+  object_type  = "dcim.interface"
+  interface_id = each.value.id
+  tags         = [local.managed_tag]
 }
