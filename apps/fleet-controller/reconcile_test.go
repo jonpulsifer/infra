@@ -779,6 +779,35 @@ func TestQuarantinedNodeIsCordoned(t *testing.T) {
 	}
 }
 
+// A control plane is never cordoned, even with a quarantined verdict: by
+// the controlplane class, or by a class the class inputs render as one.
+func TestControlPlaneIsNeverCordoned(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{
+		device("optiplex", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane"}),
+		mergeID(device("bigcp", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane-big"}), 8),
+	}, ifaces: riptideIfaces()}
+	r, done := newTest(t, nb, &fakeKube{})
+	defer done()
+	r.Config.ControlPlaneClasses = map[string]bool{"controlplane-big": true}
+	fc := &fakeCluster{}
+	r.Cluster = fc.server(t)
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(fc.patches) != 0 {
+		t.Fatalf("a control plane was cordoned: %v", fc.patches)
+	}
+	r.Cluster = nil
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range nb.journals {
+		if strings.Contains(j["comments"].(string), "cordon") {
+			t.Errorf("a control plane's quarantine was journaled for a cordon: %v", j)
+		}
+	}
+}
+
 func TestQuarantineWithoutClusterCredentialsIsJournaled(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr"})}, ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})

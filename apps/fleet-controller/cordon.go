@@ -86,9 +86,11 @@ func (c *Cluster) Cordon(ctx context.Context, node string) error {
 // every pass while the verdict stands, so an uncordon by hand before the
 // owner clears the verdict does not hold. The controller never uncordons: the
 // owner clears the verdict, then uncordons the node. A device the cluster
-// has no node for is left alone.
+// has no node for is left alone. A control plane is never cordoned, whatever
+// its verdict says: it serves the cluster's API, and talos-attest only alerts
+// on one.
 func (r *Reconciler) cordonQuarantined(ctx context.Context, d Device) error {
-	if !strings.HasPrefix(d.Verdict, QuarantinedVerdict) {
+	if !strings.HasPrefix(d.Verdict, QuarantinedVerdict) || r.Config.IsControlPlane(d.Class) {
 		return nil
 	}
 	if r.Cluster == nil {
