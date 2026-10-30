@@ -526,34 +526,10 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   }
 }
 
-# The bootstrap VLAN reaches the anchors on its own subnet, which the switch carries and
-# the gateway never filters, the gateway's DHCP, and
-# the internet, where a Talos install pulls its installer image. Nothing else on
-# the LAN or in the cluster's VIP range. The controller appends each policy to its
-# zone pair, so each block depends on its allow to be created after it.
-resource "unifi_firewall_policy" "bootstrap_dhcp" {
-  name                 = "Allow Bootstrap DHCP"
-  action               = "ALLOW"
-  protocol             = "udp"
-  ip_version           = "IPV4"
-  create_allow_respond = false
-  enabled              = true
-  logging              = false
-
-  source = {
-    matching_target    = "ANY"
-    port_matching_type = "ANY"
-    zone_id            = unifi_firewall_zone.bootstrap.id
-  }
-
-  destination = {
-    matching_target    = "ANY"
-    port               = "67"
-    port_matching_type = "SPECIFIC"
-    zone_id            = data.unifi_firewall_zone.gateway.id
-  }
-}
-
+# The bootstrap network holds only the anchors' boot addresses and the boot VIP.
+# From there it reaches the anchors on its own subnet, which the switch carries
+# and the gateway never filters, and the internet; nothing else on the LAN or
+# in the cluster's VIP range.
 resource "unifi_firewall_policy" "bootstrap_block_gateway" {
   name                 = "Block Bootstrap to Gateway"
   action               = "BLOCK"
@@ -574,8 +550,6 @@ resource "unifi_firewall_policy" "bootstrap_block_gateway" {
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.gateway.id
   }
-
-  depends_on = [unifi_firewall_policy.bootstrap_dhcp]
 }
 
 # Every other cluster VIP. The rest of External, the internet, stays open by the
@@ -600,35 +574,6 @@ resource "unifi_firewall_policy" "bootstrap_block_lb" {
     ips                = [local.lb_range]
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.external.id
-  }
-
-  depends_on = [unifi_firewall_policy.bootstrap_dhcp]
-}
-
-# Intel AMT shares a node's NIC and MAC, so it follows the node onto the bootstrap
-# VLAN during a reinstall. The owner's MeshCommander on the future network keeps
-# the node's console and power there; nothing else reaches Bootstrap.
-resource "unifi_firewall_policy" "future_to_bootstrap_amt" {
-  name                 = "Allow future to Bootstrap AMT"
-  action               = "ALLOW"
-  protocol             = "tcp"
-  ip_version           = "IPV4"
-  create_allow_respond = true
-  enabled              = true
-  logging              = false
-
-  source = {
-    matching_target    = "NETWORK"
-    network_ids        = [unifi_network.future.id]
-    port_matching_type = "ANY"
-    zone_id            = data.unifi_firewall_zone.internal.id
-  }
-
-  destination = {
-    matching_target    = "ANY"
-    port               = "16992-16995"
-    port_matching_type = "SPECIFIC"
-    zone_id            = unifi_firewall_zone.bootstrap.id
   }
 }
 

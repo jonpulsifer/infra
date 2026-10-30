@@ -58,10 +58,12 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | <a name="input_extensions"></a> [extensions](#input\_extensions) | Official Image Factory system extensions baked into the schematic. | `list(string)` | n/a | yes |
 | <a name="input_extra_kernel_args"></a> [extra\_kernel\_args](#input\_extra\_kernel\_args) | Kernel arguments baked into the schematic (UKI installs cannot change them any other way). | `list(string)` | `[]` | no |
 | <a name="input_kubernetes_version"></a> [kubernetes\_version](#input\_kubernetes\_version) | Kubernetes version, e.g. v1.36.3. Changing it runs upgrade-k8s through talos\_cluster. | `string` | n/a | yes |
+| <a name="input_nameservers"></a> [nameservers](#input\_nameservers) | The resolvers of a node with a static address. | `list(string)` | `[]` | no |
 | <a name="input_nodes"></a> [nodes](#input\_nodes) | Every machine in the cluster, keyed by hostname. | <pre>map(object({<br/>    address     = string<br/>    role        = string # controlplane | worker<br/>    install     = string # CEL disk selector, e.g. disk.dev_path == "/dev/sda"<br/>    reboot_mode = optional(string, "DEFAULT")<br/>    patches     = optional(list(string), [])<br/>    labels      = optional(map(string), {})<br/>    taints      = optional(map(string), {}) # key => "value:Effect"<br/>    # Replaces the Image Factory installer. Tag it with talos_version and no<br/>    # digest, or Create upgrades the node.<br/>    installer_image = optional(string)<br/>    # A change replaces the node's talos_machine (see nodes.tf).<br/>    install_generation = optional(string)<br/>  }))</pre> | n/a | yes |
 | <a name="input_op_vault"></a> [op\_vault](#input\_op\_vault) | 1Password vault UUID that holds the secrets bundle. The Atlantis service account must read it. | `string` | n/a | yes |
 | <a name="input_secrets_item_uuid"></a> [secrets\_item\_uuid](#input\_secrets\_item\_uuid) | UUID of the 1Password Secure Note whose note is this cluster's secrets.yaml (talosctl gen secrets shape, with the imported service-account signing key). | `string` | n/a | yes |
 | <a name="input_site"></a> [site](#input\_site) | Cluster site (folly or offsite). Selects the topology ConfigMap. | `string` | n/a | yes |
+| <a name="input_static_addresses"></a> [static\_addresses](#input\_static\_addresses) | Configure every node's address statically: its address in K8S\_NODE\_CIDR's prefix on its one physical NIC, the default route through ROUTER\_IP, and the resolvers below, with no DHCP. Off, Talos runs its default DHCP on every physical link. | `bool` | `false` | no |
 | <a name="input_talos_contract"></a> [talos\_contract](#input\_talos\_contract) | Machine-config version contract passed to the generator. Pinned at the version the cluster was created with; never bumped on an OS upgrade. | `string` | `"v1.14"` | no |
 | <a name="input_talos_version"></a> [talos\_version](#input\_talos\_version) | Installer tag, e.g. v1.14.2. Changing it upgrades every node (a reboot each). | `string` | n/a | yes |
 | <a name="input_tpm_nodes"></a> [tpm\_nodes](#input\_tpm\_nodes) | Nodes labelled lolwtf.ca/tpm=true. A fresh install of one makes STATE and EPHEMERAL LUKS2 volumes sealed to the TPM, and kexec is off on them. | `set(string)` | `[]` | no |
@@ -71,10 +73,10 @@ tofu -chdir=terraform/modules/talos-cluster validate
 
 | Name | Description |
 | ---- | ----------- |
-| <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Image Factory installer of every node that sets no installer\_image. |
 | <a name="output_install_inputs"></a> [install\_inputs](#output\_install\_inputs) | Per node: machine\_type, cluster\_name, cluster\_endpoint, talos\_contract, kubernetes\_version and the ordered config\_patches of a fresh install. |
-| <a name="output_render_inputs"></a> [render\_inputs](#output\_render\_inputs) | cluster\_name, cluster\_endpoint, talos\_contract, kubernetes\_version, dns\_zone, the cluster and control-plane patch lists in order, the TPM node patches of a fresh install, and the TPM node label. |
+| <a name="output_installer_image"></a> [installer\_image](#output\_installer\_image) | Image Factory installer of every node that sets no installer\_image. |
 | <a name="output_node_installer_images"></a> [node\_installer\_images](#output\_node\_installer\_images) | Installer image each node runs or is upgraded to. |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | Node name to address, as applied. |
+| <a name="output_render_inputs"></a> [render\_inputs](#output\_render\_inputs) | cluster\_name, cluster\_endpoint, talos\_contract, kubernetes\_version, dns\_zone, the cluster and control-plane patch lists in order, the TPM node patches of a fresh install, the TPM node label, and the link, prefix length and gateway of a static address (null without static\_addresses). |
 | <a name="output_schematic_id"></a> [schematic\_id](#output\_schematic\_id) | Image Factory schematic the nodes are installed from. The install media must use the same ID. |
 <!-- END_TF_DOCS -->
