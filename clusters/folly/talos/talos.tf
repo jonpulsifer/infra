@@ -40,7 +40,7 @@ locals {
   machines       = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version = "v1.14.4"
+  talos_version = "v1.14.5"
 
   # Signed with the lab's Secure Boot keys, with the extensions below. The
   # image build publishes one per Talos version, tagged with the version.
