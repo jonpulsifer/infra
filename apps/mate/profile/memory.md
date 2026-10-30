@@ -6,3 +6,7 @@ What Rowbutt has learned, one fact a line in the present tense, with the date it
 
 - 2026-10-13: A report reads exception-first: what needs the owner, then what was fixed, then what could not be checked; a healthy day is one line.
 - 2026-10-25: The owner prefers alert investigation replies in two or three short lines covering status, cause and action, with more detail only on request.
+
+## Lab facts
+
+- 2026-10-30: The registrar publishes the matching DNSSEC DS record for `kthx.dev`; `terraform/network/cloudflare/kthx.dev.tf` declares the Cloudflare key and DS output.

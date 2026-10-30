@@ -27,7 +27,11 @@ beyond them.
     `tofu -chdir=<root> init -backend=false && tofu -chdir=<root> validate`.
 - A root is a directory whose `.tf` files declare a `backend` block
   (`.github/scripts/validation-impact.sh terraform-roots` lists them). Anything
-  else is a module.
+  else is a module. Provider upgrades also affect modules with their own
+  `required_providers` constraints and `.terraform.lock.hcl` files. Check those
+  directories, update incompatible constraints, and run
+  `tofu -chdir=<dir> init -backend=false -upgrade` before validation. Commit
+  the resulting lockfile changes with the upgrade.
 - Atlantis autoplans a root when a `*.tf*` file in it or in a module it uses
   changes. A `.conf` or `.hujson` change under `terraform/` also triggers it
   (`ATLANTIS_AUTOPLAN_FILE_LIST` in
