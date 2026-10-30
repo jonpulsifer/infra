@@ -19,7 +19,12 @@
 #
 # For a machine NetBox does not know, /intake makes an attest-only Workflow. The controller then
 # binds the attested device to a stub, the model map's class and a free address in the node
-# prefix, cables it to the switch port its intake pass attested, and provisions it.
+# prefix outside its DHCP pool, cables it to the switch port its intake pass attested, and
+# provisions it.
+#
+# With fleet-controller/folly-cordon-token sealed, it cordons a node talos-attest quarantined
+# through the cluster's API, as clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's
+# account, which may patch nodes only.
 {
   config,
   lib,
@@ -36,9 +41,10 @@ let
   # sops leaves key names in the clear, so evaluation can see which secrets the file holds.
   sealed = key: lib.hasInfix "\nfleet-controller:\n" secrets && lib.hasInfix "\n    ${key}:" secrets;
   webhook = sealed "webhook-secret";
-  # The prep station's port, `provisioning` in the site's quarantine_ports.
-  bootstrapTf = builtins.readFile ../../terraform/network/unifi/${cfg.site}/bootstrap.tf;
-  prepPort = builtins.match ".*quarantine_ports = [{][^}]*provisioning = ([0-9]+)[^}]*[}].*" bootstrapTf;
+  # The ServiceAccount token that cordons a quarantined node; the cluster's API and its pinned CA
+  # come from ../lib/networks.nix.
+  cordon = sealed "folly-cordon-token";
+  cluster = (import ../lib/networks.nix).${cfg.site};
   # An intake's address comes from the node prefix. Only these keys are read, so a new node, which
   # changes the inventory export, leaves the service's environment alone.
   topology = (lib.importJSON ../../clusters/${cfg.site}/config/cluster-topology.json).data;
@@ -129,16 +135,6 @@ in
       default = true;
       description = "Set desired_action to provision on a bound intake that has a class and an address. Off, a bound intake waits for the owner.";
     };
-    intakePort = lib.mkOption {
-      type = lib.types.port;
-      default =
-        if prepPort == null then
-          throw "terraform/network/unifi/${cfg.site}/bootstrap.tf names no provisioning port in quarantine_ports"
-        else
-          lib.toInt (builtins.head prepPort);
-      defaultText = "`provisioning` in quarantine_ports of terraform/network/unifi/<site>/bootstrap.tf";
-      description = "The prep station's switch port, where every machine intakes. An intake pass that attests it says nothing of the machine's rack port: no expected_port check and no cable follow from it.";
-    };
     modelMap = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
@@ -224,6 +220,10 @@ in
     // lib.optionalAttrs webhook {
       # The event rule's secret in NetBox; without it the controller only polls.
       "fleet-controller/webhook-secret" = { };
+    }
+    // lib.optionalAttrs cordon {
+      # The cordon account's token; without it a quarantine is journaled for the owner to cordon.
+      "fleet-controller/folly-cordon-token" = { };
     }
     // lib.optionalAttrs workerSecrets {
       "talos-enroll/worker-secrets" = { };
@@ -327,28 +327,28 @@ in
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
         FLEET_MODEL_MAP = builtins.toJSON cfg.modelMap;
-        FLEET_INTAKE_PORT = toString cfg.intakePort;
         # Every anchor's nginx proxies /intake from its Anchor address and names the machine in
         # X-Real-IP (./talos-boot.nix); no other host on the Anchor network may.
         FLEET_PROXY_ADDRESSES = lib.concatStringsSep "," (
           map (anchor: lab.hosts.${anchor}) (lib.attrNames lab.bootstrap.hosts)
         );
-        # An attested AMT address must be a machine's on the bootstrap network: inside its prefix,
-        # and neither an anchor's address there nor the boot VIP.
-        FLEET_BOOTSTRAP_CIDR = lab.bootstrap.cidr;
-        FLEET_BOOTSTRAP_RESERVED = lib.concatStringsSep "," (
-          lib.attrValues lab.bootstrap.hosts ++ [ lab.bootstrap.vip ]
-        );
         FLEET_NODE_PREFIX = topology.K8S_NODE_CIDR;
-        # The gateway and the API server's address are in the prefix and never go to a new node.
+        # The gateway and the API server's address are in the prefix and never go to a new node,
+        # and the network's DHCP pool leases to netbooting machines.
         FLEET_NODE_RESERVED = "${topology.ROUTER_IP},${topology.API_SERVER_IP}";
         # The Talos root bootstraps etcd on the control plane at the API server's address: no
         # provision or wipe runs there, and it never installs from here.
         FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
+        FLEET_NODE_DHCP_PREFIX = topology.K8S_DHCP_CIDR;
         # talosctl writes its patch files and nothing else here.
         HOME = "/tmp";
       }
       // lib.optionalAttrs webhook { FLEET_WEBHOOK_SECRET_FILE = "%d/webhook-secret"; }
+      // lib.optionalAttrs cordon {
+        FLEET_CLUSTER_SERVER = cluster.apiServer;
+        FLEET_CLUSTER_CA_FILE = "${cluster.apiServerCA}";
+        FLEET_CLUSTER_TOKEN_FILE = "%d/folly-cordon-token";
+      }
       // lib.optionalAttrs workerSecrets {
         # Written by `mise run render-class-inputs` from the Talos root.
         FLEET_CLASS_INPUTS = "${../../clusters/${cfg.site}/fleet/class-inputs.json}";
@@ -368,6 +368,9 @@ in
         ++ map (name: "${name}:${config.sops.secrets."tinkerbell/${name}".path}") kubeCredentials
         ++ lib.optional webhook "webhook-secret:${
           config.sops.secrets."fleet-controller/webhook-secret".path
+        }"
+        ++ lib.optional cordon "folly-cordon-token:${
+          config.sops.secrets."fleet-controller/folly-cordon-token".path
         }"
         ++ [ "attest-secret:${config.sops.secrets."fleet-controller/attest-secret".path}" ]
         ++ lib.optional workerSecrets "worker-secrets:${
