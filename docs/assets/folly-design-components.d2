@@ -5,8 +5,8 @@ control: "Management on spore\nfleetd + YubiKey\nBoot services + Tinkerbell"
 node: "Node boundary\nFirmware + TPM\nHookOS then Talos"
 identity: "Identity boundary\nSPIRE on spore\nAgent and workload on node"
 resource: "Resource boundary\nGCP IAM or\nservice policy"
-facts -> control: desired state
-control -> node: authorized install
-node -> identity: node proof
-identity -> resource: workload credential
+facts -> control: desired state {style.font-size: 24}
+control -> node: authorized install {style.font-size: 24}
+node -> identity: node proof {style.font-size: 24}
+identity -> resource: workload credential {style.font-size: 24}
 **.style.font-size: 24

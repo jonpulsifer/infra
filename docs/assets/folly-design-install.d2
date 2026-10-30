@@ -4,12 +4,12 @@ node: HookOS
 fleet: fleetd
 talos: "Installed Talos"
 netbox: NetBox
-fleet -> node: "1. TPM-wrapped code after admission"
-node -> node: "2. Tink action checks pass and code"
-node -> node: "3. Wipe; install; write code to META"
-node -> talos: "4. Reboot from disk"
-talos -> fleet: "5. HTTPS GET: UUID and bearer code"
-fleet -> talos: "6. Complete config response"
-fleet -> fleet: "7. Burn code"
-fleet -> netbox: "8. Request active; retry failed write"
+fleet -> node: "1. TPM-wrapped code after admission" {style.font-size: 24}
+node -> node: "2. Tink action checks pass and code" {style.font-size: 24}
+node -> node: "3. Wipe; install; write code to META" {style.font-size: 24}
+node -> talos: "4. Reboot from disk" {style.font-size: 24}
+talos -> fleet: "5. HTTPS GET: UUID and bearer code" {style.font-size: 24}
+fleet -> talos: "6. Complete config response" {style.font-size: 24}
+fleet -> fleet: "7. Burn code" {style.font-size: 24}
+fleet -> netbox: "8. Request active; retry failed write" {style.font-size: 24}
 **.style.font-size: 24
