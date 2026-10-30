@@ -66,6 +66,21 @@ let
   # until the node renews it from spore's.
   bundle = certs + "/${site}-devid-ca.pem";
 
+  tftpDir = "/var/lib/tftpboot";
+
+  # The netboot-not-allowed directories the old tmpfiles rules made belong to root; fleetd takes
+  # them over, so it can repoint and remove them. This runs as root in a directory fleetd can
+  # write, so it touches only root's MAC directories and their link, and never follows a link.
+  adoptTftpLinks = pkgs.writeShellScript "fleetd-adopt-tftp-links" ''
+    mac='[0-9a-f]{2}(:[0-9a-f]{2}){5}'
+    ${pkgs.findutils}/bin/find ${tftpDir} -mindepth 1 -maxdepth 1 -type d -user root \
+      -regextype posix-extended -regex ".*/$mac" \
+      -exec ${pkgs.coreutils}/bin/chown -h fleetd:fleetd {} +
+    ${pkgs.findutils}/bin/find ${tftpDir} -mindepth 2 -maxdepth 2 -type l -user root \
+      -regextype posix-extended -regex ".*/$mac/netboot-not-allowed" \
+      -exec ${pkgs.coreutils}/bin/chown -h fleetd:fleetd {} +
+  '';
+
   devidPort = 8444;
   adminPort = 8445;
   runDir = "/run/fleetd";
@@ -244,6 +259,11 @@ in
         FLEET_HOOKOS_URL = "http://${bootstrapIp}/talos/${site}/hookos-amd64-secureboot-uki.efi";
         FLEET_HOOKOS_CMDLINE = hookosCmdline;
         FLEET_WEBHOOK_ADDR = ":${toString cfg.webhookPort}";
+        # Some firmware takes Smee's offer over the network's DHCP, and Smee names
+        # /<mac>/netboot-not-allowed while allowPXE is off (./tinkerbell.nix). fleetd links that
+        # path to the signed iPXE under dnsmasq's TFTP root for each MAC NetBox holds.
+        FLEET_TFTP_DIR = tftpDir;
+        FLEET_TFTP_LINK_TARGET = "${tftpDir}/talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
         FLEET_WORKFLOW_TTL = "168h";
         FLEET_CONFIG_TTL = "2h";
@@ -276,7 +296,10 @@ in
         FLEET_CONTROLPLANE_CONFIG_TTL = "30m";
       };
       serviceConfig = {
-        ExecStartPre = "+${migrate}";
+        ExecStartPre = [
+          "+${migrate}"
+          "+${adoptTftpLinks}"
+        ];
         ExecStart = lib.getExe fleetd;
         LoadCredential = [
           "netbox-token:${config.sops.secrets."fleetd/netbox-token".path}"
@@ -294,7 +317,10 @@ in
         RuntimeDirectory = "fleetd";
         RuntimeDirectoryMode = "0700";
         RuntimeDirectoryPreserve = "yes";
-        ReadWritePaths = [ metricsDir ];
+        ReadWritePaths = [
+          metricsDir
+          tftpDir
+        ];
         UMask = "0027";
         Restart = "always";
         RestartSec = 5;

@@ -34,7 +34,7 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | spore's SPIRE | each node with `tpm` `2.0`, for its LDevID alias | `nix/lib/inventory.nix`, `nix/hosts/spore.nix` |
 | [fleetd](../apps/fleetd.md) | Nothing from the file; it reads each declared fact from the node's NetBox device | `apps/fleetd/fleet/netbox.go` |
 
-The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
+The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The MACs stay in NetBox: fleetd on spore links each one's `netboot-not-allowed` TFTP path from them on each reconcile pass.
 
 A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/netbox/folly`, `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request, and deploy spore for a new TPM 2.0 node's alias.
 

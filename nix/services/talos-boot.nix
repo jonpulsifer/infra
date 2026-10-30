@@ -226,7 +226,11 @@ in
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0755 root root -"
     "d ${siteDir} 0755 root root -"
-    "d /var/lib/tftpboot 0755 root root -"
+    # fleetd makes the <mac>/netboot-not-allowed links here (./fleetd.nix); the sticky bit keeps it
+    # to its own.
+    "d /var/lib/tftpboot ${
+      if config.homelab.fleetd.enable then "1775 root fleetd" else "0755 root root"
+    } -"
     "d /var/lib/tftpboot/talos 0755 root root -"
     "d ${tftpDir} 0755 root root -"
     "L+ ${tftpDir}/${ipxe} - - - - ${siteDir}/current/${ipxe}"

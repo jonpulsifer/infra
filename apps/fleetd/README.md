@@ -63,6 +63,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
 | `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker that never ran a Workflow starts its provision |
+| `FLEET_TFTP_DIR`, `FLEET_TFTP_LINK_TARGET` | none | The TFTP root and the file each `<mac>/netboot-not-allowed` link points at. Each pass makes the link for every MAC NetBox holds and removes a MAC directory that holds only a stale link; without them fleetd makes none |
 
 ## Device flow
 
