@@ -70,6 +70,9 @@ type Config struct {
 	// Installs maps each class the controller renders to its Talos
 	// installer image, from the class inputs.
 	Installs map[string]string
+	// Bootstrap is the address of the control plane the Talos root
+	// bootstraps etcd on, set with the control-plane renders.
+	Bootstrap string
 	// AutoProvision lets a bound intake with a class and an address start
 	// its provision without the owner.
 	AutoProvision bool
@@ -286,6 +289,11 @@ func run() error {
 // all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL;
 // without them, or without FLEET_ATTEST_SECRET_FILE, /render answers 503.
 // A Workflow installs only with the renderer and FLEET_INSTALLS=true.
+//
+// FLEET_CONTROLPLANE_BUNDLE, the full secrets bundle, lets a control-plane
+// class render and install too. It needs the renderer and
+// FLEET_BOOTSTRAP_ADDRESS, the control plane the Talos root bootstraps,
+// which never installs from here.
 func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*Installer, error) {
 	stateDir := env("FLEET_STATE_DIR", "/var/lib/fleet-controller")
 	in := &Installer{
@@ -334,6 +342,20 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	// talos-attest gives up on /render after 30 seconds.
 	t := &Talosctl{Bin: bin, Worker: worker, Inputs: inputs, Timeout: 20 * time.Second}
 	in.Renderer, in.Prepare = t, t.Init
+	if bundle := os.Getenv("FLEET_CONTROLPLANE_BUNDLE"); bundle != "" {
+		if err := LoadBundle(bundle, worker); err != nil {
+			return nil, err
+		}
+		boot, err := netip.ParseAddr(os.Getenv("FLEET_BOOTSTRAP_ADDRESS"))
+		if err != nil {
+			return nil, fmt.Errorf("FLEET_CONTROLPLANE_BUNDLE needs FLEET_BOOTSTRAP_ADDRESS, the control plane the Talos root bootstraps: %w", err)
+		}
+		if in.ControlPlaneTTL, err = time.ParseDuration(env("FLEET_CONTROLPLANE_CONFIG_TTL", "30m")); err != nil || in.ControlPlaneTTL <= 0 {
+			return nil, fmt.Errorf("FLEET_CONTROLPLANE_CONFIG_TTL must be a positive duration")
+		}
+		t.BundlePath, in.ControlPlanes, in.Bootstrap = bundle, true, boot.String()
+		cfg.Bootstrap = in.Bootstrap
+	}
 	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
 	// installs, and /render refuses every call, since no run asks for one.
 	if env("FLEET_INSTALLS", "false") != "true" {
@@ -341,7 +363,7 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	}
 	cfg.Installs = map[string]string{}
 	for class, ci := range inputs {
-		if ci.MachineType == "worker" {
+		if ci.MachineType == "worker" || in.ControlPlanes {
 			cfg.Installs[class] = ci.InstallerImage
 		}
 	}

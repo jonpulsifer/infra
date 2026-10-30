@@ -1,6 +1,6 @@
 ---
 title: Provision a node
-description: Plug a prepared folly machine in at the provisioning station and let it intake, attest and install as a Talos worker, or declare it in NetBox by hand.
+description: Plug a prepared folly machine in at the provisioning station and let it intake, attest and install as a Talos worker or a joining control plane, or declare it in NetBox by hand.
 ---
 
 Use this runbook to install a new folly node through [NetBox](../platform/netbox.md). The machine phones home from HookOS, [talos-attest](../apps/talos-attest.md) attests it, and [fleet-controller](../apps/fleet-controller.md) names, addresses and provisions it.
@@ -67,6 +67,21 @@ It refuses a malformed name or MAC, a missing port, and an address outside `K8S_
 
 3. Power on the machine by hand.
 4. [Watch the run](#watch-the-run), then continue from step 6 above.
+
+## Provision a control plane
+
+A control plane installs the same way and joins the running cluster. The cluster's first control plane, at `API_SERVER_IP`, never installs this way, because the Talos root bootstraps etcd on it.
+
+1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetController.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing. [fleet-controller](../apps/fleet-controller.md#control-planes) says what spore then holds.
+2. Declare the stub with `--class controlplane`, or declare the machine by hand with `--class controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in) or [Declare a machine by hand](#declare-a-machine-by-hand) to the end. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
+4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
+
+   ```sh
+   talosctl --nodes <addr> etcd members
+   ```
+
+   Result: every control plane is listed, and none is a learner.
 
 ## Watch the run
 

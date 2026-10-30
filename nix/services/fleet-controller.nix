@@ -11,7 +11,8 @@
 # enrollment name's HTTPS server here, and on a plain-HTTP port of this anchor's Anchor address
 # that the other anchors' enrollment name servers pass the location to (../lib/talos-config.nix,
 # ./talos-boot.nix). The controller follows nginx's log of the location, burns a served file and
-# sets the device active.
+# sets the device active. With controlPlanes on, it renders a control plane that joins the cluster
+# the same way, from the full secrets bundle; off, spore decrypts only the worker subset.
 #
 # For a machine NetBox does not know, /intake makes an attest-only Workflow. The controller then
 # binds the attested device to a stub, the model map's class and a free address in the node
@@ -51,7 +52,8 @@ let
   fleet-controller = pkgs.callPackage ../../apps/fleet-controller/package.nix { };
   talosctl = pkgs.callPackage ../../apps/fleet-controller/talosctl.nix { };
   # The worker subset of folly's secrets bundle (scripts/talos-worker-secrets.sh), under the key
-  # name it was first sealed with. The controller renders workers only, and refuses a control plane.
+  # name it was first sealed with. Without controlPlanes the controller renders workers only, and
+  # refuses a control plane.
   workerSecrets =
     lib.hasInfix "\ntalos-enroll:\n" secrets && lib.hasInfix "\n    worker-secrets:" secrets;
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
@@ -107,6 +109,11 @@ in
       type = lib.types.bool;
       default = false;
       description = "Let a worker's provision Workflow install Talos from HookOS, with the config /render writes. Off, no Workflow installs and /render refuses every call.";
+    };
+    controlPlanes = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Let a control-plane class render and install like a worker and join the cluster. The controller then holds the full secrets bundle, fleet-controller/bundle in spore's sops file, with the cluster's CA keys. The control plane at the API server's address, which the Talos root bootstraps, never installs from here. Off, sops-nix does not decrypt the bundle and a control plane is refused.";
     };
     webhookPort = lib.mkOption {
       type = lib.types.port;
@@ -173,6 +180,10 @@ in
         assertion = config.sops.secrets ? "tinkerbell/admin-crt";
         message = "fleet-controller.nix reaches Tinkerbell's API with the certificates that tinkerbell.nix declares.";
       }
+      {
+        assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
+        message = "homelab.fleetController.controlPlanes needs installs, the worker secrets and fleet-controller/bundle in spore's sops file.";
+      }
     ];
 
     warnings =
@@ -193,6 +204,10 @@ in
     }
     // lib.optionalAttrs workerSecrets {
       "talos-enroll/worker-secrets" = { };
+    }
+    // lib.optionalAttrs cfg.controlPlanes {
+      # The full bundle, with the cluster's CA keys.
+      "fleet-controller/bundle" = { };
     };
 
     # NetBox on capsule posts the webhook, every anchor's talos-attest the render call and every
@@ -306,6 +321,13 @@ in
         FLEET_CLASS_INPUTS = "${../../clusters/${cfg.site}/fleet/class-inputs.json}";
         FLEET_WORKER_SECRETS = "%d/worker-secrets";
         FLEET_TALOSCTL = lib.getExe talosctl;
+      }
+      // lib.optionalAttrs cfg.controlPlanes {
+        FLEET_CONTROLPLANE_BUNDLE = "%d/bundle";
+        # The Talos root bootstraps etcd on the control plane at the API server's address.
+        FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
+        # A control plane's config carries the CA keys, so it waits unread for less time.
+        FLEET_CONTROLPLANE_CONFIG_TTL = "30m";
       };
       serviceConfig = {
         ExecStart = lib.getExe fleet-controller;
@@ -320,7 +342,8 @@ in
         ++ [ "attest-secret:${config.sops.secrets."fleet-controller/attest-secret".path}" ]
         ++ lib.optional workerSecrets "worker-secrets:${
           config.sops.secrets."talos-enroll/worker-secrets".path
-        }";
+        }"
+        ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleet-controller/bundle".path}";
         User = "fleet-controller";
         Group = "fleet-controller";
         StateDirectory = "fleet-controller";

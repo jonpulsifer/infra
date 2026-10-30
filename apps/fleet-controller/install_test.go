@@ -619,6 +619,8 @@ func TestTailDrainsARotationWhileStopped(t *testing.T) {
 
 func TestUnreadConfigExpires(t *testing.T) {
 	it := newInstallTest(t, "staged", nil)
+	// A worker's config keeps the TTL beside the shorter control-plane one.
+	it.in.ControlPlaneTTL = 30 * time.Minute
 	if code, _ := it.post(t, goodRequest(), testSecret); code != 201 {
 		t.Fatal(code)
 	}
@@ -696,8 +698,119 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 			t.Errorf("%s installs: %v", d.Name, m)
 		}
 	}
+	cfg.Installs["controlplane"], cfg.Bootstrap = "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4", "10.3.0.10"
+	if m := hm(Device{Name: "optiplex", Class: "controlplane", TPM: "2.0", Address: "10.3.0.10"}, "provision"); m["install"] != "false" {
+		t.Errorf("the bootstrap control plane installs: %v", m)
+	}
+	if m := hm(Device{Name: "swell", Class: "controlplane", TPM: "2.0", Address: "10.3.0.14"}, "provision"); m["install"] != "true" {
+		t.Errorf("a joining control plane installs nothing: %v", m)
+	}
 	cfg.Installs = nil
 	if m := hm(g5, "provision"); m["install"] != "false" {
 		t.Errorf("a controller without a renderer installs: %v", m)
+	}
+}
+
+func controlPlaneTest(t *testing.T) (*installTest, RenderRequest) {
+	it := newInstallTest(t, "staged", map[string]any{"talos_class": "controlplane"})
+	req := goodRequest()
+	req.Class = "controlplane"
+	return it, req
+}
+
+func TestControlPlaneRendersOnlyBehindTheGate(t *testing.T) {
+	it, req := controlPlaneTest(t)
+	if code, reason := it.post(t, req, testSecret); code != http.StatusConflict || !strings.Contains(reason, "the owner renders") {
+		t.Fatalf("a control plane without the bundle: %d %s", code, reason)
+	}
+	it.in.ControlPlanes = true
+	it.in.Bootstrap = "10.3.0.12"
+	if code, _ := it.post(t, req, testSecret); code != http.StatusConflict {
+		t.Fatalf("the bootstrap control plane: %d", code)
+	}
+	it.in.Bootstrap = "10.3.0.10"
+	it.nb.devices[0]["primary_ip4"] = nil
+	if code, _ := it.post(t, req, testSecret); code != http.StatusConflict {
+		t.Fatalf("a control plane with no address: %d", code)
+	}
+	if it.rend.calls != 0 {
+		t.Fatal("a refused control plane rendered")
+	}
+	it.nb.devices[0]["primary_ip4"] = map[string]any{"address": "10.3.0.12/26"}
+	if code, reason := it.post(t, req, testSecret); code != http.StatusCreated {
+		t.Fatalf("a joining control plane: %d %s", code, reason)
+	}
+	for path, want := range map[string]os.FileMode{
+		it.cfgPath(testCode):               0o640,
+		filepath.Dir(it.cfgPath(testCode)): 0o750 | os.ModeDir,
+	} {
+		if fi, err := os.Stat(path); err != nil || fi.Mode() != want {
+			t.Errorf("%s: %v, want %v (%v)", path, fi.Mode(), want, err)
+		}
+	}
+}
+
+func TestControlPlaneConfigExpiresSooner(t *testing.T) {
+	it, req := controlPlaneTest(t)
+	it.in.ControlPlanes, it.in.Bootstrap, it.in.ControlPlaneTTL = true, "10.3.0.10", 30*time.Minute
+	if code, _ := it.post(t, req, testSecret); code != http.StatusCreated {
+		t.Fatal(code)
+	}
+	ctx := context.Background()
+	it.now = testNow.Add(29 * time.Minute)
+	it.in.Sweep(ctx)
+	if _, err := os.Stat(it.cfgPath(testCode)); err != nil {
+		t.Fatal("a control plane's config younger than its TTL expired")
+	}
+	it.now = testNow.Add(30*time.Minute + time.Second)
+	it.in.Sweep(ctx)
+	if _, err := os.Stat(it.cfgPath(testCode)); !os.IsNotExist(err) {
+		t.Fatal("a control plane's config outlived its TTL")
+	}
+	if it.in.Metrics.Expired.Load() != 1 || journalCount(it.nb, "warning") != 1 {
+		t.Fatal("the expiry was not journaled and counted")
+	}
+}
+
+func TestLoadInstallerGatesControlPlanes(t *testing.T) {
+	dir := t.TempDir()
+	classes := filepath.Join(dir, "class-inputs.json")
+	raw, _ := json.Marshal(riptideInputs())
+	_ = os.WriteFile(classes, raw, 0o600)
+	workers := filepath.Join(dir, "worker-secrets")
+	_ = os.WriteFile(workers, []byte(fakeBundle("A")), 0o600)
+	bundle := filepath.Join(dir, "bundle")
+	_ = os.WriteFile(bundle, []byte(fullFakeBundle("A")), 0o600)
+	t.Setenv("FLEET_STATE_DIR", dir)
+	t.Setenv("FLEET_CLASS_INPUTS", classes)
+	t.Setenv("FLEET_WORKER_SECRETS", workers)
+	t.Setenv("FLEET_TALOSCTL", "/bin/false")
+	t.Setenv("FLEET_INSTALLS", "true")
+	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", "")
+	t.Setenv("FLEET_BOOTSTRAP_ADDRESS", "")
+
+	cfg := Config{}
+	in, err := loadInstaller(&cfg, nil, nil, NewMetrics())
+	if err != nil || in.ControlPlanes || cfg.Installs["controlplane"] != "" || cfg.Installs["worker-g5"] == "" || cfg.Bootstrap != "" {
+		t.Fatalf("without the bundle: %v %+v", err, cfg.Installs)
+	}
+
+	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", bundle)
+	if _, err := loadInstaller(&Config{}, nil, nil, NewMetrics()); err == nil {
+		t.Fatal("the bundle loaded without the bootstrap address")
+	}
+	t.Setenv("FLEET_BOOTSTRAP_ADDRESS", "10.3.0.10")
+	cfg = Config{}
+	in, err = loadInstaller(&cfg, nil, nil, NewMetrics())
+	if err != nil || !in.ControlPlanes || in.ControlPlaneTTL != 30*time.Minute || cfg.Installs["controlplane"] == "" || cfg.Bootstrap != "10.3.0.10" {
+		t.Fatalf("with the bundle: %v %+v", err, cfg)
+	}
+	if r := in.Renderer.(*Talosctl); r.BundlePath != bundle {
+		t.Fatalf("the renderer has no bundle: %q", r.BundlePath)
+	}
+
+	_ = os.WriteFile(bundle, []byte(fakeBundle("A")), 0o600)
+	if _, err := loadInstaller(&Config{}, nil, nil, NewMetrics()); err == nil {
+		t.Fatal("a worker subset loaded as the bundle")
 	}
 }

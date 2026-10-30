@@ -160,10 +160,15 @@ func SkipsAttest(d Device) bool {
 // from HookOS, or "" when the run installs nothing. Only a provision that
 // attests installs: the attest step is where the machine gets the code its
 // first boot fetches the config with. Installs holds only the classes the
-// controller renders, so a control plane, or a controller without a
-// renderer, leaves the install to the old path.
+// controller renders, so a control plane without the secrets bundle, or a
+// controller without a renderer, leaves the install to the owner. The
+// control plane at Bootstrap, which the Talos root bootstraps, never
+// installs from here.
 func (c Config) Installer(d Device, action string) string {
 	if action != "provision" || SkipsAttest(d) {
+		return ""
+	}
+	if c.Bootstrap != "" && d.Address == c.Bootstrap {
 		return ""
 	}
 	return c.Installs[d.Class]
