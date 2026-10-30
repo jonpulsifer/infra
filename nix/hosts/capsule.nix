@@ -17,11 +17,10 @@
     bootstrap = false;
   };
 
-  # The YubiKey 4c that holds one of the two hardware DevID CA keys.
+  # The YubiKey 4c that holds capsule's DevID CA key. fleetd on spore issues every LDevID now;
+  # the ones this CA issued stay trusted through the site's bundle until their nodes renew.
   homelab.devidCa.yubikey.enable = true;
   homelab.devidCa.yubikey.serial = 7126381;
-  # The attest service signs LDevIDs with this anchor's YubiKey CA.
-  homelab.talosAttest.caKey = "pkcs11";
 
   sops.defaultSopsFile = ../secrets/capsule.sops.yaml;
 

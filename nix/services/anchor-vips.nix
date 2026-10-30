@@ -1,6 +1,5 @@
 # The anchors' shared addresses. ns1 and ns2 carry DNS and NTP on the Anchor network, and s3 carries the
-# Garage S3 API (./garage.nix); boot carries the Talos boot files on the bootstrap VLAN
-# (./talos-boot.nix). keepalived on every anchor runs unicast VRRP
+# Garage S3 API (./garage.nix). keepalived on every anchor runs unicast VRRP
 # for each. Each VIP prefers its own order of anchors, and an anchor whose service stops answering
 # drops below every healthy one, so the VIP follows a working server.
 {
@@ -24,11 +23,6 @@ let
       interface = "end0";
       hosts = lab.hosts;
       prefix = prefixOf lab.cidr;
-    };
-    bootstrap = {
-      interface = "bootstrap";
-      hosts = lab.bootstrap.hosts;
-      prefix = prefixOf lab.bootstrap.cidr;
     };
   };
   peersOn = network: map (anchor: network.hosts.${anchor}) others;
@@ -65,18 +59,6 @@ let
         "capsule"
         "forge"
         "spore"
-      ];
-    };
-    # spore first, beside Smee, which the netboot iPXE chains at spore's own address.
-    boot = {
-      routerId = 69;
-      network = networks.bootstrap;
-      addr = lab.bootstrap.vip;
-      track = "talos-boot";
-      order = [
-        "spore"
-        "capsule"
-        "forge"
       ];
     };
   };
@@ -182,8 +164,7 @@ in
     };
   };
 
-  # VRRP (IP protocol 112) only from the other anchors. ./talos-boot.nix admits the boot VIP's VRRP
-  # in its bootstrap chain.
+  # VRRP (IP protocol 112) only from the other anchors.
   networking.firewall.extraCommands = lib.concatMapStrings (peer: ''
     iptables -A nixos-fw -i ${networks.lab.interface} -p 112 -s ${peer} -j nixos-fw-accept
   '') (peersOn networks.lab);

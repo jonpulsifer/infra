@@ -1,19 +1,17 @@
 #!/usr/bin/env bash
 # After Atlantis applies terraform/pki's software DevID CA: writes its certificate, its chain and the
-# DevID CA bundle under terraform/pki/certs/, and seals its private key into each anchor's sops file,
-# where sops-nix hands it to talos-attest (nix/services/talos-attest.nix). The key never reaches
-# stdout or argv.
-# Run with the owner's age key: SOPS_AGE_KEY_FILE=~/.config/age/keys.txt.
+# DevID CA bundle under terraform/pki/certs/. No service signs with the software CA: fleetd signs
+# with spore's YubiKey CA (nix/services/fleetd.nix), and the bundle keeps the LDevIDs the software
+# CA issued trusted until their nodes renew. Its private key stays in terraform/pki's state.
 
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
 pki_dir="$repo_root/terraform/pki"
 certs_dir="$pki_dir/certs"
-anchors=(capsule forge spore)
 
 missing=()
-for tool in tofu jq sops; do
+for tool in tofu jq; do
   command -v "$tool" >/dev/null || missing+=("$tool")
 done
 if ((${#missing[@]})); then
@@ -32,11 +30,4 @@ jq -er '.devid_ca_chain.value' <<<"$outputs" >"$certs_dir/folly-devid-ca-softwar
 echo "==> wrote certs/folly-devid-ca-software.pem and certs/folly-devid-ca-software-chain.pem" >&2
 bash "$repo_root/scripts/devid-ca-yubikey.sh" bundle
 
-for anchor in "${anchors[@]}"; do
-  file="$repo_root/nix/secrets/$anchor.sops.yaml"
-  jq -e '.devid_ca_private_key.value | tostring' <<<"$outputs" \
-    | sops set --value-stdin "$file" '["talos-attest"]["devid-ca-key"]'
-  echo "==> sealed the DevID CA key into nix/secrets/$anchor.sops.yaml" >&2
-done
-
-echo "==> now: mise run pki:verify, then commit certs/ and the three sops files" >&2
+echo "==> now: mise run pki:verify, then commit certs/" >&2

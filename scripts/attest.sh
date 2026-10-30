@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# Lists and approves first intakes on the anchors' talos-attest, through `tailscale serve` on each
-# anchor's tailnet name, port 8445, which hands the server the caller's tailnet login. A first
-# intake waits on the anchor that ran it, so approve reads each anchor's GET /machines for the
+# Lists and approves first intakes on fleetd, through `tailscale serve` on spore's tailnet name,
+# port 8445, which hands the server the caller's tailnet login. approve reads GET /machines for the
 # serial's pending claim and approves the EK hashes it names there. A claim is unauthenticated, so
-# approve shows it and asks before it approves. ATTEST_ADMIN_URL names one server.
+# approve shows it and asks before it approves. ATTEST_ADMIN_URL names another server.
 set -euo pipefail
-
-anchors=(spore capsule forge)
 
 usage() {
   echo "usage: attest.sh approve <serial> | pending" >&2
@@ -21,10 +18,7 @@ else
     echo "tailscale reports no MagicDNS suffix; set ATTEST_ADMIN_URL" >&2
     exit 1
   }
-  bases=()
-  for anchor in "${anchors[@]}"; do
-    bases+=("https://$anchor.$suffix:8445")
-  done
+  bases=("https://spore.$suffix:8445")
 fi
 
 pending() {
@@ -57,7 +51,7 @@ case "${1:-}" in
           --data-binary @- "$base/approve" | jq .
       exit 0
     done
-    echo "no anchor holds a first intake for serial $serial" >&2
+    echo "fleetd holds no first intake for serial $serial" >&2
     exit 1
     ;;
   *) usage ;;

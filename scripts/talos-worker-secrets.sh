@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
 # The worker subset of a Talos secrets bundle: what a worker's config carries,
 # which is tokens, identifiers and CA certificates, never a CA private key.
-# fleet-controller renders workers from it (apps/fleet-controller/README.md), so an
-# anchor that holds only the subset cannot mint a control-plane config or a
-# talosconfig.
+# fleetd renders workers from it (apps/fleetd/README.md), so a spore that
+# holds only the subset cannot mint a control-plane config or a talosconfig.
 #
 #   talos-worker-secrets.sh derive <bundle.yaml>    print the subset
 #   talos-worker-secrets.sh seal <anchor|file>      read the sealed bundle in
 #                                                   nix/secrets/<anchor>.sops.yaml
 #                                                   (or the sops file given),
 #                                                   seal the subset beside it as
-#                                                   talos-enroll/worker-secrets
+#                                                   fleetd/worker-secrets
 #   talos-worker-secrets.sh drop-bundle <anchor|file>
-#                                                   remove talos-enroll/bundle
-#                                                   once the subset is sealed
+#                                                   remove fleetd/bundle once the
+#                                                   subset is sealed
 #
 # seal and drop-bundle need SOPS_AGE_KEY_FILE. Nothing decrypted touches the
 # disk or the terminal.
@@ -61,24 +60,24 @@ case "${1:-}" in
     ;;
   seal)
     file="$(sops_file "${2:?usage: $0 seal <anchor|file>}")"
-    subset="$(sops decrypt --extract '["talos-enroll"]["bundle"]' "$file" | derive /dev/stdin)"
+    subset="$(sops decrypt --extract '["fleetd"]["bundle"]' "$file" | derive /dev/stdin)"
     check <(printf '%s\n' "$subset")
     # sops takes the new value as JSON, so the YAML document goes in as one string.
-    printf '%s\n' "$subset" | jq -Rs . | sops set --value-stdin "$file" '["talos-enroll"]["worker-secrets"]'
-    echo "==> sealed talos-enroll/worker-secrets into ${file#"$root"/}" >&2
+    printf '%s\n' "$subset" | jq -Rs . | sops set --value-stdin "$file" '["fleetd"]["worker-secrets"]'
+    echo "==> sealed fleetd/worker-secrets into ${file#"$root"/}" >&2
     ;;
   drop-bundle)
     file="$(sops_file "${2:?usage: $0 drop-bundle <anchor|file>}")"
-    sops decrypt --extract '["talos-enroll"]["worker-secrets"]' "$file" >/dev/null \
+    sops decrypt --extract '["fleetd"]["worker-secrets"]' "$file" >/dev/null \
       || {
         echo "seal the worker subset first" >&2
         exit 1
       }
-    sops unset "$file" '["talos-enroll"]["bundle"]'
-    echo "==> removed talos-enroll/bundle from ${file#"$root"/}" >&2
+    sops unset "$file" '["fleetd"]["bundle"]'
+    echo "==> removed fleetd/bundle from ${file#"$root"/}" >&2
     ;;
   *)
-    sed -n '2,19p' "$0" >&2
+    sed -n '2,18p' "$0" >&2
     exit 2
     ;;
 esac

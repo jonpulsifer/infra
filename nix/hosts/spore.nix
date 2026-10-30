@@ -1,4 +1,4 @@
-# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, Talos boot assets, DNS and NTP.
+# spore: NVMe-rooted Pi 5 serving NFS, PXE, native-boot artifacts, Talos boot assets, fleetd, DNS and NTP.
 # First boot grows root to a fixed cap and gives the disk tail to the nfs-data partition at /nfs/data.
 {
   config,
@@ -13,11 +13,11 @@ let
     optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
-  # With tpm_devid on, a node attests by the LDevID that the attest service issues it, whose subject
+  # With tpm_devid on, a node attests by the LDevID that fleetd issues it, whose subject
   # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
   # its OU (the class) or O (the site), so each node in the nodes file with a TPM 2.0 gets its own
   # alias, and a new node needs a spore deploy. A failed or retired node keeps its alias until its
-  # entry goes, and talos-attest refuses it an LDevID.
+  # entry goes, and fleetd refuses it an LDevID.
   devidNodes = lib.attrNames (
     lib.filterAttrs (_: n: n.tpm or null == "2.0") (import ../lib/inventory.nix { inherit lib; })
   );
@@ -57,19 +57,19 @@ in
   imports = [
     ../profiles/anchor.nix
     ../profiles/pi5-nvme.nix
-    ../services/fleet-controller.nix
+    ../services/fleetd.nix
     ../services/garage.nix
     ../services/nfs-server.nix
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
+    ../services/talos-boot.nix
     ../services/tinkerbell.nix
     ../system/sops.nix
   ];
 
-  # A worker provision installs Talos from HookOS; /render serves the config. On once the
-  # installer release and the tink-attest digest that writes the code are live.
-  homelab.fleetController.installs = true;
+  # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
+  homelab.fleetd.installs = true;
 
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
@@ -79,11 +79,9 @@ in
 
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
-  # The YubiKey 5 that holds one of the two hardware DevID CA keys.
+  # The YubiKey 5 that holds the DevID CA key fleetd issues every LDevID with.
   homelab.devidCa.yubikey.enable = true;
   homelab.devidCa.yubikey.serial = 9758244;
-  # The attest service signs LDevIDs with this anchor's YubiKey CA.
-  homelab.talosAttest.caKey = "pkcs11";
 
   # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
   # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).

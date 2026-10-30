@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Writes the per-class render inputs fleet-controller renders from: the folly
-# Talos root's class_inputs output, read by `tofu console` with no state and
-# no 1Password. The control planes among them, which the API server's SANs
+# Writes the per-class render inputs fleetd renders from: the folly Talos
+# root's class_inputs output, read by `tofu console` with no state and no
+# 1Password. The control planes among them, which the API server's SANs
 # name, are the declared ones NetBox holds active or failed, so this reads
 # each node's status from NetBox, as the root does at plan time. A node adds
-# nothing else here: the controller reads the node's facts from NetBox at
-# render time.
+# nothing else here: fleetd reads the node's facts from NetBox at render
+# time.
 #
 # It also writes node-macs.json, the MACs NetBox holds for the declared nodes,
 # which spore's nix/services/tinkerbell.nix reads for its netboot-not-allowed
