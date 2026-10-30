@@ -97,6 +97,9 @@ in
         anchorAddr
       ];
       CSRF_TRUSTED_ORIGINS = [ "https://${host}" ];
+      # fleetd honours an approved EK binding only while the changelog record of Terraform's
+      # write survives, so the changelog is kept for good.
+      CHANGELOG_RETENTION = 0;
     };
   };
 

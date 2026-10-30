@@ -116,6 +116,7 @@ A replaced TPM, as after a board swap, needs the same change: the old binding re
 | The console says `attest: try 5 failed` | fleetd did not answer | Read `journalctl -u fleetd` on spore |
 | The console says `attest: FAILED` and the agent starts at once | fleetd refused the machine | Read the `attest.verdict` audit line in `journalctl -u fleetd` |
 | `attest: FAILED` with `ek-hash-mismatch` or `ek-missing` | The TPM is not the one the entry approves | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence. Nothing was written |
+| `attest: FAILED` with `ek-binding-unauthored` | NetBox's changelog does not show Terraform's user writing the binding: another user edited it, the changelog lost the record, or `bindingAuthor` is unset on spore | Read the device's journal. Restore the binding from git: remove the lines, apply, add them back and apply, so that Terraform writes it again |
 | `desired_action` stays set | fleetd is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
 | The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attestation | Check that the switch sends LLDP, then power-cycle the machine |
 | `wipe: this boot did not pass attestation` or `no install code` | The boot's attestation got no pass or no code, so nothing was wiped | Read the `attest.install` audit line in `journalctl -u fleetd`, then set `desired_action` again |

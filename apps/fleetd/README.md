@@ -43,6 +43,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
 | `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE` | required, `/run/credentials/fleetd.service/netbox-token` | NetBox, the only source of machines and of each one's approved EK binding. A serial it lacks waits for its node entry, and a NetBox that does not answer refuses every request |
 | `ATTEST_PENDING_MAX` | `50` | How many claims wait at once for an approved EK binding |
+| `ATTEST_BINDING_AUTHOR` | none | The NetBox user Terraform writes as. A binding counts only when NetBox's changelog shows this user made its newest change; unset, no binding counts |
 | `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten on each change |
 
 ### Fleet
@@ -102,13 +103,23 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   `pending/`, which authorizes nothing and creates no device.
 - EKs that are not the binding are refused at the start. fleetd writes nothing, quarantines nothing
   and journals the device at most every ten minutes.
+- A binding counts only when `ATTEST_BINDING_AUTHOR` made its newest change. fleetd reads the
+  device's records in `/api/core/object-changes/`, newest first, and takes the first one whose
+  `prechange_data` and `postchange_data` differ in either field. A binding another user wrote, a
+  changelog that does not answer, and one with no record that sets the current value are refused
+  with `ek-binding-unauthored` and journaled; nothing is recorded or quarantined. The token needs
+  the view permission on core object changes.
 - Right before it issues the LDevID, and again before it answers the install code, fleetd reads the
-  device again and refuses when the binding changed or went since the start. Only Terraform writes
-  the binding, so no claim changes it.
-- A pass that matched the binding replaces the observed hashes; otherwise only an empty one is
-  written. A replaced TPM needs a change to the binding in the nodes file.
-- A renewal and the daily check prove the LAK on file and read no EK. A HookOS attestation of a
-  device past `planned` without a binding is held to its `ek_hash` pins, and gets no install code.
+  device and its changelog again, and refuses when the binding changed, went, or was last written
+  by someone else since the start. No claim changes the binding: fleetd never writes it.
+- A pass that matched the binding pins the binding alone: each approved hash, and null for an
+  algorithm the binding leaves out, journaled, so neither a removed TPM's EK nor an extra EK the
+  pass sent stays a pin. Without a binding only an empty pin is written. A replaced TPM needs a
+  change to the binding in the nodes file.
+- A renewal and the daily check prove the LAK on file and read no EK. A `planned` device gets no
+  renewal, since its identity comes from an intake pass; it is refused and journaled. A HookOS
+  attestation of a device past `planned` without a binding is held to its `ek_hash` pins, and gets
+  no install code.
 
 A planned stub binds to the first box that passes for its serial: fleetd puts the claimed MAC on
 the stub's interface. `mise run attest:approve <serial>` prints the nodes-file lines for a waiting

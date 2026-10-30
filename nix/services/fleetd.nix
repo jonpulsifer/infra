@@ -137,6 +137,11 @@ in
       default = 8446;
       description = "The port NetBox's event-rule webhook posts to, on the Anchor network.";
     };
+    bindingAuthor = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "The NetBox user that terraform/netbox/folly writes as, behind the netbox-folly-terraform token. fleetd honours a device's approved EK binding only when NetBox's changelog shows this user made its newest change. Null, no binding counts and every planned machine waits.";
+    };
     autoProvision = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -158,7 +163,8 @@ in
 
     sops.secrets = {
       # A NetBox API token that may read and change dcim devices, interfaces, cables and IP
-      # addresses, and add journal entries.
+      # addresses, add journal entries, and read the changelog (core | object change, view),
+      # where fleetd finds who last wrote a device's approved EK binding.
       "fleetd/netbox-token" = { };
       # cert-manager's DNS-01 token (clusters/folly/networking/cert-manager/cloudflare-secret.sops.yaml).
       "acme/cloudflare-token" = { };
@@ -245,6 +251,7 @@ in
         # address; the anchors are no tailnet peers of one another.
         ATTEST_NETBOX_URL = "http://${lab.hosts.capsule}:8080";
         ATTEST_NETBOX_TOKEN_FILE = "%d/netbox-token";
+        ATTEST_BINDING_AUTHOR = lib.mkIf (cfg.bindingAuthor != null) cfg.bindingAuthor;
 
         FLEET_SITE = site;
         FLEET_NAMESPACE = "tinkerbell";
