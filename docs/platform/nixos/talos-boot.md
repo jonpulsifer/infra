@@ -13,7 +13,7 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives spore its `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | spore |
-| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC in `clusters/folly/fleet/node-macs.json`, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not) | spore |
+| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC NetBox holds, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not). [fleetd](../../apps/fleetd.md) makes and removes them under `/var/lib/tftpboot` on each reconcile pass, so a new node or NIC needs no commit | spore |
 | nginx `talos-boot` | Serves the ISO and HookOS on port 80 at `SPORE_BOOTSTRAP_IP` | spore |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 | fleetd's boot listener | Serves `enroll.lolwtf.ca` on port 443 at `SPORE_BOOTSTRAP_IP` with a Let's Encrypt certificate from DNS-01: the device flow under `/attest/` and a node's first config at `/talos/config`. The anchors' CoreDNS answers the name with `SPORE_BOOTSTRAP_IP` | spore |

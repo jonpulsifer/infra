@@ -23,7 +23,10 @@ type Reconciler struct {
 	// nil without a renderer.
 	Installer *Installer
 	Metrics   *Metrics
-	Now       func() time.Time
+	// Links keeps the TFTP netboot-not-allowed links of the devices' MACs,
+	// or is nil without a directory.
+	Links *TFTPLinks
+	Now   func() time.Time
 
 	// pass keeps a reconcile pass and an Admit apart, so one Workflow starts
 	// for a device; an Admit gives up waiting when its context ends.
@@ -193,10 +196,28 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			}
 		}
 	}
+	if err := r.syncLinks(devices); err != nil {
+		errs = append(errs, err)
+	}
 	if err := r.prune(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
+}
+
+// syncLinks leaves the links alone for an empty device list, as the
+// Hardware cleanup does.
+func (r *Reconciler) syncLinks(devices []Device) error {
+	if r.Links == nil || len(devices) == 0 {
+		return nil
+	}
+	var macs []string
+	for _, d := range devices {
+		if d.MAC != "" {
+			macs = append(macs, d.MAC)
+		}
+	}
+	return r.Links.Sync(macs)
 }
 
 // deleteManaged deletes an object by name only when fleetd made it.

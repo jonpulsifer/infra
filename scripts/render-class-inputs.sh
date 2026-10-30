@@ -7,10 +7,6 @@
 # nothing else here: fleetd reads the node's facts from NetBox at render
 # time.
 #
-# It also writes node-macs.json, the MACs NetBox holds for the declared nodes,
-# which spore's nix/services/tinkerbell.nix reads for its netboot-not-allowed
-# links.
-#
 # NetBox access is scripts/lib/netbox.sh's environment.
 set -euo pipefail
 shopt -s inherit_errexit
@@ -24,7 +20,6 @@ readonly nodes_file="$root/clusters/folly/inventory/nodes.yaml"
 
 nb_init
 devices="$(nb_list "dcim/devices/?site=folly&role=kubernetes-node")"
-interfaces="$(nb_list "dcim/interfaces/?type__n=virtual&$(jq -r 'map("device_id=\(.id)") | join("&")' <<<"$devices")")"
 declared="$(yq -o json '.nodes | keys' "$nodes_file")"
 statuses="$(jq -c 'map({key: .name, value: .status.value}) | from_entries' <<<"$devices")"
 # As the Talos root's plan does, refuse a declared node NetBox has no device for.
@@ -74,15 +69,5 @@ value="${value%\"}"
 }
 base64 -d <<<"$value" | jq -S . >"$work/class-inputs.json"
 
-# Each declared node's MAC: its device's first interface with a primary MAC.
-jq -S -n --argjson devices "$devices" --argjson interfaces "$interfaces" --argjson declared "$declared" '
-  $devices
-  | map(select(.name as $n | $declared | index($n)) | . as $d
-    | ([$interfaces[] | select(.device.id == $d.id and .primary_mac_address != null)] | sort_by(.id) | first) as $nic
-    | select($nic != null)
-    | {key: $d.name, value: ($nic.primary_mac_address.mac_address | ascii_downcase)})
-  | from_entries' >"$work/node-macs.json"
-
 mv "$work/class-inputs.json" "$fleet_dir/class-inputs.json"
-mv "$work/node-macs.json" "$fleet_dir/node-macs.json"
 printf 'Wrote %s/class-inputs.json for: %s\n' "${fleet_dir#"$root"/}" "$(jq -r 'keys | join(", ")' "$fleet_dir/class-inputs.json")"

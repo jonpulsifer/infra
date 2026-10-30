@@ -21,9 +21,9 @@ let
   # Under dnsmasq's TFTP root; Smee names it in its offer to UEFI x86-64 PXE clients (arch 7).
   ipxeFile = "talos/${site}/ipxe-amd64-secureboot.efi";
   # Some firmware (riptide's) takes Smee's ProxyDHCP offer over UniFi's. With allowPXE off, Smee
-  # names /<mac>/netboot-not-allowed on spore's TFTP, so that path serves the same signed iPXE, which
-  # falls back to its own menu when Smee has no script.
-  nodeMacs = lib.attrValues (lib.importJSON ../../clusters/${site}/fleet/node-macs.json);
+  # names /<mac>/netboot-not-allowed on spore's TFTP; fleetd (./fleetd.nix) links that path to the
+  # same signed iPXE for each MAC NetBox holds, and the iPXE falls back to its own menu when Smee
+  # has no script.
   # nginx's base for the signed HookOS UKI. Smee's default HookOS script reads it; a Hardware
   # object's netboot.ipxe.url replaces that script, so Secure Boot nodes never use it.
   osieUrl = "http://${bootstrapIp}/talos/${site}";
@@ -248,11 +248,6 @@ in
       message = "tinkerbell.nix binds Smee to the ${iface} VLAN, which talos-boot.nix declares.";
     }
   ];
-
-  systemd.tmpfiles.rules = lib.concatMap (mac: [
-    "d /var/lib/tftpboot/${mac} 0755 root root -"
-    "L+ /var/lib/tftpboot/${mac}/netboot-not-allowed - - - - /var/lib/tftpboot/${ipxeFile}"
-  ]) nodeMacs;
 
   sops.secrets = lib.genAttrs (map (name: "tinkerbell/${name}") secrets) (_: {
     restartUnits = [ "tinkerbell.service" ];
