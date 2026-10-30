@@ -42,10 +42,11 @@ resource "terraform_data" "install" {
   input = each.value.install_generation
 }
 
-# The control plane is configured first; talos_cluster bootstraps etcd on it;
-# workers follow. An image change upgrades in the same order.
+# The bootstrap control plane is configured first; talos_cluster bootstraps
+# etcd on it; the joining control planes and the workers follow. An image
+# change upgrades in the same order.
 resource "talos_machine" "controlplane" {
-  for_each = local.controlplanes
+  for_each = local.bootstrap
 
   node                     = each.value.address
   client_configuration_wo  = ephemeral.talos_client_configuration.this.client_configuration
@@ -73,7 +74,7 @@ resource "talos_machine" "controlplane" {
 resource "talos_cluster" "this" {
   depends_on = [talos_machine.controlplane]
 
-  node                    = local.controlplane.address
+  node                    = local.topology.API_SERVER_IP
   client_configuration_wo = ephemeral.talos_client_configuration.this.client_configuration
   kubernetes_version      = var.kubernetes_version
 
@@ -83,11 +84,36 @@ resource "talos_cluster" "this" {
   }
 
   lifecycle {
-    # API_SERVER_IP is the control plane's own address (no VIP).
+    # API_SERVER_IP is the bootstrap control plane's own address (no VIP).
     precondition {
-      condition     = local.controlplane.address == local.topology.API_SERVER_IP
-      error_message = "The control plane address must equal API_SERVER_IP in cluster-topology.json."
+      condition     = length(local.bootstrap) == 1
+      error_message = "One applied control plane's address must equal API_SERVER_IP in cluster-topology.json."
     }
+  }
+}
+
+# A control plane other than the bootstrap one joins etcd through the cluster
+# it serves, so it is configured after talos_cluster, like a worker.
+resource "talos_machine" "joining" {
+  for_each   = local.joining
+  depends_on = [talos_cluster.this]
+
+  node                     = each.value.address
+  client_configuration_wo  = ephemeral.talos_client_configuration.this.client_configuration
+  machine_configuration_wo = ephemeral.talos_machine_configuration.node[each.key].machine_configuration
+  image                    = local.node_installer_image[each.key]
+  reboot_mode              = each.value.reboot_mode
+  drain_on_upgrade         = false
+
+  ignore_kubernetes_upgrade_drift = true
+
+  timeouts = {
+    create = "40m"
+    update = "90m"
+  }
+
+  lifecycle {
+    replace_triggered_by = [terraform_data.install[each.key]]
   }
 }
 

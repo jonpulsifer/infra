@@ -22,7 +22,8 @@ import (
 // talos-attest calls POST /render at the end of a full intake, before it
 // answers the machine its install code. The controller checks the device's
 // state in NetBox and Tinkerbell, renders the config with the class inputs
-// and the worker secrets, and writes it where nginx serves
+// and the worker secrets, or the full bundle for a joining control plane,
+// and writes it where nginx serves
 // /talos/config?uuid=<uuid>&code=<code>. It then tails nginx's log of that
 // location: a 200 burns the file and sets the device active, a 404 is
 // journaled once per code, and a config nobody fetched is deleted after the
@@ -39,6 +40,17 @@ type Installer struct {
 	Store   *Store
 	Tail    *Tail
 	TTL     time.Duration
+	// ControlPlanes lets a control-plane class render, from the full
+	// secrets bundle the renderer holds. Off, a control plane is refused
+	// and the owner renders it.
+	ControlPlanes bool
+	// ControlPlaneTTL replaces TTL for a control plane's config, which
+	// carries the cluster's CA keys.
+	ControlPlaneTTL time.Duration
+	// Bootstrap is the address of the control plane the Talos root
+	// bootstraps etcd on. It never installs from here: a control plane the
+	// controller renders joins the cluster that one serves.
+	Bootstrap string
 	// TailInterval is how often Run reads nginx's log.
 	TailInterval time.Duration
 	Metrics      *Metrics
@@ -189,7 +201,12 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	case "":
 		return d, unavailable("the class inputs have no class %q", d.Class)
 	case "controlplane":
-		return d, conflict("%s is a control plane, which the owner renders", d.Name)
+		if !i.ControlPlanes {
+			return d, conflict("%s is a control plane, which the owner renders", d.Name)
+		}
+		if d.Address == "" || d.Address == i.Bootstrap {
+			return d, conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
+		}
 	}
 	if err := i.prepare(ctx); err != nil {
 		return d, unavailable("the renderer: %v", err)
@@ -208,7 +225,7 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 		return d, unavailable("write the config: %v", err)
 	}
 	i.pending()
-	comment := fmt.Sprintf("fleet-controller: rendered the %s config for %s's install; it is deleted when the node fetches it on its first boot, or unread after %s", d.Class, d.Name, i.TTL)
+	comment := fmt.Sprintf("fleet-controller: rendered the %s config for %s's install; it is deleted when the node fetches it on its first boot, or unread after %s", d.Class, d.Name, i.ttl(d.Class))
 	if err := i.NetBox.Update(ctx, d, "", nil, "info", comment); err != nil {
 		log.Printf("journal the render of %s: %v", d.Name, err)
 	}
@@ -357,13 +374,13 @@ func (i *Installer) Sweep(ctx context.Context) {
 			if err := i.release(ctx, p); err != nil {
 				i.releaseFailed(ctx, p, err)
 			}
-		case now.Sub(p.Rendered) > i.TTL:
+		case now.Sub(p.Rendered) > i.ttl(p.Class):
 			if err := i.expire(ctx, p); err != nil {
 				log.Printf("expire %s: %v", p.Node, err)
 			}
 		}
 	}
-	if err := i.Store.Strays(now, i.TTL); err != nil {
+	if err := i.Store.Strays(now, i.strayTTL()); err != nil {
 		log.Printf("talos configs: %v", err)
 	}
 	i.pending()
@@ -432,18 +449,37 @@ func (i *Installer) releaseFailed(ctx context.Context, p Pending, err error) {
 	}
 }
 
+// ttl is how long a class's config waits unread: a control plane's, which
+// carries the CA keys, waits ControlPlaneTTL when it is set.
+func (i *Installer) ttl(class string) time.Duration {
+	if i.ControlPlaneTTL > 0 && i.Renderer != nil && i.Renderer.MachineType(class) == "controlplane" {
+		return i.ControlPlaneTTL
+	}
+	return i.TTL
+}
+
+// strayTTL is the age at which a file without a record goes. Its class is
+// unknown, so it gets the shorter wait.
+func (i *Installer) strayTTL() time.Duration {
+	if i.ControlPlaneTTL > 0 && i.ControlPlaneTTL < i.TTL {
+		return i.ControlPlaneTTL
+	}
+	return i.TTL
+}
+
 func (i *Installer) expire(ctx context.Context, p Pending) error {
 	if err := i.Store.Drop(p, i.Now()); err != nil {
 		return err
 	}
 	i.Metrics.Expired.Add(1)
+	ttl := i.ttl(p.Class)
 	d := Device{Serial: p.Serial, Name: p.Node, Class: p.Class}
-	Audit("fleet.expire", i.Site, d, p.Workflow, "config unread after "+i.TTL.String())
+	Audit("fleet.expire", i.Site, d, p.Workflow, "config unread after "+ttl.String())
 	found, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
 	if err != nil {
 		return err
 	}
-	comment := fmt.Sprintf("fleet-controller: the Talos config rendered at %s was not fetched within %s and is deleted; provision the node again", timestamp(p.Rendered), i.TTL)
+	comment := fmt.Sprintf("fleet-controller: the Talos config rendered at %s was not fetched within %s and is deleted; provision the node again", timestamp(p.Rendered), ttl)
 	return i.NetBox.Update(ctx, found, "", nil, "warning", comment)
 }
 

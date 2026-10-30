@@ -80,8 +80,8 @@ variable "nodes" {
     error_message = "role must be controlplane or worker."
   }
   validation {
-    condition     = length([for n in var.nodes : n if n.role == "controlplane"]) == 1
-    error_message = "This lab runs exactly one control plane per cluster."
+    condition     = length([for n in var.nodes : n if n.role == "controlplane" && !n.enrolling]) >= 1
+    error_message = "A cluster needs a control plane that is not enrolling."
   }
 }
 

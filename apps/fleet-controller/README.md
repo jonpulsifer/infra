@@ -36,8 +36,11 @@ go run .
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them `/render` answers 503 and no Workflow installs |
 | `FLEET_STATE_DIR` | `/var/lib/fleet-controller` | Where rendered configs go, as `talos/<uuid>/<code>.yaml`, with the log offset and the spent codes |
 | `FLEET_CONFIG_LOG` | `/var/log/nginx/fleet/talos-config.log` | nginx's log of `/talos/config`, in the `fleet` format `$time_iso8601 $arg_uuid $arg_code $status $request_method $request_completion $body_bytes_sent` |
-| `FLEET_INSTALLS` | `false` | Whether a worker's provision Workflow installs; off, `/render` refuses every call, since no run asks for one |
+| `FLEET_INSTALLS` | `false` | Whether a rendered class's provision Workflow installs; off, `/render` refuses every call, since no run asks for one |
 | `FLEET_CONFIG_TTL` | `2h` | Age at which an unfetched config is deleted |
+| `FLEET_CONTROLPLANE_BUNDLE` | none | The full secrets bundle; with it a control-plane class renders and installs too. It must hold every CA key and the worker subset's values, and needs the renderer and `FLEET_BOOTSTRAP_ADDRESS` |
+| `FLEET_BOOTSTRAP_ADDRESS` | none | The address of the control plane the Talos root bootstraps etcd on, `API_SERVER_IP`; a device there never installs, and `/render` refuses it |
+| `FLEET_CONTROLPLANE_CONFIG_TTL` | `30m` | Age at which an unfetched control-plane config is deleted |
 | `FLEET_AUTO_PROVISION` | `false` | Whether a bound intake with a class and an address gets `desired_action` `provision`; the Nix module sets `true` |
 | `FLEET_MODEL_MAP` | the G5 mini as `worker-g5`, `amt`, `/dev/nvme0n1` | JSON `{"<SMBIOS model>": {"class", "bmc", "disk"}}` for an intake |
 | `FLEET_NODE_PREFIX`, `FLEET_NODE_RESERVED` | none | The prefix an intake's address comes from, `K8S_NODE_CIDR`, and a comma list of addresses in it that never go to a node; without the prefix an intake gets no free address |
@@ -79,7 +82,8 @@ base64url; anything else is 400 before a path is built. 401 is a bad
 signature. 409 is a device that is unknown, not `planned` or `staged`, without
 an unfinished `provision` run with `install=true` in `last_workflow`, of
 another node, class or `smbios_uuid` than the body names, or a code already
-spent. 503 is a render the controller cannot do now, with the detail in its
+spent. It is also a control plane without `FLEET_CONTROLPLANE_BUNDLE`, or one
+at `FLEET_BOOTSTRAP_ADDRESS` or with no address. 503 is a render the controller cannot do now, with the detail in its
 log. 201 means the file is written. Every answer is `{"reason": "..."}`,
 which never repeats the request.
 

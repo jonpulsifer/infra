@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestLoadClassInputsRefusesAnIncompleteClass(t *testing.T) {
@@ -191,6 +193,31 @@ func TestTalosctlRender(t *testing.T) {
 	if err != nil || !strings.Contains(string(out), "type: controlplane") {
 		t.Fatalf("a control plane with the bundle: %v", err)
 	}
+	// A control plane carries the bundle's CA keys and nothing of the
+	// throwaway bundle, which only workers are rendered from.
+	raw, _ := os.ReadFile(bundle)
+	var keys struct {
+		Certs map[string]struct {
+			Key string `yaml:"key"`
+		} `yaml:"certs"`
+	}
+	if err := yaml.Unmarshal(raw, &keys); err != nil {
+		t.Fatal(err)
+	}
+	// Talos prints a key as the bundle's base64, or as the PEM in a document.
+	for _, ca := range []string{"os", "etcd", "k8s", "k8saggregator", "k8sserviceaccount"} {
+		k := keys.Certs[ca].Key
+		pem, _ := base64.StdEncoding.DecodeString(k)
+		body := strings.Split(string(pem), "\n")
+		if k == "" || len(body) < 2 || !strings.Contains(string(out), k) && !strings.Contains(string(out), body[1]) {
+			t.Errorf("the control plane lacks the bundle's %s key", ca)
+		}
+	}
+	for name, v := range withDecoy.decoyValues {
+		if first := strings.SplitN(v, "\n", 2)[0]; !strings.Contains(name, "PEM") && strings.Contains(string(out), first) {
+			t.Errorf("the control plane carries the throwaway %s", name)
+		}
+	}
 	if _, err := withDecoy.Render(ctx, Node{Name: "x", Class: "worker-g2", Disk: "/dev/sda"}); !errors.Is(err, ErrNoClass) {
 		t.Fatalf("an unknown class: %v", err)
 	}
@@ -210,7 +237,9 @@ func TestTalosctlRender(t *testing.T) {
 //	FLEET_PARITY_BUNDLE  a throwaway talosctl gen secrets bundle
 //
 // A worker goes through the throwaway-bundle path with the bundle's worker
-// subset; a control plane through the bundle.
+// subset; a control plane through the bundle. The script adds joining-cp, a
+// staged control plane, so a control plane the controller installs to join
+// the cluster is always compared.
 func TestRenderParity(t *testing.T) {
 	inputsPath, nodesPath, classPath, bundle := os.Getenv("FLEET_PARITY_INPUTS"), os.Getenv("FLEET_PARITY_NODES"), os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_PARITY_BUNDLE")
 	if inputsPath == "" || nodesPath == "" || classPath == "" || bundle == "" {
@@ -259,6 +288,7 @@ func TestRenderParity(t *testing.T) {
 	if len(moduleInputs) == 0 {
 		t.Fatal("no node to compare")
 	}
+	controlPlanes := 0
 	for name, in := range moduleInputs {
 		fact, ok := facts[name]
 		if !ok {
@@ -279,6 +309,36 @@ func TestRenderParity(t *testing.T) {
 			t.Errorf("%s: the controller's render differs from the module's:\n--- controller\n%s\n--- module\n%s", name, got, want)
 			continue
 		}
+		if in.MachineType == "controlplane" {
+			controlPlanes++
+		}
 		t.Logf("ok %s: %d bytes, class %s", name, len(got), fact.Class)
+	}
+	if _, ok := moduleInputs["joining-cp"]; !ok || controlPlanes < 2 {
+		t.Errorf("compared %d control planes; the parity needs the root's and joining-cp", controlPlanes)
+	}
+}
+
+func fullFakeBundle(prefix string) string {
+	return fakeBundle(prefix) + "  etcd:\n    crt: c\n    key: k\n  k8saggregator:\n    crt: c\n    key: k\n  k8sserviceaccount:\n    key: k\n"
+}
+
+func TestLoadBundleNeedsTheFullBundleOfTheWorkersCluster(t *testing.T) {
+	worker, _ := parseWorkerSecrets([]byte(fakeBundle("A")))
+	dir := t.TempDir()
+	for name, c := range map[string]struct {
+		bundle string
+		ok     bool
+	}{
+		"the full bundle":            {fullFakeBundle("A"), true},
+		"the worker subset":          {fakeBundle("A"), false},
+		"a bundle without secretbox": {strings.Replace(fullFakeBundle("A"), "secretboxencryptionsecret: x", `secretboxencryptionsecret: ""`, 1), false},
+		"another cluster's bundle":   {fullFakeBundle("B"), false},
+	} {
+		f := filepath.Join(dir, strings.ReplaceAll(name, " ", "-"))
+		_ = os.WriteFile(f, []byte(c.bundle), 0o600)
+		if err := LoadBundle(f, worker); (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+		}
 	}
 }

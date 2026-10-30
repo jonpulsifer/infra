@@ -149,6 +149,52 @@ func LoadWorkerSecrets(path string) (WorkerSecrets, error) {
 	return w, nil
 }
 
+// LoadBundle checks the full secrets bundle a control-plane render reads:
+// every CA key and the secretbox secret are present, and its worker values
+// are the worker secrets', so both files are of one cluster. A control plane
+// rendered from a worker subset, or from another cluster's bundle, would
+// never join.
+func LoadBundle(path string, worker WorkerSecrets) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var full struct {
+		Secrets struct {
+			Secretbox string `yaml:"secretboxencryptionsecret"`
+		} `yaml:"secrets"`
+		Certs map[string]struct {
+			Key string `yaml:"key"`
+		} `yaml:"certs"`
+	}
+	if err := yaml.Unmarshal(b, &full); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if full.Secrets.Secretbox == "" {
+		return fmt.Errorf("%s: secrets.secretboxencryptionsecret is empty", path)
+	}
+	for _, ca := range []string{"etcd", "k8s", "k8saggregator", "k8sserviceaccount", "os"} {
+		if full.Certs[ca].Key == "" {
+			return fmt.Errorf("%s: certs.%s.key is empty; a control plane needs the full bundle", path, ca)
+		}
+	}
+	own, err := parseWorkerSecrets(b)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	have, _ := own.values()
+	want, err := worker.values()
+	if err != nil {
+		return fmt.Errorf("the worker secrets: %w", err)
+	}
+	for name, v := range want {
+		if have[name] != v {
+			return fmt.Errorf("%s: %s differs from the worker secrets'; the two are not of one cluster", path, name)
+		}
+	}
+	return nil
+}
+
 // Node is what a render takes from a NetBox device: its name, class,
 // install disk and TPM spec version ("2.0" for a node that seals its disks).
 type Node struct {
@@ -178,7 +224,8 @@ var ErrNoClass = errors.New("the node's class is not in the class inputs")
 // matches the Talos provider byte for byte. A worker is rendered from a
 // throwaway bundle, and the six values a worker config carries are then
 // replaced with the real ones, so the server needs no CA key for it. A
-// control plane needs BundlePath.
+// control plane is rendered from the full bundle at BundlePath, as the Talos
+// root renders it; without one it is refused.
 type Talosctl struct {
 	Bin        string
 	BundlePath string

@@ -11,7 +11,10 @@ locals {
   cluster_endpoint = "https://${local.topology.API_SERVER_HOSTNAME}:${local.topology.API_SERVER_PORT}"
   controlplanes    = { for name, n in var.nodes : name => n if n.role == "controlplane" && !n.enrolling }
   workers          = { for name, n in var.nodes : name => n if n.role == "worker" && !n.enrolling }
-  controlplane     = one(values(local.controlplanes))
+  # talos_cluster bootstraps etcd on the control plane at API_SERVER_IP, and
+  # every other control plane joins the cluster it serves.
+  bootstrap = { for name, n in local.controlplanes : name => n if n.address == local.topology.API_SERVER_IP }
+  joining   = { for name, n in local.controlplanes : name => n if n.address != local.topology.API_SERVER_IP }
 }
 
 # The secrets bundle is a 1Password Secure Note whose note is secrets.yaml

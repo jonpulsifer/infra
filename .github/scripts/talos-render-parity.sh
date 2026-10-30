@@ -11,6 +11,12 @@
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #
+# Beside the inventory's nodes, the root is evaluated with one more machine:
+# joining-cp, a staged control plane at a documentation address. The root
+# takes it as enrolling, as it takes a control plane that fleet-controller
+# installs to join the cluster. Its render is compared like the others, and
+# the class inputs must stay what they are with it in the root.
+#
 # usage: talos-render-parity.sh [root]   (default clusters/folly/talos)
 
 set -euo pipefail
@@ -23,7 +29,23 @@ trap 'rm -rf "$work"; rm -f "$override"' EXIT
 
 # The root's backend needs credentials; a local backend with no state lets
 # tofu console evaluate the repo alone. The 1Password item is never opened.
-printf 'terraform {\n  backend "local" {}\n}\n' >"$override"
+# The override's locals add the joining control plane.
+cp_class=$(jq -r '[to_entries[] | select(.value.machine_type == "controlplane") | .key] | first // empty' "clusters/$site/fleet/class-inputs.json")
+if [[ -z "$cp_class" ]]; then
+  echo "clusters/$site/fleet/class-inputs.json has no control-plane class" >&2
+  exit 1
+fi
+cat >"$override" <<EOF
+terraform {
+  backend "local" {}
+}
+
+locals {
+  machines = merge(yamldecode(file("\${path.module}/../inventory/machines.yaml")).machines, {
+    joining-cp = { class = "$cp_class", status = "staged", address = "192.0.2.10", disk = "/dev/nvme0n1", tpm = "2.0" }
+  })
+}
+EOF
 export TF_DATA_DIR="$work/root-data" TF_IN_AUTOMATION=1
 tofu -chdir="$root" init -input=false -lockfile=readonly >/dev/null
 
@@ -49,6 +71,10 @@ for node in $nodes; do
 done
 if [[ $(jq 'length' "$inputs") -eq 0 ]]; then
   echo "no node of $root has known inputs" >&2
+  exit 1
+fi
+if [[ $(console 'local.nodes["joining-cp"].enrolling') != true ]]; then
+  echo "the root does not take a staged control plane as enrolling" >&2
   exit 1
 fi
 

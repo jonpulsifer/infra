@@ -70,16 +70,17 @@ locals {
   install_generation = "secureboot-2"
 
   # The nodes are the export's active, staged and failed machines: a failed
-  # one is quarantined, not gone, and stays managed. A staged worker is
-  # enrolling: the server renders its config and the root applies none until
-  # NetBox holds it active, so its talos_machine is planned away and back
-  # across a reinstall, by design. The one control plane is never enrolling,
-  # or the root would have no control plane to bootstrap and apply through.
-  # The install disk is the inventory's.
+  # one is quarantined, not gone, and stays managed. A staged node is
+  # enrolling: fleet-controller renders its config and the root applies none
+  # until NetBox holds it active, so its talos_machine is planned away and
+  # back across a reinstall, by design. A control plane enrolls as a worker
+  # does, and joins the cluster. The control plane at API_SERVER_IP is never
+  # enrolling, or the root would have no control plane to bootstrap and
+  # apply through. The install disk is the inventory's.
   nodes = { for name, m in local.machines : name => {
     class     = m.class
     role      = local.classes[m.class].role
-    enrolling = m.status == "staged" && local.classes[m.class].role != "controlplane"
+    enrolling = m.status == "staged" && m.address != module.topology.data.API_SERVER_IP
   } if contains(["active", "staged", "failed"], m.status) }
 
   # The inventory's TPM 2.0 nodes, which seal disks and attest.

@@ -1,10 +1,10 @@
 # talos-cluster
 
-Module for the Talos Linux machine configuration of one cluster: an Image Factory schematic, one `talos_machine` per node, and the `talos_cluster` that bootstraps etcd on the control plane and runs Kubernetes upgrades. A root in `clusters/<site>/talos/` calls it with `site`, the version pins and the node map. See [OpenTofu and Atlantis](https://wiki.lolwtf.ca/platform/opentofu/) on the wiki.
+Module for the Talos Linux machine configuration of one cluster: an Image Factory schematic, one `talos_machine` per node, and the `talos_cluster` that bootstraps etcd on the control plane at `API_SERVER_IP` and runs Kubernetes upgrades. Every other control plane joins that one, after `talos_cluster`, as `talos_machine.joining`. A root in `clusters/<site>/talos/` calls it with `site`, the version pins and the node map. See [OpenTofu and Atlantis](https://wiki.lolwtf.ca/platform/opentofu/) on the wiki.
 
 The module has no Kubernetes provider and no data source that contacts a node, so a plan succeeds while the cluster is down. The secrets bundle is a 1Password Secure Note whose note is the cluster's `secrets.yaml` in the `talosctl gen secrets` shape. It is read with an ephemeral resource and passed through write-only attributes, so no secret reaches the plan or the state. In that mode the provider skips its live refresh: a plan does not notice a node changed by hand.
 
-Network facts come from `clusters/<site>/config/cluster-topology.json` through `terraform/modules/cluster-topology`, and the DNS zone from `terraform/network/tailscale/fleet.tf.json`. An apply that changes `talos_version`, `extensions` or `extra_kernel_args` upgrades and reboots every node, the control plane first. An apply that changes `kubernetes_version` runs `upgrade-k8s` through `talos_cluster`.
+Network facts come from `clusters/<site>/config/cluster-topology.json` through `terraform/modules/cluster-topology`, and the DNS zone from `terraform/network/tailscale/fleet.tf.json`. An apply that changes `talos_version`, `extensions` or `extra_kernel_args` upgrades and reboots every node, the control plane at `API_SERVER_IP` first. An apply that changes `kubernetes_version` runs `upgrade-k8s` through `talos_cluster`.
 
 ## Develop
 
@@ -44,6 +44,7 @@ tofu -chdir=terraform/modules/talos-cluster validate
 | [talos_cluster.this](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/cluster) | resource |
 | [talos_image_factory_schematic.this](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/image_factory_schematic) | resource |
 | [talos_machine.controlplane](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/machine) | resource |
+| [talos_machine.joining](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/machine) | resource |
 | [talos_machine.worker](https://registry.terraform.io/providers/siderolabs/talos/latest/docs/resources/machine) | resource |
 | [terraform_data.install](https://registry.terraform.io/providers/hashicorp/terraform/latest/docs/resources/data) | resource |
 
