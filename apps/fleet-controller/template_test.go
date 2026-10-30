@@ -118,7 +118,8 @@ func contains(list []string, s string) bool {
 }
 
 // TestInstallActionScript runs the install action's shell with a docker
-// that records its arguments.
+// that records its arguments. The script's /tmp/fleet and console devices are
+// pointed into a temp dir, so the test needs no hardware paths.
 func TestInstallActionScript(t *testing.T) {
 	wf := renderTemplate(t, provisionMap(t))
 	var script string
@@ -135,6 +136,12 @@ func TestInstallActionScript(t *testing.T) {
 		t.Skip("no sh")
 	}
 	dir := t.TempDir()
+	fleetDir := filepath.Join(dir, "fleet")
+	if err := os.Mkdir(fleetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script = strings.ReplaceAll(script, "/tmp/fleet", fleetDir)
+	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
 	argsFile := filepath.Join(dir, "args")
 	os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argsFile+"\n"), 0o755)
 	codeFile := filepath.Join(dir, "install_code")
