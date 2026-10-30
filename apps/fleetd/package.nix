@@ -12,7 +12,7 @@
     fileset = lib.fileset.unions [
       ./go.mod
       ./go.sum
-      ./attest/policy.yaml
+      ./attest/policy
       ./attest/roots
       ./attest/testdata
       ./fleet/testdata

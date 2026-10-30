@@ -54,8 +54,10 @@ type Record struct {
 	NVIndexes       []uint32  `json:"nv_indexes,omitempty"`
 	// BootApplications are the Authenticode digests PCR 4 recorded after
 	// its separator, for pinning in the policy.
-	BootApplications []string  `json:"boot_applications,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	BootApplications []string `json:"boot_applications,omitempty"`
+	// Boot is the revocation state the log measured: dbx and the SBAT level.
+	Boot      bootFacts `json:"boot,omitzero"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// CheckedAt is the running node's newest passing quote,
 	// from a daily check or a renewal.
 	CheckedAt time.Time `json:"checked_at,omitzero"`

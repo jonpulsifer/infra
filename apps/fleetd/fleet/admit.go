@@ -192,6 +192,8 @@ func (r *Reconciler) checkDeclared(ctx context.Context, d Device) error {
 	why := ""
 	if m := d.missing(); len(m) > 0 {
 		why = fmt.Sprintf("%s lacks %s; apply terraform/netbox/folly", d.Name, strings.Join(m, ", "))
+	} else if _, ok := r.Config.Classes[d.Class]; !ok {
+		why = fmt.Sprintf("%s's class %q is not in the class table", d.Name, d.Class)
 	} else if port, _ := r.where(ctx, d, r.Now().Add(-AttestedPortTTL)); d.ExpectedPort != port {
 		why = portMismatch(port, d.ExpectedPort, d.Name)
 	}

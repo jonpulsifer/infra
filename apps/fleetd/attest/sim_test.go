@@ -156,7 +156,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		t.Fatal(err)
 	}
 	h.v = &Verifier{
-		Roots: roots, Policy: policy, CA: devIDCA(t), Store: store,
+		Roots: roots, Policies: map[string]*Policy{"talos": policy}, Classes: testClasses, CA: devIDCA(t), Store: store,
 		Audit: &Audit{W: &h.audit, Site: "folly"},
 		Log:   slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now, SessionTTL: time.Minute,
 	}

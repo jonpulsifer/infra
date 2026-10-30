@@ -61,7 +61,7 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 | --- | --- | --- |
 | EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/fleetd/attest/roots/` |
 | Credential activation | The attestation key (AK) is in that TPM | [fleetd](../apps/fleetd.md), from HookOS |
-| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | fleetd, against `apps/fleetd/attest/policy.yaml` |
+| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | fleetd, against the profiles in `apps/fleetd/attest/policy/` |
 | TPM2_Certify | The LDevID key is in that TPM and cannot leave it | fleetd |
 | LDevID and LAK certificates | The DevID CA vouches for the key and the AK | `FML DevID folly CA`, in [PKI](pki.md#chain) |
 | `tpm_devid` | The agent holds the LDevID key in a TPM with a genuine EK | spore's SPIRE server |

@@ -341,7 +341,7 @@ func TestRenewalFromTheRunningNode(t *testing.T) {
 
 	// The full policy applies to a renewal, minus required_authorities,
 	// which only a HookOS boot meets.
-	h.v.Policy = loadPolicy(t)
+	h.v.Policies["talos"] = loadPolicy(t)
 	h.v.Now = func() time.Time { return time.Now().Add(time.Hour) }
 	renewed, err := h.renew(simSerial)
 	if err != nil {
@@ -381,7 +381,7 @@ func TestRenewalFromTheRunningNode(t *testing.T) {
 	}
 
 	// A renewal that fails the renewal policy quarantines the machine.
-	h.v.Policy.RenewRequiredAuthorities = h.v.Policy.RequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = h.v.Policies["talos"].RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.renew(simSerial); return err }()); r.Verdict.Reason != reasonPolicy {
 		t.Fatalf("renewal against the HookOS policy: %+v", r.Verdict)
 	}

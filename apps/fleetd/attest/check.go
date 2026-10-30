@@ -115,7 +115,11 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	if _, err := v.checkLDevID(s, req.LDevID, s.ldBlobs); err != nil {
 		return unproven(err)
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.EvaluateRenewal)
+	policy, err := v.policyFor(s.machine.Class, true)
+	if err != nil {
+		return protocol.Renewed{}, err
+	}
+	events, err := v.replayBoot(pcrs, req.EventLog, policy.EvaluateRenewal)
 	if err != nil {
 		if s.machine.controlPlane() {
 			return protocol.Renewed{}, v.failInPlace(ctx, s, err, true)
@@ -143,6 +147,7 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	rec.Status = StatusAttested
 	rec.Reason, rec.Detail, rec.CheckFailed = "", nil, ""
 	rec.BootApplications = bootApplications(events)
+	rec.noteBoot(events)
 	rec.AttestedAt, rec.CheckedAt, rec.UpdatedAt = now, now, now
 	if rec.LDevIDNotBefore.IsZero() {
 		// A check moves attested_at, which orders a record without one.

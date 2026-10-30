@@ -72,10 +72,10 @@ func renderTemplate(t *testing.T, hardwareMap map[string]any) tinkWorkflow {
 }
 
 func provisionMap(t *testing.T) map[string]any {
-	cfg := Config{Template: "provision",
+	cfg := Config{Classes: testClasses,
 		Installs: map[string]string{"worker-g5": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"}}
 	d := Device{Name: "riptide", Class: "worker-g5", TPM: "2.0", Status: "planned", Verdict: "attested", BMCType: "amt", BMCAddress: "10.3.0.12"}
-	return cfg.Workflow(d, "provision", testNow, false)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
+	return mustWorkflow(t, cfg, d, "provision")["spec"].(map[string]any)["hardwareMap"].(map[string]any)
 }
 
 func TestTemplateRendersTheInstall(t *testing.T) {
