@@ -47,7 +47,8 @@ cmdline() {
 
 # attest sets the clock, which fleetd checks certificate dates against, then
 # runs tink-attest until it passes, fleetd gives a verdict (exit 3), or five
-# tries fail.
+# tries fail. A pass leaves /worker/fleet/attested, which the Template's wipe
+# of a run that attests requires.
 attest() {
   url=${ATTEST_URL:-$(cmdline fleet_attest_url)}
   ntp=${NTP_SERVER:-$(cmdline fleet_ntp_server)}
@@ -63,10 +64,14 @@ attest() {
   fi
   $B mountpoint -q /sys/kernel/security || $B mount -t securityfs securityfs /sys/kernel/security
   $B mkdir -p /worker/fleet && $B chmod 0700 /worker/fleet
+  $B rm -f /worker/fleet/attested
   for try in 1 2 3 4 5; do
     /autoid/tink-attest -url "$url" -mac "$ID" -install-code /worker/fleet/install_code
     case $? in
-    0) return 0 ;;
+    0)
+      : >/worker/fleet/attested
+      return 0
+      ;;
     3) return 1 ;;
     esac
     log "try $try failed"

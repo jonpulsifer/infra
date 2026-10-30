@@ -103,10 +103,16 @@ func (b *binding) note(format string, a ...any) { b.notes = append(b.notes, fmt.
 // planned device, starts its provision when one is asked for or allowed, and
 // renders its config under the code. Only nil means the config waits for the
 // code; the pass stands either way. Admit and a reconcile pass never run at
-// once, so one Workflow starts for the device.
+// once, so one Workflow starts for the device. A new run starts only once
+// the render's gates pass, so no run wipes a disk it cannot install.
 func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
-	r.passMu.Lock()
-	defer r.passMu.Unlock()
+	if r.Installer == nil {
+		return unavailable("the fleet has no installer")
+	}
+	if err := r.lock(ctx); err != nil {
+		return unavailable("waiting for the reconcile pass: %v", err)
+	}
+	defer r.unlock()
 	d, err := r.NetBox.BySerial(ctx, r.Config.Site, req.Serial)
 	if errors.Is(err, ErrNoDevice) {
 		return conflict("NetBox has no %s node with that serial", r.Config.Site)
@@ -128,6 +134,11 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		if d.MAC == "" || d.Disk == "" {
 			return conflict("%s needs a primary MAC on an interface and install_disk", d.Name)
 		}
+		if r.Config.Installer(d, "provision") != "" {
+			if err := r.Installer.Ready(ctx, d); err != nil {
+				return err
+			}
+		}
 		workflows, err := r.nodeWorkflows(ctx, d)
 		if err != nil {
 			return unavailable("%v", err)
@@ -140,9 +151,6 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 			r.Metrics.AutoProvisioned.Add(1)
 			Audit("fleet.autoprovision", r.Config.Site, d, name, "provision")
 		}
-	}
-	if r.Installer == nil {
-		return unavailable("the fleet has no installer")
 	}
 	return r.Installer.Render(ctx, req)
 }
@@ -178,6 +186,8 @@ func (r *Reconciler) provisionWhy(d Device) string {
 		return "a control plane; the owner sets desired_action to provision by hand"
 	case d.Address == "":
 		return "the device has no address"
+	case r.Config.Installer(d, "provision") == "":
+		return "its class installs nothing here; the owner sets desired_action to provision"
 	}
 	return ""
 }

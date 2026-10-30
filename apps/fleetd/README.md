@@ -110,7 +110,10 @@ session's SMBIOS UUID lower-cased, and must read as 8-4-4-4-12 hex. `Admit`:
 
 Only when the render succeeds does the confirm carry the code, wrapped to the session's TPM with
 TPM2_MakeCredential; otherwise one `attest.install` audit line says why and the pass stands. The
-code is never logged. `tink-attest` unwraps it and writes it to `-install-code`, mode 0600.
+code is never logged. `tink-attest` unwraps it and writes it to `-install-code`, mode 0600. A new
+run starts only after the render's device gates pass (`Installer.Ready`), and the Template wipes a
+provision's disk only after the boot's pass and with the code. `Admit` waits for a reconcile pass
+and gives up when its context ends.
 
 ## Config
 

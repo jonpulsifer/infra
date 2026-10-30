@@ -34,6 +34,9 @@ type Pending struct {
 	// Fetched is when the node fetched it; a fetched config's bytes are
 	// gone, and it waits only for its release in NetBox.
 	Fetched time.Time
+	// claimed is a fetch that is writing the config now; no other fetch
+	// gets it meanwhile.
+	claimed bool
 }
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
@@ -123,6 +126,32 @@ func (c *Configs) Get(uuid, code string, now time.Time) (Pending, []byte, bool) 
 	return p, c.bytes[uuid], true
 }
 
+// Claim is Get for one fetch at a time: a config another fetch is writing
+// answers nothing until that fetch burns it or gives it back.
+func (c *Configs) Claim(uuid, code string, now time.Time) (Pending, []byte, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	p, ok := c.pending[uuid]
+	if !ok || p.Code != code || !p.Fetched.IsZero() || p.claimed || p.expired(now) {
+		return Pending{}, nil, false
+	}
+	p.claimed = true
+	c.pending[uuid] = p
+	return p, c.bytes[uuid], true
+}
+
+// Unclaim gives a config back after a fetch that did not write all of it.
+func (c *Configs) Unclaim(uuid, code string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	if p, ok := c.pending[uuid]; ok && p.Code == code {
+		p.claimed = false
+		c.pending[uuid] = p
+	}
+}
+
 // Burn marks the machine's config served: its bytes go, its code is burned,
 // and its record waits for Released. ok is false when the config is no
 // longer the one asked for.
@@ -134,7 +163,7 @@ func (c *Configs) Burn(uuid, code string, at time.Time) (Pending, bool) {
 	if !ok || p.Code != code || !p.Fetched.IsZero() {
 		return Pending{}, false
 	}
-	p.Fetched = at
+	p.Fetched, p.claimed = at, false
 	c.pending[uuid] = p
 	delete(c.bytes, uuid)
 	c.burn(uuid, code, at)

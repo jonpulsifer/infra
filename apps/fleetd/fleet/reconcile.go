@@ -25,9 +25,10 @@ type Reconciler struct {
 	Metrics   *Metrics
 	Now       func() time.Time
 
-	// passMu keeps a pass and an Admit apart, so one Workflow starts for a
-	// device.
-	passMu   sync.Mutex
+	// pass keeps a reconcile pass and an Admit apart, so one Workflow starts
+	// for a device; an Admit gives up waiting when its context ends.
+	pass     chan struct{}
+	passOnce sync.Once
 	mu       sync.Mutex
 	reported map[string]bool
 }
@@ -118,10 +119,29 @@ func (r *Reconciler) journalOnce(ctx context.Context, key string, d Device, kind
 	return nil
 }
 
-// Reconcile is one pass.
+// lock takes the pass, or gives up when ctx ends.
+func (r *Reconciler) lock(ctx context.Context) error {
+	r.passOnce.Do(func() { r.pass = make(chan struct{}, 1) })
+	select {
+	case r.pass <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (r *Reconciler) unlock() { <-r.pass }
+
+// Reconcile is one pass. The installer's expiries and release retries run
+// even when NetBox's device list fails.
 func (r *Reconciler) Reconcile(ctx context.Context) error {
-	r.passMu.Lock()
-	defer r.passMu.Unlock()
+	if err := r.lock(ctx); err != nil {
+		return err
+	}
+	defer r.unlock()
+	if r.Installer != nil {
+		defer r.Installer.Tick(ctx)
+	}
 	devices, err := r.NetBox.Devices(ctx, r.Config.Site)
 	if err != nil {
 		return fmt.Errorf("NetBox: %w", err)
@@ -176,9 +196,6 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	if err := r.prune(ctx); err != nil {
 		errs = append(errs, err)
-	}
-	if r.Installer != nil {
-		r.Installer.Tick(ctx)
 	}
 	return errors.Join(errs...)
 }

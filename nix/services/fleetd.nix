@@ -15,7 +15,8 @@
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
 #
 # With fleetd/folly-cordon-token sealed, it cordons a node it quarantined through the cluster's API,
-# as clusters/folly/tinkerbell-access/fleetd-cordon.yaml's account, which may cordon nodes only.
+# as clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account, which may cordon nodes
+# only.
 {
   config,
   lib,
@@ -91,12 +92,15 @@ let
   acmeDir = config.security.acme.certs.${host}.directory;
 
   # The records talos-attest kept on spore, every node's LDevID files among them, move once into
-  # fleetd's state; the old directory stays as the rollback.
+  # fleetd's state; the old directory stays as the rollback. The copy lands under a temporary name
+  # and moves into place whole, so an interrupted copy runs again on the next start.
   migrate = pkgs.writeShellScript "fleetd-migrate" ''
     set -eu
     if [ -d /var/lib/talos-attest ] && [ ! -e ${stateDir}/attest ]; then
-      ${pkgs.coreutils}/bin/cp -a /var/lib/talos-attest ${stateDir}/attest
-      ${pkgs.coreutils}/bin/chown -R fleetd:fleetd ${stateDir}/attest
+      ${pkgs.coreutils}/bin/rm -rf ${stateDir}/.attest-migrating
+      ${pkgs.coreutils}/bin/cp -a /var/lib/talos-attest ${stateDir}/.attest-migrating
+      ${pkgs.coreutils}/bin/chown -R fleetd:fleetd ${stateDir}/.attest-migrating
+      ${pkgs.coreutils}/bin/mv -T ${stateDir}/.attest-migrating ${stateDir}/attest
     fi
   '';
 in
@@ -262,13 +266,17 @@ in
     systemd.services.fleetd = {
       description = "Folly's attestation, LDevID issuance, Tinkerbell installs and first-boot configs";
       wantedBy = [ "multi-user.target" ];
+      # The ACME unit puts a certificate in place, self-signed until the first order, before the
+      # boot listener reads it.
       wants = [
         "network-online.target"
         "tinkerbell.service"
+        "acme-${host}.service"
       ];
       after = [
         "network-online.target"
         "tinkerbell.service"
+        "acme-${host}.service"
       ];
       environment = {
         FLEETD_BOOT_ADDR = "${bootstrapIp}:443";

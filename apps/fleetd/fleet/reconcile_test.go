@@ -899,7 +899,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	wfName := names[0]
 	wf := kube.get(wfBase + wfName)
 	hm := wf["spec"].(map[string]any)["hardwareMap"].(map[string]any)
-	if hm["wipe"] != "true" || hm["retire"] != "false" || hm["attest"] != nil || hm["attest_url"] != nil || hm["ntp_server"] != nil {
+	if hm["wipe"] != "true" || hm["attest"] != "true" || hm["retire"] != "false" || hm["attest_url"] != nil || hm["ntp_server"] != nil {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	boot := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)
@@ -1101,7 +1101,7 @@ func TestWipeSkipsAttestOnTPM12AndManualBootWithoutBMC(t *testing.T) {
 	}
 	wf := kube.get(wfBase + names[0])
 	hm := wf["spec"].(map[string]any)["hardwareMap"].(map[string]any)
-	if hm["wipe"] != "true" || hm["retire"] != "false" {
+	if hm["attest"] != "false" || hm["wipe"] != "true" || hm["retire"] != "false" {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	if _, has := wf["spec"].(map[string]any)["bootOptions"].(map[string]any)["bootMode"]; has {
@@ -1131,7 +1131,7 @@ func TestRetirement(t *testing.T) {
 	}
 	wfName := names[0]
 	hm := kube.get(wfBase + wfName)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
-	if hm["retire"] != "true" || hm["wipe"] != "true" {
+	if hm["retire"] != "true" || hm["wipe"] != "true" || hm["attest"] != "false" {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	if _, has := nb.patches[0]["status"]; has {

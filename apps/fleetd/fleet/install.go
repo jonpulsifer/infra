@@ -164,22 +164,8 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if i.Configs.Spent(req.UUID, req.Code) {
 		return d, conflict("the code is spent")
 	}
-	switch i.Renderer.MachineType(d.Class) {
-	case "":
-		return d, unavailable("the class inputs have no class %q", d.Class)
-	case "controlplane":
-		if !i.ControlPlanes {
-			return d, conflict("%s is a control plane, which the owner renders", d.Name)
-		}
-		if d.Address == "" || d.Address == i.Bootstrap {
-			return d, conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
-		}
-	}
-	if d.TPM == "" && i.classHasTPM(d.Class) {
-		return d, conflict("%s has no tpm_version, and its model carries a TPM 2.0; it renders once the verifier records it", d.Name)
-	}
-	if err := i.prepare(ctx); err != nil {
-		return d, unavailable("the renderer: %v", err)
+	if err := i.gates(ctx, d); err != nil {
+		return d, err
 	}
 	cfg, err := i.Renderer.Render(ctx, Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address})
 	if err != nil {
@@ -200,6 +186,38 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 		log.Printf("journal the render of %s: %v", d.Name, err)
 	}
 	return d, nil
+}
+
+// Ready checks what the device itself must pass before fleetd starts a run
+// that installs it: the class, the control-plane gate, the TPM version and
+// the renderer. Admit asks before it creates the Workflow.
+func (i *Installer) Ready(ctx context.Context, d Device) error {
+	if i.Renderer == nil {
+		return unavailable("the fleet has no renderer")
+	}
+	return i.gates(ctx, d)
+}
+
+// gates are the device's render gates.
+func (i *Installer) gates(ctx context.Context, d Device) error {
+	switch i.Renderer.MachineType(d.Class) {
+	case "":
+		return unavailable("the class inputs have no class %q", d.Class)
+	case "controlplane":
+		if !i.ControlPlanes {
+			return conflict("%s is a control plane, which the owner renders", d.Name)
+		}
+		if d.Address == "" || d.Address == i.Bootstrap {
+			return conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
+		}
+	}
+	if d.TPM == "" && i.classHasTPM(d.Class) {
+		return conflict("%s has no tpm_version, and its model carries a TPM 2.0; it renders once the verifier records it", d.Name)
+	}
+	if err := i.prepare(ctx); err != nil {
+		return unavailable("the renderer: %v", err)
+	}
+	return nil
 }
 
 // classHasTPM says whether a model of the class carries a TPM 2.0.
@@ -256,7 +274,7 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := i.Now()
-	p, cfg, ok := i.Configs.Get(uuid, code, now)
+	p, cfg, ok := i.Configs.Claim(uuid, code, now)
 	if !ok {
 		i.notFound(r.Context(), uuid, code, now)
 		http.NotFound(w, r)
@@ -272,6 +290,7 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		err = http.NewResponseController(w).Flush()
 	}
 	if err != nil || n != len(cfg) {
+		i.Configs.Unclaim(uuid, code)
 		log.Printf("talos-config: %s's fetch ended after %d of %d bytes; the config stays", p.Node, n, len(cfg))
 		return
 	}

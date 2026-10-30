@@ -523,3 +523,35 @@ func TestAdmitLeavesFactsOfAnUnknownModelEmpty(t *testing.T) {
 		}
 	}
 }
+
+// A run starts only once the render's gates pass: a device whose model
+// carries a TPM 2.0 renders once its tpm_version is recorded, so no
+// Workflow wipes it before then.
+func TestAdmitStartsNoRunTheRenderRefuses(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"tpm_version": nil})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "tpm_version") {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	if n := at.kube.workflows(); len(n) != 0 || at.held(testCode) || at.rend.calls != 0 {
+		t.Fatalf("a run started that the render refuses: %v", n)
+	}
+}
+
+// An admission waits for a reconcile pass, and gives up when its context
+// ends, with nothing written.
+func TestAdmitGivesUpWhileAPassRuns(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	if err := at.r.lock(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := at.r.Admit(ctx, RenderRequest{Serial: boxSerial, UUID: boxUUID, Node: "swell", Code: testCode})
+	if status(err) != http.StatusServiceUnavailable || len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 {
+		t.Fatalf("admit during a pass: %v, patches %v", err, at.nb.patches)
+	}
+	at.r.unlock()
+	if code, why := at.admit(testCode); code != http.StatusCreated {
+		t.Fatalf("admit after the pass: %d %s", code, why)
+	}
+}

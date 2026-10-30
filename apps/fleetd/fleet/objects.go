@@ -22,17 +22,17 @@ const ActionRetire = "retire"
 // run netboots HookOS, which attests on every boot, so an attest is a run
 // that does nothing else. It leaves an active node active: planned would
 // take it out of the Talos root, which applies no config to a node until it
-// is active.
+// is active. Attest makes the run's wipe wait for that boot's pass.
 type Action struct {
-	Wipe, Retire bool
-	Status       string
+	Attest, Wipe, Retire bool
+	Status               string
 }
 
 // Actions are the runs the fleet starts, by desired_action and by
 // ActionRetire.
 var Actions = map[string]Action{
-	"provision":  {Wipe: true, Status: "planned"},
-	"attest":     {},
+	"provision":  {Attest: true, Wipe: true, Status: "planned"},
+	"attest":     {Attest: true},
 	"wipe":       {Wipe: true, Status: "planned"},
 	ActionRetire: {Wipe: true, Retire: true},
 }
@@ -199,6 +199,7 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) Ob
 		"templateRef": c.Template,
 		"hardwareRef": d.Name,
 		"hardwareMap": map[string]any{
+			"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
 			"wipe":            fmt.Sprint(a.Wipe),
 			"retire":          fmt.Sprint(a.Retire),
 			"install":         fmt.Sprint(installer != ""),

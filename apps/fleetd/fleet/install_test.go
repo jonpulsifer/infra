@@ -586,3 +586,29 @@ func TestRenderRefusesATPMModelWithoutTPMVersion(t *testing.T) {
 		})
 	}
 }
+
+// Two fetches at once get the config once: the second answers nothing while
+// the first writes, and a fetch that breaks off gives it back.
+func TestAConfigIsServedOnceToConcurrentFetches(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	c := it.in.Configs
+	if _, _, ok := c.Claim(testUUID, testCode, it.now); !ok {
+		t.Fatal("the first fetch got nothing")
+	}
+	if _, _, ok := c.Claim(testUUID, testCode, it.now); ok {
+		t.Fatal("a second fetch got the config while the first wrote it")
+	}
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+		t.Fatalf("a concurrent GET answered %d", w.Code)
+	}
+	c.Unclaim(testUUID, testCode)
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+		t.Fatalf("the GET after the first broke off answered %d", w.Code)
+	}
+	if it.held(testCode) {
+		t.Fatal("the config was not burned")
+	}
+}

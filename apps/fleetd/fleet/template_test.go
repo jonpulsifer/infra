@@ -96,8 +96,13 @@ func TestTemplateRendersTheInstall(t *testing.T) {
 	}
 	// The agent's entrypoint attests at boot and writes the install code
 	// under HookOS's /worker, which the install action mounts.
-	if !contains(actions["install"].Volumes, "/worker/fleet:/tmp/fleet") {
-		t.Errorf("install does not mount /worker/fleet: %v", actions["install"].Volumes)
+	for _, name := range []string{"wipe-disk", "install"} {
+		if !contains(actions[name].Volumes, "/worker/fleet:/tmp/fleet") {
+			t.Errorf("%s does not mount /worker/fleet: %v", name, actions[name].Volumes)
+		}
+	}
+	if env["ATTEST"] != "true" {
+		t.Errorf("a provision's wipe waits for no attestation: %v", env)
 	}
 	for name, a := range actions {
 		if a.Namespaces.Network != "" {
@@ -189,5 +194,57 @@ func TestInstallActionScript(t *testing.T) {
 	}
 	if args, err := run("false", testCode); err != nil || args != "" {
 		t.Fatalf("a run without install: %v %q", err, args)
+	}
+}
+
+// TestWipeWaitsForTheBootsPass runs the wipe action's shell: a run that
+// attests wipes nothing until the boot passed, and a run that installs
+// nothing without the install code. A disk that is no block device stops
+// the script just after the gates, so the test needs no disk.
+func TestWipeWaitsForTheBootsPass(t *testing.T) {
+	wf := renderTemplate(t, provisionMap(t))
+	var script string
+	for _, a := range wf.Tasks[0].Actions {
+		if a.Name == "wipe-disk" {
+			script = a.Command[2]
+		}
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
+	attested, code := filepath.Join(dir, "attested"), filepath.Join(dir, "install_code")
+	run := func(attest, install string, files ...string) string {
+		os.Remove(attested)
+		os.Remove(code)
+		for _, f := range files {
+			os.WriteFile(f, []byte(testCode), 0o600)
+		}
+		cmd := exec.Command(sh, "-c", script)
+		cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+		for k, v := range wf.Tasks[0].Environment {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		cmd.Env = append(cmd.Env, "ATTEST="+attest, "INSTALL="+install, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dir, "disk"))
+		out, _ := cmd.CombinedOutput()
+		return string(out)
+	}
+	for _, c := range []struct {
+		attest, install string
+		files           []string
+		want            string
+	}{
+		{"true", "true", nil, "did not pass attestation"},
+		{"true", "true", []string{code}, "did not pass attestation"},
+		{"true", "true", []string{attested}, "no install code"},
+		{"true", "true", []string{attested, code}, "is not a block device"},
+		{"true", "false", []string{attested}, "is not a block device"},
+		{"false", "false", nil, "is not a block device"},
+	} {
+		if out := run(c.attest, c.install, c.files...); !strings.Contains(out, c.want) {
+			t.Errorf("attest %s install %s with %v: %q, want %q", c.attest, c.install, c.files, out, c.want)
+		}
 	}
 }
