@@ -430,7 +430,7 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 	nbs := httptest.NewServer(nb.handler())
 	ks := httptest.NewServer(kube.handler())
 	cfg := Config{
-		Site: "folly", Namespace: "tinkerbell", Template: "provision",
+		Site: "folly", Namespace: "tinkerbell", Classes: testClasses,
 		HookOSURL: "http://10.9.0.11/hookos.efi", HookOSCmdline: "console=tty0",
 		Interval: time.Minute, WorkflowTTL: 7 * 24 * time.Hour,
 		BMCSecrets: map[string]string{"amt": "bmc-amt"},

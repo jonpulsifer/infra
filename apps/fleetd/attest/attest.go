@@ -22,6 +22,7 @@ import (
 	"github.com/google/go-attestation/attest"
 	"github.com/google/go-tpm/legacy/tpm2"
 
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -38,9 +39,12 @@ type Recorder interface {
 type Verifier struct {
 	// NetBox is the system of record: it names the machine, its class and
 	// its lifecycle, and gets a device for a serial it never saw.
-	NetBox     *NetBox
-	Roots      *EKRoots
-	Policy     *Policy
+	NetBox *NetBox
+	Roots  *EKRoots
+	// Policies are the attestation profiles by name, and Classes says which
+	// profile judges each class.
+	Policies   map[string]*Policy
+	Classes    classes.Table
 	CA         *CA
 	Store      *Store
 	Recorders  []Recorder
@@ -482,7 +486,11 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 		}
 		return refuse(err)
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.Evaluate)
+	policy, err := v.policyFor(s.machine.Class, false)
+	if err != nil {
+		return refuse(err)
+	}
+	events, err := v.replayBoot(pcrs, req.EventLog, policy.Evaluate)
 	if err != nil {
 		return refuse(err)
 	}
@@ -518,6 +526,7 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	rec.LAKSerial = serialHex(lakCert)
 	rec.AttestedAt = now
 	rec.BootApplications = bootApplications(events)
+	rec.noteBoot(events)
 	rec.Network = v.attestedNetwork(ctx, s, req)
 	files := map[string][]byte{
 		fileLDevIDCert: v.CA.LeafPEM(ldevidCert),
@@ -776,7 +785,11 @@ func (v *Verifier) quotedPCRs(s *session, quote protocol.Quote, values []protoco
 	if err := s.ak.Verify(attest.Quote{Quote: quote.Quote, Signature: quote.Signature}, pcrs, s.nonce); err != nil {
 		return nil, fail(reasonQuote, "%v", err)
 	}
-	for _, want := range v.Policy.PCRs {
+	policy, err := v.policyFor(s.machine.Class, false)
+	if err != nil {
+		return nil, err
+	}
+	for _, want := range policy.PCRs {
 		i := slices.IndexFunc(pcrs, func(p attest.PCR) bool { return p.Index == want })
 		if i < 0 || !pcrs[i].QuoteVerified() {
 			return nil, fail(reasonQuote, "the quote does not cover PCR %d", want)
@@ -1098,7 +1111,11 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	if err != nil {
 		return protocol.Renewed{}, v.reject(&s.machine, s.claim, err)
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.EvaluateRenewal)
+	policy, err := v.policyFor(s.machine.Class, true)
+	if err != nil {
+		return refuse(err)
+	}
+	events, err := v.replayBoot(pcrs, req.EventLog, policy.EvaluateRenewal)
 	if err != nil {
 		return refuse(err)
 	}
@@ -1127,6 +1144,7 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	rec.UpdatedAt = now
 	rec.Renewed = true
 	rec.BootApplications = bootApplications(events)
+	rec.noteBoot(events)
 	seen, known := v.seePCR0(ctx, s.machine.Serial, pcrs, req.BIOS)
 	v.notePCR0(&rec, seen, known)
 	files := map[string][]byte{

@@ -21,6 +21,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 func env(key, fallback string) string {
@@ -49,9 +51,11 @@ func ReadSecret(path string) (string, error) {
 
 // Config is the fleet's environment.
 type Config struct {
-	Site          string
-	Namespace     string
-	Template      string
+	Site      string
+	Namespace string
+	// Classes is the class table: the Template and installer image of each
+	// class a Workflow can run.
+	Classes       classes.Table
 	HookOSURL     string
 	HookOSCmdline string
 	Interval      time.Duration
@@ -77,7 +81,6 @@ func LoadConfig() (Config, error) {
 	c := Config{
 		Site:          env("FLEET_SITE", "folly"),
 		Namespace:     env("FLEET_NAMESPACE", "tinkerbell"),
-		Template:      env("FLEET_TEMPLATE", "provision"),
 		HookOSURL:     os.Getenv("FLEET_HOOKOS_URL"),
 		HookOSCmdline: os.Getenv("FLEET_HOOKOS_CMDLINE"),
 		BMCSecrets:    map[string]string{"amt": "bmc-amt"},
@@ -89,6 +92,13 @@ func LoadConfig() (Config, error) {
 		}
 	}
 	var err error
+	classFile, err := required("FLEET_CLASSES")
+	if err != nil {
+		return c, err
+	}
+	if c.Classes, err = classes.Load(classFile); err != nil {
+		return c, err
+	}
 	if c.Interval, err = time.ParseDuration(env("FLEET_INTERVAL", "2m")); err != nil || c.Interval <= 0 {
 		return c, fmt.Errorf("FLEET_INTERVAL must be a positive duration")
 	}
@@ -207,6 +217,11 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	for class, ci := range inputs {
 		if ci.MachineType == "worker" || in.ControlPlanes {
 			cfg.Installs[class] = ci.InstallerImage
+		}
+	}
+	for class, c := range cfg.Classes {
+		if _, ok := cfg.Installs[class]; !ok && c.InstallerImage != "" {
+			cfg.Installs[class] = c.InstallerImage
 		}
 	}
 	return in, nil

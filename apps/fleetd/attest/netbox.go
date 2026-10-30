@@ -108,6 +108,9 @@ type netboxDevice struct {
 		TPMVersion json.RawMessage `json:"tpm_version"`
 		// PCR0ByBIOS is nil when NetBox defines no pcr0_by_bios field.
 		PCR0ByBIOS json.RawMessage `json:"pcr0_by_bios"`
+		// DBXHash and SBATLevel are nil when NetBox defines no such field.
+		DBXHash   json.RawMessage `json:"dbx_hash"`
+		SBATLevel json.RawMessage `json:"sbat_level"`
 		// The attested network fields, nil when NetBox does not define one.
 		AttestedAddress    json.RawMessage `json:"attested_address"`
 		AttestedSwitch     json.RawMessage `json:"attested_switch"`
@@ -651,6 +654,7 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 	var notes [][2]string
 	if r.Status == StatusAttested {
 		notes = pcr0Fields(d, r, fields)
+		notes = append(notes, bootFields(d, r, fields)...)
 	}
 	patch["custom_fields"] = fields
 	if err := n.do(ctx, http.MethodPatch, fmt.Sprintf("/api/dcim/devices/%d/", d.ID), patch, nil); err != nil {
@@ -705,6 +709,35 @@ func pcr0Fields(d netboxDevice, r Record, fields map[string]any) [][2]string {
 		notes = append(notes, [2]string{"info", fmt.Sprintf("fleetd: PCR 0 at BIOS %s recorded as %s", bios, p.PCR0)})
 	case !strings.EqualFold(cur, p.PCR0):
 		notes = append(notes, [2]string{"warning", fmt.Sprintf("fleetd: PCR 0 at BIOS %s is %s, not the %s on record, and no BIOS update explains it. Not quarantined: once the change is explained, set this BIOS version's entry in pcr0_by_bios to the new value", bios, p.PCR0, plain(cur))})
+	}
+	return notes
+}
+
+// bootFields records the dbx and SBAT hashes a pass measured, in the fields
+// NetBox defines. A value that differs from the one on file replaces it and
+// leaves a warning, since only the owner can say whether a firmware or shim
+// update explains it. It never fails a pass.
+func bootFields(d netboxDevice, r Record, fields map[string]any) [][2]string {
+	var notes [][2]string
+	for _, f := range []struct {
+		field, label, got string
+		raw               json.RawMessage
+	}{
+		{"dbx_hash", "dbx", r.Boot.DBX, d.CustomFields.DBXHash},
+		{"sbat_level", "SBAT level", r.Boot.SBAT, d.CustomFields.SBATLevel},
+	} {
+		if f.got == "" || f.raw == nil {
+			continue
+		}
+		var cur string
+		_ = json.Unmarshal(f.raw, &cur)
+		if strings.EqualFold(cur, f.got) {
+			continue
+		}
+		fields[f.field] = f.got
+		if cur != "" {
+			notes = append(notes, [2]string{"warning", fmt.Sprintf("fleetd: the %s hash is %s, was %s. Not quarantined: a firmware or shim update explains it, or nothing does", f.label, f.got, plain(cur))})
+		}
 	}
 	return notes
 }

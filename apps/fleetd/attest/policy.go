@@ -15,7 +15,7 @@ import (
 )
 
 // Policy is what a replayed event log must show. Certificates are named by
-// the lowercase hex SHA-256 of their DER. policy.yaml is the instance.
+// the lowercase hex SHA-256 of their DER. A file under policy/ is the instance.
 type Policy struct {
 	// PCRs the quote must cover in the SHA-256 bank.
 	PCRs []int `yaml:"pcrs"`
