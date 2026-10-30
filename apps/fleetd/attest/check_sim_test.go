@@ -52,7 +52,7 @@ func activeNode(t *testing.T) (*harness, *fakeNetBox) {
 	t.Helper()
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil})
+	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}

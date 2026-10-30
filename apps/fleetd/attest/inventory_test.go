@@ -4,18 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-// InventoryMachine is one entry of the inventory ATTEST_INVENTORY names, a
-// `machines:` document that nix/services/fleetd.nix writes from the nodes
-// file, clusters/folly/inventory/nodes.yaml: each node's serial, class, TPM
-// version and Secure Boot state. EKHash is the SHA-256 of the RSA EK, the
-// value SPIRE's TPM plugin uses, and EKHashECC the ECC EK's; the nodes file
-// carries neither, since NetBox holds the pins.
+// InventoryMachine is one entry of a test fixture's `machines:` document: a
+// machine the harness enters into the fake NetBox. EKHash is the SHA-256 of
+// the RSA EK, and EKHashECC the ECC EK's.
 type InventoryMachine struct {
 	Name       string `yaml:"-"`
 	Serial     string `yaml:"serial"`
@@ -40,7 +36,7 @@ func (m InventoryMachine) Pinned() map[string]string {
 	return p
 }
 
-// Inventory finds machines by their SMBIOS serial.
+// Inventory is a test fixture: machines by their SMBIOS serial.
 type Inventory struct {
 	bySerial map[string]InventoryMachine
 }
@@ -72,33 +68,6 @@ func LoadInventory(path string) (*Inventory, error) {
 	return inv, nil
 }
 
-// serialKey normalizes a serial for comparison: ASCII upper case, with the
-// surrounding white space trimmed, and nothing else. validSerial has
-// refused anything outside printable ASCII before a serial gets this far.
-func serialKey(s string) string {
-	b := []byte(strings.TrimSpace(s))
-	for i, c := range b {
-		if c >= 'a' && c <= 'z' {
-			b[i] = c - 'a' + 'A'
-		}
-	}
-	return string(b)
-}
-
-// validSerial is whether a claimed serial is printable ASCII and not empty.
-func validSerial(s string) bool {
-	s = strings.TrimSpace(s)
-	if s == "" || len(s) > 64 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		if s[i] < 0x21 || s[i] > 0x7e {
-			return false
-		}
-	}
-	return true
-}
-
 // BySerial looks a machine up by its SMBIOS serial.
 func (inv *Inventory) BySerial(serial string) (InventoryMachine, bool) {
 	m, ok := inv.bySerial[serialKey(serial)]
@@ -114,12 +83,21 @@ func (inv *Inventory) Lookup(_ context.Context, serial string) (Machine, bool, e
 	return Machine{Name: m.Name, Serial: m.Serial, MAC: m.MAC, Class: m.Class, Status: m.Status, Pins: m.Pinned()}, true, nil
 }
 
-// Names lists the machines with a serial.
-func (inv *Inventory) Names() []string {
-	out := make([]string, 0, len(inv.bySerial))
+// seed enters each machine into the fake NetBox as the device its
+// pins, class and status would come from.
+func (inv *Inventory) seed(f *fakeNetBox) {
 	for _, m := range inv.bySerial {
-		out = append(out, m.Name)
+		status := m.Status
+		if status == "" {
+			status = "active"
+		}
+		fields := map[string]any{"talos_class": m.Class}
+		if m.EKHash != "" {
+			fields["ek_hash"] = m.EKHash
+		}
+		if m.EKHashECC != "" {
+			fields["ek_hash_ecc"] = m.EKHashECC
+		}
+		f.add(m.Name, m.Serial, status, m.MAC, fields)
 	}
-	sort.Strings(out)
-	return out
 }

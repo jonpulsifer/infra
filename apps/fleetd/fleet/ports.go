@@ -32,38 +32,19 @@ func plain(s string) string {
 	}, s))
 }
 
-// fillPort cables an installing or active node whose interface has no cable
-// to the switch port its intake pass attested, when that pass is younger than
-// AttestedPortTTL, unless another device's cable holds the port; the cable is
-// journaled. A node on another port than its expected_port is journaled
-// once: the port check admits a machine, and a move after it is the owner's
-// to judge.
-func (r *Reconciler) fillPort(ctx context.Context, d Device, p *passCache) error {
+// checkPort journals once an installing or active node whose intake pass,
+// younger than AttestedPortTTL, attested a switch port other than its
+// expected_port: the port check admits a machine, and a move after it is the
+// owner's to judge. It never cables the node; Terraform owns the cable.
+func (r *Reconciler) checkPort(ctx context.Context, d Device) error {
 	now := r.Now()
-	if d.MAC == "" || d.NIC == 0 || (!d.Installing() && d.Status != "active") || !fresh(d.Attested.At, now, AttestedPortTTL) {
+	if d.ExpectedPort == 0 || (!d.Installing() && d.Status != "active") || !fresh(d.Attested.At, now, AttestedPortTTL) {
 		return nil
 	}
-	if d.Cabled && d.ExpectedPort == 0 {
+	port, _ := r.where(ctx, d, now.Add(-AttestedPortTTL))
+	if port == 0 || port == d.ExpectedPort {
 		return nil
 	}
-	sw, port, _ := r.where(ctx, p, d, now.Add(-AttestedPortTTL))
-	if sw == nil {
-		return nil
-	}
-	if d.ExpectedPort != 0 && port != d.ExpectedPort {
-		why := "fleetd: its intake pass attested the node " + portMismatch(port, d.ExpectedPort, "its expected_port")
-		if err := r.journalOnce(ctx, fmt.Sprintf("port-moved/%d/%d", d.ID, port), d, "warning", why); err != nil {
-			return err
-		}
-	}
-	if d.Cabled {
-		return nil
-	}
-	var b binding
-	made, err := r.cable(ctx, d, sw, port, &b)
-	if err != nil || !made {
-		return err
-	}
-	Audit("fleet.bind", r.Config.Site, d, d.LastWorkflow, "port: "+strings.Join(b.notes, "; "))
-	return r.NetBox.Update(ctx, d, "", nil, "info", "fleetd: its intake pass attested a switch port; "+strings.Join(b.notes, "; "))
+	why := "fleetd: its intake pass attested the node " + portMismatch(port, d.ExpectedPort, "its expected_port")
+	return r.journalOnce(ctx, fmt.Sprintf("port-moved/%d/%d", d.ID, port), d, "warning", why)
 }

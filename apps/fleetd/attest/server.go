@@ -414,11 +414,7 @@ func (s *Server) machines(w http.ResponseWriter, _ *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	var inventory []string
-	if s.V.Inventory != nil {
-		inventory = s.V.Inventory.Names()
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"machines": recs, "pending": pending, "inventory": inventory})
+	writeJSON(w, http.StatusOK, map[string]any{"machines": recs, "pending": pending})
 }
 
 func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
@@ -434,11 +430,7 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 		s.writeError(w, err)
 		return
 	}
-	next := "the next attest writes these to the device's ek_hash and ek_hash_ecc in NetBox"
-	if s.V.NetBox == nil {
-		next = "add these to the machine's ek_hash and ek_hash_ecc in the inventory ATTEST_INVENTORY names"
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"approved": hashes, "next": next})
+	writeJSON(w, http.StatusOK, map[string]any{"approved": hashes, "next": "the next attest writes these to the device's ek_hash and ek_hash_ecc in NetBox"})
 }
 
 // renewStart opens a renewal for a running node. The LAK and the AK blobs

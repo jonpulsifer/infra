@@ -70,18 +70,6 @@ type Config struct {
 	// AutoProvision lets an admitted device with a class and an address,
 	// which never ran a Workflow, start its provision without the owner.
 	AutoProvision bool
-	// Models maps an SMBIOS model to the class, BMC and disk an admitted
-	// device of the model gets when it has none.
-	Models map[string]Model
-	// NodePrefix is the prefix an admitted device's address comes from when
-	// NetBox reserves none, and NodeReserved the addresses in it that never
-	// go to a node.
-	NodePrefix   string
-	NodeReserved map[string]bool
-	// NodeDHCP is the part of the node prefix that the network's DHCP pool
-	// hands out to netbooting machines; no node's static address comes from
-	// it.
-	NodeDHCP netip.Prefix
 }
 
 // LoadConfig reads the FLEET_* environment that README.md lists.
@@ -118,37 +106,12 @@ func LoadConfig() (Config, error) {
 		}
 	}
 	c.AutoProvision = env("FLEET_AUTO_PROVISION", "false") == "true"
-	if c.Models, err = ParseModels(os.Getenv("FLEET_MODEL_MAP")); err != nil {
-		return c, err
-	}
 	if v := os.Getenv("FLEET_BOOTSTRAP_ADDRESS"); v != "" {
 		a, err := netip.ParseAddr(v)
 		if err != nil {
 			return c, fmt.Errorf("FLEET_BOOTSTRAP_ADDRESS %q is not an address: %w", v, err)
 		}
 		c.Bootstrap = a.String()
-	}
-	if v := os.Getenv("FLEET_NODE_DHCP_PREFIX"); v != "" {
-		if c.NodeDHCP, err = netip.ParsePrefix(v); err != nil || !c.NodeDHCP.Addr().Is4() || c.NodeDHCP != c.NodeDHCP.Masked() {
-			return c, fmt.Errorf("FLEET_NODE_DHCP_PREFIX %q is not an IPv4 network prefix", v)
-		}
-	}
-	c.NodePrefix = os.Getenv("FLEET_NODE_PREFIX")
-	if c.NodePrefix != "" {
-		p, err := netip.ParsePrefix(c.NodePrefix)
-		if err != nil || !p.Addr().Is4() || p != p.Masked() {
-			return c, fmt.Errorf("FLEET_NODE_PREFIX %q is not an IPv4 network prefix", c.NodePrefix)
-		}
-	}
-	c.NodeReserved = map[string]bool{}
-	for _, a := range strings.Split(os.Getenv("FLEET_NODE_RESERVED"), ",") {
-		if a = strings.TrimSpace(a); a == "" {
-			continue
-		}
-		if _, err := netip.ParseAddr(a); err != nil {
-			return c, fmt.Errorf("FLEET_NODE_RESERVED: %w", err)
-		}
-		c.NodeReserved[a] = true
 	}
 	return c, nil
 }
@@ -184,7 +147,6 @@ func LoadCluster() (*Cluster, error) {
 func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*Installer, error) {
 	in := &Installer{
 		Site:    cfg.Site,
-		Models:  cfg.Models,
 		NetBox:  netbox,
 		Kube:    kube,
 		Configs: &Configs{Dir: os.Getenv("FLEET_CONFIG_DIR")},

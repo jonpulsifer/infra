@@ -14,8 +14,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -91,9 +89,6 @@ func refusal(t *testing.T, err error) *client.RefusedError {
 // A planned machine, entered before it arrived, needs no click when its EKs
 // carry manufacturer certificates; its first pass pins it.
 func TestPlannedMachineIsAdmittedByItsEKCertificates(t *testing.T) {
-	plannedInventory := func(_, _ string) string {
-		return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    class: worker-g5\n    status: planned\n", simSerial, simMAC)
-	}
 	// One software TPM at a time: each subtest's harness closes before the next opens.
 	t.Run("pinned by the pass", func(t *testing.T) {
 		f := newFakeNetBox(t)
@@ -120,11 +115,15 @@ func TestPlannedMachineIsAdmittedByItsEKCertificates(t *testing.T) {
 			t.Fatalf("planned with an unpinned maker: %+v", r.Verdict)
 		}
 	})
-	// The inventory alone never grants it: planned is NetBox's word.
-	t.Run("inventory alone waits for approval", func(t *testing.T) {
-		h := newHarness(t, harnessOpts{inventory: plannedInventory})
+	// A NetBox that lacks the machine grants nothing: the claim waits for approval.
+	t.Run("absent from NetBox waits for approval", func(t *testing.T) {
+		f := newFakeNetBox(t)
+		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 		if r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }()); r.Verdict.Verdict != protocol.VerdictPending {
-			t.Fatalf("planned in the inventory only: %+v", r.Verdict)
+			t.Fatalf("absent from NetBox: %+v", r.Verdict)
+		}
+		if f.count() != 0 {
+			t.Fatal("a device was created for a claim")
 		}
 	})
 }
@@ -145,7 +144,7 @@ func TestNetBoxOutageFailsClosed(t *testing.T) {
 	if _, ok, _ := h.v.Store.Record("testbox"); ok {
 		t.Fatal("the outage wrote a record")
 	}
-	// With the inventory knowing the machine, the answer is the same: NetBox has the last word.
+	// Once NetBox holds the machine and fails again, the answer is the same.
 	f.setFailing(false, false)
 	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
@@ -399,13 +398,11 @@ func TestRenewalRefusals(t *testing.T) {
 		if _, err := h.run(simSerial, simMAC); err != nil {
 			t.Fatal(err)
 		}
-		retired := filepath.Join(t.TempDir(), "machines.yaml")
-		if err := os.WriteFile(retired, []byte(fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    status: decommissioning\n    ek_hash: %s\n", simSerial, simMAC, h.hashes["rsa"])), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		h.v.Inventory, _ = LoadInventory(retired)
-		if r := refusal(t, func() error { _, err := h.renew(simSerial); return err }()); r.Status != http.StatusForbidden || r.Verdict.Reason != reasonStatus {
-			t.Fatalf("retired renewal: %+v", r)
+		h.nb.set(simSerial, func(d *fakeDevice) { d.Status = "decommissioning" })
+		rr := httptest.NewRecorder()
+		h.srv.DevIDHandler().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, protocol.PathRenew, strings.NewReader(`{"serial":"`+simSerial+`"}`)))
+		if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), reasonStatus) {
+			t.Fatalf("retired renewal: %d %s", rr.Code, rr.Body.String())
 		}
 	})
 	t.Run("nothing on file", func(t *testing.T) {

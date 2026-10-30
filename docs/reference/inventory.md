@@ -13,7 +13,7 @@ To add a node, add its entry in a pull request and comment the plans that [Reade
 
 ## Terraform
 
-The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt` and `secure_boot_expected`. No MAC is needed: fleetd writes it when the machine attests.
+The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `tpm_version`, `amt`, `secure_boot_expected` and `expected_port`, the switch port. fleetd writes none of them and refuses an install while one is empty. No MAC is needed: fleetd writes it when the machine attests.
 
 | Field or object | Written by |
 | --- | --- |
@@ -32,7 +32,7 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | UniFi | `address` for the node's DNS record, `switch_port` for its node port | `terraform/network/unifi/folly/k8s.tf`, `bootstrap.tf` |
 | Talos | `address` for the node's static address, `class`, `disk` for the install selector, `tpm` for `tpm_nodes`, for each node NetBox holds `active` or `failed` | `clusters/folly/talos/nodes.tf`, `talos.tf` |
 | spore's SPIRE | each node with `tpm` `2.0`, for its LDevID alias | `nix/lib/inventory.nix`, `nix/hosts/spore.nix` |
-| [fleetd](../apps/fleetd.md) | `serial`, `class`, `tpm` and `secure_boot`, as its verifier's inventory; it reads everything else of each device from NetBox | `nix/services/fleetd.nix` |
+| [fleetd](../apps/fleetd.md) | Nothing from the file; it reads each declared fact from the node's NetBox device | `apps/fleetd/fleet/netbox.go` |
 
 The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The same task writes `clusters/folly/fleet/node-macs.json` from the MACs NetBox holds, which spore's netboot links read.
 

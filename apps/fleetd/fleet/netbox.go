@@ -53,10 +53,6 @@ type Device struct {
 	// ExpectedPort is the switch port a stub expects its machine on, 0 for
 	// any.
 	ExpectedPort int
-	// NIC is the id of the interface that holds MAC.
-	NIC int
-	// Cabled says whether that interface has a cable.
-	Cabled bool
 	// Attested is the network facts of the last intake pass.
 	Attested Attested
 }
@@ -229,9 +225,6 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	}
 	d.Attested = Attested{Switch: strings.ToLower(cf("attested_switch")), Port: cf("attested_switch_port")}
 	d.Attested.At, _ = time.Parse(time.RFC3339, cf("attested_network_at"))
-	if d.BMCType == "" {
-		d.BMCType = "none"
-	}
 	if d.DesiredAction == "" {
 		d.DesiredAction = "none"
 	}
@@ -244,7 +237,7 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 	// oob_ip, or the node's own declared address for AMT, which shares the
 	// node's NIC and address.
 	switch {
-	case d.BMCType == "none":
+	case d.BMCType == "" || d.BMCType == "none":
 	case r.OOBIP != nil && r.OOBIP.Address != "":
 		d.BMCAddress = stripPrefix(r.OOBIP.Address)
 	case d.BMCType == "amt":
@@ -308,9 +301,6 @@ func (n *NetBox) withInterfaces(ctx context.Context, devices []Device) error {
 		PrimaryMAC *struct {
 			MAC string `json:"mac_address"`
 		} `json:"primary_mac_address"`
-		Cable *struct {
-			ID int `json:"id"`
-		} `json:"cable"`
 	}
 	var ifaces []iface
 	for _, raw := range iraws {
@@ -327,8 +317,6 @@ func (n *NetBox) withInterfaces(ctx context.Context, devices []Device) error {
 		idx, ok := byID[i.Device.ID]
 		if ok && devices[idx].MAC == "" {
 			devices[idx].MAC = strings.ToLower(i.PrimaryMAC.MAC)
-			devices[idx].NIC = i.ID
-			devices[idx].Cabled = i.Cable != nil
 		}
 	}
 	return nil

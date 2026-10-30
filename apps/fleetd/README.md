@@ -12,7 +12,7 @@ on the wiki.
 ```sh
 go build -o fleetd .
 ATTEST_CA_KEY=/path/to/devid-ca.key ATTEST_CA_CHAIN=chain.pem ATTEST_EK_ROOTS=attest/roots \
-ATTEST_POLICY=attest/policy.yaml ATTEST_INVENTORY=inventory.yaml \
+ATTEST_POLICY=attest/policy.yaml \
 ATTEST_STATE_DIR=/tmp/fleetd ATTEST_APPROVERS=you@example.com \
 FLEET_NETBOX_URL=http://capsule:8080 FLEET_NETBOX_TOKEN_FILE=token \
 FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FLEET_HOOKOS_CMDLINE='console=tty0' \
@@ -38,10 +38,10 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site. A leaf another CA issued verifies only when its CA is here, and each must chain to the chain's root |
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the NetBox site |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
-| `ATTEST_EK_ROOTS`, `ATTEST_POLICY`, `ATTEST_INVENTORY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates, the event-log policy, and the inventory: a `machines:` document of each node's `serial`, `class`, `tpm` and `secure_boot`, which `nix/services/fleetd.nix` writes from `clusters/folly/inventory/nodes.yaml` |
+| `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the event-log policy |
 | `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, approvals and `verdicts.jsonl` |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
-| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE`, `ATTEST_NETBOX_ROLE` | none, `/run/credentials/fleetd.service/netbox-token`, `kubernetes-node` | NetBox as the system of record |
+| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE`, `ATTEST_NETBOX_ROLE` | required, `/run/credentials/fleetd.service/netbox-token`, `kubernetes-node` | NetBox, the only source of machines. A serial it lacks waits for the owner's approval, and a NetBox that does not answer refuses every request |
 | `ATTEST_INTAKE_PER_HOUR`, `ATTEST_PENDING_MAX` | `10`, `50` | How many EKs that activated a credential may create a first-sight device an hour, and how many first-intake claims wait at once |
 | `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten on each change |
 
@@ -50,7 +50,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `FLEET_SITE`, `FLEET_NAMESPACE`, `FLEET_TEMPLATE` | `folly`, `tinkerbell`, `provision` | The NetBox site, Tinkerbell's namespace and the Template every Workflow runs |
-| `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices, interfaces, cables and IP addresses and adds journal entries |
+| `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
 | `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the cordon account's token; all three or none |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line each Hardware's iPXE script passes |
@@ -62,9 +62,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's |
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
-| `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker with a class and an address that never ran a Workflow starts its provision |
-| `FLEET_MODEL_MAP` | the G5 mini | JSON `{"<SMBIOS model>": {"class", "bmc", "disk", "tpm", "amt", "secure_boot"}}` an admitted device gets what it lacks from |
-| `FLEET_NODE_PREFIX`, `FLEET_NODE_RESERVED`, `FLEET_NODE_DHCP_PREFIX` | none | `K8S_NODE_CIDR`, the addresses in it that never go to a node, and `K8S_DHCP_CIDR`, which no static address comes from |
+| `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker that never ran a Workflow starts its provision |
 
 ## Device flow
 
@@ -98,16 +96,15 @@ The signed confirm of an intake pass, never of a renewal, mints 32 random bytes 
 calls the fleet's `Admit` in process with `{serial, uuid, node, class, code}`. `uuid` is the
 session's SMBIOS UUID lower-cased, and must read as 8-4-4-4-12 hex. `Admit`:
 
-1. Refuses a device that is not `planned`, or whose attested LLDP port, from the last hour, is not
-   its `expected_port`; nothing is written and the journal says why.
-2. Fills `talos_class`, `bmc_type` and `install_disk` from the model map when empty, and `amt` and
-   `secure_boot_expected` when empty; gives the device the address reserved under its name or the
-   next free one; and cables its interface to the attested port unless another cable holds it.
-3. Starts the provision Workflow, with no boot mode, unless one is running: when `desired_action` is
-   `provision`, or when the device never ran a Workflow, auto-provision is on, and it is a worker
-   with a class and an address.
-4. Renders the config. The render refuses a device whose `last_workflow` is not an unfinished
-   `provision` with `install=true`, a spent code, another `smbios_uuid`, a TPM 2.0 model without
+1. Refuses a device that is not `planned`, that lacks a declared field (`talos_class`, `install_disk`,
+   `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` or `primary_ip4`), or
+   whose attested LLDP port, from the last hour, is not its `expected_port`; nothing is written and
+   the journal says why. `terraform/netbox/folly` declares every one of them from the nodes file, and
+   fleetd fills in none.
+2. Starts the provision Workflow, with no boot mode, unless one is running: when `desired_action` is
+   `provision`, or when the device never ran a Workflow, auto-provision is on, and it is a worker.
+3. Renders the config. The render refuses a device whose `last_workflow` is not an unfinished
+   `provision` with `install=true`, a spent code, another `smbios_uuid`, a device without
    `tpm_version`, and a control plane without the bundle, at the bootstrap address or with no
    address.
 
@@ -133,10 +130,10 @@ a day. A fetch with another code is journaled at most every ten minutes per mach
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
 fleetd reads the name, serial, status, `primary_ip4`, `oob_ip`, the first physical interface's
-`primary_mac_address` and cable, and the custom fields `install_disk`, `talos_class`, `tpm_version`,
+`primary_mac_address`, and the custom fields `install_disk`, `talos_class`, `tpm_version`,
 `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`, `last_workflow`, `expected_port`,
 `smbios_uuid`, `attest_verdict` and the attested network fields. It writes the verdict fields, the
-EK pins, the SMBIOS facts, `pcr0_by_bios`, the admission's fields, `desired_action` back to `none`,
+EK pins, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `none`,
 `last_workflow`, `status` and journal entries. A `quarantined` verdict cordons the node through the
 cluster's API on every pass; a control plane's `failed-no-quarantine` is no quarantine, and fleetd
 never uncordons.

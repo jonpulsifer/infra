@@ -40,14 +40,20 @@ func nbDevice(id int, name, status, serial, model string, cf map[string]any) map
 	}
 }
 
-// declared is the owner's planned device for the box after its intake pass:
-// the verifier wrote the MAC it proved and its verdict.
+// declared is the planned device Terraform applies for the box, with every
+// declared field, after its intake pass: the verifier wrote the MAC it proved
+// and its verdict.
 func declared(cf map[string]any) map[string]any {
-	fields := map[string]any{"attest_verdict": "attested", "tpm_version": "2.0"}
+	fields := map[string]any{
+		"attest_verdict": "attested", "tpm_version": "2.0", "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1",
+		"bmc_type": "amt", "amt": true, "secure_boot_expected": true, "expected_port": 5,
+	}
 	for k, v := range cf {
 		fields[k] = v
 	}
-	return nbDevice(nodeID, "swell", "planned", boxSerial, g5, fields)
+	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, fields)
+	d["primary_ip4"] = map[string]any{"address": "10.3.0.13/26"}
+	return d
 }
 
 func nic(id, device int, name, mac string) map[string]any {
@@ -82,12 +88,10 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	t.Helper()
 	at := &admitTest{}
 	at.nb = &fakeNetBox{
-		apply:     true,
-		devices:   devices,
-		ifaces:    append(ifaces, switchIfaces()...),
-		switches:  []map[string]any{{"id": 100, "name": "usw-24-poe"}},
-		prefixes:  []map[string]any{{"id": 9, "prefix": "10.3.0.0/26"}},
-		available: []string{"10.3.0.1/26", "10.3.0.2/26", "10.3.0.13/26", "10.3.0.14/26"},
+		apply:    true,
+		devices:  devices,
+		ifaces:   append(ifaces, switchIfaces()...),
+		switches: []map[string]any{{"id": 100, "name": "usw-24-poe"}},
 	}
 	at.kube = &fakeKube{}
 	r, done := newTest(t, at.nb, at.kube)
@@ -97,7 +101,7 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	at.rend = &fakeRenderer{types: map[string]string{"worker-g5": "worker", "controlplane": "controlplane"}}
 	r.Installer = &Installer{
 		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Renderer: at.rend, Configs: &Configs{},
-		TTL: 2 * time.Hour, Models: DefaultModels, Metrics: r.Metrics, Now: func() time.Time { return testNow },
+		TTL: 2 * time.Hour, Metrics: r.Metrics, Now: func() time.Time { return testNow },
 	}
 	at.r = r
 	// The intake pass attested the machine's port a minute ago.
@@ -151,42 +155,17 @@ func (at *admitTest) journal(substr string) bool {
 	return false
 }
 
-func (at *admitTest) cabledTo(port int) bool {
-	i := at.nb.ifaceByID(nodeNIC)
-	for _, p := range i["link_peers"].([]any) {
-		if p.(map[string]any)["id"] == switchPortID(port) {
-			return true
-		}
-	}
-	return false
-}
-
 func (at *admitTest) held(code string) bool {
 	_, _, ok := at.r.Installer.Configs.Get(boxUUID, code, testNow)
 	return ok
 }
 
-func reservedIP(id int, name, addr string) map[string]any {
-	return map[string]any{"id": id, "address": addr, "dns_name": name, "status": "reserved", "assigned_object_type": nil, "assigned_object_id": nil}
-}
-
-// The declared device's intake pass binds it, starts its provision with no
+// The declared device's intake pass checks it, starts its provision with no
 // boot mode, since the machine waits in HookOS, and renders its config.
-func TestAdmitBindsAndProvisions(t *testing.T) {
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"expected_port": 5})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	at.nb.ips = []map[string]any{reservedIP(500, "swell", "10.3.0.13/26")}
+func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	if code, why := at.admit(testCode); code != http.StatusCreated {
 		t.Fatalf("admit: %d %s", code, why)
-	}
-	n := at.node()
-	if ip, _ := n["primary_ip4"].(map[string]any); ip == nil || ip["address"] != "10.3.0.13/26" {
-		t.Errorf("primary_ip4 %v", n["primary_ip4"])
-	}
-	if ip := at.nb.ips[0]; fmt.Sprint(ip["assigned_object_id"]) != fmt.Sprint(nodeNIC) || ip["status"] != "active" {
-		t.Errorf("the reserved address %v", ip)
-	}
-	if !at.cabledTo(5) {
-		t.Errorf("no cable to Port 5: %v", at.nb.ifaceByID(nodeNIC))
 	}
 	names := at.kube.workflows()
 	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
@@ -210,16 +189,13 @@ func TestAdmitBindsAndProvisions(t *testing.T) {
 	if !at.held(testCode) || at.rend.calls != 1 {
 		t.Fatal("the config was not rendered under the code")
 	}
-	if !at.journal("cabled to usw-24-poe Port 5") || !at.journal("attested from HookOS, where it waits") {
-		t.Errorf("journals %v", at.nb.journals)
-	}
-	if at.r.Metrics.Bound.Load() != 1 || at.r.Metrics.AutoProvisioned.Load() != 1 {
-		t.Errorf("bound %d autoprovisioned %d", at.r.Metrics.Bound.Load(), at.r.Metrics.AutoProvisioned.Load())
+	if !at.journal("attested from HookOS, where it waits") || at.r.Metrics.AutoProvisioned.Load() != 1 {
+		t.Errorf("journals %v autoprovisioned %d", at.nb.journals, at.r.Metrics.AutoProvisioned.Load())
 	}
 
 	// A second pass from the same boot renders under its new code in the
-	// same run, and binds nothing again.
-	patches, cables := len(at.nb.patches), len(at.nb.cables)
+	// same run, and writes nothing again.
+	patches := len(at.nb.patches)
 	again := strings.Repeat("Q", 43)
 	if code, why := at.admit(again); code != http.StatusCreated {
 		t.Fatalf("second admit: %d %s", code, why)
@@ -227,7 +203,7 @@ func TestAdmitBindsAndProvisions(t *testing.T) {
 	if n := at.kube.workflows(); len(n) != 1 || n[0] != names[0] {
 		t.Fatalf("a second run started: %v", n)
 	}
-	if len(at.nb.cables) != cables || len(at.nb.patches) != patches {
+	if len(at.nb.patches) != patches {
 		t.Errorf("a second admission wrote: %v", at.nb.patches[patches:])
 	}
 	if at.held(testCode) || !at.held(again) {
@@ -235,42 +211,55 @@ func TestAdmitBindsAndProvisions(t *testing.T) {
 	}
 }
 
-func TestAdmitAllocatesTheNextFreeAddress(t *testing.T) {
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+// Terraform declares every field the install needs. A device that lacks one
+// is refused, named in the journal, and nothing is written, so fleetd fills in
+// nothing the declaration owns.
+func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
+	for field, name := range map[string]string{
+		"talos_class": "talos_class", "install_disk": "install_disk", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
+		"amt": "amt", "secure_boot_expected": "secure_boot_expected", "expected_port": "expected_port",
+	} {
+		t.Run(name, func(t *testing.T) {
+			at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{field: nil})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+			if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks "+name) {
+				t.Fatalf("admit: %d %s", code, why)
+			}
+			if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+				t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
+			}
+			if !at.journal("lacks " + name) {
+				t.Errorf("journals %v", at.nb.journals)
+			}
+		})
+	}
+	t.Run("primary_ip4", func(t *testing.T) {
+		d := declared(nil)
+		d["primary_ip4"] = nil
+		at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+		if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks primary_ip4") || len(at.nb.patches) != 0 {
+			t.Fatalf("admit: %d %s, patches %v", code, why, at.nb.patches)
+		}
+	})
+}
+
+// A declared bmc_type of none and an amt of false are values, not blanks: the
+// device admits and keeps them.
+func TestAdmitKeepsAnExplicitNoBMC(t *testing.T) {
+	d := declared(map[string]any{"bmc_type": "none", "amt": false, "secure_boot_expected": false})
+	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	if code, why := at.admit(testCode); code != http.StatusCreated {
 		t.Fatalf("admit: %d %s", code, why)
 	}
-	// 10.3.0.1 is reserved.
-	if ip, _ := at.node()["primary_ip4"].(map[string]any); ip == nil || ip["address"] != "10.3.0.2/26" {
-		t.Fatalf("primary_ip4 %v", at.node()["primary_ip4"])
-	}
-	if ip := at.nb.ips[0]; ip["dns_name"] != "swell" || fmt.Sprint(ip["assigned_object_id"]) != fmt.Sprint(nodeNIC) {
-		t.Errorf("allocated %v", ip)
+	for field, want := range map[string]any{"bmc_type": "none", "amt": false, "secure_boot_expected": false} {
+		if got := at.cf(field); got != want {
+			t.Errorf("%s = %v, want %v", field, got, want)
+		}
 	}
 }
-
-func TestAdmitUnknownModelGetsNoProvision(t *testing.T) {
-	d := declared(nil)
-	d["device_type"] = map[string]any{"model": "OptiPlex 7090"}
-	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "no class") {
-		t.Fatalf("admit: %d %s", code, why)
-	}
-	if at.cf("talos_class") != nil || at.cf("install_disk") != nil || len(at.kube.workflows()) != 0 || at.held(testCode) {
-		t.Errorf("class %v disk %v workflows %v", at.cf("talos_class"), at.cf("install_disk"), at.kube.workflows())
-	}
-	if !at.journal(`the model "OptiPlex 7090" is not in FLEET_MODEL_MAP`) || at.r.Metrics.AutoProvisioned.Load() != 0 {
-		t.Errorf("journals %v", at.nb.journals)
-	}
-}
-
 func TestAdmitNeverAutoProvisionsAControlPlane(t *testing.T) {
 	for name, setup := range map[string]func(*admitTest){
 		"the device's class": func(at *admitTest) {
 			at.node()["custom_fields"].(map[string]any)["talos_class"] = ControlPlaneClass
-		},
-		"the model map's class": func(at *admitTest) {
-			at.r.Config.Models = map[string]Model{g5: {Class: ControlPlaneClass, BMC: "amt", Disk: "/dev/nvme0n1"}}
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -294,7 +283,7 @@ func TestAdmitChecksTheExpectedPort(t *testing.T) {
 			t.Fatalf("admit: %d %s", code, why)
 		}
 	}
-	if len(at.nb.patches) != 0 || len(at.nb.ips) != 0 || len(at.nb.cables) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+	if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
 		t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
 	}
 	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7 (swell)") {
@@ -308,39 +297,28 @@ func TestAdmitOnPort24IsLikeAnyPort(t *testing.T) {
 		at := newAdmitTest(t, prepMAC, []map[string]any{declared(map[string]any{"expected_port": want})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
 		code, _ := at.admit(testCode)
 		switch {
-		case ok && (code != http.StatusCreated || !at.cabledTo(24)):
-			t.Errorf("expected_port 24: %d, interface %v, journals %v", code, at.nb.ifaceByID(nodeNIC), at.nb.journals)
-		case !ok && (code != http.StatusConflict || len(at.nb.cables) != 0 || !at.journal("on port 24, expected 7 (swell)")):
-			t.Errorf("expected_port 7: %d cables %v journals %v", code, at.nb.cables, at.nb.journals)
+		case ok && code != http.StatusCreated:
+			t.Errorf("expected_port 24: %d, journals %v", code, at.nb.journals)
+		case !ok && (code != http.StatusConflict || !at.journal("on port 24, expected 7 (swell)")):
+			t.Errorf("expected_port 7: %d journals %v", code, at.nb.journals)
 		}
 	}
 }
 
-func TestAdmitWithoutLLDPLeavesTheCable(t *testing.T) {
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	for _, f := range []string{"attested_switch", "attested_switch_port", "attested_network_at"} {
-		at.node()["custom_fields"].(map[string]any)[f] = nil
-	}
-	if code, why := at.admit(testCode); code != http.StatusCreated {
-		t.Fatalf("admit: %d %s", code, why)
-	}
-	if len(at.nb.cables) != 0 || len(at.kube.workflows()) != 1 {
-		t.Errorf("cables %v workflows %v", at.nb.cables, at.kube.workflows())
-	}
-	if !at.journal("no switch port for the device, and no cable: the verifier recorded no attested switch port") {
-		t.Errorf("journals %v", at.nb.journals)
-	}
-}
-
-// An expected_port refuses a machine whose pass attested no port, or a port
-// from more than an hour ago, as it refuses one on another port.
-func TestAdmitWithoutAFreshPortRefusesAnExpectedPort(t *testing.T) {
+// A machine whose pass attested no port, or a port from more than an hour
+// ago, is refused as one on another port is.
+func TestAdmitWithoutAFreshPortIsRefused(t *testing.T) {
 	for name, mut := range map[string]func(*admitTest){
 		"no Port <n>": func(at *admitTest) { at.node()["custom_fields"].(map[string]any)["attested_switch_port"] = "eth4" },
-		"stale":       func(at *admitTest) { at.attest(rackMAC, testNow.Add(-2*time.Hour)) },
+		"no LLDP": func(at *admitTest) {
+			for _, f := range []string{"attested_switch", "attested_switch_port", "attested_network_at"} {
+				at.node()["custom_fields"].(map[string]any)[f] = nil
+			}
+		},
+		"stale": func(at *admitTest) { at.attest(rackMAC, testNow.Add(-2*time.Hour)) },
 	} {
 		t.Run(name, func(t *testing.T) {
-			at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"expected_port": 5})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+			at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 			mut(at)
 			if code, _ := at.admit(testCode); code != http.StatusConflict {
 				t.Fatalf("admit: %d", code)
@@ -404,62 +382,28 @@ func TestAdmitRefusesADeviceThatIsNotPlanned(t *testing.T) {
 	}
 }
 
-func TestFillPortCablesANodeOnItsRackPort(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
+// A node off its expected port is journaled once, and never cabled: the cable
+// is Terraform's, and a move after the port check is the owner's to judge.
+func TestCheckPortJournalsANodeOffItsExpectedPort(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow)
 	reconcile(t, at.r)
-	if !at.cabledTo(5) || !at.journal("its intake pass attested a switch port") {
-		t.Errorf("interface %v journals %v", at.nb.ifaceByID(nodeNIC), at.nb.journals)
-	}
 	reconcile(t, at.r)
-	if len(at.nb.cables) != 1 {
-		t.Errorf("a cabled node was cabled again: %v", at.nb.cables)
+	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.patches) != 0 {
+		t.Errorf("journals %v patches %v", at.nb.journals, at.nb.patches)
 	}
 }
 
-func TestFillPortIgnoresAnOldReport(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
+func TestCheckPortIgnoresAnOldReport(t *testing.T) {
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow.Add(-2*time.Hour))
 	reconcile(t, at.r)
-	if len(at.nb.cables) != 0 {
-		t.Errorf("an old report cabled the node: %v", at.nb.cables)
-	}
-}
-
-// The attested port holds another device's cable in NetBox: the node gets no
-// cable, the other one stays, and the owner reads the conflict.
-func TestFillPortNeverStealsACable(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5"})
-	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC), nic(60, 61, "eth0", "38:22:e2:00:00:61")})
-	port5 := at.nb.ifaceByID(switchPortID(5))
-	port5["cable"] = map[string]any{"id": 77}
-	port5["link_peers"] = []any{map[string]any{"id": 60, "name": "eth0", "device": map[string]any{"name": "shale"}}}
-	at.attest(rackMAC, testNow)
-	reconcile(t, at.r)
-	reconcile(t, at.r)
-	if len(at.nb.cables) != 0 || len(at.nb.deleted) != 0 || port5["cable"] == nil {
-		t.Errorf("a port with another cable was taken: cables %v deleted %v", at.nb.cables, at.nb.deleted)
-	}
-	if n := len(at.nb.journals); n != 1 || !at.journal("is cabled to another device in NetBox; no cable, and the other cable stays") {
+	if len(at.nb.journals) != 0 {
 		t.Errorf("journals %v", at.nb.journals)
 	}
 }
-
-func TestFillPortJournalsANodeOffItsExpectedPort(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
-	cabled := nic(nodeNIC, nodeID, "eth0", rackMAC)
-	cabled["cable"] = map[string]any{"id": 77}
-	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{cabled})
-	at.attest(rackMAC, testNow)
-	reconcile(t, at.r)
-	reconcile(t, at.r)
-	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.cables) != 0 {
-		t.Errorf("journals %v cables %v", at.nb.journals, at.nb.cables)
-	}
-}
-
 func reconcile(t *testing.T, r *Reconciler) {
 	t.Helper()
 	if err := r.Reconcile(t.Context()); err != nil {
@@ -467,66 +411,8 @@ func reconcile(t *testing.T, r *Reconciler) {
 	}
 }
 
-func TestAllocatable(t *testing.T) {
-	c := Config{NodePrefix: "10.3.0.0/26", NodeReserved: map[string]bool{"10.3.0.1": true}}
-	for a, want := range map[string]bool{
-		"10.3.0.0": false, "10.3.0.1": false, "10.3.0.2": true, "10.3.0.62": true, "10.3.0.63": false, "10.3.0.64": false, "bogus": false,
-	} {
-		if got := c.allocatable(a); got != want {
-			t.Errorf("allocatable(%s) = %v", a, got)
-		}
-	}
-}
-
-func TestParseModels(t *testing.T) {
-	m, err := ParseModels("")
-	if err != nil || m[g5].Class != "worker-g5" || m[g5].BMC != "amt" || m[g5].Disk != "/dev/nvme0n1" {
-		t.Fatalf("default %v %v", m, err)
-	}
-	m, err = ParseModels(`{"OptiPlex 3050":{"class":"controlplane","bmc":"none","disk":"/dev/sda"}}`)
-	if err != nil || m["OptiPlex 3050"].Class != "controlplane" || len(m) != 1 {
-		t.Fatalf("parsed %v %v", m, err)
-	}
-	if _, err := ParseModels(`{"x":`); err == nil {
-		t.Error("broken JSON parsed")
-	}
-}
-
-func TestAdmitFillsTheModelsHardwareFactsWhenEmpty(t *testing.T) {
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	at.admit(testCode)
-	for _, field := range []string{"amt", "secure_boot_expected"} {
-		if got := at.cf(field); got != true {
-			t.Errorf("%s = %v, want true", field, got)
-		}
-	}
-}
-
-func TestAdmitNeverOverwritesAHardwareFact(t *testing.T) {
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"amt": false, "secure_boot_expected": false})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	at.admit(testCode)
-	for _, field := range []string{"amt", "secure_boot_expected"} {
-		if got := at.cf(field); got != false {
-			t.Errorf("%s = %v, want false", field, got)
-		}
-	}
-}
-
-func TestAdmitLeavesFactsOfAnUnknownModelEmpty(t *testing.T) {
-	d := declared(nil)
-	d["device_type"] = map[string]any{"model": "Unknown Box"}
-	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	at.admit(testCode)
-	for _, field := range []string{"amt", "secure_boot_expected"} {
-		if got := at.cf(field); got != nil {
-			t.Errorf("%s = %v, want it empty", field, got)
-		}
-	}
-}
-
-// A run starts only once the render's gates pass: a device whose model
-// carries a TPM 2.0 renders once its tpm_version is recorded, so no
-// Workflow wipes it before then.
+// A run starts only once the device is fully declared, so no Workflow wipes
+// a disk the install cannot follow.
 func TestAdmitStartsNoRunTheRenderRefuses(t *testing.T) {
 	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"tpm_version": nil})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "tpm_version") {

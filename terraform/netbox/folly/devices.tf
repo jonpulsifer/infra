@@ -137,6 +137,7 @@ resource "restapi_object" "declared" {
       tpm_version          = each.value.tpm
       amt                  = each.value.amt
       secure_boot_expected = each.value.secure_boot
+      expected_port        = tonumber(each.value.switch_port)
     }
   })
 }

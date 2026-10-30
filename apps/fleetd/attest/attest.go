@@ -31,16 +31,13 @@ type Recorder interface {
 	Record(ctx context.Context, r Record) error
 }
 
-// Verifier runs the attestation: EK chain and inventory at start, then
+// Verifier runs the attestation: EK chain and NetBox's machine at start, then
 // credential activation, quote, event-log policy and the LDevID's
 // certification at evidence, then issue. A renewal from the running node
 // repeats the quote and the policy against the LAK on file.
 type Verifier struct {
-	// Inventory is the nodes file's inventory: the only source without
-	// NetBox, and the source of a class NetBox lacks with it.
-	Inventory *Inventory
-	// NetBox, when set, is the system of record: it names the machine, its
-	// class and its lifecycle, and gets a device for a serial it never saw.
+	// NetBox is the system of record: it names the machine, its class and
+	// its lifecycle, and gets a device for a serial it never saw.
 	NetBox     *NetBox
 	Roots      *EKRoots
 	Policy     *Policy
@@ -132,9 +129,6 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 	// pass binds the box's MAC to it.
 	bind := ok && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned)
 	if !ok {
-		if v.NetBox == nil {
-			return protocol.StartResponse{}, v.reject(nil, req.Machine, fail(reasonUnknownMachine, "no inventory machine has serial %q", req.Machine.Serial))
-		}
 		// NetBox answered that it has no such device. Nothing is created
 		// for a claim: the device comes into being once the machine's TPM
 		// activates a credential, in Evidence.

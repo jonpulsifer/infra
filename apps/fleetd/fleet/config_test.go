@@ -6,19 +6,6 @@ import (
 	"testing"
 )
 
-func TestLoadConfigReadsTheDHCPPrefix(t *testing.T) {
-	for _, k := range []string{"FLEET_HOOKOS_URL", "FLEET_HOOKOS_CMDLINE"} {
-		t.Setenv(k, "x")
-	}
-	for v, ok := range map[string]bool{"": true, "192.0.2.48/28": true, "192.0.2.49/28": false, "2001:db8::/64": false, "pool": false} {
-		t.Setenv("FLEET_NODE_DHCP_PREFIX", v)
-		c, err := LoadConfig()
-		if (err == nil) != ok || ok && v != "" && c.NodeDHCP.String() != v {
-			t.Errorf("FLEET_NODE_DHCP_PREFIX=%q: %v, err %v", v, c.NodeDHCP, err)
-		}
-	}
-}
-
 // The cluster's credentials come all together or not at all: a half-set
 // environment is a mistake, not a choice to skip the cordon.
 func TestLoadClusterNeedsAllThree(t *testing.T) {
