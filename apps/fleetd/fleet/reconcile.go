@@ -321,6 +321,9 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		why := "fleetd: " + d.DesiredAction + " waits: the device needs a primary MAC on an interface and install_disk"
 		return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+d.DesiredAction, d, "warning", why)
 	}
+	if why := d.Unidentified(d.DesiredAction); why != "" {
+		return r.journalOnce(ctx, "unidentified/"+d.Name+"/"+d.DesiredAction, d, "warning", "fleetd: "+d.DesiredAction+" waits: "+why)
+	}
 	_, err = r.start(ctx, d, d.DesiredAction, workflows, false)
 	return err
 }
@@ -432,6 +435,9 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 		if !hardware {
 			why := "fleetd: the retirement waits: the device needs a primary MAC on an interface and install_disk"
 			return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+ActionRetire, d, "warning", why)
+		}
+		if why := d.Unidentified(ActionRetire); why != "" {
+			return r.journalOnce(ctx, "unidentified/"+d.Name+"/"+ActionRetire, d, "warning", "fleetd: the retirement waits: "+why)
 		}
 		_, err := r.start(ctx, d, ActionRetire, workflows, false)
 		return err

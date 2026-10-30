@@ -61,6 +61,18 @@ data "netbox_site" "folly" {
       condition     = alltrue([for n in values(local.nodes) : can(regex("^/dev/", n.disk)) && contains(["1.2", "2.0"], n.tpm)])
       error_message = "A node's disk must be under /dev/ and its tpm 1.2 or 2.0."
     }
+    precondition {
+      condition     = alltrue([for m in values(local.models) : !contains(keys(m), "disk_serial")])
+      error_message = "disk_serial names one disk, so a node sets it and a model never does."
+    }
+    precondition {
+      condition     = alltrue([for s in local.disk_serials : can(regex("^\"[A-Za-z0-9._-]{1,64}\"$", jsonencode(s)))])
+      error_message = "A node's disk_serial must be a quoted string of 1 to 64 letters, digits, dots, underscores or hyphens: the serial its install disk reports."
+    }
+    precondition {
+      condition     = length(distinct([for s in local.disk_serials : upper(s)])) == length(local.disk_serials)
+      error_message = "No two nodes may share a disk_serial."
+    }
   }
 }
 

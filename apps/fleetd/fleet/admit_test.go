@@ -45,7 +45,7 @@ func nbDevice(id int, name, status, serial, model string, cf map[string]any) map
 // and its verdict.
 func declared(cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"attest_verdict": "attested", "tpm_version": "2.0", "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1",
+		"attest_verdict": "attested", "tpm_version": "2.0", "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "install_disk_serial": "30DF7020FGKL",
 		"bmc_type": "amt", "amt": true, "secure_boot_expected": true, "expected_port": 5,
 	}
 	for k, v := range cf {
@@ -216,7 +216,7 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 // nothing the declaration owns.
 func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 	for field, name := range map[string]string{
-		"talos_class": "talos_class", "install_disk": "install_disk", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
+		"talos_class": "talos_class", "install_disk": "install_disk", "install_disk_serial": "install_disk_serial", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
 		"amt": "amt", "secure_boot_expected": "secure_boot_expected", "expected_port": "expected_port",
 	} {
 		t.Run(name, func(t *testing.T) {

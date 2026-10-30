@@ -13,6 +13,13 @@
 # NetBox device's desired_action is set or an intake pass admits it, and netboot goes off when the
 # run succeeds, so Smee has no script for the MAC on the next boot.
 #
+# The Hardware's disk is a kernel name, which follows probe order: a swapped slot, a missing disk
+# or a USB stick can take it. So wipe-disk and install first check that the disk at that name
+# reports install_disk_serial, the serial the nodes file declares, that no other disk reports it,
+# and that it is neither removable nor on USB, and refuse with nothing written otherwise. The
+# serials come from sysfs, which needs no udev. The installer still gets the kernel name, since it
+# appends partition numbers to its --disk.
+#
 # The actions run images/tink-reprovision-tools, which the containers workflow's delivery pins by
 # digest. An all-zero digest means the image has not been delivered yet and the run cannot pull it.
 #
@@ -48,6 +55,7 @@ spec:
           # install keys reads them as no install.
           INSTALL: '{{ or (index . "install") "false" }}'
           INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          DISK_SERIAL: '{{ or (index . "install_disk_serial") "" }}'
           INSTALL_CODE_FILE: /tmp/fleet/install_code
           ATTESTED_FILE: /tmp/fleet/attested
         actions:
@@ -63,6 +71,39 @@ spec:
               - |
                 set -eu
                 log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
+                # The serial a whole disk reports: an NVMe or MMC controller's, a virtio disk's, or a
+                # SCSI or SATA disk's unit serial number page past its 4-byte header.
+                serial_of() {
+                  if [ -r "$1/device/serial" ]; then cat "$1/device/serial"
+                  elif [ -r "$1/serial" ]; then cat "$1/serial"
+                  elif [ -r "$1/device/vpd_pg80" ]; then tail -c +5 "$1/device/vpd_pg80"
+                  fi 2>/dev/null | tr -d ' \t\n\000'
+                }
+                check_disk() {
+                  case "$DISK_SERIAL" in
+                    "") log "no install disk serial is declared for $DISK; $1"; exit 1 ;;
+                    *[!A-Za-z0-9._-]*) log "the install disk serial $DISK_SERIAL is malformed; $1"; exit 1 ;;
+                  esac
+                  [ -b "$DISK" ] || { log "$DISK is not a block device; $1"; exit 1; }
+                  name=$(basename "$(readlink -f "$DISK")")
+                  [ -d "/sys/block/$name" ] || { log "$DISK is not a whole disk; $1"; exit 1; }
+                  found=""
+                  for b in /sys/block/*; do
+                    if [ "$(serial_of "$b")" = "$DISK_SERIAL" ]; then found="$found ${b##*/}"; fi
+                  done
+                  found=${found# }
+                  case "$found" in
+                    "") log "no disk reports the serial $DISK_SERIAL; $1"; exit 1 ;;
+                    *" "*) log "more than one disk reports the serial $DISK_SERIAL ($found); $1"; exit 1 ;;
+                    "$name") ;;
+                    *) log "$DISK is $name, but the disk that reports $DISK_SERIAL is $found; $1"; exit 1 ;;
+                  esac
+                  if [ "$(cat "/sys/block/$name/removable" 2>/dev/null)" != 0 ]; then log "$DISK is removable; $1"; exit 1; fi
+                  case "$(readlink -f "/sys/block/$name")" in
+                    */usb[0-9]*) log "$DISK is on USB; $1"; exit 1 ;;
+                  esac
+                  log "$DISK reports the serial $DISK_SERIAL"
+                }
                 # A run that attests fails when this boot's attestation did, before it wipes
                 # anything, and the install code gates the wipe of a run that installs, so a
                 # refused machine keeps its disk.
@@ -85,7 +126,7 @@ spec:
                   log "an installer from an earlier run is still there; nothing wiped"
                   exit 1
                 fi
-                [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
+                check_disk "nothing wiped"
                 log "wiping every partition of $DISK"
                 for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
                   wipefs --all --force "$p"
@@ -114,6 +155,38 @@ spec:
               - |
                 set -eu
                 log() { echo "install: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "install: $*" >"$t" 2>/dev/null || true; done; }
+                # serial_of and check_disk are wipe-disk's, word for word.
+                serial_of() {
+                  if [ -r "$1/device/serial" ]; then cat "$1/device/serial"
+                  elif [ -r "$1/serial" ]; then cat "$1/serial"
+                  elif [ -r "$1/device/vpd_pg80" ]; then tail -c +5 "$1/device/vpd_pg80"
+                  fi 2>/dev/null | tr -d ' \t\n\000'
+                }
+                check_disk() {
+                  case "$DISK_SERIAL" in
+                    "") log "no install disk serial is declared for $DISK; $1"; exit 1 ;;
+                    *[!A-Za-z0-9._-]*) log "the install disk serial $DISK_SERIAL is malformed; $1"; exit 1 ;;
+                  esac
+                  [ -b "$DISK" ] || { log "$DISK is not a block device; $1"; exit 1; }
+                  name=$(basename "$(readlink -f "$DISK")")
+                  [ -d "/sys/block/$name" ] || { log "$DISK is not a whole disk; $1"; exit 1; }
+                  found=""
+                  for b in /sys/block/*; do
+                    if [ "$(serial_of "$b")" = "$DISK_SERIAL" ]; then found="$found ${b##*/}"; fi
+                  done
+                  found=${found# }
+                  case "$found" in
+                    "") log "no disk reports the serial $DISK_SERIAL; $1"; exit 1 ;;
+                    *" "*) log "more than one disk reports the serial $DISK_SERIAL ($found); $1"; exit 1 ;;
+                    "$name") ;;
+                    *) log "$DISK is $name, but the disk that reports $DISK_SERIAL is $found; $1"; exit 1 ;;
+                  esac
+                  if [ "$(cat "/sys/block/$name/removable" 2>/dev/null)" != 0 ]; then log "$DISK is removable; $1"; exit 1; fi
+                  case "$(readlink -f "/sys/block/$name")" in
+                    */usb[0-9]*) log "$DISK is on USB; $1"; exit 1 ;;
+                  esac
+                  log "$DISK reports the serial $DISK_SERIAL"
+                }
                 if [ "$INSTALL" != true ]; then
                   log "nothing installed this run"
                   exit 0
@@ -130,6 +203,7 @@ spec:
                   log "the install code is malformed"
                   exit 1
                 fi
+                check_disk "nothing installed"
                 log "installing $INSTALLER_IMAGE to $DISK"
                 # The installer's output goes to the console too: Tinkerbell keeps no action log,
                 # and the console is the only record of why an install failed.

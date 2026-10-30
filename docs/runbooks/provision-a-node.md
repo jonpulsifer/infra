@@ -13,19 +13,20 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 - A new machine is ready, as [Prepare a machine](prepare-a-machine.md) describes.
 - You can sign in to NetBox at `https://capsule.<tailnet>`.
 - You hold independent evidence of the machine's EKs: a receiving scan of its TPM, or the supplier's authenticated record that ties its chassis serial to its EK hashes. [Approve a machine's EKs](#approve-a-machines-eks) says what counts.
+- You have the serial of the machine's install disk, from the disk's label or a receiving scan.
 - You are a tailnet login in `ATTEST_APPROVERS`, and you can read the console.
 - `<node>` is the host name and `<serial>` the SMBIOS serial. An `<addr>` is a free address in `K8S_NODE_CIDR` of `clusters/folly/config/cluster-topology.json`.
 
 ## Declare the node
 
-1. On a branch, add an entry under `nodes` in `clusters/folly/inventory/nodes.yaml` with `<node>`, its model, `<serial>`, its class, its switch port, `<addr>`, its BMC type, and its approved EK binding from your evidence, `approved_ek_rsa2048` and `approved_ek_eccp256`. Add the model under `models` if it is new. [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
+1. On a branch, add an entry under `nodes` in `clusters/folly/inventory/nodes.yaml` with `<node>`, its model, `<serial>`, its class, its switch port, `<addr>`, its BMC type, its install disk's serial as `disk_serial`, and its approved EK binding from your evidence, `approved_ek_rsa2048` and `approved_ek_eccp256`. Add the model under `models` if it is new. [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
 2. Open a pull request and comment `atlantis plan -d terraform/netbox/folly`, then `atlantis plan -d terraform/network/unifi/folly`.
 
-   Result: the plans create the device, its address and its cable, the node's DNS record, and its switch port's name. They fail on an unknown model or class, an address, port, serial or approved EK another node holds, or an approved EK hash that is not 64 lowercase hex characters.
+   Result: the plans create the device, its address and its cable, the node's DNS record, and its switch port's name. They fail on an unknown model or class, an address, port, serial, disk serial or approved EK another node holds, or an approved EK hash that is not 64 lowercase hex characters.
 
 3. Comment `atlantis apply`.
 
-   Result: a `planned` device with the serial, class, address, `approved_ek_hash` and `approved_ek_hash_ecc`, and a cable to the switch port, and no MAC.
+   Result: a `planned` device with the serial, class, address, `install_disk_serial`, `approved_ek_hash` and `approved_ek_hash_ecc`, and a cable to the switch port, and no MAC.
 
 ## Plug a machine in
 
@@ -76,7 +77,7 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 2. Watch the console and NetBox.
 
-   Result: `attest: PASSED`, `install code written`, `install: installed Talos to <disk>`, and at the node's first boot, `active`.
+   Result: `attest: PASSED`, `install code written`, `wipe: <disk> reports the serial <disk serial>`, `install: installed Talos to <disk>`, and at the node's first boot, `active`.
 
 ## Approve a machine's EKs
 
@@ -117,7 +118,10 @@ A replaced TPM, as after a board swap, needs the same change: the old binding re
 | The console says `attest: FAILED` and the agent starts at once | fleetd refused the machine | Read the `attest.verdict` audit line in `journalctl -u fleetd` |
 | `attest: FAILED` with `ek-hash-mismatch` or `ek-missing` | The TPM is not the one the entry approves | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence. Nothing was written |
 | `attest: FAILED` with `ek-binding-unauthored` | NetBox's changelog does not show Terraform's user writing the binding: another user edited it, the changelog lost the record, or `bindingAuthor` is unset on spore | Read the device's journal. Restore the binding from git: remove the lines, apply, add them back and apply, so that Terraform writes it again |
-| `desired_action` stays set | fleetd is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
+| `desired_action` stays set | fleetd is down, or the device lacks a MAC, `install_disk` or `install_disk_serial` | Read the device's journal. A journal that says the run waits for `install_disk_serial` needs `disk_serial` in the node's entry and an apply of `terraform/netbox/folly` |
+| `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk: the slots swapped, the disk is missing or replaced, or a USB disk took its name. Nothing was wiped or installed | Read the machine's disks. Fix the hardware, or correct `disk` or `disk_serial` in the nodes file and apply it, then set `desired_action` again |
+| `wipe: <disk> is removable`, `is on USB`, or `more than one disk reports the serial` | The declared serial names a removable or USB disk, or two disks report it. Nothing was wiped | Remove the extra disk, or correct `disk_serial` |
+| `wipe: no install disk serial is declared` | The Workflow carries no `install_disk_serial` | Make sure that spore runs fleetd from `main` and the device holds `install_disk_serial`, then set `desired_action` again |
 | The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attestation | Check that the switch sends LLDP, then power-cycle the machine |
 | `wipe: this boot did not pass attestation` or `no install code` | The boot's attestation got no pass or no code, so nothing was wiped | Read the `attest.install` audit line in `journalctl -u fleetd`, then set `desired_action` again |
 | The audit line says `no provision` | A last run the owner has not repeated, a control plane, or auto-provision is off | Set `desired_action` to `provision` |

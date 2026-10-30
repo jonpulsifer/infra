@@ -382,12 +382,13 @@ func workflowObject(name, node, action, created, state string) Object {
 
 func device(name, status, action string, cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"install_disk":   "/dev/nvme0n1",
-		"talos_class":    map[string]any{"value": "worker-g5", "label": "worker-g5"},
-		"tpm_version":    "2.0",
-		"bmc_type":       "amt",
-		"desired_action": action,
-		"last_workflow":  nil,
+		"install_disk":        "/dev/nvme0n1",
+		"install_disk_serial": "30DF7020FGKL",
+		"talos_class":         map[string]any{"value": "worker-g5", "label": "worker-g5"},
+		"tpm_version":         "2.0",
+		"bmc_type":            "amt",
+		"desired_action":      action,
+		"last_workflow":       nil,
 	}
 	for k, v := range cf {
 		fields[k] = v
@@ -1209,6 +1210,54 @@ func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
 				}
 			}
 			if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), action+" refused") {
+				t.Errorf("journals %v", nb.journals)
+			}
+		})
+	}
+}
+
+// A run that wipes waits for the install disk's serial, which the Template
+// checks before it writes; an attest touches no disk and runs without one.
+func TestARunThatWipesWaitsForTheDiskSerial(t *testing.T) {
+	for _, c := range []struct {
+		status, action string
+		serial         any
+		want           string
+	}{
+		{"active", "provision", nil, "provision waits: riptide declares no install_disk_serial"},
+		{"active", "wipe", nil, "wipe waits: riptide declares no install_disk_serial"},
+		{"decommissioning", "none", nil, "the retirement waits: riptide declares no install_disk_serial"},
+		{"active", "provision", "30DF 7020", `install_disk_serial "30DF 7020" is malformed`},
+		{"active", "attest", nil, ""},
+	} {
+		t.Run(c.status+"/"+c.action+"/"+fmt.Sprint(c.serial), func(t *testing.T) {
+			nb := &fakeNetBox{devices: []map[string]any{device("riptide", c.status, c.action, map[string]any{"install_disk_serial": c.serial})}, ifaces: riptideIfaces()}
+			kube := &fakeKube{}
+			r, done := newTest(t, nb, kube)
+			defer done()
+			for range 2 {
+				if err := r.Reconcile(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if c.want == "" {
+				if n := kube.workflows(); len(n) != 1 || !strings.HasPrefix(n[0], "attest-riptide-") {
+					t.Fatalf("workflows %v", n)
+				}
+				return
+			}
+			if n := kube.workflows(); len(n) != 0 {
+				t.Fatalf("workflows %v", n)
+			}
+			if kube.get(hwPath) == nil {
+				t.Error("the Hardware went with the serial")
+			}
+			for _, p := range nb.patches {
+				if cf, ok := p["custom_fields"].(map[string]any); ok && cf["desired_action"] != nil {
+					t.Errorf("desired_action written: %v", p)
+				}
+			}
+			if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), c.want) {
 				t.Errorf("journals %v", nb.journals)
 			}
 		})

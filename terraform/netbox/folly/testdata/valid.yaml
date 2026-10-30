@@ -16,6 +16,7 @@ nodes:
     switch_port: 1
     address: 192.0.2.10
     bmc: none
+    disk_serial: "DISK-1"
     approved_ek_rsa2048: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
     approved_ek_eccp256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
   two:
@@ -25,6 +26,7 @@ nodes:
     switch_port: 2
     address: 192.0.2.11
     bmc: none
+    disk_serial: "0123456789"
     approved_ek_eccp256: cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
   three:
     model: box

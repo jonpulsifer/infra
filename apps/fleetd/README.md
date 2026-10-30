@@ -134,10 +134,10 @@ calls the fleet's `Admit` in process with `{serial, uuid, node, class, code}`. `
 session's SMBIOS UUID lower-cased, and must read as 8-4-4-4-12 hex. `Admit`:
 
 1. Refuses a device that is not `planned`, that lacks a declared field (`talos_class`, `install_disk`,
-   `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` or `primary_ip4`), or
-   whose attested LLDP port, from the last hour, is not its `expected_port`; nothing is written and
-   the journal says why. `terraform/netbox/folly` declares every one of them from the nodes file, and
-   fleetd fills in none.
+   `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port`
+   or `primary_ip4`), or whose attested LLDP port, from the last hour, is not its `expected_port`;
+   nothing is written and the journal says why. `terraform/netbox/folly` declares every one of them
+   from the nodes file, and fleetd fills in none.
 2. Starts the provision Workflow, with no boot mode, unless one is running: when `desired_action` is
    `provision`, or when the device never ran a Workflow, auto-provision is on, and it is a worker.
 3. Renders the config. The render refuses a device whose `last_workflow` is not an unfinished
@@ -167,13 +167,20 @@ a day. A fetch with another code is journaled at most every ten minutes per mach
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
 fleetd reads the name, serial, status, `primary_ip4`, `oob_ip`, the first physical interface's
-`primary_mac_address`, and the custom fields `install_disk`, `talos_class`, `tpm_version`,
-`bmc_type`, `amt`, `secure_boot_expected`, `desired_action`, `last_workflow`, `expected_port`,
-`smbios_uuid`, `attest_verdict`, `approved_ek_hash`, `approved_ek_hash_ecc` and the attested network fields. It writes the verdict fields, the
+`primary_mac_address`, and the custom fields `install_disk`, `install_disk_serial`, `talos_class`,
+`tpm_version`, `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`, `last_workflow`,
+`expected_port`, `smbios_uuid`, `attest_verdict`, `approved_ek_hash`, `approved_ek_hash_ecc` and the attested network fields. It writes the verdict fields, the
 observed EK hashes, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `none`,
 `last_workflow`, `status` and journal entries. A `quarantined` verdict cordons the node through the
 cluster's API on every pass; a control plane's `failed-no-quarantine` is no quarantine, and fleetd
 never uncordons.
+
+A `provision`, `wipe` or `retire` run starts only for a device whose `install_disk_serial` is set
+and well formed; otherwise the journal says the run waits and `desired_action` stays. Each
+Workflow's `hardwareMap` carries the serial as `install_disk_serial`, because Tinkerbell's Hardware
+CRD keeps only a disk's `device`. The Template refuses to wipe or install unless the disk at
+`install_disk` reports that serial, no other disk reports it, and it is neither removable nor on
+USB.
 
 ## Overdue Workflows
 

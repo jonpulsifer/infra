@@ -1,7 +1,9 @@
 package fleet
 
 import (
+	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -39,6 +41,24 @@ var Actions = map[string]Action{
 	"attest":     {Attest: true},
 	"wipe":       {Wipe: true, Status: "planned"},
 	ActionRetire: {Wipe: true, Retire: true},
+}
+
+var diskSerialPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
+// Unidentified says why a run of action cannot start on the device, or ""
+// when it can: a run that wipes needs the serial its install disk reports,
+// because the Template wipes and installs only the disk that reports it.
+func (d Device) Unidentified(action string) string {
+	if !Actions[action].Wipe {
+		return ""
+	}
+	if d.DiskSerial == "" {
+		return fmt.Sprintf("%s declares no install_disk_serial, so a %s run cannot tell its install disk from another; add disk_serial to its nodes-file entry and apply terraform/netbox/folly", d.Name, action)
+	}
+	if !diskSerialPattern.MatchString(d.DiskSerial) {
+		return fmt.Sprintf("%s's install_disk_serial %q is malformed", d.Name, d.DiskSerial)
+	}
+	return ""
 }
 
 // Installing says whether a planned device has passed attestation: its
@@ -191,7 +211,8 @@ func (c Config) IsControlPlane(class string) bool {
 }
 
 // Workflow runs the class's Template for one action, and refuses a device
-// whose class the table lacks. A device that boots by hand (ManualBoot), or
+// whose class the table lacks, and a run that wipes a disk the device does not
+// identify (Unidentified). A device that boots by hand (ManualBoot), or
 // one whose machine already waits in HookOS (hookos), gets no boot mode.
 // toggleAllowNetboot is off: the fleet sets the Hardware's flags before the
 // Workflow exists, and Tinkerbell's toggle would be a second writer of the
@@ -201,8 +222,17 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 	if !ok {
 		return nil, fmt.Errorf("%s's class %q is not in the class table", d.Name, d.Class)
 	}
+	if why := d.Unidentified(action); why != "" {
+		return nil, errors.New(why)
+	}
 	a := Actions[action]
 	installer := c.Installer(d, action)
+	// The Template quotes the serial, so a run that wipes nothing gets none
+	// that is malformed.
+	serial := d.DiskSerial
+	if !diskSerialPattern.MatchString(serial) {
+		serial = ""
+	}
 	spec := map[string]any{
 		"templateRef": class.Template,
 		"hardwareRef": d.Name,
@@ -212,6 +242,9 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 			"retire":          fmt.Sprint(a.Retire),
 			"install":         fmt.Sprint(installer != ""),
 			"installer_image": installer,
+			// The Hardware's disk carries only the kernel name: Tinkerbell's
+			// CRD prunes any other field, so the serial goes here.
+			"install_disk_serial": serial,
 		},
 	}
 	boot := map[string]any{"toggleAllowNetboot": false}

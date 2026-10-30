@@ -32,8 +32,11 @@ type Device struct {
 	Address string
 	MAC     string
 	Disk    string
-	Class   string
-	TPM     string
+	// DiskSerial is the serial the install disk reports, which the Template
+	// checks before it wipes or installs Disk.
+	DiskSerial string
+	Class      string
+	TPM        string
 	// EKHash and EKHashECC pin the TPM's endorsement keys.
 	EKHash, EKHashECC string
 	// AMT and SecureBootExpected are nil while the custom field is empty.
@@ -210,6 +213,7 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 		Serial:             r.Serial,
 		Status:             selectValue(r.Status),
 		Disk:               cf("install_disk"),
+		DiskSerial:         cf("install_disk_serial"),
 		Class:              cf("talos_class"),
 		TPM:                cf("tpm_version"),
 		EKHash:             cf("ek_hash"),
