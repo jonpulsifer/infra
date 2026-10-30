@@ -23,12 +23,16 @@ const (
 )
 
 // Verdicts. A refusal is an answer to a request that proved nothing yet; it
-// changes no machine's record.
+// changes no machine's record. A control-plane node whose TPM-proven boot
+// misses the policy on the running node gets VerdictFailedNoQuarantine: it is
+// recorded and alerts, and the node keeps its status and identity, since
+// failing it would take the cluster's API off its network.
 const (
-	VerdictPass       = "pass"
-	VerdictQuarantine = "quarantine"
-	VerdictPending    = "pending-approval"
-	VerdictRefused    = "refused"
+	VerdictPass               = "pass"
+	VerdictQuarantine         = "quarantine"
+	VerdictPending            = "pending-approval"
+	VerdictRefused            = "refused"
+	VerdictFailedNoQuarantine = "failed-no-quarantine"
 )
 
 // Machine is what the host says about itself, from SMBIOS and its NIC. The

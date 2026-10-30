@@ -342,3 +342,39 @@ tests:
             exp_annotations:
               message: "optiplex's PCR 0 changed at the same BIOS version"
               description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+
+  # optiplex, the control plane, failed in place on spore, and no anchor has a newer record: critical.
+  # riptide failed in place on forge, then passed on capsule later: the newer record clears it. A
+  # failed-no-quarantine check's own timestamp never raises the warning rule.
+  - interval: 1m
+    input_series:
+      - series: 'talos_attest_failed_no_quarantine{instance="spore",machine="optiplex"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="spore",machine="optiplex"}'
+        values: 3000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="optiplex"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="optiplex"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="forge",machine="riptide"}'
+        values: 1x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="forge",machine="riptide"}'
+        values: 1000x10
+      - series: 'talos_attest_failed_no_quarantine{instance="capsule",machine="riptide"}'
+        values: 0x10
+      - series: 'talos_attest_record_updated_timestamp_seconds{instance="capsule",machine="riptide"}'
+        values: 2000x10
+      - series: 'talos_attest_check_last_timestamp_seconds{instance="spore",machine="optiplex",verdict="failed-no-quarantine"}'
+        values: 120x10
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: TalosAttestCheckFailed
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              verdict: failed-no-quarantine
+              instance: spore
+              machine: optiplex
+            exp_annotations:
+              message: "Control-plane node optiplex failed attestation and is not quarantined"
+              description: "optiplex's TPM quoted a boot that misses talos-attest's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u talos-attest on spore, then reinstall or fix the node; the next passing check clears this."

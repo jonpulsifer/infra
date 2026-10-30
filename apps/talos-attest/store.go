@@ -60,7 +60,13 @@ type Record struct {
 	// PCR0Changed is whether that quote's PCR 0 differs from the one NetBox
 	// holds for the BIOS version the node reported.
 	PCR0Changed bool `json:"pcr0_changed,omitempty"`
+	// CheckFailed is the reason a control-plane node's TPM-proven boot
+	// missed the policy on its newest running quote, which leaves it in
+	// place; a passing quote clears it.
+	CheckFailed string `json:"check_failed,omitempty"`
 
+	// unquarantined marks the record of such a failure for NetBox.
+	unquarantined bool
 	// check marks a daily check's pass, which NetBox records as a verdict
 	// and a time without touching the certificate fields; pcr0 is what the
 	// quote showed for PCR 0. Neither is kept on disk.

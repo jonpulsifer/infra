@@ -90,6 +90,14 @@ func (v *Verifier) Metrics() (string, error) {
 			fmt.Fprintf(&b, "talos_attest_pcr0_changed{machine=%q} %d\n", r.Machine, val)
 		}
 	}
+	head("talos_attest_failed_no_quarantine", "gauge", "1 when a control-plane node's newest running quote on this anchor proved a boot that misses the policy, which leaves the node in place; a passing quote clears it.")
+	for _, r := range recs {
+		val := 0
+		if r.CheckFailed != "" {
+			val = 1
+		}
+		fmt.Fprintf(&b, "talos_attest_failed_no_quarantine{machine=%q} %d\n", r.Machine, val)
+	}
 	head("talos_attest_checks_total", "counter", "Daily checks since the service started, by machine and verdict: pass, quarantine, or refused before the TPM's proof.")
 	checks := v.Checks()
 	checkKeys := make([][2]string, 0, len(checks))

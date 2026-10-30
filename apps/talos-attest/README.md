@@ -102,7 +102,11 @@ the renewal's, plus `bios`, the SMBIOS BIOS version. Before any write the
 LAK on file must sign the quote over the session's nonce and certify the
 LDevID key on file with it; a failure there is `refused` and records
 nothing. After it, a boot that misses `renew_required_authorities` and the
-rest of the policy, or a log that does not replay, is a quarantine. A pass
+rest of the policy, or a log that does not replay, is a quarantine, except on
+a node whose class is `controlplane`: a check or renewal failure there is 403
+`failed-no-quarantine`, written to `attest_verdict` as `failed-no-quarantine:
+<reason>`, journaled and exported as `talos_attest_failed_no_quarantine`,
+and the status and LDevID stay. A pass
 answers `{checked, attested_at}`, issues nothing, and writes only
 `attest_verdict` and `last_attested`. Each passing quote from the running
 node, check or renewal, records PCR 0 under the BIOS version in the

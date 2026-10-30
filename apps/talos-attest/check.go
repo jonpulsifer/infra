@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/hex"
+	"errors"
 	"maps"
 	"strings"
 	"time"
@@ -116,6 +117,9 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	}
 	events, err := v.replayBoot(pcrs, req.EventLog, v.Policy.EvaluateRenewal)
 	if err != nil {
+		if s.machine.controlPlane() {
+			return protocol.Renewed{}, v.failInPlace(ctx, s, err, true)
+		}
 		if r := reasonOf(err); r != reasonInternal && r != reasonSession {
 			v.countCheck(s.machine.Name, protocol.VerdictQuarantine)
 		}
@@ -131,7 +135,7 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	now := v.Now()
 	rec := *s.renew
 	rec.Status = StatusAttested
-	rec.Reason, rec.Detail = "", nil
+	rec.Reason, rec.Detail, rec.CheckFailed = "", nil, ""
 	rec.BootApplications = bootApplications(events)
 	rec.AttestedAt, rec.CheckedAt, rec.UpdatedAt = now, now, now
 	if rec.LDevIDNotBefore.IsZero() {
@@ -160,6 +164,45 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 type checkCount struct {
 	N    uint64
 	Last time.Time
+}
+
+// failInPlace records a control-plane node's failed running quote, from a
+// daily check or a renewal, after the TPM's proof: the reason goes on the
+// record and on NetBox's attest_verdict as failed-no-quarantine, the device
+// is journaled and talos_attest_failed_no_quarantine alerts, and its status
+// and LDevID stay. Failing the node would move the cluster's API to the
+// bootstrap VLAN. Nothing is issued, and a record that is no longer a pass
+// is left as it is.
+func (v *Verifier) failInPlace(ctx context.Context, s *session, err error, check bool) error {
+	var f *Failure
+	if !errors.As(err, &f) || f.Reason == reasonInternal || f.Reason == reasonSession {
+		return err
+	}
+	f.Unquarantined = true
+	if check {
+		v.countCheck(s.machine.Name, protocol.VerdictFailedNoQuarantine)
+	}
+	rec, ok, rerr := v.Store.Record(s.machine.Name)
+	if rerr != nil {
+		return rerr
+	}
+	if !ok {
+		rec = *s.renew
+	}
+	if rec.Status != StatusAttested {
+		v.Log.Warn("control-plane node failed attestation; its record is no longer a pass and stays", "machine", rec.Machine, "status", rec.Status, "reason", f.Reason)
+		return err
+	}
+	rec.CheckFailed = f.Reason
+	rec.Detail = []string{err.Error()}
+	rec.UpdatedAt = v.Now()
+	rec.check, rec.unquarantined = check, true
+	if serr := v.Store.Save(rec, nil); serr != nil {
+		v.Log.Error("record failed check", "machine", rec.Machine, "err", serr)
+	}
+	v.Log.Error("control-plane node failed attestation; not quarantined", "machine", rec.Machine, "reason", f.Reason, "err", f.Detail)
+	v.finish(ctx, rec, protocol.VerdictFailedNoQuarantine, f.Reason, err)
+	return err
 }
 
 // countCheck counts a daily check's verdict for the machine.

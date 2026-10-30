@@ -201,6 +201,80 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 	})
 }
 
+// The control plane is never quarantined by a running quote: failing
+// folly's only control plane would move the cluster's API to the bootstrap
+// VLAN. Its failure is recorded, journaled and alerts; status and LDevID stay.
+func TestControlPlaneFailsInPlace(t *testing.T) {
+	t.Run("daily check", func(t *testing.T) {
+		h, f := activeNode(t)
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
+		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
+		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
+			t.Fatalf("control-plane policy miss: %+v", r)
+		}
+		failedInPlace(t, h, f, 3)
+		if !strings.Contains(h.audit.String(), `"event":"attest.check"`) {
+			t.Fatalf("no attest.check audit line:\n%s", h.audit.String())
+		}
+		if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_checks_total{machine="testbox",verdict="failed-no-quarantine"} 1`) {
+			t.Fatalf("metrics lack the check verdict:\n%s", m)
+		}
+
+		// The next passing check clears it.
+		h.v.Policy.RenewRequiredAuthorities = nil
+		if _, err := h.check(h.ts.URL, "1.0"); err != nil {
+			t.Fatalf("check after the boot is fixed: %v", err)
+		}
+		if d := f.settled(t, simSerial, 4); d.Status != "active" || d.CustomFields["attest_verdict"] != StatusAttested {
+			t.Fatalf("NetBox after the passing check: %s %+v", d.Status, d.CustomFields)
+		}
+		if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_failed_no_quarantine{machine="testbox"} 0`) {
+			t.Fatalf("the passing check did not clear the failure:\n%s", m)
+		}
+	})
+	t.Run("renewal", func(t *testing.T) {
+		h, f := activeNode(t)
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
+		first := nvLDevID(t, h)
+		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		r := refusal(t, func() error { _, err := h.renew(simSerial); return err }())
+		if r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
+			t.Fatalf("control-plane renewal policy miss: %+v", r)
+		}
+		failedInPlace(t, h, f, 3)
+		if after := nvLDevID(t, h); after.SerialNumber.Cmp(first.SerialNumber) != 0 {
+			t.Fatal("a failed renewal replaced the LDevID in NV")
+		}
+	})
+}
+
+func failedInPlace(t *testing.T, h *harness, f *fakeNetBox, patches int) {
+	t.Helper()
+	d := f.settled(t, simSerial, patches)
+	if d.Status != "active" || d.CustomFields["attest_verdict"] != "failed-no-quarantine: "+reasonPolicy {
+		t.Fatalf("NetBox after a control-plane failure: %s %+v", d.Status, d.CustomFields)
+	}
+	waitFor(t, "the failure's journal entry", func() bool {
+		return f.journaled("danger: talos-attest: failed attestation (policy) and not quarantined")
+	})
+	if rec, _, _ := h.v.Store.Record("testbox"); rec.Status != StatusAttested || rec.CheckFailed != reasonPolicy {
+		t.Fatalf("record after a control-plane failure: %+v", rec)
+	}
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusOK {
+		t.Fatalf("a control-plane node lost its DevID: %d", code)
+	}
+	if code, body := h.get("/verdict/" + simSerial); code != http.StatusOK || !strings.Contains(string(body), `"status":"attested"`) {
+		t.Fatalf("verdict after a control-plane failure: %d %s", code, body)
+	}
+	if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_failed_no_quarantine{machine="testbox"} 1`) {
+		t.Fatalf("metrics lack the failure:\n%s", m)
+	}
+	if !strings.Contains(h.audit.String(), `"status":"failed-no-quarantine"`) {
+		t.Fatalf("no audit line for the failure:\n%s", h.audit.String())
+	}
+}
+
 func quarantined(t *testing.T, h *harness, f *fakeNetBox, reason string) {
 	t.Helper()
 	if d := f.settled(t, simSerial, 3); d.Status != "failed" || d.CustomFields["attest_verdict"] != "quarantined: "+reason {

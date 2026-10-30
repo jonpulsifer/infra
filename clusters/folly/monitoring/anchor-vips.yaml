@@ -205,12 +205,23 @@ spec:
         # too; one refused before the proof (a forged, replayed or foreign quote) records nothing. Each
         # fires for an hour after the newest such check on any anchor.
         - alert: TalosAttestCheckFailed
-          expr: time() - max by (machine, verdict) (talos_attest_check_last_timestamp_seconds{verdict!="pass"}) < 3600
+          expr: time() - max by (machine, verdict) (talos_attest_check_last_timestamp_seconds{verdict!~"pass|failed-no-quarantine"}) < 3600
           labels:
             severity: warning
           annotations:
             message: "{{ $labels.machine }}'s daily check ended in {{ $labels.verdict }}"
             description: "quarantine: the TPM quoted a boot that misses talos-attest's renewal policy, and NetBox has the device failed. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u talos-attest on the anchors."
+        # A control-plane node whose proven boot misses the policy is never quarantined, since failing
+        # it moves the cluster's API to the bootstrap VLAN. Its newest record, on whichever anchor holds
+        # it, keeps this firing until a passing quote clears it.
+        - alert: TalosAttestCheckFailed
+          expr: (talos_attest_failed_no_quarantine == 1) and on (instance, machine) (talos_attest_record_updated_timestamp_seconds == on (machine) group_left max by (machine) (talos_attest_record_updated_timestamp_seconds))
+          labels:
+            severity: critical
+            verdict: failed-no-quarantine
+          annotations:
+            message: "Control-plane node {{ $labels.machine }} failed attestation and is not quarantined"
+            description: "{{ $labels.machine }}'s TPM quoted a boot that misses talos-attest's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u talos-attest on {{ $labels.instance }}, then reinstall or fix the node; the next passing check clears this."
         # The newest passing quote, on whichever anchor took it, decides. A PCR 0 change the BIOS version
         # does not explain alerts and never quarantines; the owner explains it in NetBox.
         - alert: TalosAttestPCR0Changed

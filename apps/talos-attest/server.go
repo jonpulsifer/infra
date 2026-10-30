@@ -127,6 +127,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		code, verdict = http.StatusBadRequest, ""
 	case f.Unauthenticated:
 		verdict = protocol.VerdictRefused
+	case f.Unquarantined:
+		verdict = protocol.VerdictFailedNoQuarantine
 	case f.Reason == reasonEKPending:
 		verdict = protocol.VerdictPending
 	}

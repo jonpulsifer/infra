@@ -562,6 +562,11 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 	patch := map[string]any{}
 	var kind, comment string
 	switch {
+	case r.unquarantined:
+		// A control-plane node keeps its status and its identity: failing it
+		// would move the cluster's API to the bootstrap VLAN.
+		fields["attest_verdict"] = fmt.Sprintf("%s: %s", protocol.VerdictFailedNoQuarantine, r.CheckFailed)
+		kind, comment = "danger", fmt.Sprintf("talos-attest: failed attestation (%s) and not quarantined, since %s is a control-plane node: %s", r.CheckFailed, d.Name, plain(strings.Join(r.Detail, "; ")))
 	case r.Status == StatusAttested && r.check:
 		// A daily check issues nothing: the verdict and its time are all it
 		// writes, besides what the quote showed for PCR 0. A routine pass
@@ -733,7 +738,7 @@ func (n *NetBox) MarkPending(ctx context.Context, serial, detail string) error {
 	if err != nil || !ok {
 		return err
 	}
-	if d.CustomFields.Verdict == StatusAttested {
+	if d.CustomFields.Verdict == StatusAttested || strings.HasPrefix(d.CustomFields.Verdict, protocol.VerdictFailedNoQuarantine) {
 		return nil
 	}
 	// A quarantine stands until the owner clears it; the claim is only journaled.
@@ -759,7 +764,8 @@ func (n *NetBox) Verdict(ctx context.Context, serial string) (protocol.Status, b
 	}
 	st := protocol.Status{Node: d.Name, Class: string(d.CustomFields.Class), Site: d.Site.Slug, UpdatedAt: d.LastUpdated, LDevIDSerial: strings.ToLower(d.CustomFields.LDevIDSerial)}
 	switch v := d.CustomFields.Verdict; {
-	case v == StatusAttested:
+	case v == StatusAttested, strings.HasPrefix(v, protocol.VerdictFailedNoQuarantine):
+		// A control-plane node that failed in place keeps its identity.
 		st.Status = protocol.StatusAttested
 	case strings.HasPrefix(v, StatusQuarantined):
 		st.Status = protocol.StatusQuarantined

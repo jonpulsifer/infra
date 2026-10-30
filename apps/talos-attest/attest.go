@@ -1083,6 +1083,10 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 		return v.check(ctx, s, req)
 	}
 	refuse := func(err error) (protocol.Renewed, error) {
+		if s.machine.controlPlane() {
+			// Failing the control plane takes the cluster's API down.
+			return protocol.Renewed{}, v.failInPlace(ctx, s, err, false)
+		}
 		return protocol.Renewed{}, v.refuse(ctx, &s.machine, s.claim, nil, err)
 	}
 	// Serials are public. Until the LAK's signature over this session's nonce
@@ -1110,7 +1114,7 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	}
 	rec := *s.renew
 	rec.Status = StatusAttested
-	rec.Reason, rec.Detail = "", nil
+	rec.Reason, rec.Detail, rec.CheckFailed = "", nil, ""
 	rec.Class = s.machine.Class
 	rec.LDevIDSerial = serialHex(ldevidCert)
 	rec.LDevIDNotAfter = ldevidCert.NotAfter

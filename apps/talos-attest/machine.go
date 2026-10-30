@@ -84,6 +84,18 @@ func (v *Verifier) lookupMachine(ctx context.Context, serial string) (Machine, b
 	return nb, true, nil
 }
 
+// classControlPlane is the talos_class of the control plane, whose role
+// clusters/folly/fleet/class-inputs.json names controlplane.
+const classControlPlane = "controlplane"
+
+// controlPlane reports whether the machine's class, NetBox's talos_class
+// or the inventory's, is the control plane's. Failing such a node puts the
+// cluster's API on the bootstrap VLAN, so a failed running quote alerts and
+// leaves it in place.
+func (m Machine) controlPlane() bool {
+	return strings.EqualFold(strings.TrimSpace(m.Class), classControlPlane)
+}
+
 // blocked reports whether the lifecycle forbids issuing to the machine: a
 // retired one, and a failed one until the owner moves it out of failed.
 func (m Machine) blocked() bool {
