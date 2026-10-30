@@ -160,7 +160,7 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | Win first enrollment with a copied serial and MAC | Not solved | Manufacturer EK validation and admission checks constrain the attempt. | An unpinned planned device has no independent chassis-to-EK binding. |
 | Forge a physical switch location | Not solved | `apps/fleetd/attest/network.go` checks signed reports; admission checks `expected_port`. | LLDP observations do not authenticate a cable or switch. |
 | Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. | Does not establish that firmware measures all relevant code correctly. |
-| Run an old but accepted signed image | Not solved | Signing-authority checks apply in `apps/fleetd/attest/policy.yaml`. | Empty `boot_applications` provides no exact-image restriction or version floor. |
+| Run an old but accepted signed image | Not solved | Signing-authority checks apply in the class's profile under `apps/fleetd/attest/policy/`. | Empty `boot_applications` provides no exact-image restriction or version floor. |
 | Compromise a host after an acceptable boot | Not solved | Daily quotes provide later boot evidence. | They do not prove runtime memory integrity or remove an attacker. |
 | Replay a fully consumed config code | Solved | Burn state and single-fetch exclusion in `apps/fleetd/fleet/configs.go`. | Theft before consumption remains possible. |
 | Steal an unspent install code from the node | Not solved | TPM delivery, HTTPS, file permissions and expiry reduce exposure. | The code is a bearer secret after unwrapping, including in META. |
