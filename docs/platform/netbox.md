@@ -21,7 +21,7 @@ Every part runs on capsule.
 
 ## Use it
 
-Open `https://capsule.<tailnet>`, which the [tailnet grants](network/remote-access.md#grants) open to the owner. Sign in as `admin` with the password in the 1Password item `netbox-folly`. Scripts use the write-enabled token `netbox/api-token` in `nix/secrets/capsule.sops.yaml`, also `api-token` in that item.
+Open `https://capsule.<tailnet>`, which the [tailnet grants](network/remote-access.md#grants) open to the owner. Sign in as `admin` with the password in the 1Password item `netbox-folly`. Scripts use the write-enabled `admin` token `netbox/api-token` in `nix/secrets/capsule.sops.yaml`, also `api-token` in that item.
 
 Atlantis on offsite reaches the API over HTTP on port 8080 at capsule's Anchor network address, which the `nest_k8s_to_capsule_netbox` policy and capsule's firewall admit from offsite's node, VIP and pod ranges.
 
@@ -30,6 +30,17 @@ To add a node, add its entry to `clusters/folly/inventory/nodes.yaml` in a pull 
 ## Data
 
 `terraform/netbox/folly` applies the nodes file: each node's device, address, cable and declared custom fields, the node models' device types, every custom field and choice set on `dcim.device`, and the event rule `fleet-controller-device-update`, which posts every device update to fleetd's webhook on spore, at the address in `clusters/folly/config/anchor-topology.json`. The webhook's secret, the value fleetd verifies, is set in NetBox by hand. The site, the roles, the platforms, the prefixes, the anchors and the switch are set in NetBox by hand, and their objects carry the tag `managed-by: git-seed`. [Hardware inventory](../reference/inventory.md) covers the nodes file and the drift check.
+
+## Users and tokens
+
+`terraform/netbox/folly` declares two API-only users beside `admin`, the superuser. Each has a random password that nothing reads, so nobody signs in as it, and the owner mints each user's v2 token in the UI. Terraform manages no token.
+
+| User | Token lives in | Permissions |
+| --- | --- | --- |
+| `terraform` | The 1Password item `netbox-folly-terraform`, which Atlantis reads | View, add, change and delete on the types `terraform/netbox/folly` manages, including `users.user` and `users.objectpermission`; view on the site, roles, platforms, manufacturers and interfaces it looks up |
+| `fleetd` | `fleetd/netbox-token` in spore's SOPS file | View, change and add on only what `apps/fleetd` calls: view `dcim.device`, `dcim.interface`, `dcim.macaddress`, `extras.journalentry` and `core.objectchange`; change `dcim.device` and `dcim.interface`; add `dcim.interface`, `dcim.macaddress` and `extras.journalentry`. No delete, no superuser, no staff |
+
+The provider cannot set a superuser, so `terraform` holds object permissions instead. It manages the permissions it holds, so it can keep managing users and permissions, and for the same reason it can grant itself anything. What the separate user gives is a name in the changelog: fleetd honours a device's approved EK binding only when the user named by `homelab.fleetd.bindingAuthor` (`terraform`) made its newest change, and a token of `admin` or `fleetd` never counts. A token still on `admin` makes Terraform's writes record as `admin`, so no binding counts and every planned machine waits. [Switch a NetBox token to its own user](../runbooks/switch-a-netbox-token.md) moves each token.
 
 ## Backups
 
@@ -66,3 +77,4 @@ To restore, stop `netbox.service`, run `pg_restore --clean --if-exists -d netbox
 - [Backups](backups.md)
 - [Secrets](secrets.md)
 - [Hardware inventory](../reference/inventory.md)
+- [Switch a NetBox token to its own user](../runbooks/switch-a-netbox-token.md)

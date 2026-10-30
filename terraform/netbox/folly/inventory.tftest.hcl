@@ -4,6 +4,9 @@ mock_provider "netbox" {
   mock_resource "netbox_custom_field_choice_set" {
     defaults = { id = "1" }
   }
+  mock_resource "netbox_user" {
+    defaults = { id = "1" }
+  }
   mock_resource "netbox_webhook" {
     defaults = { id = "1" }
   }
@@ -31,6 +34,7 @@ mock_provider "netbox" {
 }
 mock_provider "restapi" {}
 mock_provider "onepassword" {}
+mock_provider "random" {}
 
 override_module {
   target = module.topology
@@ -74,6 +78,23 @@ run "accepts_approved_bindings" {
   assert {
     condition     = alltrue([for o in values(restapi_object.declared) : !contains(keys(jsondecode(o.data).custom_fields), "ek_hash") && !contains(keys(jsondecode(o.data).custom_fields), "ek_hash_ecc")])
     error_message = "Terraform must never write the EK hashes fleetd observes."
+  }
+}
+
+run "grants_fleetd_no_delete" {
+  command = plan
+
+  plan_options {
+    target = [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add]
+  }
+
+  variables {
+    nodes_file = "testdata/valid.yaml"
+  }
+
+  assert {
+    condition     = alltrue([for p in [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add] : !contains(p.actions, "delete")])
+    error_message = "fleetd deletes nothing in NetBox, so it must hold no delete permission."
   }
 }
 

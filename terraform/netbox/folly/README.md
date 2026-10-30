@@ -28,6 +28,7 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.11 |
 | <a name="requirement_netbox"></a> [netbox](#requirement\_netbox) | ~> 5.8 |
 | <a name="requirement_onepassword"></a> [onepassword](#requirement\_onepassword) | ~> 3.0 |
+| <a name="requirement_random"></a> [random](#requirement\_random) | ~> 3.7 |
 | <a name="requirement_restapi"></a> [restapi](#requirement\_restapi) | ~> 3.0 |
 
 ## Providers
@@ -35,6 +36,7 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | Name | Version |
 | ---- | ------- |
 | <a name="provider_netbox"></a> [netbox](#provider\_netbox) | 5.8.0 |
+| <a name="provider_random"></a> [random](#provider\_random) | 3.9.1 |
 | <a name="provider_restapi"></a> [restapi](#provider\_restapi) | 3.0.0 |
 
 ## Modules
@@ -56,7 +58,15 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [netbox_event_rule.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/event_rule) | resource |
 | [netbox_interface_template.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/interface_template) | resource |
 | [netbox_ip_address.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
+| [netbox_permission.fleetd_add](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_permission.fleetd_change](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_permission.fleetd_read](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_permission.terraform_manage](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_permission.terraform_read](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/permission) | resource |
+| [netbox_user.fleetd](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/user) | resource |
+| [netbox_user.terraform](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/user) | resource |
 | [netbox_webhook.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/webhook) | resource |
+| [random_password.netbox_user](https://registry.terraform.io/providers/hashicorp/random/latest/docs/resources/password) | resource |
 | [restapi_object.datetime_field](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [netbox_device_interfaces.created](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |

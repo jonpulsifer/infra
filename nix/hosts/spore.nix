@@ -71,6 +71,10 @@ in
   # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
   homelab.fleetd.installs = true;
 
+  # terraform/netbox/folly writes as this NetBox user once the owner switches its token to the user's own.
+  # Until then its writes record as admin and no approved EK binding counts.
+  homelab.fleetd.bindingAuthor = "terraform";
+
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
     enable = true;
