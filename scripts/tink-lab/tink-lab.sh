@@ -12,15 +12,15 @@
 #   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--attest VERDICT]
 #   vm delete NAME | vm console NAME TIMEOUT CMD... | vm screen NAME FILE.png
 #   provision NAME [--action A] [--set KEY=VALUE]... [--again] [--template NAME] [--no-boot]
-#   template NAME [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the provision
-#                                       Template with other timeouts, for a test
+#   template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the
+#                                       provision Template, or of FILE, with other timeouts
 #   slow-installer SECONDS              the class's installer, writing ticks to its disk first
 #   reconcile NAME | wait NAME TIMEOUT [STATE]
 #   power NAME on|off|soft|cycle|status
 #   cut NAME [--when COND] [--delay S] [--on-after S]
 #   agent-net NAME cut|restore [--when COND] [--reject]
 #   kill PROC [--signal SIG] [--when COND] | stop PROC | start PROC
-#   disk NAME sentinel|shuffle|usb-attach DISK SIZE|usb-detach DISK
+#   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK
 #   efi NAME show|next ENTRY|order ENTRY,...
 #   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow
 #   observe NAME [--no-console]
@@ -910,7 +910,7 @@ qemu() {
       usb) args+=(-device "usb-storage,bus=xhci.0,drive=d$i,serial=$serial,removable=on") ;;
     esac
     i=$((i + 1))
-  done < <(jq -c '.disks | sort_by(.slot) | .[]' "$d/vm.json")
+  done < <(jq -c '.disks | map(select(.detached != true)) | sort_by(.slot) | .[]' "$d/vm.json")
   printf '\n==== tink-lab: power on %s ====\n' "$(date -u +%FT%TZ)" >>"$d/serial.log"
   exec qemu-system-x86_64 -name "$name" -machine q35,smm=on,accel=kvm -cpu host -m "$VM_MEM" -smp "$VM_CPUS" \
     -global driver=cfi.pflash01,property=secure,value=on \
@@ -960,12 +960,21 @@ observe() {
     f=$(jq -r .file <<<"$disk")
     jq -c --argjson s "$(read_sentinels "$f" "$name-$(jq -r .name <<<"$disk")")" \
       --argjson p "$(sfdisk -J "$f" 2>/dev/null | jq -c '[.partitiontable.partitions[]? | {start, size, type, name}]' || echo '[]')" \
-      '{name, bus, serial, slot, intact: ($s | all(.intact)), sentinels: $s, partitions: $p}' <<<"$disk"
+      '{name, bus, serial, slot, attached: (.detached != true), intact: ($s | all(.intact)), sentinels: $s,
+        partitions: $p}' <<<"$disk"
   done | jq -sc .)
   efi_=$(efi "$name" 2>/dev/null || echo null)
   if [ "$with_console" = true ] && [ "$power" = On ]; then
+    # HookOS's shell expands these: each disk's kernel name, serial and bus, and the by-id names.
+    # shellcheck disable=SC2016
+    local blocks='for b in /sys/block/[sv]d* /sys/block/nvme*; do [ -e $b ] || continue;
+      echo "${b##*/} rm=$(cat $b/removable) sectors=$(cat $b/size)
+      serial=$(cat $b/serial $b/device/serial 2>/dev/null | head -n 1 | tr -d " ")
+      wwid=$(cat $b/wwid $b/device/wwid 2>/dev/null | head -n 1 | tr -d " ") path=$(readlink -f $b)"; done;
+      echo ====; ls /dev/disk/by-id | cat'
     if out=$(console "$name" 20 "cat /proc/cmdline; echo ====; nerdctl -n services.linuxkit exec hook-docker ls -la /worker/fleet 2>&1; echo ====;" \
-      "nerdctl -n services.linuxkit exec hook-docker docker ps -a --no-trunc --format '{{json .}}'" 2>/dev/null); then
+      "nerdctl -n services.linuxkit exec hook-docker docker ps -a --no-trunc --format '{{json .}}'; echo ====;" \
+      "${blocks//$'\n'/ }" 2>/dev/null); then
       hook=$(python3 -I "$here/hookos-observe.py" <<<"$out")
     else
       hook='"no HookOS shell answered on the serial console"'
@@ -1108,12 +1117,18 @@ EOF
 
 # template_cmd applies a copy of the committed provision Template as NAME, with each
 # --timeout ACTION=SECONDS and --global SECONDS (global_timeout) changed, for a test that varies
-# timeouts. provision --template NAME runs it.
+# timeouts. --from FILE copies another Template file instead, such as a proposed fix from another
+# branch. provision --template NAME runs it.
 template_cmd() {
-  local name=${1:?template needs a name} data t
+  local name=${1:?template needs a name} data t from=$repo/clusters/folly/tinkerbell/template.yaml
   shift
   [ "$name" != provision ] || die "the copy needs a name other than provision"
-  data=$(yq -r '.spec.data' "$repo/clusters/folly/tinkerbell/template.yaml")
+  if [ "${1:-}" = --from ]; then
+    from=$(realpath "${2:?--from needs a Template file}")
+    shift 2
+  fi
+  data=$(yq -r '.spec.data' "$from")
+  [ -n "$data" ] && [ "$data" != null ] || die "$from has no spec.data"
   while [ $# -gt 0 ]; do
     case $1 in
       --timeout)
@@ -1132,7 +1147,7 @@ template_cmd() {
   done
   jq -n --arg name "$name" --arg ns "$NS" --arg data "$data" '{apiVersion: "tinkerbell.org/v1alpha1",
     kind: "Template", metadata: {name: $name, namespace: $ns}, spec: {data: $data}}' | KUBE apply -f - >/dev/null
-  event event=template name="$name" \
+  event event=template name="$name" from="$from" sha256="$(sha256sum <<<"$data" | cut -c1-16)" \
     "timeouts=$(yq -o json .tasks <<<"$data" | jq -c '[.[].actions[] | {(.name): .timeout}] | add')" \
     global_timeout="$(yq .global_timeout <<<"$data")"
 }
@@ -1203,14 +1218,28 @@ disk_cmd() {
       fi
       event event=disk vm="$name" action=usb-attach disk="$dname" serial="$serial" hotplug="$(running_vm "$name" && echo true || echo false)"
       ;;
-    usb-detach)
-      dname=${3:?usb-detach needs a disk name}
-      if running_vm "$name"; then printf 'device_del usb-%s\n' "$dname" | monitor "$name" || true; fi
-      jq --arg n "$dname" '.disks |= map(select(.name != $n))' "$d/vm.json" >"$d/vm.json.new"
+    detach | attach)
+      # Takes a disk out of the machine, or puts it back, from the next power-on. A USB disk is
+      # also unplugged or plugged in at once when the machine runs. The image and its sentinels
+      # stay, and observe still reads them.
+      dname=${3:?$what needs a disk name}
+      disk=$(jq -c --arg n "$dname" '.disks[] | select(.name == $n)' "$d/vm.json")
+      [ -n "$disk" ] || die "$name has no disk $dname"
+      if running_vm "$name" && [ "$(jq -r .bus <<<"$disk")" = usb ]; then
+        if [ "$what" = detach ]; then
+          printf 'device_del usb-%s\n' "$dname" | monitor "$name" || true
+        else
+          printf 'drive_add 0 if=none,id=usb-%s,format=raw,file=%s\ndevice_add usb-storage,bus=xhci.0,drive=usb-%s,id=usb-%s,serial=%s,removable=on\n' \
+            "$dname" "$(jq -r .file <<<"$disk")" "$dname" "$dname" "$(jq -r .serial <<<"$disk")" | monitor "$name"
+        fi
+      fi
+      jq --arg n "$dname" --argjson off "$([ "$what" = detach ] && echo true || echo false)" \
+        '.disks |= map(if .name == $n then .detached = $off else . end)' "$d/vm.json" >"$d/vm.json.new"
       mv "$d/vm.json.new" "$d/vm.json"
-      event event=disk vm="$name" action=usb-detach disk="$dname"
+      event event=disk vm="$name" action="$what" disk="$dname" \
+        "attached=$(jq -c '[.disks | sort_by(.slot)[] | select(.detached != true) | .name]' "$d/vm.json")"
       ;;
-    *) die "disk: sentinel, shuffle, usb-attach or usb-detach" ;;
+    *) die "disk: sentinel, shuffle, usb-attach, detach or attach" ;;
   esac
 }
 

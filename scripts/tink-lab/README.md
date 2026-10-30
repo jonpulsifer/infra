@@ -84,9 +84,11 @@ Other commands:
   run.
 - `--template NAME` runs a copy of the Template that `template` applied. A test that does this
   must say so.
-- `template NAME [--timeout ACTION=SECONDS]... [--global SECONDS]` applies a copy of the committed
-  Template as NAME, with those action timeouts or that `global_timeout`. The committed Template
-  stays as it is.
+- `template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]` applies a copy of
+  the committed Template as NAME, with those action timeouts or that `global_timeout`. `--from`
+  copies another Template file instead, such as a proposed fix from another branch. The `template`
+  event records the source and a hash of the applied `spec.data`. The committed Template stays as
+  it is.
 - `slow-installer SECONDS` pushes `ghcr.io/tink-lab/slow-installer:SECONDS`, the class's installer
   behind `slow-installer.sh`. It writes a tick to the install disk every second for SECONDS, 1 MiB
   from its end, and echoes it to the console. Then it runs the real installer. Use it with
@@ -130,7 +132,8 @@ wait after the boundary. A COND is one of:
 | `stop PROC`, `start PROC` | Stops a process for good, or starts it. PROC is `tinkerbell` (or, with split, `etcd`, `apiserver`, `tink-server`, `tink-controller`, `smee`, `rufio`), `dnsmasq`, `registry`, `http`, `ntp` or `bmc-NAME`. `down` and `up` stand in for losing spore. | `stop`, `start` `{proc, pid}` |
 | `disk NAME sentinel` | Rewrites each disk's sentinels: a GPT with one partition named `sentinel-VM-DISK`, and a record at 1 MiB, 17 MiB, the middle, and 2 MiB from the end. `vm create` writes them too. | `disk` |
 | `disk NAME shuffle` | Reverses the order in which the disks take PCI slots and SATA ports, from the next power-on. Virtio names follow slot order, so `/dev/vda` becomes another disk. | `disk` `{order}` |
-| `disk NAME usb-attach DISK SIZE`, `usb-detach DISK` | A USB disk with sentinels, hotplugged when the VM runs and kept for later boots. | `disk` `{disk, serial, hotplug}` |
+| `disk NAME usb-attach DISK SIZE` | A USB disk with sentinels, hotplugged when the VM runs and kept for later boots. | `disk` `{disk, serial, hotplug}` |
+| `disk NAME detach DISK`, `attach DISK` | Takes a disk out of the VM, or puts it back, from the next power-on; a USB disk also unplugs or plugs in at once. The image stays, and `observe` still reads its sentinels. | `disk` `{disk, attached}` |
 | `efi NAME show\|next ENTRY\|order A,B,...` | Reads the VM's EFI boot variables from its OVMF store. A write needs the VM off. `next Pxe` or `next Hdd` picks the first such entry in BootOrder. | `efi` `{result}` |
 | `registry delete IMAGE`, `restore IMAGE` | Deletes a lab image's manifest (IMAGE is any part of its reference, such as `talos-installer`), so a pull fails with "manifest unknown". `restore` pushes it back from the cache. | `registry` `{action, image, digest}` |
 | `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. | `registry` `{action, verdict}` |
@@ -144,12 +147,15 @@ wait after the boundary. A COND is one of:
   state, message, start, stop and duration.
 - `hardware`: `allowPXE`, `allowWorkflow` and the declared disk.
 - `rufio_jobs`: each job's conditions.
-- `disks`: for each disk, the bus, serial, slot, every sentinel, `intact`, and the GPT partitions.
+- `disks`: for each disk, the bus, serial, slot, `attached`, every sentinel, `intact`, and the GPT
+  partitions.
 - `efi`: BootOrder, BootNext, and each `Boot####` entry with its description and kind (`disk`,
   `pxe-ipv4`, `http`, `firmware`).
 - `hookos`, when HookOS's shell answers within 20 s: `/proc/cmdline`, the `/worker/fleet` listing,
-  and hook-docker's containers (`docker ps -a`), which show a surviving installer or a
-  `provision-reboot` container.
+  hook-docker's containers (`docker ps -a`), which show a surviving installer or a
+  `provision-reboot` container, the kernel's disks (`blocks`: name, removable, sectors, serial,
+  WWID and sysfs path, which shows the bus), and the `/dev/disk/by-id` names (`by_id`). `blocks`
+  maps each kernel name to a disk's serial in that boot.
 - `tpm_state`: a hash of the swtpm state.
 
 ## The five observations for each run
