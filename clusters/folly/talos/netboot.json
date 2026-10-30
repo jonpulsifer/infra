@@ -4,5 +4,5 @@
     "version": "v0.11.1",
     "sha512": "24bc6ccf225b5ce1033cdfa155d14c01da175a2e1c5268e5e64bda76fd94af7f72d841e0e0045fbf232486bc89f35251ba551aa810e30d4bebce0d5083bce61d"
   },
-  "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:6aacb17fcf2c7b725edd08734189b9f9c826bcb513dd121610feb9458c58ad52"
+  "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:3e4c60a953f867e84043013d7b99c8f2a32138ac858f2125400084abdc022af3"
 }

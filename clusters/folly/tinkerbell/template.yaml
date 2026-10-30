@@ -78,7 +78,7 @@ spec:
           - name: attest
             namespaces:
               network: host
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:3df9661f3b4d5dd5e0d7149c2ad422ff811bbd6977a5f7d4258caffad63cefc1
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:f702abc47695c5092c34a9e0f017ee5a5acf4084df8408ed760e617171771d49
             timeout: 600
             volumes:
               - /tmp/fleet:/tmp/fleet
