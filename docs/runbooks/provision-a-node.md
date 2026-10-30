@@ -74,7 +74,7 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetController.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing. [fleet-controller](../apps/fleet-controller.md#control-planes) says what spore then holds.
 2. Declare the stub with `--class controlplane`, or declare the machine by hand with `--class controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
-3. Follow [Plug a machine in](#plug-a-machine-in) or [Declare a machine by hand](#declare-a-machine-by-hand) to the end. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in) or [Declare a machine by hand](#declare-a-machine-by-hand) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
    ```sh
@@ -82,6 +82,9 @@ A control plane installs the same way and joins the running cluster. The cluster
    ```
 
    Result: every control plane is listed, and none is a learner.
+
+> [!WARNING]
+> The Talos root upgrades every control plane in `talos_machine.joining` in parallel, beside the workers. With two joining control planes, one Talos upgrade can take two of three etcd members down at once and lose quorum. Before a second joining control plane exists, serialise their upgrades, for example with `-parallelism=1` on the `clusters/folly/talos` apply, or with one resource per joining control plane.
 
 ## Watch the run
 

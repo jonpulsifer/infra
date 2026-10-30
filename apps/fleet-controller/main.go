@@ -73,6 +73,9 @@ type Config struct {
 	// Bootstrap is the address of the control plane the Talos root
 	// bootstraps etcd on, set with the control-plane renders.
 	Bootstrap string
+	// ControlPlaneClasses are the classes the class inputs render as a
+	// control plane, beside ControlPlaneClass.
+	ControlPlaneClasses map[string]bool
 	// AutoProvision lets a bound intake with a class and an address start
 	// its provision without the owner.
 	AutoProvision bool
@@ -342,6 +345,12 @@ func loadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	// talos-attest gives up on /render after 30 seconds.
 	t := &Talosctl{Bin: bin, Worker: worker, Inputs: inputs, Timeout: 20 * time.Second}
 	in.Renderer, in.Prepare = t, t.Init
+	cfg.ControlPlaneClasses = map[string]bool{}
+	for class, ci := range inputs {
+		if ci.MachineType == "controlplane" {
+			cfg.ControlPlaneClasses[class] = true
+		}
+	}
 	if bundle := os.Getenv("FLEET_CONTROLPLANE_BUNDLE"); bundle != "" {
 		if err := LoadBundle(bundle, worker); err != nil {
 			return nil, err

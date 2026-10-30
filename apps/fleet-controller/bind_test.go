@@ -284,6 +284,40 @@ func TestBindUnknownModelGetsNoAutoProvision(t *testing.T) {
 	}
 }
 
+func TestBindNeverAutoProvisionsAControlPlane(t *testing.T) {
+	for name, setup := range map[string]func(*bindTest) []map[string]any{
+		"a stub's class": func(*bindTest) []map[string]any {
+			return []map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", boxSerial, ControlPlaneClass, 5)}
+		},
+		"the model map's class": func(bt *bindTest) []map[string]any {
+			bt.r.Config.Models = map[string]Model{g5: {Class: ControlPlaneClass, BMC: "amt", Disk: "/dev/nvme0n1"}}
+			return []map[string]any{intakeDevice(g5, nil)}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			bt, done := newBindTest(t, rackMAC,
+				[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", boxSerial, "worker-g5", 5)},
+				[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+			defer done()
+			if devices := setup(bt); devices != nil {
+				bt.nb.devices = devices
+			}
+			if err := bt.r.Reconcile(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if bt.cf("talos_class") != ControlPlaneClass {
+				t.Fatalf("talos_class %v", bt.cf("talos_class"))
+			}
+			if bt.cf("desired_action") != "none" || bt.r.Metrics.AutoProvisioned.Load() != 0 {
+				t.Errorf("a control plane auto-provisioned: desired_action %v", bt.cf("desired_action"))
+			}
+			if !bt.journal("no auto-provision: a control plane; the owner sets desired_action to provision by hand") {
+				t.Errorf("journals %v", bt.nb.journals)
+			}
+		})
+	}
+}
+
 func TestBindOffThePrepStationChecksTheExpectedPort(t *testing.T) {
 	bt, done := newBindTest(t, rackMAC,
 		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},

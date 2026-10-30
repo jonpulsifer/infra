@@ -184,6 +184,13 @@ in
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
         message = "homelab.fleetController.controlPlanes needs installs, the worker secrets and fleet-controller/bundle in spore's sops file.";
       }
+      {
+        # An intake of a model mapped to a control plane would be bound with the CA keys in reach;
+        # the owner declares a control plane in NetBox instead.
+        assertion =
+          !cfg.controlPlanes || lib.all (m: m.class != "controlplane") (lib.attrValues cfg.modelMap);
+        message = "homelab.fleetController.modelMap must map no model to controlplane while controlPlanes is on.";
+      }
     ];
 
     warnings =

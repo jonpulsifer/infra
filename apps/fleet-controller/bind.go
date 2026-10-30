@@ -473,7 +473,9 @@ func (r *Reconciler) cable(ctx context.Context, d Device, sw *Switch, port int, 
 }
 
 // autoProvision sets desired_action provision once on a bound device with a
-// class and an address, when FLEET_AUTO_PROVISION allows it.
+// class and an address, when FLEET_AUTO_PROVISION allows it. A control plane
+// never provisions on its own: its install hands it the cluster's CA keys, so
+// the owner sets desired_action by hand.
 func (r *Reconciler) autoProvision(ctx context.Context, d Device, known bool, b *binding) error {
 	why := ""
 	switch {
@@ -487,6 +489,8 @@ func (r *Reconciler) autoProvision(ctx context.Context, d Device, known bool, b 
 		why = fmt.Sprintf("the model %q is not in FLEET_MODEL_MAP and no stub gave a class", d.Model)
 	case d.Class == "":
 		why = "the device has no class"
+	case r.Config.IsControlPlane(d.Class):
+		why = "a control plane; the owner sets desired_action to provision by hand"
 	case d.Address == "":
 		why = "the device has no address"
 	}

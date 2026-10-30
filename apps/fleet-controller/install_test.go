@@ -705,6 +705,18 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 	if m := hm(Device{Name: "swell", Class: "controlplane", TPM: "2.0", Address: "10.3.0.14"}, "provision"); m["install"] != "true" {
 		t.Errorf("a joining control plane installs nothing: %v", m)
 	}
+	// /render refuses a control plane with no address, so its run installs
+	// nothing either; a worker's address plays no part.
+	if m := hm(Device{Name: "swell", Class: "controlplane", TPM: "2.0"}, "provision"); m["install"] != "false" {
+		t.Errorf("a control plane with no address installs: %v", m)
+	}
+	cfg.Installs["cp-g5"], cfg.ControlPlaneClasses = "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4", map[string]bool{"cp-g5": true}
+	if m := hm(Device{Name: "swell", Class: "cp-g5", TPM: "2.0"}, "provision"); m["install"] != "false" {
+		t.Errorf("a control-plane class of another name with no address installs: %v", m)
+	}
+	if m := hm(Device{Name: "riptide", Class: "worker-g5", TPM: "2.0"}, "provision"); m["install"] != "true" {
+		t.Errorf("a worker with no address installs nothing: %v", m)
+	}
 	cfg.Installs = nil
 	if m := hm(g5, "provision"); m["install"] != "false" {
 		t.Errorf("a controller without a renderer installs: %v", m)

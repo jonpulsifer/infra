@@ -161,9 +161,10 @@ func SkipsAttest(d Device) bool {
 // attests installs: the attest step is where the machine gets the code its
 // first boot fetches the config with. Installs holds only the classes the
 // controller renders, so a control plane without the secrets bundle, or a
-// controller without a renderer, leaves the install to the owner. The
-// control plane at Bootstrap, which the Talos root bootstraps, never
-// installs from here.
+// controller without a renderer, leaves the install to the owner. As
+// /render does, it refuses the control plane at Bootstrap, which the Talos
+// root bootstraps, and a control plane with no address: an install /render
+// then refuses would leave a node with no config.
 func (c Config) Installer(d Device, action string) string {
 	if action != "provision" || SkipsAttest(d) {
 		return ""
@@ -171,7 +172,20 @@ func (c Config) Installer(d Device, action string) string {
 	if c.Bootstrap != "" && d.Address == c.Bootstrap {
 		return ""
 	}
+	if c.IsControlPlane(d.Class) && d.Address == "" {
+		return ""
+	}
 	return c.Installs[d.Class]
+}
+
+// ControlPlaneClass is the control plane's Talos class: NetBox's talos_class
+// choice, the model map's and the class inputs' key.
+const ControlPlaneClass = "controlplane"
+
+// IsControlPlane says whether a class is a control plane's: ControlPlaneClass,
+// or a class the class inputs render as one.
+func (c Config) IsControlPlane(class string) bool {
+	return class == ControlPlaneClass || c.ControlPlaneClasses[class]
 }
 
 // Workflow runs the provision Template for one action. A device that boots
