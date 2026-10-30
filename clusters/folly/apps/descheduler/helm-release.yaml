@@ -42,15 +42,6 @@ spec:
                     - FailedBarePods
                   extraEnabled:
                     - PodsWithPVC
-            - name: RemoveFailedPods
-              args:
-                reasons:
-                  - Evicted
-                  - NodeShutdown
-                includingInitContainers: true
-                excludeOwnerKinds:
-                  - Job
-                minPodLifetimeSeconds: 3600
             - name: PodLifeTime
               args:
                 namespaces:
@@ -184,7 +175,6 @@ spec:
           plugins:
             deschedule:
               enabled:
-                - RemoveFailedPods
                 - PodLifeTime
                 - RemovePodsHavingTooManyRestarts
                 - RemovePodsViolatingNodeTaints
@@ -195,6 +185,34 @@ spec:
                 - RemoveDuplicates
                 - RemovePodsViolatingTopologySpreadConstraint
                 - LowNodeUtilization
+        # A node shutdown leaves its Deployment pods Succeeded or Failed after
+        # the ReplicaSet has replaced them. PodLifeTime is already configured
+        # above, so these records are cleared in a profile of their own.
+        - name: finished-pods
+          pluginConfig:
+            # A finished pod holds no running storage or critical service.
+            - name: DefaultEvictor
+              args:
+                podProtections:
+                  defaultDisabled:
+                    - PodsWithLocalStorage
+                    - SystemCriticalPods
+            - name: PodLifeTime
+              args:
+                states:
+                  - Succeeded
+                  - Failed
+                ownerKinds:
+                  include:
+                    - ReplicaSet
+                conditions:
+                  - type: Ready
+                    status: "False"
+                    minTimeSinceLastTransitionSeconds: 3600
+          plugins:
+            deschedule:
+              enabled:
+                - PodLifeTime
     service:
       enabled: true
     serviceMonitor:
