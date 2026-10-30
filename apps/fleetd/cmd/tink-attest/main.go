@@ -5,7 +5,8 @@
 // certificates in NV. With the host's network namespace it also reports the
 // boot NIC's IPv4 address and the switch port its LLDP frame names, signed
 // by the session's AK; the LLDP wait, at most 35 seconds, runs beside the
-// TPM work. It exits non-zero on any refusal. An install code in the
+// TPM work. It exits 3 on a verdict, which another try of the same boot gets
+// again, and 1 on any other failure. An install code in the
 // confirm's answer goes to -install-code for the Workflow's install action;
 // it is never logged.
 //
@@ -97,8 +98,20 @@ func main() {
 	}
 	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout, network(m.MAC)); err != nil {
 		logf("FAILED: %v", err)
-		os.Exit(1)
+		os.Exit(exitCode(err))
 	}
+}
+
+// exitRefused is the exit status of a verdict fleetd gave, which another try
+// of the same boot gets again; anything else exits 1 and may be tried again.
+const exitRefused = 3
+
+func exitCode(err error) int {
+	var refused *client.RefusedError
+	if errors.As(err, &refused) && (refused.Status == http.StatusBadRequest || refused.Status == http.StatusForbidden) {
+		return exitRefused
+	}
+	return 1
 }
 
 // network starts listening on the NIC with the MAC and answers what it

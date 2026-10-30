@@ -46,8 +46,8 @@ cmdline() {
 }
 
 # attest sets the clock, which fleetd checks certificate dates against, then
-# runs tink-attest until it passes or five tries fail. A refusal writes
-# nothing anywhere, so a retry costs only the TPM's time.
+# runs tink-attest until it passes, fleetd gives a verdict (exit 3), or five
+# tries fail.
 attest() {
   url=${ATTEST_URL:-$(cmdline fleet_attest_url)}
   ntp=${NTP_SERVER:-$(cmdline fleet_ntp_server)}
@@ -64,9 +64,11 @@ attest() {
   $B mountpoint -q /sys/kernel/security || $B mount -t securityfs securityfs /sys/kernel/security
   $B mkdir -p /worker/fleet && $B chmod 0700 /worker/fleet
   for try in 1 2 3 4 5; do
-    if /autoid/tink-attest -url "$url" -mac "$ID" -install-code /worker/fleet/install_code; then
-      return 0
-    fi
+    /autoid/tink-attest -url "$url" -mac "$ID" -install-code /worker/fleet/install_code
+    case $? in
+    0) return 0 ;;
+    3) return 1 ;;
+    esac
     log "try $try failed"
     [ "$try" -lt 5 ] && $B sleep 30
   done
