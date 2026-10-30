@@ -13,6 +13,10 @@ terraform {
       source  = "1Password/onepassword"
       version = "~> 3.0"
     }
+    netbox = {
+      source  = "e-breuninger/netbox"
+      version = "~> 5.8"
+    }
   }
 }
 
@@ -36,8 +40,6 @@ locals {
   # The vault the Atlantis 1Password service account reads.
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 
-  machines = yamldecode(file("${path.module}/../inventory/machines.yaml")).machines
-
   # renovate: datasource=github-releases depName=siderolabs/talos
   talos_version = "v1.14.5"
 
@@ -45,8 +47,8 @@ locals {
   # image build publishes one per Talos version, tagged with the version.
   secureboot_installer = "ghcr.io/jonpulsifer/talos-installer-folly:${local.talos_version}"
 
-  # Git declares classes; NetBox declares which machine is of which class, in
-  # the inventory export's class key. ephemeral caps EPHEMERAL so that the
+  # Each class's role and patches; the nodes file names each node's class
+  # (nodes.tf). ephemeral caps EPHEMERAL so that the
   # data user volume takes the rest of the one disk. Every class boots the
   # signed UKI; the generation changes when a class is reinstalled from new
   # media, or when every node's recorded install must be re-created without
@@ -69,19 +71,19 @@ locals {
   }
   install_generation = "secureboot-2"
 
-  # The nodes are the export's active and failed machines: a failed one is
-  # quarantined, not gone, and stays managed. A node being installed stays
+  # The nodes are the declared machines NetBox holds active or failed: a
+  # failed one is quarantined, not gone, and stays managed. A node being installed stays
   # planned until it fetches its config: fleet-controller renders that config
   # and the root applies none until NetBox holds the node active, so its
   # talos_machine is planned away and back across a reinstall, by design. A
   # control plane installs as a worker does, and joins the cluster. The
-  # install disk is the inventory's.
+  # install disk is the nodes file's.
   nodes = { for name, m in local.machines : name => {
     class = m.class
     role  = local.classes[m.class].role
   } if contains(["active", "failed"], m.status) }
 
-  # The inventory's TPM 2.0 nodes, which seal disks and attest.
+  # The TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
 
   # A TPM node's running STATE and EPHEMERAL are encrypted, except these, which

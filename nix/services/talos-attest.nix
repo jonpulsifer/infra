@@ -50,6 +50,17 @@ let
   # ./fleet-controller.nix's webhookPort on spore, which also serves /render.
   fleetControllerPort = (import ../lib/talos-config.nix).controllerPort;
 
+  # The service's inventory, in the machines: shape it reads (JSON is YAML): each node's serial,
+  # class, TPM version and Secure Boot state from the nodes file. NetBox holds the MACs and pins.
+  inventory = pkgs.writeText "machines.yaml" (
+    builtins.toJSON {
+      machines = lib.mapAttrs (_: n: {
+        inherit (n) serial class tpm;
+        secure_boot = n.secure_boot or false;
+      }) (import ../lib/inventory.nix { inherit lib; });
+    }
+  );
+
   devidPort = 8444;
   adminPort = 8445;
   runDir = "/run/talos-attest";
@@ -156,7 +167,7 @@ in
         ATTEST_CA_CHAIN = "${cfg.caChain}";
         ATTEST_EK_ROOTS = "${../../apps/talos-attest/roots}";
         ATTEST_POLICY = "${../../apps/talos-attest/policy.yaml}";
-        ATTEST_INVENTORY = "${../../clusters/${site}/inventory/machines.yaml}";
+        ATTEST_INVENTORY = "${inventory}";
         ATTEST_STATE_DIR = "/var/lib/talos-attest";
         ATTEST_PEERS = lib.concatStringsSep "," peers;
         ATTEST_METRICS_FILE = "${metricsDir}/talos-attest.prom";

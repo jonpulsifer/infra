@@ -18,19 +18,19 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 ## Declare the node
 
 1. On a branch, add an entry under `nodes` in `clusters/folly/inventory/nodes.yaml` with `<node>`, its model, `<serial>`, its class, its switch port, `<addr>` and its BMC type. Add the model under `models` if it is new. [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
-2. Open a pull request and comment `atlantis plan -d terraform/netbox/folly`.
+2. Open a pull request and comment `atlantis plan -d terraform/netbox/folly`, then `atlantis plan -d terraform/network/unifi/folly`.
 
-   Result: the plan creates the device, its address and its cable. It fails on an unknown model or class, or an address, port or serial another node holds.
+   Result: the plans create the device, its address and its cable, the node's DNS record, and its switch port's name. They fail on an unknown model or class, or an address, port or serial another node holds.
 
 3. Comment `atlantis apply`.
 
-   Result: a `planned` device with the serial, class, address and a cable to the switch port, and no MAC. The export skips it until it has a MAC.
+   Result: a `planned` device with the serial, class, address and a cable to the switch port, and no MAC.
 
 ## Plug a machine in
 
 1. [Declare the node](#declare-the-node).
 2. Make sure that the entry names the machine's serial. A machine whose serial no entry names gets a `planned` device of its own at its first intake.
-3. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each inventory node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
+3. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each declared node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
 
    Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
 
@@ -43,16 +43,12 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
    Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run, and the installed Talos boots with that address set statically.
 
 6. Set the machine's AMT to the node's address, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says, so Rufio reaches it for every later run.
-7. On a branch, run `mise run netbox:export`. The export's `address` is the node's address everywhere.
-8. Make sure that `mise run netbox:check` prints nothing. Open a pull request.
-9. Comment `atlantis apply -d terraform/network/unifi/folly`.
+7. Once NetBox holds the node `active`, open a pull request, comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 
-   Result: the node has a DNS record, and its switch port carries its name.
+   Result: the Talos root manages the node, since it reads each node's status from NetBox.
 
-10. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
-11. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
-12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
-13. If the merged export shows the node `planned`, export again in a pull request once NetBox holds it `active`, and apply `clusters/folly/talos`.
+8. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
+9. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
 
 ## Provision a control plane
 
@@ -60,7 +56,7 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetController.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing. [fleet-controller](../apps/fleet-controller.md#control-planes) says what spore then holds.
 2. [Declare the node](#declare-the-node) with the class `controlplane`. `homelab.fleetController.modelMap` gives a G5 the class `worker-g5`, so only a declared class makes a control plane.
-3. Follow [Plug a machine in](#plug-a-machine-in) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the export's pull request that shows the node `active`, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 11 gives the controller the new class inputs for the next control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in) to the end. A bound control plane is never auto-provisioned: at step 5 the journal says `no auto-provision: a control plane`, and you set `desired_action` to `provision` in NetBox yourself. In the pull request of step 7, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 8 gives the controller the new class inputs for the next control plane.
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
    ```sh

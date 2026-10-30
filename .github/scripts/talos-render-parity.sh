@@ -11,14 +11,16 @@
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #
-# Beside the inventory's nodes, the root is evaluated with one more machine,
+# Every declared node is taken as active, since CI cannot read NetBox, so the
+# committed class inputs must be rendered while NetBox holds every declared
+# control plane active. Beside the declared nodes, the root is evaluated with one more machine,
 # joining-cp, a control plane at a documentation address, twice. Planned, as a
 # control plane that fleet-controller installs is until it fetches its config,
 # the root applies no config to it and the committed class inputs stay current.
 # Active, the root takes it as a second control plane that joins the cluster
 # (talos_machine.joining), and every node is compared from the root's inputs
-# and the class inputs it renders then, as the export's pull request commits
-# them with mise run render-class-inputs.
+# and the class inputs it renders then, as mise run render-class-inputs writes
+# them once NetBox holds it active.
 #
 # usage: talos-render-parity.sh [root]   (default clusters/folly/talos)
 
@@ -45,7 +47,7 @@ terraform {
 }
 
 locals {
-  machines = merge(yamldecode(file("\${path.module}/../inventory/machines.yaml")).machines, {
+  machines = merge({ for name, m in local.declared : name => merge(m, { status = "active" }) }, {
     joining-cp = { class = "$cp_class", status = "$1", address = "192.0.2.10", disk = "/dev/nvme0n1", tpm = "2.0" }
   })
 }
@@ -108,12 +110,12 @@ if ! jq -e 'has("joining-cp")' "$inputs" >/dev/null; then
   exit 1
 fi
 
-# The node facts the controller reads from NetBox, from the inventory export
+# The node facts the controller reads from NetBox, from the nodes file
 # as the root decodes it, beside the module's inputs for the same node.
 console 'base64encode(jsonencode({ for n, m in local.machines : n => { class = m.class, disk = m.disk, tpm = m.tpm, address = m.address } }))' \
   | decode | jq --slurpfile all "$inputs" 'with_entries(select(.key as $k | $all[0] | has($k)))' >"$work/nodes.json"
 if [[ $(jq '[.[] | select(.class == null)] | length' "$work/nodes.json") -ne 0 ]]; then
-  echo "a node of $root has no class in clusters/$site/inventory/machines.yaml" >&2
+  echo "a node of $root has no class in clusters/$site/inventory/nodes.yaml" >&2
   exit 1
 fi
 

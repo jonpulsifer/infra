@@ -33,7 +33,7 @@ NixOS hosts rebuild from `main` once a day. The Pi 4 hosts have no auto-upgrade,
 
 | Hosts | Name | Declared in |
 | --- | --- | --- |
-| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from the `address` of each node in `clusters/folly/inventory/machines.yaml` |
+| folly nodes | `<host>.lolwtf.ca` | `static_records` in `terraform/network/unifi/folly/k8s.tf`, from the `address` of each node in `clusters/folly/inventory/nodes.yaml` |
 | offsite nodes | `<host>.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json` |
 | Hosts on [the Anchor network](../platform/network.md#networks) | `<host>.lolwtf.ca` | The `lab` and `rpis` entries with an `ip` in `terraform/network/unifi/folly/clients.yaml` |
 | offsite control plane | `offsite.lolwtf.ca` | `terraform/network/cloudflare/lolwtf.ca.tf`, from `API_SERVER_IP` in `clusters/offsite/config/cluster-topology.json` |

@@ -30,7 +30,6 @@ on:
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/tink-agent-autoid/intake/**'
       # talos-attest's tests read these.
-      - 'clusters/folly/inventory/machines.yaml'
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
       - 'packages/pkcs11signer/**'
@@ -53,7 +52,6 @@ on:
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/tink-agent-autoid/intake/**'
       # talos-attest's tests read these.
-      - 'clusters/folly/inventory/machines.yaml'
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
       - 'packages/pkcs11signer/**'

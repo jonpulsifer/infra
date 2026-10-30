@@ -1,9 +1,9 @@
 ---
 title: Retire a node
-description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleet-controller wipes it and the exports drop it.
+description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleet-controller wipes it, then remove its entry from the nodes file.
 ---
 
-Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleet-controller](../apps/fleet-controller.md) then wipes the system disk and powers the node off, and sets the device to `offline`, which NetBox keeps for history. A pull request then drops the node from the inventory export, which carries its address.
+Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleet-controller](../apps/fleet-controller.md) then wipes the system disk and powers the node off, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain and the `Node` deletion act on the cluster.
@@ -11,7 +11,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 ## Before you start
 
 - You need the `folly` context with cluster admin, as [Get cluster admin access](get-cluster-admin-access.md) describes, and the `velero` CLI.
-- You can sign in to NetBox at `https://capsule.<tailnet>`, and `mise run netbox:export` reaches it.
+- You can sign in to NetBox at `https://capsule.<tailnet>`.
 - The node is a worker with a BMC. optiplex is folly's only control-plane node, and this runbook does not retire it.
 - `<node>` is the host name.
 
@@ -65,29 +65,15 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
    Result: `node "<node>" deleted`.
 
-## Drop the node from git
+## Drop the node from the nodes file
 
-1. On a branch, export the inventory.
+1. Make sure that the device is `offline` in NetBox.
+2. On a branch, remove the node's entry from `clusters/folly/inventory/nodes.yaml`.
+3. If `nix/hosts/spore.nix` pins an EK hash for `<node>`, remove it.
+4. To keep the node's switch port a node port, add it to `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no block names keeps its last override.
+5. Open a pull request. Comment `atlantis plan -d terraform/netbox/folly`, `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos`.
 
-   ```bash
-   mise run netbox:export
-   ```
-
-   Result: `wrote clusters/folly/inventory/machines.yaml`, with no entry for `<node>`.
-
-2. If `nix/hosts/spore.nix` pins an EK hash for `<node>`, remove it.
-3. To keep the node's switch port a node port, add it to `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. A port that no block names keeps its last override.
-4. Make sure that the export and the topology agree.
-
-   ```bash
-   mise run netbox:check
-   ```
-
-   Result: no output.
-
-5. Open a pull request. Comment `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos`.
-
-   Result: the plans delete the node's DNS record and its `talos_machine`.
+   Result: the plans delete the node's device, address and cable in NetBox, its DNS record, and its `talos_machine` if the Talos root still manages it.
 
 6. Comment `atlantis apply`.
 7. Deploy spore from `main`, as [Deploy a NixOS host](deploy-a-nixos-host.md) describes.
@@ -100,7 +86,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | SPIRE | spore drops its LDevID alias at the deploy, so no workload entry names it. talos-attest renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
 | Talos | The Talos root stops managing the node |
 | Tinkerbell | fleet-controller deletes its `Hardware` and `Machine` |
-| NetBox | The `offline` device keeps its history. To use the machine again, set its status to `planned`, then follow [Provision a node](provision-a-node.md) |
+| NetBox | The apply deletes the device with its history. To use the machine again, follow [Provision a node](provision-a-node.md) |
 
 ## If something goes wrong
 
@@ -109,8 +95,6 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | No `retire-` `Workflow` | The device has no primary MAC or `install_disk`, or fleet-controller is down | Read the device's journal, and `journalctl -u fleet-controller` on spore |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
 | The device stays `decommissioning` after a failed run | The controller journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
-| `netbox:check` prints `API_SERVER_IP ... is not a node address` | The retired node held the API server address | Keep the control plane; retire a worker |
-| `NetboxExportDiffers` fires | The export pull request has not merged for two hours | Merge it |
 
 ## Related
 

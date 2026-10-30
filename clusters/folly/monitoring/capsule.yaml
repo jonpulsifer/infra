@@ -101,30 +101,3 @@ spec:
           annotations:
             message: "{{ if $labels.name }}{{ $labels.name }}{{ else }}netbox.service{{ end }} on capsule is not active"
             description: "NetBox, its PostgreSQL, Redis or RQ worker, or the Tailscale serve that publishes it is down on capsule. The UI and API at https://capsule.<tailnet> fail, and intake that writes NetBox stops; the clusters keep running. `systemctl status` and `journalctl -u` on the unit show why."
-        - alert: NetboxNodeDrift
-          expr: max by (device) (netbox_drift{instance="capsule"}) == 1
-          for: 5m
-          labels:
-            severity: warning
-          annotations:
-            message: "{{ $labels.device }} differs from its NetBox device"
-            description: "The hourly drift check on capsule found that {{ $labels.device }} reports a model, SKU, serial, BIOS, MAC, Secure Boot state or address that differs from NetBox, or has no NetBox device. The device's journal and `mise run inventory:check` list the differences. Fix NetBox or the node, then run `mise run netbox:export`. https://wiki.lolwtf.ca/reference/inventory/#drift"
-        - alert: NetboxExportDiffers
-          expr: max(netbox_export_drift{instance="capsule"}) == 1
-          for: 2h
-          labels:
-            severity: warning
-          annotations:
-            message: NetBox differs from clusters/folly/inventory/machines.yaml on main
-            description: "A device changed in NetBox and its export has not merged. Run `mise run netbox:export` and open a pull request with clusters/folly/inventory/machines.yaml. https://wiki.lolwtf.ca/reference/inventory/#export"
-        - alert: NetboxDriftCheckStale
-          expr: |
-            (time() - max(netbox_drift_last_success_timestamp_seconds{instance="capsule"})) > 3 * 3600
-            or
-            absent(netbox_drift_last_success_timestamp_seconds{instance="capsule"})
-          for: 10m
-          labels:
-            severity: warning
-          annotations:
-            message: The NetBox drift check on capsule has not finished for three hours
-            description: "netbox-drift.service on capsule has not finished a run, so node drift goes unseen. `journalctl -u netbox-drift` on capsule shows why: NetBox, the Talos API or the minted os:reader certificate. https://wiki.lolwtf.ca/reference/inventory/#drift"

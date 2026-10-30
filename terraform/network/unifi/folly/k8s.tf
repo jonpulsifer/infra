@@ -4,29 +4,16 @@ locals {
   lb_cidr   = local.topology.LB_RANGE
   dhcp_cidr = local.topology.K8S_DHCP_CIDR
 
-  machines = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/machines.yaml")).machines
-
-  # Hostname to address for every node: the export's active and failed
-  # machines, which clusters/folly/talos treats as nodes.
-  node_addresses = {
-    for node, m in local.machines : node => m.address
-    if contains(["active", "failed"], try(m.status, "active")) && try(m.address, null) != null
-  }
-
-  # A planned machine is not a node yet, or reinstalls. Its DNS record comes
-  # from the export's address, so a reprovisioned node keeps its name.
-  planned_addresses = {
-    for node, m in local.machines : node => m.address
-    if try(m.status, "active") == "planned" && try(m.address, null) != null
-  }
+  # Every node the nodes file declares, from its first install on, keeps its
+  # name and address through a reinstall.
+  nodes = yamldecode(file("${path.module}/../../../../clusters/folly/inventory/nodes.yaml")).nodes
 
   static_records = merge(
     {
       "erx" = cidrhost(local.anchor_cidr, 5)
       "k8s" = local.topology.API_SERVER_IP
     },
-    local.planned_addresses,
-    local.node_addresses,
+    { for node, m in local.nodes : node => m.address },
   )
 }
 
@@ -68,10 +55,19 @@ resource "unifi_network" "k8s" {
   lifecycle {
     precondition {
       condition = alltrue([
-        for node, m in local.machines : cidrhost("${m.address}/${split("/", local.dhcp_cidr)[1]}", 0) != cidrhost(local.dhcp_cidr, 0)
-        if try(m.address, null) != null
+        for node, m in local.nodes : cidrhost("${m.address}/${split("/", local.dhcp_cidr)[1]}", 0) != cidrhost(local.dhcp_cidr, 0)
       ])
-      error_message = "A machine's address in clusters/folly/inventory/machines.yaml is inside K8S_DHCP_CIDR, the Kubernetes network's DHCP pool."
+      error_message = "A node's address in clusters/folly/inventory/nodes.yaml is inside K8S_DHCP_CIDR, the Kubernetes network's DHCP pool."
+    }
+    # node_ports keys by switch port, so a shared port would drop a node silently,
+    # and a shared address would publish two names for one host.
+    precondition {
+      condition     = length(distinct([for m in values(local.nodes) : m.address])) == length(local.nodes)
+      error_message = "Two nodes in clusters/folly/inventory/nodes.yaml share an address."
+    }
+    precondition {
+      condition     = length(distinct([for m in values(local.nodes) : m.switch_port])) == length(local.nodes)
+      error_message = "Two nodes in clusters/folly/inventory/nodes.yaml share a switch port."
     }
   }
 }

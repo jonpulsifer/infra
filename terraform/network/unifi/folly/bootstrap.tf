@@ -25,14 +25,14 @@ locals {
     forge   = 9
   }
 
-  # Every node port is a Kubernetes port: each inventory node's switch_port,
+  # Every node port is a Kubernetes port: each declared node's switch_port,
   # named for the node, and the free rack ports where a new box may be
   # cabled. A node carries its address statically, so a port needs neither
   # MAC auth nor a reservation.
   free_node_ports = [4, 12, 20, 24]
   node_ports = merge(
     { for port in local.free_node_ports : tostring(port) => "node" },
-    { for node, m in local.machines : tostring(m.switch_port) => node if try(m.switch_port, null) != null },
+    { for node, m in local.nodes : tostring(m.switch_port) => node },
   )
 
   switch = local.clients.switches["USW 24 PoE"]
@@ -129,13 +129,15 @@ resource "unifi_device" "usw_24_poe" {
     }
   }
 
-  # A node port carries the Kubernetes network untagged and nothing else.
+  # A node port carries the Kubernetes network untagged and nothing else. The
+  # controller stores a native network with every tagged VLAN blocked as
+  # forward native.
   dynamic "port_override" {
     for_each = local.node_ports
     content {
       index                 = tonumber(port_override.key)
       name                  = port_override.value
-      forward               = "customize"
+      forward               = "native"
       native_networkconf_id = unifi_network.k8s.id
       tagged_vlan_mgmt      = "block_all"
       dot1x = {
@@ -147,7 +149,7 @@ resource "unifi_device" "usw_24_poe" {
   lifecycle {
     precondition {
       condition     = length(setintersection(keys(local.node_ports), [for p in values(local.anchor_ports) : tostring(p)])) == 0
-      error_message = "A node's switch_port in clusters/folly/inventory/machines.yaml, or a free node port, is an anchor's port."
+      error_message = "A node's switch_port in clusters/folly/inventory/nodes.yaml, or a free node port, is an anchor's port."
     }
   }
 }

@@ -292,17 +292,6 @@ func TestPolicyRefusesSecureBootOff(t *testing.T) {
 	}
 }
 
-func TestInventoryReadsMachinesYAML(t *testing.T) {
-	inv, err := LoadInventory(inRepo(t, "clusters/folly/inventory/machines.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, ok := inv.BySerial(" mxl0172q6l ")
-	if !ok || m.Name != "riptide" || normalMAC(m.MAC) != "38:22:e2:2d:96:44" {
-		t.Fatalf("riptide by serial: %+v %v", m, ok)
-	}
-}
-
 func TestCAIssuesDevIDs(t *testing.T) {
 	ca := devIDCA(t)
 	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

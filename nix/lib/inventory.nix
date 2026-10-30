@@ -1,12 +1,13 @@
-# clusters/folly/inventory/machines.yaml, NetBox's export, as an attrset of machines. Nix reads no
-# YAML, and an import from a derivation would build on the evaluating host, so this reads the
-# export's own shape: `machines:`, each machine's name two spaces in, and its scalar keys four
-# spaces in. A key with a nested block, such as `bmc`, is left out. Values are strings, booleans
-# or null. Any line inside `machines:` outside that shape throws, so a change to the export's
-# shape fails evaluation instead of dropping or merging machines.
+# clusters/folly/inventory/nodes.yaml, the nodes file, as an attrset of nodes, each with its
+# model's disk, tpm, amt and secure_boot unless it sets its own. Nix reads no YAML, and an import
+# from a derivation would build on the evaluating host, so this reads the file's own shape: the
+# top-level `models:` and `nodes:`, each entry's name two spaces in, and its scalar keys four
+# spaces in. A key with a nested block is left out. Values are strings, booleans or null. Any
+# line inside either section outside that shape throws, so a change to the file's shape fails
+# evaluation instead of dropping or merging nodes.
 {
   lib,
-  path ? ../../clusters/folly/inventory/machines.yaml,
+  path ? ../../clusters/folly/inventory/nodes.yaml,
 }:
 let
   name = "[A-Za-z0-9_.-]+";
@@ -53,12 +54,13 @@ let
       };
 
   step =
+    section:
     state: entry:
     let
       n = entry.n;
       line = entry.line;
-      topMachines = builtins.match "machines:${comment}" line;
-      noMachines = builtins.match "machines:[[:space:]]*\\{}${comment}" line;
+      topMachines = builtins.match "${section}:${comment}" line;
+      noMachines = builtins.match "${section}:[[:space:]]*\\{}${comment}" line;
       machine = builtins.match "  (${keyRe}):${comment}" line;
       key = builtins.match "    (${keyRe}):(.*)" line;
       deeper = builtins.match "      .*" line;
@@ -136,15 +138,30 @@ let
     inherit n;
     line = lib.removeSuffix "\r" line;
   }) (lib.splitString "\n" (builtins.readFile path));
-  parsed = lib.foldl' step {
-    inMachines = false;
-    seen = false;
-    current = null;
-    nested = false;
-    machines = { };
-  } lines;
+  section =
+    key:
+    let
+      parsed = lib.foldl' (step key) {
+        inMachines = false;
+        seen = false;
+        current = null;
+        nested = false;
+        machines = { };
+      } lines;
+    in
+    if parsed.seen then
+      parsed.machines
+    else
+      throw "nix/lib/inventory.nix: ${toString path} has no top-level ${key}: key";
+
+  models = section "models";
+  # The model fields a node takes unless it sets its own.
+  defaults = model: lib.getAttrs (lib.intersectLists [ "disk" "tpm" "amt" "secure_boot" ] (lib.attrNames model)) model;
 in
-if parsed.seen then
-  parsed.machines
-else
-  throw "nix/lib/inventory.nix: ${toString path} has no top-level machines: key"
+lib.mapAttrs (
+  node: n:
+  if n ? model && models ? ${n.model} then
+    defaults models.${n.model} // n
+  else
+    throw "nix/lib/inventory.nix: ${node}'s model is no key of models in ${toString path}"
+) (section "nodes")
