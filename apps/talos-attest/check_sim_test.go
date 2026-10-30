@@ -277,10 +277,10 @@ func failedInPlace(t *testing.T, h *harness, f *fakeNetBox, patches int) {
 
 func quarantined(t *testing.T, h *harness, f *fakeNetBox, reason string) {
 	t.Helper()
-	if d := f.settled(t, simSerial, 3); d.Status != "failed" || d.CustomFields["attest_verdict"] != "quarantined: "+reason {
+	if d := f.settled(t, simSerial, 3); d.Status != "active" || d.CustomFields["attest_verdict"] != "quarantined: "+reason {
 		t.Fatalf("NetBox after the quarantine: %s %+v", d.Status, d.CustomFields)
 	}
-	if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+	if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 		t.Fatalf("a quarantined node's DevID answered %d", code)
 	}
 	if !strings.Contains(h.audit.String(), `"event":"attest.check"`) || !strings.Contains(h.audit.String(), `"status":"quarantine"`) {
@@ -289,16 +289,16 @@ func quarantined(t *testing.T, h *harness, f *fakeNetBox, reason string) {
 	if m, _ := h.v.Metrics(); !strings.Contains(m, `talos_attest_checks_total{machine="testbox",verdict="quarantine"} 1`) {
 		t.Fatalf("metrics lack the quarantine:\n%s", m)
 	}
-	// Leaving failed is the owner's: a quarantined node's next check finds
+	// Lifting the quarantine is the owner's: a quarantined node's next check finds
 	// no DevID to sign with, its start is refused, and neither writes.
 	if _, err := h.check(h.ts.URL, "1.0"); err == nil {
-		t.Fatal("a check while failed passed")
+		t.Fatal("a check while quarantined passed")
 	}
 	if code, body := h.post(protocol.PathRenew, protocol.RenewRequest{Serial: simSerial, Check: true}); code != http.StatusForbidden || !strings.Contains(string(body), reasonStatus) {
-		t.Fatalf("a check start while failed: %d %s", code, body)
+		t.Fatalf("a check start while quarantined: %d %s", code, body)
 	}
-	if d := f.bySerial(simSerial); d.Patches != 3 || d.Status != "failed" {
-		t.Fatalf("a check while failed wrote to NetBox: %d writes, %s", d.Patches, d.Status)
+	if d := f.bySerial(simSerial); d.Patches != 3 || d.Status != "active" {
+		t.Fatalf("a check while quarantined wrote to NetBox: %d writes, %s", d.Patches, d.Status)
 	}
 }
 

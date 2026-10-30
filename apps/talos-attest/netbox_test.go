@@ -450,7 +450,7 @@ func TestNetBoxRecordWritesTheVerdict(t *testing.T) {
 		t.Fatal(err)
 	}
 	d = f.bySerial("SW-1")
-	if d.Status != "failed" || d.CustomFields["attest_verdict"] != "quarantined: ek-hash-mismatch" {
+	if d.Status != "planned" || d.CustomFields["attest_verdict"] != "quarantined: ek-hash-mismatch" {
 		t.Fatalf("after a quarantine: %s %+v", d.Status, d.CustomFields)
 	}
 	// A refusal never rewrites the pins nor the hardware facts.
@@ -461,7 +461,7 @@ func TestNetBoxRecordWritesTheVerdict(t *testing.T) {
 	if err := nb.MarkPending(context.Background(), "SW-1", "no EK hash on record"); err != nil {
 		t.Fatal(err)
 	}
-	if d := f.bySerial("SW-1"); d.CustomFields["attest_verdict"] != "quarantined: ek-hash-mismatch" || d.Status != "failed" {
+	if d := f.bySerial("SW-1"); d.CustomFields["attest_verdict"] != "quarantined: ek-hash-mismatch" || d.Status != "planned" {
 		t.Fatalf("a claim wrote over the quarantine: %s %+v", d.Status, d.CustomFields)
 	}
 	f.add("shale", "SL-1", "planned", "", nil)

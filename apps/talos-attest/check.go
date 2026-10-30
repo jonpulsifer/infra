@@ -170,9 +170,9 @@ type checkCount struct {
 // daily check or a renewal, after the TPM's proof: the reason goes on the
 // record and on NetBox's attest_verdict as failed-no-quarantine, the device
 // is journaled and talos_attest_failed_no_quarantine alerts, and its status
-// and LDevID stay. Failing the node would move the cluster's API to the
-// bootstrap VLAN. Nothing is issued, and a record that is no longer a pass
-// is left as it is.
+// and LDevID stay. Quarantining it would revoke the identity of the node
+// that serves the cluster's API. Nothing is issued, and a record that is no
+// longer a pass is left as it is.
 func (v *Verifier) failInPlace(ctx context.Context, s *session, err error, check bool) error {
 	var f *Failure
 	if !errors.As(err, &f) || f.Reason == reasonInternal || f.Reason == reasonSession {

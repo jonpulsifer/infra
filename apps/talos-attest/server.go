@@ -16,8 +16,8 @@ import (
 	"github.com/jonpulsifer/infra/apps/talos-attest/protocol"
 )
 
-// Server holds the three listeners' handlers: the device flow on the
-// bootstrap VLAN, the DevID lookup for cluster nodes, and the owner's admin
+// Server holds the three listeners' handlers: the device flow for machines
+// that netboot, the DevID lookup for cluster nodes, and the owner's admin
 // API on the tailnet.
 type Server struct {
 	V         *Verifier
@@ -303,9 +303,14 @@ func (s *Server) retiredInNetBox(ctx context.Context, serial string) bool {
 
 // lookup returns the LDevID of the newest verdict, only when that verdict
 // is a pass. The files live on the anchor that issued them; refresh has
-// brought a peer's newer pass here already.
+// brought a peer's newer pass here already. A quarantine revokes the
+// identity: its lookup is a refusal, which the handlers answer 403.
 func (s *Server) lookup(ctx context.Context, serial string, local bool) (protocol.DevID, bool, error) {
 	gate, ok, err := s.status(ctx, serial, local)
+	if err == nil && ok && gate.Status == protocol.StatusQuarantined {
+		f := &Failure{Reason: reasonStatus, Detail: fmt.Sprintf("%s is quarantined; no LDevID is served for it until the owner clears its verdict", gate.Node), Unauthenticated: true}
+		return protocol.DevID{}, false, f
+	}
 	if err != nil || !ok || gate.Status != protocol.StatusAttested {
 		return protocol.DevID{}, false, err
 	}
@@ -518,7 +523,9 @@ func (s *Server) fetchPeer(ctx context.Context, peer, route, serial string, out 
 		return false, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
+	// A peer that holds the machine quarantined serves it nothing, and a
+	// peer's quarantine is never adopted.
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return false, nil
 	}
 	if resp.StatusCode != http.StatusOK {

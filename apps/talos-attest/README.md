@@ -56,10 +56,13 @@ ATTEST_APPROVERS=you@example.com \
 body `{verdict, reason, detail}`; an unknown or expired session is 404.
 The verdict is `quarantine` only for a check the machine's TPM signed for:
 the boot evidence after credential activation at intake, and after the LAK's
-signature on a renewal. It withdraws the LDevID and fails the device in
-NetBox. Everything refused before that proof, a wrong MAC, an unknown or
-mismatched EK, a failed activation, a quote the LAK did not sign, a
-`failed`, `decommissioning` or `offline` device, is the verdict `refused`:
+signature on a renewal. It revokes the identity: NetBox's `attest_verdict`
+becomes `quarantined: <reason>`, the status stays, `GET /devid` answers 403,
+and fleet-controller cordons the node. Until the owner clears the verdict,
+the machine gets no identity and no renewal. Everything refused before that
+proof, a wrong MAC, an unknown or mismatched EK, a failed activation, a quote
+the LAK did not sign, a quarantined, `failed`, `decommissioning` or `offline`
+device, is the verdict `refused`:
 counted, audited and journaled, and recorded against no machine, so nobody
 withdraws a node's identity by knowing its serial. A first intake's
 `pending-approval` is a claim kept apart from the machine records, keyed by
@@ -74,10 +77,10 @@ costs nothing.
 
 | Route | Does |
 | --- | --- |
-| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname and SMBIOS manufacturer, model, SKU and BIOS, its EKs (DER public key and the NV certificate) and a new AK with its creation proof. Finds the machine in NetBox, else in the inventory; a serial NetBox never saw gets its device once activation succeeds. Refuses a `failed`, `decommissioning` or `offline` device. Checks each EK certificate against `roots/`, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a 32-byte nonce and one credential challenge per EK. A `planned` device with no pin passes the pin check when every EK has a manufacturer certificate. |
+| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname and SMBIOS manufacturer, model, SKU and BIOS, its EKs (DER public key and the NV certificate) and a new AK with its creation proof. Finds the machine in NetBox, else in the inventory; a serial NetBox never saw gets its device once activation succeeds. Refuses a quarantined, `failed`, `decommissioning` or `offline` device. Checks each EK certificate against `roots/`, refuses a ROCA-weak RSA EK, matches the MAC and the EK pins, and answers a session, a 32-byte nonce and one credential challenge per EK. A `planned` device with no pin passes the pin check when every EK has a manufacturer certificate. |
 | `POST /v1/attest/{session}/evidence` | Takes each activated secret, a quote over PCRs 0 to 7 qualified by the nonce, the PCR values, the event log, the LDevID key certified by the AK with the nonce, both keys' blobs, and optionally `network` (`{address, lldp: {chassis_id, port_id, port_description, system_name}}`) with `network_signature`, the session's AK signing SHA-256 over the nonce, `network` and SHA-256 of the facts' JSON. Checks them, replays the log, applies `policy.yaml`, and issues the LDevID and LAK certificates with the subject `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Network facts without a good signature are logged and dropped; the pass stands. |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes the machine used and `signature`, the session's AK signing SHA-256 over the nonce and `confirm` (a TPMT_SIGNATURE, ECDSA). A wrong signature is 403 `refused` and leaves the session open; an unsigned confirm, from an older client, confirms and gets no install code. Evidence posted for a passed session is 404 and leaves it open, and a new start for the machine keeps a pass that waits for its confirm for five minutes. Records the confirm and answers `{status}`, with the install code wrapped to the TPM as [Install code](#install-code) says |
-| `GET /devid/{serial}` | The LDevID of the newest verdict, if it is a pass: `node`, `serial`, `ldevid_cert_pem` (leaf then DevID CA), `lak_cert_pem`, `chain_pem`, `ldevid_pub_blob_b64` (TPMT_PUBLIC), `ldevid_priv_blob_b64` (TPM2B_PRIVATE without its size), `ak_pub_blob_b64`, `ak_priv_blob_b64`, `srk`, `ek_hashes`, `rsa_ek_cert`, `attested_at`, `confirmed`. 404 otherwise. |
+| `GET /devid/{serial}` | The LDevID of the newest verdict, if it is a pass: `node`, `serial`, `ldevid_cert_pem` (leaf then DevID CA), `lak_cert_pem`, `chain_pem`, `ldevid_pub_blob_b64` (TPMT_PUBLIC), `ldevid_priv_blob_b64` (TPM2B_PRIVATE without its size), `ak_pub_blob_b64`, `ak_priv_blob_b64`, `srk`, `ek_hashes`, `rsa_ek_cert`, `attested_at`, `confirmed`. 403 for a quarantined machine, 404 otherwise. |
 | `GET /devid/{serial}/{file}` | One of `ldevid.crt`, `lak.crt`, `chain.pem`, `ldevid.pub`, `ldevid.priv`, `ak.pub`, `ak.priv`, raw |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at}` with status `attested` or `quarantined`; 404 with status `unknown` for no verdict or a pending first intake. With NetBox, the device's `attest_verdict`, `last_attested`, `talos_class` and `attest_consumed_at` answer, and the anchors' record of the same attestation fills in `uuid` and `rsa_ek_cert`. |
 | `GET /healthz`, `GET /metrics` | Health check and Prometheus metrics |
@@ -91,7 +94,7 @@ The renewal routes, `POST /v1/renew` and `POST /v1/renew/{session}/evidence`,
 are on the DevID listener too. A renewal certifies the LDevID key on file
 again with the LAK on file, replays the running boot against the policy's
 `renew_required_authorities`, and answers `{ldevid_cert_pem, lak_cert_pem}`.
-It is 404 with no LDevID on file and 403 when the device's status forbids it.
+It is 404 with no LDevID on file and 403 when the device is quarantined or its status forbids it.
 
 The daily check takes the same routes with `"check": true` in the start, and
 the start answers `"check": true` only when it opened one. The evidence is
@@ -145,7 +148,7 @@ audit line.
 A declared `planned` box can be impersonated before it attests. The lab's
 Secure Boot `.auth` files are public, so anyone with a TPM from a pinned
 maker can boot the lab-signed HookOS, rewrite the SMBIOS serial to the
-stub's and spoof its MAC on an open bootstrap port; the first such box to
+stub's and spoof its MAC on any node port; the first such box to
 attest takes the stub's identity. The MAC is a tripwire, not
 authentication. Keep the gap between declaring a stub and plugging it in
 short; give stubs an `expected_port`; and pin the EK hashes where a vendor supplies them, which
@@ -192,8 +195,8 @@ pass whose signature holds, the service writes `attested_address`, `attested_swi
 (the chassis ID), `attested_switch_port` (the port ID) and
 `attested_network_at` (the pass's time) to each of those fields NetBox
 defines (`scripts/netbox-seed.sh`). A fact the pass lacks clears its field,
-and a renewal writes none. fleet-controller dials a `planned`
-machine's AMT at the address, and cables the machine to the port; the
+and a renewal writes none. fleet-controller cables the machine to the port;
+the address is for the owner. The
 facts are as true as the HookOS that booted, which the quote proves, and the
 switch that sent the frame. The parser in `lldp/` is a copy of the one in
 `images/tink-agent-autoid/intake`, whose Docker context cannot reach this

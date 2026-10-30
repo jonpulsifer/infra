@@ -409,7 +409,7 @@ func TestAttestRefusals(t *testing.T) {
 			if !ok || rec.Status != StatusQuarantined || rec.Reason != c.reason {
 				t.Fatalf("record %+v", rec)
 			}
-			if code, _ := h.get("/devid/" + simSerial); code != http.StatusNotFound {
+			if code, _ := h.get("/devid/" + simSerial); code != http.StatusForbidden {
 				t.Fatalf("a quarantined machine's DevID answered %d", code)
 			}
 			if code, body := h.get("/verdict/" + simSerial); code != http.StatusOK || !strings.Contains(string(body), `"status":"quarantined"`) {
