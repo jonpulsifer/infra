@@ -81,7 +81,7 @@ backup:
 
 valkey:
   # A plain Valkey; `templates/valkey.yaml` says why the cluster operator cannot serve Celery.
-  image: valkey/valkey:9.1.2
+  image: valkey/valkey:9.1.3
   size: 1Gi
   storageClass: ""
   resources:
