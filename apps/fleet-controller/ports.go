@@ -6,10 +6,9 @@ import (
 	"strings"
 )
 
-// fillPort follows an installing or active node to its rack port once it has left
-// the intake port. Each intake pass attests the port, and one younger than
-// AttestedPortTTL off the intake port cables a node whose interface has no
-// cable, unless another device's cable holds the port; the move is
+// fillPort cables an installing or active node whose interface has no cable
+// to the switch port its intake pass attested, when that pass is younger than
+// AttestedPortTTL, unless another device's cable holds the port; the cable is
 // journaled. A node on another port than its expected_port is journaled
 // once: the port check binds a machine, and a move after it is the owner's
 // to judge.
@@ -22,7 +21,7 @@ func (r *Reconciler) fillPort(ctx context.Context, d Device, p *bindPass) error 
 		return nil
 	}
 	sw, port, _ := r.where(ctx, p, d, now.Add(-AttestedPortTTL))
-	if sw == nil || port == r.Config.IntakePort {
+	if sw == nil {
 		return nil
 	}
 	if d.ExpectedPort != 0 && port != d.ExpectedPort {
@@ -40,5 +39,5 @@ func (r *Reconciler) fillPort(ctx context.Context, d Device, p *bindPass) error 
 		return err
 	}
 	Audit("fleet.bind", r.Config.Site, d, d.LastWorkflow, "port: "+strings.Join(b.notes, "; "))
-	return r.NetBox.Update(ctx, d, "", nil, "info", "fleet-controller: its intake pass attested a rack port; "+strings.Join(b.notes, "; "))
+	return r.NetBox.Update(ctx, d, "", nil, "info", "fleet-controller: its intake pass attested a switch port; "+strings.Join(b.notes, "; "))
 }

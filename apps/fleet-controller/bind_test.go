@@ -8,7 +8,7 @@ import (
 )
 
 // An intake of rackMAC reports port 5 by LLDP, and one of prepMAC port 24,
-// the prep station, both on the switch switchMAC.
+// both on the switch switchMAC.
 const (
 	rackMAC   = "38:22:e2:aa:bb:05"
 	prepMAC   = "38:22:e2:aa:bb:01"
@@ -339,7 +339,7 @@ func TestBindNeverAutoProvisionsAControlPlane(t *testing.T) {
 	}
 }
 
-func TestBindOffThePrepStationChecksTheExpectedPort(t *testing.T) {
+func TestBindChecksTheExpectedPort(t *testing.T) {
 	bt, done := newBindTest(t, rackMAC,
 		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},
 		[]map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
@@ -360,38 +360,21 @@ func TestBindOffThePrepStationChecksTheExpectedPort(t *testing.T) {
 	}
 }
 
-func TestBindAtThePrepStationCablesTheExpectedPort(t *testing.T) {
-	bt, done := newBindTest(t, prepMAC,
-		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},
-		[]map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
-	defer done()
-	bt.reconcile(t)
-	if bt.node()["name"] != "swell" || !bt.cabledTo(7) || bt.cabledTo(24) {
-		t.Errorf("name %v, interface %v", bt.node()["name"], bt.nb.ifaceByID(nodeNIC))
-	}
-	if bt.cf("expected_port") != float64(7) || bt.cf("desired_action") != "provision" {
-		t.Errorf("expected_port %v desired_action %v", bt.cf("expected_port"), bt.cf("desired_action"))
-	}
-	if !bt.journal("at the prep station on port 24") {
-		t.Errorf("journals %v", bt.nb.journals)
-	}
-}
-
-func TestBindAtThePrepStationLeavesATakenPortAlone(t *testing.T) {
-	other := nic(60, 61, "eth0", "38:22:e2:00:00:61")
-	bt, done := newBindTest(t, prepMAC,
-		[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", 7)},
-		[]map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC), other})
-	defer done()
-	port7 := bt.nb.ifaceByID(switchPortID(7))
-	port7["cable"] = map[string]any{"id": 77}
-	port7["link_peers"] = []any{map[string]any{"id": 60, "name": "eth0", "device": map[string]any{"name": "shale"}}}
-	bt.reconcile(t)
-	if len(bt.nb.cables) != 0 || len(bt.nb.deleted) != 1 {
-		t.Errorf("a declared port took another node's cable: cables %v deleted %v", bt.nb.cables, bt.nb.deleted)
-	}
-	if !bt.journal("is cabled to another device in NetBox") || bt.node()["name"] != "swell" {
-		t.Errorf("journals %v", bt.nb.journals)
+// Port 24 is a node port like any other: a machine there is checked against
+// its stub's expected_port and cabled to the port it is on.
+func TestBindOnPort24IsLikeAnyPort(t *testing.T) {
+	for want, ok := range map[int]bool{24: true, 7: false} {
+		bt, done := newBindTest(t, prepMAC,
+			[]map[string]any{intakeDevice(g5, nil), stubDevice(20, "swell", "", "worker-g5", want)},
+			[]map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
+		bt.reconcile(t)
+		switch {
+		case ok && (bt.node()["name"] != "swell" || !bt.cabledTo(24) || bt.cf("desired_action") != "provision"):
+			t.Errorf("expected_port 24: name %v, interface %v, journals %v", bt.node()["name"], bt.nb.ifaceByID(nodeNIC), bt.nb.journals)
+		case !ok && (len(bt.nb.cables) != 0 || !bt.journal("on port 24, expected 7 (stub swell)")):
+			t.Errorf("expected_port 7: cables %v journals %v", bt.nb.cables, bt.nb.journals)
+		}
+		done()
 	}
 }
 
@@ -475,18 +458,6 @@ func TestBindIgnoresAnAttestedPortFromBeforeTheIntake(t *testing.T) {
 		t.Errorf("a stale port bound: patches %v deleted %v", bt.nb.patches, bt.nb.deleted)
 	}
 	if !bt.journal("its intake pass attested no switch port, and stub swell expects port 5") {
-		t.Errorf("journals %v", bt.nb.journals)
-	}
-}
-
-func TestBindAtThePrepStationWithoutAPortLeavesTheCable(t *testing.T) {
-	bt, done := newBindTest(t, prepMAC, []map[string]any{intakeDevice(g5, nil)}, []map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
-	defer done()
-	bt.reconcile(t)
-	if len(bt.nb.cables) != 0 {
-		t.Errorf("cabled to the prep station: %v", bt.nb.cables)
-	}
-	if !bt.journal("no cable until an intake pass on a rack port attests it") || bt.cf("desired_action") != "provision" {
 		t.Errorf("journals %v", bt.nb.journals)
 	}
 }
@@ -627,7 +598,7 @@ func TestFillPortCablesANodeOnItsRackPort(t *testing.T) {
 	defer done()
 	bt.attest(rackMAC, testNow)
 	bt.reconcile(t)
-	if !bt.cabledTo(5) || !bt.journal("its intake pass attested a rack port") {
+	if !bt.cabledTo(5) || !bt.journal("its intake pass attested a switch port") {
 		t.Errorf("interface %v journals %v", bt.nb.ifaceByID(nodeNIC), bt.nb.journals)
 	}
 	bt.reconcile(t)
@@ -678,17 +649,6 @@ func TestFillPortJournalsANodeOffItsExpectedPort(t *testing.T) {
 	bt.reconcile(t)
 	if len(bt.nb.journals) != 1 || !bt.journal("on port 5, expected 7") || len(bt.nb.cables) != 0 {
 		t.Errorf("journals %v cables %v", bt.nb.journals, bt.nb.cables)
-	}
-}
-
-func TestFillPortIgnoresThePrepStation(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "planned", boxSerial, g5, map[string]any{"attest_verdict": "attested"})
-	bt, done := newBindTest(t, prepMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", prepMAC)})
-	defer done()
-	bt.attest(prepMAC, testNow)
-	bt.reconcile(t)
-	if len(bt.nb.cables) != 0 {
-		t.Errorf("cabled to the prep station: %v", bt.nb.cables)
 	}
 }
 

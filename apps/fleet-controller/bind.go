@@ -96,15 +96,14 @@ func portMismatch(port int, want int, stub string) string {
 // pick takes the stub a device binds to: the stub with its serial, else the
 // oldest serial-less stub of its class whose expected port, if any, is the
 // port its intake pass attested. refused names a stub whose port check failed when no
-// stub fits. check false skips the port check: the machine is on the intake
-// port at the prep station, not on its rack port yet.
-func (p *bindPass) pick(d Device, class string, port int, check bool) (*Device, string) {
+// stub fits.
+func (p *bindPass) pick(d Device, class string, port int) (*Device, string) {
 	take := func(i int) *Device {
 		s := p.stubs[i]
 		p.stubs = append(p.stubs[:i], p.stubs[i+1:]...)
 		return &s
 	}
-	fits := func(s Device) bool { return !check || s.ExpectedPort == 0 || s.ExpectedPort == port }
+	fits := func(s Device) bool { return s.ExpectedPort == 0 || s.ExpectedPort == port }
 	for i, s := range p.stubs {
 		if s.Serial != "" && strings.EqualFold(s.Serial, d.Serial) && !p.promised[s.Name] {
 			if !fits(s) {
@@ -145,7 +144,7 @@ func (p *bindPass) named(name string) *Device {
 // where is the switch port the device's attested LLDP neighbour names, from
 // a pass at or after since: the NetBox switch whose MAC is the chassis ID and
 // the port number, or why it cannot say. An intake's own claim of a port
-// never counts: anybody on the bootstrap network can post one.
+// never counts: anybody who reaches the intake can post one.
 func (r *Reconciler) where(ctx context.Context, p *bindPass, d Device, since time.Time) (*Switch, int, string) {
 	a := d.Attested
 	switch {
@@ -203,10 +202,6 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	}
 	model, known := r.Config.Models[d.Model]
 	sw, port, portWhy := r.where(ctx, p, d, wf.Created())
-	// On the intake port the machine is at the prep station: its rack port
-	// is yet to come, so no port check applies and no cable follows from it.
-	atIntake := port != 0 && port == r.Config.IntakePort
-	check := !atIntake
 
 	var stub *Device
 	target, expected := d.Name, d.ExpectedPort
@@ -220,7 +215,7 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 				class = model.Class
 			}
 			var refused string
-			if stub, refused = p.pick(d, class, port, check); refused != "" {
+			if stub, refused = p.pick(d, class, port); refused != "" {
 				return r.refuse(ctx, d, wf.Name(), refused)
 			}
 			if stub != nil {
@@ -228,7 +223,7 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 			}
 		}
 	}
-	if check && expected != 0 && expected != port {
+	if expected != 0 && expected != port {
 		return r.refuse(ctx, d, wf.Name(), portMismatch(port, expected, d.Name))
 	}
 
@@ -315,13 +310,6 @@ func (r *Reconciler) bind(ctx context.Context, d Device, hw Object, in intakes, 
 	}
 
 	switch {
-	case atIntake && expected != 0:
-		b.note("at the prep station on port %d", port)
-		if _, err := r.cable(ctx, d, sw, expected, &b); err != nil {
-			return err
-		}
-	case atIntake:
-		b.note("at the prep station on port %d; no cable until an intake pass on a rack port attests it", port)
 	case sw != nil:
 		if _, err := r.cable(ctx, d, sw, port, &b); err != nil {
 			return err
@@ -418,14 +406,15 @@ func (r *Reconciler) address(ctx context.Context, d Device, name string, p *bind
 
 // allocatable says whether an address of the node prefix may go to a new
 // node: inside the prefix, neither its network nor its broadcast address,
-// and not reserved.
+// not reserved, and outside the DHCP pool, whose leases would collide with a
+// static address.
 func (c Config) allocatable(a string) bool {
 	pfx, err := netip.ParsePrefix(c.NodePrefix)
 	if err != nil {
 		return false
 	}
 	addr, err := netip.ParseAddr(a)
-	if err != nil || !pfx.Contains(addr) || c.NodeReserved[a] {
+	if err != nil || !pfx.Contains(addr) || c.NodeReserved[a] || c.NodeDHCP.IsValid() && c.NodeDHCP.Contains(addr) {
 		return false
 	}
 	return hostAddress(pfx, addr)

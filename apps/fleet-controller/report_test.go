@@ -26,27 +26,25 @@ func TestPlain(t *testing.T) {
 	}
 }
 
-func TestBootstrapAddress(t *testing.T) {
-	c := Config{BootstrapPrefix: netip.MustParsePrefix("10.9.0.0/28"), BootstrapReserved: map[string]bool{"10.9.0.11": true, "10.9.0.14": true}}
+// A node's static address never comes from the DHCP pool, whose leases go to
+// netbooting machines.
+func TestAllocatableSkipsTheDHCPPool(t *testing.T) {
+	c := Config{NodePrefix: "10.3.0.0/26", NodeReserved: map[string]bool{"10.3.0.1": true}, NodeDHCP: netip.MustParsePrefix("10.3.0.48/28")}
 	for a, want := range map[string]bool{
-		"10.9.0.5": true, "10.9.0.11": false, "10.9.0.14": false, "10.9.0.0": false, "10.9.0.15": false,
-		"10.9.0.16": false, "10.3.0.12": false, "2001:db8::1": false, "": false,
+		"10.3.0.2": true, "10.3.0.1": false, "10.3.0.47": true, "10.3.0.48": false, "10.3.0.55": false, "10.3.0.62": false, "10.3.0.64": false,
 	} {
-		if got := c.bootstrapAddress(a); got != want {
-			t.Errorf("bootstrapAddress(%q) = %v", a, got)
+		if got := c.allocatable(a); got != want {
+			t.Errorf("allocatable(%q) = %v", a, got)
 		}
-	}
-	if (Config{}).bootstrapAddress("10.9.0.5") {
-		t.Error("an address counts without a bootstrap prefix")
 	}
 }
 
 func TestFresh(t *testing.T) {
 	now := testNow
 	for at, want := range map[time.Time]bool{
-		now.Add(-time.Minute): true, now.Add(-AttestedAddressTTL): false, now.Add(10 * time.Second): true, now.Add(time.Minute): false, {}: false,
+		now.Add(-time.Minute): true, now.Add(-AttestedPortTTL): false, now.Add(10 * time.Second): true, now.Add(time.Minute): false, {}: false,
 	} {
-		if got := fresh(at, now, AttestedAddressTTL); got != want {
+		if got := fresh(at, now, AttestedPortTTL); got != want {
 			t.Errorf("fresh(%s) = %v", at, got)
 		}
 	}
