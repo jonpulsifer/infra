@@ -1,6 +1,6 @@
 ---
 title: Prepare a machine
-description: Set a new folly machine's firmware at the provisioning station and enroll the lab's Secure Boot keys over PXE, before NetBox provisions it.
+description: Set a new folly machine's firmware and AMT address on its node port and enroll the lab's Secure Boot keys over PXE, before NetBox provisions it.
 ---
 
 Use this runbook once for each new machine, before [Provision a node](provision-a-node.md). You set its firmware, read its serial and MAC, and enroll the lab's Secure Boot keys from the `folly netboot` menu.
@@ -11,12 +11,13 @@ Use this runbook once for each new machine, before [Provision a node](provision-
 ## Before you start
 
 - The machine has a TPM 2.0 and Intel AMT. The steps are for the HP EliteDesk 800 G5, the model of riptide.
-- You have the provisioning station's monitor and keyboard. Its port is `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, which is always on the bootstrap network. The machine stays there for the whole intake, through [Provision a node](provision-a-node.md), before it moves to its rack port.
+- The machine is cabled to a node port, where it stays: each inventory node's `switch_port`, or `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. Every node port carries the Kubernetes network, where the machine netboots.
+- You have a monitor and keyboard at the machine.
 - The AMT password is in the 1Password item `AMT MEBx credentials`.
 
 ## Set the firmware
 
-1. Connect the machine to the provisioning station's port and monitor. Power it on and press F10.
+1. Connect the monitor and keyboard. Power the machine on and press F10.
 2. Write down the serial number and the MAC address from the system information page.
 
 > [!NOTE]
@@ -47,6 +48,15 @@ Use this runbook once for each new machine, before [Provision a node](provision-
    Result: `Secure Boot keys successfully enrolled`, and the machine reboots.
 
 3. Open the firmware setup, turn on Secure Boot, and power off the machine.
+
+## Set AMT's address
+
+AMT shares the node's NIC, and fleet-controller's Rufio `Machine` dials it at the node's own address. Talos sets that address statically, so AMT holds it statically too. Do this once the node has an address in NetBox: the stub's `--address`, or the one its binding allocates.
+
+1. In MEBx, or in MeshCommander from the future network, turn off DHCP for AMT's wired IPv4.
+2. Set the address to the node's NetBox address, shared with the host, with the prefix length of `K8S_NODE_CIDR` and the gateway `ROUTER_IP` from `clusters/folly/config/cluster-topology.json`.
+
+   Result: AMT answers on port 16992 at the node's address.
 
 ## If something goes wrong
 

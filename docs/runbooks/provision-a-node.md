@@ -1,6 +1,6 @@
 ---
 title: Provision a node
-description: Plug a prepared folly machine in at the provisioning station and let it intake, attest and install as a Talos worker or a joining control plane, or declare it in NetBox by hand.
+description: Plug a prepared folly machine into any node port and let it intake, attest and install as a Talos worker or a joining control plane, or declare it in NetBox by hand.
 ---
 
 Use this runbook to install a new folly node through [NetBox](../platform/netbox.md). The machine phones home from HookOS, [talos-attest](../apps/talos-attest.md) attests it, and [fleet-controller](../apps/fleet-controller.md) names, addresses and provisions it.
@@ -23,10 +23,10 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
    mise run netbox:declare --stub <node> --class worker-g5 --serial <serial> [--port <rack port>] [--address <addr>]
    ```
 
-   Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows. `--port` gives the node its cable at the prep station; without it, the cable comes from an intake pass on a rack port.
+   Result: a `planned` device with no MAC, a stub. The export skips stubs, so no pull request follows. With `--port`, the binding refuses a machine whose intake pass attests another switch port.
 
 2. `--serial` is optional: a class-only stub names the next machine whose first intake you approve in step 4.
-3. Connect the machine to the prep station's port, `provisioning` in `quarantine_ports` of `terraform/network/unifi/folly/bootstrap.tf`, and power it on. It stays there until step 9. On this port the installed Talos boots and fetches its config, then stalls with DNS i/o timeouts, because its resolvers are on the Anchor network, which the bootstrap VLAN cannot reach. The move to the rack port is the fix, and the node joins after it.
+3. Connect the machine to a node port and power it on. Every node port carries the Kubernetes network: each inventory node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
 
    Result: the controller creates `Hardware <mac>`, with the address and LLDP port the machine claimed in its `lolwtf.ca/intake-address` and `lolwtf.ca/lldp-port-id` annotations, and an attest-only `Workflow intake-<mac>-<unix seconds>`. The pass writes the attested ones to the device's `attested_address` and `attested_switch_port`.
 
@@ -36,15 +36,15 @@ Use this runbook to install a new folly node through [NetBox](../platform/netbox
 
 5. Watch the device's NetBox journal.
 
-   Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run.
+   Result: `bound the intake`, with its name, class and address, and `desired_action` `provision`. HookOS takes the run, and the installed Talos boots with that address set statically.
 
-6. On a branch, run `mise run netbox:export`. The export's `address` is the node's address everywhere.
-7. Make sure that `mise run netbox:check` prints nothing. Open a pull request.
-8. Comment `atlantis apply -d terraform/network/unifi/folly`.
+6. Set the machine's AMT to the node's address, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says, so Rufio reaches it for every later run.
+7. On a branch, run `mise run netbox:export`. The export's `address` is the node's address everywhere.
+8. Make sure that `mise run netbox:check` prints nothing. Open a pull request.
+9. Comment `atlantis apply -d terraform/network/unifi/folly`.
 
-   Result: the node has a RADIUS user, a DHCP reservation and a DNS record.
+   Result: the node has a DNS record, and its switch port carries its name.
 
-9. Move the node to its rack port, which runs MAC auth. If it keeps its bootstrap address, power-cycle it.
 10. Comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 11. [Deploy spore](deploy-a-nixos-host.md) from `main`, for the SPIRE alias.
 12. Make sure that the node is Ready, that `talosctl --nodes <addr> get securitystate` shows `secureBoot: true`, and that its [SPIRE agent](add-a-tpm-node-to-spire.md#make-sure-the-agent-serves-svids) attests by LDevID.
@@ -60,15 +60,12 @@ mise run netbox:declare <node> <serial> <mac> <switch port> <addr>
 
 It refuses a malformed name or MAC, a missing port, and an address outside `K8S_NODE_CIDR`, or held by another device or stub. The `planned` device gets the MAC, a cable and `<addr>`; run it with no arguments for the options, whose defaults are the G5 mini's. Commit the export diff it prints in a pull request.
 
-1. Connect the machine to the prep station's port, and power it on.
-
-   Result: it boots HookOS, which phones home and waits for work.
-
+1. Connect the machine to `<switch port>`, and set its AMT to `<addr>`, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says.
 2. In NetBox, set `desired_action` to `provision`.
 
-   Result: `last_workflow` names `provision-<node>-<unix seconds>`, the status stays `planned`, and the machine waiting in HookOS takes the run, so nobody presses its power button. Its pass writes `attested_address`, and a run that follows within 15 minutes, such as a second `provision`, is powered on by Rufio through AMT at that address.
+   Result: `last_workflow` names `provision-<node>-<unix seconds>`, the status stays `planned`, and Rufio powers the machine on through AMT at `<addr>` to a PXE boot. A device with no BMC journals `power the machine on by hand`.
 
-3. [Watch the run](#watch-the-run), then continue from step 6 above.
+3. [Watch the run](#watch-the-run), then continue from step 7 above.
 
 ## Provision a control plane
 
@@ -117,11 +114,12 @@ With no pin, the console shows `attest: FAILED` with `pending-approval`.
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The journal says `on port N, expected M` | A rack port the stub does not expect | Move the machine, or correct `expected_port` |
+| The journal says `on port N, expected M` | A switch port the stub does not expect | Move the machine, or correct `expected_port` |
+| The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Set AMT's address, or power the machine on by hand |
 | The journal says the model is not in `FLEET_MODEL_MAP` | An unknown model has no class | Set `talos_class` and `desired_action`, or extend `homelab.fleetController.modelMap` |
 | No `Hardware <mac>` appears | The MAC is known, or the intake was refused | Read `fleet.intake` in `journalctl -u fleet-controller` on spore |
 | `desired_action` stays set | The controller is down, or the device lacks a MAC or `install_disk` | Read the device's journal |
-| The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attest action | Give the stub `--port`, or check that the switch sends LLDP |
+| The journal says `recorded no attested switch port` or `attested no switch port` | The switch sent no LLDP frame within 35 seconds of the attest action | Check that the switch sends LLDP, then run `attest` |
 | The journal says a port `is cabled to another device in NetBox` | NetBox holds another device's cable on the attested port | Correct the cables in NetBox; the controller never removes one |
 | `install: no install code` | Attest withheld the code | Read the `attest.install` audit line, then set `desired_action` again |
 | The audit line says 409 | No `talos_class`, or `class-inputs.json` lacks it | Set the class, or run `mise run render-class-inputs` |

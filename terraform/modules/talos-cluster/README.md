@@ -4,7 +4,7 @@ Module for the Talos Linux machine configuration of one cluster: an Image Factor
 
 The module has no Kubernetes provider and no data source that contacts a node, so a plan succeeds while the cluster is down. The secrets bundle is a 1Password Secure Note whose note is the cluster's `secrets.yaml` in the `talosctl gen secrets` shape. It is read with an ephemeral resource and passed through write-only attributes, so no secret reaches the plan or the state. In that mode the provider skips its live refresh: a plan does not notice a node changed by hand.
 
-Network facts come from `clusters/<site>/config/cluster-topology.json` through `terraform/modules/cluster-topology`, and the DNS zone from `terraform/network/tailscale/fleet.tf.json`. An apply that changes `talos_version`, `extensions` or `extra_kernel_args` upgrades and reboots every node, the control plane at `API_SERVER_IP` first. An apply that changes `kubernetes_version` runs `upgrade-k8s` through `talos_cluster`.
+Network facts come from `clusters/<site>/config/cluster-topology.json` through `terraform/modules/cluster-topology`, and the DNS zone from `terraform/network/tailscale/fleet.tf.json`. An apply that changes `talos_version`, `extensions` or `extra_kernel_args` upgrades and reboots every node, the control plane at `API_SERVER_IP` first. An apply that changes `kubernetes_version` runs `upgrade-k8s` through `talos_cluster`. With `static_addresses`, each node's config names its one physical NIC `net0` and sets its address in `K8S_NODE_CIDR`, the default route through `ROUTER_IP` and `nameservers`, with no DHCP; `render_inputs.node_network` gives fleet-controller the same link, prefix length and gateway. A config change applies without a reboot.
 
 ## Develop
 

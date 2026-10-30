@@ -60,11 +60,11 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). ta
 | --- | --- | --- |
 | `planned` | Ordered, with its serial known, or in intake, attestation or install. It may carry `ek_hash` pins. | The owner; talos-attest, on a pass for a serial NetBox did not know; fleet-controller, on a `provision` or `wipe` of an installed node |
 | `active` | Its config is released, and it is expected Ready | fleet-controller, when the node fetches its config |
-| `failed` | Quarantined by attestation | talos-attest |
+| `failed` | Held out by the owner | The owner |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
 | `offline` | Retired, and kept for history | fleet-controller, after the retirement run succeeds |
 
-Only the owner moves a device out of `failed` or into `decommissioning`. A `failed` node's RADIUS user puts it on the bootstrap network, and talos-attest refuses it. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
+Only the owner moves a device out of `failed` or into `decommissioning`, and talos-attest refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, every anchor answers the node's `/devid` with 403, and fleet-controller cordons the node. talos-attest refuses it a new identity until the owner clears the verdict, and the owner uncordons it. A control plane's failed quote reads `failed-no-quarantine: <reason>` and only alerts. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
 ## Agents
 
