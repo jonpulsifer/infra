@@ -183,7 +183,7 @@ func newFleet() (*fleet.Reconciler, error) {
 		}
 		links = &fleet.TFTPLinks{Dir: dir, Target: target}
 	}
-	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Now: time.Now}, nil
+	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
 }
 
 // serveBoot serves the boot listener, with TLS when kp is set. Until its

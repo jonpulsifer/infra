@@ -88,6 +88,14 @@ let
         "${parentOf entry} ${entry.spiffeID}" + lib.optionalString (entry.key != null) " ${entry.key}"
       )
     );
+  entryKey =
+    entry: "${parentOf entry} ${entry.spiffeID} ${lib.concatStringsSep "," (lib.sort lib.lessThan entry.selectors)}";
+  # The same key from `entry show -output json`, for matching an entry by what it issues.
+  jqKeys = ''
+    def sid: "spiffe://\(.trust_domain)\(.path)";
+    def ekey: "\(.parent_id | sid) \(.spiffe_id | sid) \([.selectors[] | "\(.type):\(.value)"] | sort | join(","))";
+  '';
+  fleetWorkloads = builtins.toJSON cfg.fleetEntries.workloads;
   entryArgs =
     entry:
     lib.escapeShellArgs (
@@ -156,6 +164,31 @@ in
         default = lib.filesystem.listFilesRecursive ./spire/roots;
         defaultText = lib.literalExpression "lib.filesystem.listFilesRecursive ./spire/roots";
         description = "PEM files of the TPM manufacturers' EK issuing and root CAs.";
+      };
+    };
+    fleetEntries = {
+      enable = lib.mkEnableOption ''
+        the fleetd entry applier. It registers the nodes in `nodesFile`, which fleetd writes from
+        NetBox, under the entry IDs `fleet-*`, and withdraws a node that leaves the file by deleting
+        its entries and evicting its agent. It skips an entry that a `git-` entry or one made by hand
+        already issues, so the entries in `entries` win and both can stand during a move
+      '';
+      nodesFile = lib.mkOption {
+        type = lib.types.path;
+        default = "/var/lib/fleetd/spire-nodes.json";
+        description = "The file fleetd writes: a `nodes` list of objects with a `name` and an `ek_hashes` list.";
+      };
+      workloads = lib.mkOption {
+        default = [ ];
+        description = "Kubernetes service accounts that get an SVID on every registered node.";
+        type = lib.types.listOf (
+          lib.types.submodule {
+            options = {
+              ns = lib.mkOption { type = lib.types.str; };
+              sa = lib.mkOption { type = lib.types.str; };
+            };
+          }
+        );
       };
     };
     entries = lib.mkOption {
@@ -277,6 +310,13 @@ in
         done
         srv healthcheck
 
+        # A declared entry takes the place of a fleet- entry that issues the same thing, since SPIRE
+        # rejects the duplicate.
+        srv entry show -output json | jq -r --argjson declared '${builtins.toJSON (map entryKey cfg.entries)}' '
+          ${jqKeys}
+          .entries[]? | select(.id | startswith("fleet-")) | select(ekey as $k | any($declared[]; . == $k)) | .id' |
+          while read -r id; do srv entry delete -entryID "$id"; done
+
         existing=$(srv entry show -output json | jq -r '.entries[]?.id')
         declared=()
         apply() {
@@ -298,6 +338,114 @@ in
           fi
         done
       '';
+    };
+
+    systemd.services.spire-server-fleet-entries = lib.mkIf cfg.fleetEntries.enable {
+      description = "Register the nodes fleetd lists with the SPIRE server, and withdraw the rest";
+      wantedBy = [ "multi-user.target" ];
+      requires = [ "spire-server.service" ];
+      after = [
+        "spire-server.service"
+        "spire-server-entries.service"
+      ];
+      partOf = [
+        "spire-server.service"
+        "spire-server-entries.service"
+      ];
+      path = [
+        pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.jq
+      ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        set -euo pipefail
+
+        srv() { ${spireServer} "$@" -socketPath ${socket}; }
+        file=${cfg.fleetEntries.nodesFile}
+        server=${serverID}
+        domain=${cfg.trustDomain}
+
+        for _ in $(seq 60); do
+          srv healthcheck >/dev/null 2>&1 && break
+          sleep 1
+        done
+        srv healthcheck
+
+        [ -e "$file" ] || { echo "no $file; nothing to apply"; exit 0; }
+
+        # A file that is not exactly this shape changes nothing.
+        jq -e '
+          type == "object" and keys == ["nodes"] and (.nodes | type == "array")
+          and all(.nodes[]; type == "object" and keys == ["ek_hashes", "name"]
+            and (.name | type == "string" and test("^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"))
+            and (.ek_hashes | type == "array" and all(.[]; type == "string" and test("^[0-9a-f]{64}$"))))
+          and ([.nodes[].name] | length == (unique | length))' "$file" >/dev/null ||
+          { echo "$file is malformed; the entries stay as they are" >&2; exit 1; }
+
+        # Every entry the file asks for, one JSON object a line. The key is
+        # "<parent> <spiffe id> <sorted selectors>".
+        desired=$(jq -c --arg server "$server" --arg domain "$domain" --argjson workloads '${fleetWorkloads}' '
+          .nodes[] | . as $n | "spiffe://\($domain)/node/\($n.name)" as $id
+          | ([["tpm_devid:subject:cn:\($n.name)"]] + [$n.ek_hashes[] | ["tpm:pub_hash:\(.)"]]
+              | map({parent: $server, spiffe: $id, selectors: .}))
+            + [$workloads[] | {parent: $id, spiffe: "spiffe://\($domain)/ns/\(.ns)/sa/\(.sa)",
+                selectors: ["k8s:ns:\(.ns)", "k8s:sa:\(.sa)"]}]
+          | .[] | .selectors |= sort | . + {key: "\(.parent) \(.spiffe) \(.selectors | join(","))"}' "$file" | sort -u)
+
+        shown=$(srv entry show -output json)
+        others=$(jq -r '${jqKeys} .entries[]? | select(.id | startswith("fleet-") | not) | ekey' <<<"$shown")
+        existing=$(jq -r '.entries[]? | select(.id | startswith("fleet-")) | .id' <<<"$shown")
+
+        wanted=()
+        while read -r line; do
+          [ -n "$line" ] || continue
+          key=$(jq -r .key <<<"$line")
+          grep -qxF "$key" <<<"$others" && continue
+          id=fleet-$(printf %s "$key" | sha256sum | cut -c1-16)
+          wanted+=("$id")
+          grep -qxF "$id" <<<"$existing" && continue
+          args=()
+          while read -r sel; do args+=(-selector "$sel"); done < <(jq -r '.selectors[]' <<<"$line")
+          srv entry create -entryID "$id" -spiffeID "$(jq -r .spiffe <<<"$line")" -parentID "$(jq -r .parent <<<"$line")" "''${args[@]}"
+        done <<<"$desired"
+
+        # A node alias that goes names the selector of its agent. The agent is evicted unless some
+        # entry still carries that selector.
+        withdrawn=()
+        for id in $existing; do
+          if ! printf '%s\n' "''${wanted[@]}" | grep -qxF "$id"; then
+            while read -r sel; do withdrawn+=("$sel"); done < <(jq -r --arg id "$id" --arg server "$server" '
+              ${jqKeys} .entries[]? | select(.id == $id and (.parent_id | sid) == $server) | .selectors[] | "\(.type):\(.value)"' <<<"$shown")
+            srv entry delete -entryID "$id"
+          fi
+        done
+
+        remaining=$(srv entry show -output json | jq -r '.entries[]? | .selectors[] | "\(.type):\(.value)"')
+        for sel in "''${withdrawn[@]}"; do
+          grep -qxF "$sel" <<<"$remaining" && continue
+          srv agent list -output json | jq -r --arg sel "$sel" '
+            ${jqKeys} .agents[]? | select(any(.selectors[]?; "\(.type):\(.value)" == $sel)) | .id | sid' |
+            while read -r agent; do srv agent evict -spiffeID "$agent"; done
+        done
+      '';
+    };
+
+    systemd.paths.spire-server-fleet-entries = lib.mkIf cfg.fleetEntries.enable {
+      wantedBy = [ "multi-user.target" ];
+      pathConfig = {
+        PathChanged = cfg.fleetEntries.nodesFile;
+        Unit = "spire-server-fleet-entries.service";
+      };
+    };
+
+    # The path unit misses a change made while the server is down, so a timer converges anyway.
+    systemd.timers.spire-server-fleet-entries = lib.mkIf cfg.fleetEntries.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnBootSec = "5m";
+        OnUnitActiveSec = "10m";
+      };
     };
 
     # SPIRE exports no gauge of attested agents, so this one counts the agents whose SVID is

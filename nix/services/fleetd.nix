@@ -265,6 +265,7 @@ in
         FLEET_TFTP_DIR = tftpDir;
         FLEET_TFTP_LINK_TARGET = "${tftpDir}/talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
+        FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
         FLEET_WORKFLOW_TTL = "168h";
         FLEET_CONFIG_TTL = "2h";
         # Rendered configs wait in this tmpfs, which RuntimeDirectoryPreserve keeps across a
