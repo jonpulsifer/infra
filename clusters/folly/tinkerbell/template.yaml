@@ -74,7 +74,7 @@ spec:
           # At the end of a full intake talos-attest answers the install code, which tink-attest
           # writes to /tmp/fleet/install_code for the install action.
           - name: attest
-            image: ghcr.io/jonpulsifer/tink-attest@sha256:ba526e432e784df30f7f3347a64a34520341d0814af511c1708ebbf37610be65
+            image: ghcr.io/jonpulsifer/tink-attest@sha256:69ec1244430e5a3dd21674a7c80d174a2dd21aca7ffa979058797d48bedab4e1
             timeout: 600
             volumes:
               - /tmp/fleet:/tmp/fleet
