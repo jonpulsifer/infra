@@ -68,7 +68,7 @@ let
 
   # The verifier's inventory, in the machines: shape it reads (JSON is YAML): each node's serial,
   # class, TPM version and Secure Boot state from the nodes file. NetBox holds the MACs and pins.
-  inventory = pkgs.writeText "machines.yaml" (
+  inventory = pkgs.writeText "fleetd-inventory.yaml" (
     builtins.toJSON {
       machines = lib.mapAttrs (_: n: {
         inherit (n) serial class tpm;

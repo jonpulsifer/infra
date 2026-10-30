@@ -436,7 +436,7 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	}
 	next := "the next attest writes these to the device's ek_hash and ek_hash_ecc in NetBox"
 	if s.V.NetBox == nil {
-		next = "add these to the machine's ek_hash and ek_hash_ecc in clusters/folly/inventory/machines.yaml"
+		next = "add these to the machine's ek_hash and ek_hash_ecc in the inventory ATTEST_INVENTORY names"
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"approved": hashes, "next": next})
 }

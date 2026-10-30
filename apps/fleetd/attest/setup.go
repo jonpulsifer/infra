@@ -70,7 +70,7 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	inv, err := LoadInventory(env("ATTEST_INVENTORY", "/etc/fleetd/machines.yaml"))
+	inv, err := LoadInventory(env("ATTEST_INVENTORY", "/etc/fleetd/inventory.yaml"))
 	if err != nil {
 		return nil, err
 	}

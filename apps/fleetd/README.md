@@ -12,7 +12,7 @@ on the wiki.
 ```sh
 go build -o fleetd .
 ATTEST_CA_KEY=/path/to/devid-ca.key ATTEST_CA_CHAIN=chain.pem ATTEST_EK_ROOTS=attest/roots \
-ATTEST_POLICY=attest/policy.yaml ATTEST_INVENTORY=../../clusters/folly/inventory/machines.yaml \
+ATTEST_POLICY=attest/policy.yaml ATTEST_INVENTORY=inventory.yaml \
 ATTEST_STATE_DIR=/tmp/fleetd ATTEST_APPROVERS=you@example.com \
 FLEET_NETBOX_URL=http://capsule:8080 FLEET_NETBOX_TOKEN_FILE=token \
 FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FLEET_HOOKOS_CMDLINE='console=tty0' \
@@ -38,7 +38,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site. A leaf another CA issued verifies only when its CA is here, and each must chain to the chain's root |
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the NetBox site |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
-| `ATTEST_EK_ROOTS`, `ATTEST_POLICY`, `ATTEST_INVENTORY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates, the event-log policy, and `machines.yaml` |
+| `ATTEST_EK_ROOTS`, `ATTEST_POLICY`, `ATTEST_INVENTORY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates, the event-log policy, and the inventory: a `machines:` document of each node's `serial`, `class`, `tpm` and `secure_boot`, which `nix/services/fleetd.nix` writes from `clusters/folly/inventory/nodes.yaml` |
 | `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, approvals and `verdicts.jsonl` |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
 | `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE`, `ATTEST_NETBOX_ROLE` | none, `/run/credentials/fleetd.service/netbox-token`, `kubernetes-node` | NetBox as the system of record |

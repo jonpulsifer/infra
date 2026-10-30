@@ -36,8 +36,8 @@ type Recorder interface {
 // certification at evidence, then issue. A renewal from the running node
 // repeats the quote and the policy against the LAK on file.
 type Verifier struct {
-	// Inventory is machines.yaml: the only source without NetBox, and the
-	// source of a pin or a class NetBox lacks with it.
+	// Inventory is the nodes file's inventory: the only source without
+	// NetBox, and the source of a class NetBox lacks with it.
 	Inventory *Inventory
 	// NetBox, when set, is the system of record: it names the machine, its
 	// class and its lifecycle, and gets a device for a serial it never saw.

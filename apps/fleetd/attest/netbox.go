@@ -625,7 +625,7 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 			}
 			// fleetd keys the config by this UUID. NetBox
 			// refuses a custom field it does not define, so the verdict
-			// never waits for scripts/netbox-seed.sh to add it.
+			// never waits for terraform/netbox/folly to add it.
 			if u, ok := smbiosUUID(r.UUID); ok && d.CustomFields.SMBIOSUUID != nil {
 				fields["smbios_uuid"] = u
 			}

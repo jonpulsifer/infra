@@ -10,10 +10,12 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// InventoryMachine is the part of clusters/folly/inventory/machines.yaml this
-// service reads. EKHash is the SHA-256 of the RSA EK, the value SPIRE's TPM
-// plugin uses; EKHashECC is the ECC EK's. Class and Status are NetBox's
-// talos_class and status as the export last saw them.
+// InventoryMachine is one entry of the inventory ATTEST_INVENTORY names, a
+// `machines:` document that nix/services/fleetd.nix writes from the nodes
+// file, clusters/folly/inventory/nodes.yaml: each node's serial, class, TPM
+// version and Secure Boot state. EKHash is the SHA-256 of the RSA EK, the
+// value SPIRE's TPM plugin uses, and EKHashECC the ECC EK's; the nodes file
+// carries neither, since NetBox holds the pins.
 type InventoryMachine struct {
 	Name       string `yaml:"-"`
 	Serial     string `yaml:"serial"`
@@ -43,7 +45,7 @@ type Inventory struct {
 	bySerial map[string]InventoryMachine
 }
 
-// LoadInventory reads machines.yaml.
+// LoadInventory reads the inventory at path.
 func LoadInventory(path string) (*Inventory, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {

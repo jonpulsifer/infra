@@ -7,7 +7,7 @@ import (
 
 // Machine is what the service knows about a machine before it attests: its
 // name, the facts that gate the flow and where the facts came from. NetBox
-// is the source when the service has one, and machines.yaml fills in what
+// is the source when the service has one, and the inventory fills in what
 // NetBox lacks or stands alone without it.
 type Machine struct {
 	Name   string
