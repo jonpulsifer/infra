@@ -97,14 +97,24 @@ func rsaPinOnly(rsa, _ string) string {
 	return fmt.Sprintf("machines:\n  testbox:\n    serial: %s\n    mac: %q\n    tpm: \"2.0\"\n    class: worker-g5\n    ek_hash: %s\n", simSerial, simMAC, rsa)
 }
 
-// A TPM without certificates sends its RSA EK alone. The pin admits it, and
-// the credential must still activate.
+// A TPM without Low Range certificates sends its RSA EK alone. The pin
+// admits it, and the credential must still activate.
 func TestAPinnedUncertifiedEKStillActivates(t *testing.T) {
 	t.Run("activated", func(t *testing.T) {
 		h := newHarness(t, harnessOpts{noEKCerts: true, inventory: rsaPinOnly})
 		res, err := h.run(simSerial, simMAC)
 		if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 			t.Fatalf("pinned uncertified EK: %+v %v", res, err)
+		}
+		if d := h.devID(t, simSerial); d.RSAEKCert || !slices.Equal(d.EKHashes, []string{h.hashes["rsa"]}) {
+			t.Fatalf("EKs on file %+v", d)
+		}
+	})
+	t.Run("High Range certificates alone", func(t *testing.T) {
+		h := newHarness(t, harnessOpts{noEKCerts: true, inventory: rsaPinOnly, ekNV: map[uint32][]byte{0x01c00014: {0x30, 0x00}}})
+		res, err := h.run(simSerial, simMAC)
+		if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
+			t.Fatalf("pinned EK beside High Range certificates: %+v %v", res, err)
 		}
 		if d := h.devID(t, simSerial); d.RSAEKCert || !slices.Equal(d.EKHashes, []string{h.hashes["rsa"]}) {
 			t.Fatalf("EKs on file %+v", d)

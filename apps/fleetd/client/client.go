@@ -92,6 +92,9 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 	for _, e := range eks {
 		logf("EK %s %s (certificate: %v, NV template: %v, NV nonce: %v)", e.Alg, e.Hash, e.Cert != nil, e.TemplateNV, e.NonceNV)
 	}
+	if note := HighRangeNote(rw, eks); note != "" {
+		logf("%s", note)
+	}
 
 	srk, _, err := tpm2.CreatePrimary(rw, tpm2.HandleOwner, tpm2.PCRSelection{}, "", "", SRKTemplate)
 	if err != nil {

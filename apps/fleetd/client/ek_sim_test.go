@@ -70,17 +70,18 @@ func makeEK(t *testing.T, rw io.ReadWriter, tmpl tpm2.Public) crypto.PublicKey {
 	return pub
 }
 
-func certify(t *testing.T, pub crypto.PublicKey) []byte {
+func certify(t *testing.T, pub crypto.PublicKey, exts ...pkix.Extension) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tmpl := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: "Test TPM Maker"},
-		NotBefore:    time.Now().Add(-time.Hour),
-		NotAfter:     time.Now().Add(time.Hour),
+		SerialNumber:    big.NewInt(1),
+		Subject:         pkix.Name{CommonName: "Test TPM Maker"},
+		NotBefore:       time.Now().Add(-time.Hour),
+		NotAfter:        time.Now().Add(time.Hour),
+		ExtraExtensions: exts,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, pub, key)
 	if err != nil {
@@ -395,17 +396,21 @@ func TestAnIdentityFromTheShippedTemplatesRenewsAfterAReboot(t *testing.T) {
 	}
 }
 
-// A TPM that certifies its EKs only in the High Range has certificates this
-// client cannot use; sending its default RSA EK as uncertified would hide
-// them.
-func TestDiscoveryRefusesAHighRangeOnlyTPM(t *testing.T) {
+// Certificates in the High Range alone leave the Low Range one absent: the
+// default RSA EK goes uncertified, for the service's pin rules to judge,
+// and the run says why.
+func TestHighRangeCertificatesLeaveTheEKUncertified(t *testing.T) {
 	t.Run("High Range alone", func(t *testing.T) {
 		sim := newSim(t)
 		defineNV(t, sim, 0x01c00014, ekIndexAttrs, "", certify(t, makeEK(t, sim, DefaultEKTemplateECC())))
-		_, err := DiscoverEKs(sim)
-		if !errors.Is(err, ErrUnsupportedEKProfile) || !strings.Contains(err.Error(), "0x1c00014") {
-			t.Fatalf("got %v", err)
+		eks, err := DiscoverEKs(sim)
+		if err != nil || len(eks) != 1 || eks[0].Alg != "rsa" || eks[0].Cert != nil || eks[0].Hash != hashOf(t, makeEK(t, sim, DefaultEKTemplateRSA())) {
+			t.Fatalf("got %+v %v", eks, err)
 		}
+		if note := HighRangeNote(sim, eks); !strings.Contains(note, "0x1c00014") || !strings.Contains(note, "approved pin") {
+			t.Fatalf("note %q", note)
+		}
+		activateWith(t, sim, eks[0])
 	})
 	t.Run("beside the Low Range", func(t *testing.T) {
 		sim := newSim(t)
@@ -413,17 +418,166 @@ func TestDiscoveryRefusesAHighRangeOnlyTPM(t *testing.T) {
 		defineNV(t, sim, 0x01c00002, ekIndexAttrs, "", certify(t, rsa))
 		defineNV(t, sim, 0x01c00014, ekIndexAttrs, "", []byte{0x30})
 		eks, err := DiscoverEKs(sim)
-		if err != nil || len(eks) != 1 || eks[0].Hash != hashOf(t, rsa) {
+		if err != nil || len(eks) != 1 || eks[0].Hash != hashOf(t, rsa) || HighRangeNote(sim, eks) != "" {
 			t.Fatalf("got %+v %v", eks, err)
 		}
 	})
 	t.Run("a chain is no certificate", func(t *testing.T) {
 		sim := newSim(t)
 		defineNV(t, sim, 0x01c00100, ekIndexAttrs, "", []byte{0x30})
-		if eks, err := DiscoverEKs(sim); err != nil || len(eks) != 1 || eks[0].Cert != nil {
+		if eks, err := DiscoverEKs(sim); err != nil || len(eks) != 1 || eks[0].Cert != nil || HighRangeNote(sim, eks) != "" {
 			t.Fatalf("got %+v %v", eks, err)
 		}
 	})
+}
+
+func lockoutCounter(t *testing.T, rw io.ReadWriter) uint32 {
+	t.Helper()
+	v, err := tpmProperty(rw, 0x20e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+// An index readable only with its own authorization, under dictionary-attack
+// protection, is a permission failure that is never tried: a wrong guess
+// would count toward the TPM's lockout.
+func TestDiscoveryNeverGuessesADAProtectedAuthorization(t *testing.T) {
+	sim := newSim(t)
+	defineNV(t, sim, 0x01c00002, tpm2.AttrAuthWrite|tpm2.AttrAuthRead, "secret", []byte{0x30, 0x00})
+	before := lockoutCounter(t, sim)
+	for range 3 {
+		if _, err := DiscoverEKs(sim); !errors.Is(err, ErrNVPermission) {
+			t.Fatalf("got %v", err)
+		}
+		if _, err := Inspect(sim); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if after := lockoutCounter(t, sim); after != before {
+		t.Fatalf("lockout counter went from %d to %d", before, after)
+	}
+	// The counter counts: the guess discovery does not make is a failure.
+	if _, err := tpm2.NVReadEx(sim, 0x01c00002, 0x01c00002, "", 0); err == nil {
+		t.Fatal("an empty password read the index")
+	}
+	if lockoutCounter(t, sim) == before {
+		t.Fatal("a failed guess did not count, so this test proves nothing")
+	}
+}
+
+// countingNVReads counts the TPM2_NV_Read commands it passes on.
+type countingNVReads struct {
+	io.ReadWriter
+	n int
+}
+
+func (c *countingNVReads) Write(b []byte) (int, error) {
+	if len(b) >= 10 && binary.BigEndian.Uint32(b[6:10]) == uint32(tpm2.CmdReadNV) {
+		c.n++
+	}
+	return c.ReadWriter.Write(b)
+}
+
+func TestDiscoveryReadsALargeCertificateInChunks(t *testing.T) {
+	sim := newSim(t)
+	if max, err := tpmProperty(sim, tpmPTNVBufferMax); err != nil || max < nvChunk {
+		t.Fatalf("NV buffer %d %v", max, err)
+	}
+	rsa := makeEK(t, sim, DefaultEKTemplateRSA())
+	cert := certify(t, rsa, pkix.Extension{Id: []int{1, 3, 6, 1, 4, 1, 32473, 1}, Value: bytes.Repeat([]byte{0x04}, 1400)})
+	if len(cert) <= 1024 {
+		t.Fatalf("certificate of %d bytes", len(cert))
+	}
+	defineNV(t, sim, 0x01c00002, ekIndexAttrs, "", cert)
+	c := &countingNVReads{ReadWriter: sim}
+	eks, err := DiscoverEKs(c)
+	if err != nil || len(eks) != 1 || !bytes.Equal(eks[0].Cert, cert) {
+		t.Fatalf("got %+v %v", eks, err)
+	}
+	if want := (len(cert) + nvChunk - 1) / nvChunk; c.n != want {
+		t.Fatalf("%d NV reads, want %d", c.n, want)
+	}
+}
+
+// A certificate whose key Go cannot represent is malformed, not a mismatch.
+func TestDiscoveryCallsACertificateWithAnUnknownKeyMalformed(t *testing.T) {
+	sim := newSim(t)
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert := certify(t, &key.PublicKey)
+	ecPublicKey := []byte{0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01}
+	if bytes.Count(cert, ecPublicKey) != 1 {
+		t.Fatal("no single id-ecPublicKey to rewrite")
+	}
+	cert = bytes.Replace(cert, ecPublicKey, append(ecPublicKey[:8:8], 0x7f), 1)
+	defineNV(t, sim, 0x01c00002, ekIndexAttrs, "", cert)
+	if _, err := DiscoverEKs(sim); !errors.Is(err, ErrNVMalformed) || errors.Is(err, ErrEKCertMismatch) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+// policyA is PolicySecret(TPM_RH_ENDORSEMENT), as the profile's 5.3.3 prints it.
+var policyA = []byte{
+	0x83, 0x71, 0x97, 0x67, 0x44, 0x84, 0xB3, 0xF8, 0x1A, 0x90, 0xCC, 0x8D, 0x46, 0xA5, 0xD7, 0x24,
+	0xFD, 0x52, 0xD7, 0x6E, 0x06, 0x52, 0x0B, 0x64, 0xF2, 0xA1, 0xDA, 0x1B, 0x33, 0x14, 0x69, 0xAA,
+}
+
+func sized(b []byte) []byte { return append([]byte{byte(len(b) >> 8), byte(len(b))}, b...) }
+
+// handL1 and handL2 marshal templates L-1 and L-2 (5.3.3, 5.3.4) byte by
+// byte, with the unique field given, apart from the code under test.
+func handL1(unique []byte) []byte {
+	b := []byte{0x00, 0x01, 0x00, 0x0b, 0x00, 0x03, 0x00, 0xb2}
+	b = append(b, sized(policyA)...)
+	b = append(b, 0x00, 0x06, 0x00, 0x80, 0x00, 0x43, 0x00, 0x10, 0x08, 0x00, 0, 0, 0, 0)
+	return append(b, sized(unique)...)
+}
+
+func handL2(x, y []byte) []byte {
+	b := []byte{0x00, 0x23, 0x00, 0x0b, 0x00, 0x03, 0x00, 0xb2}
+	b = append(b, sized(policyA)...)
+	b = append(b, 0x00, 0x06, 0x00, 0x80, 0x00, 0x43, 0x00, 0x10, 0x00, 0x03, 0x00, 0x10)
+	return append(append(b, sized(x)...), sized(y)...)
+}
+
+// 2.2.2.6 by hand: an EK Template with an empty unique field and an EK
+// Nonce make the template whose unique field is the nonce, zero-padded to
+// 256 bytes for RSA, and to 32 bytes in x with 32 zero bytes in y for ECC.
+func TestDiscoveryMatchesTheProfileNonceCalculationByHand(t *testing.T) {
+	sim := newSim(t)
+	nonce := []byte("hand-built nonce")
+	rsaWant := handL1(append(bytes.Clone(nonce), make([]byte, 256-len(nonce))...))
+	eccWant := handL2(append(bytes.Clone(nonce), make([]byte, 32-len(nonce))...), make([]byte, 32))
+	decode := func(b []byte) tpm2.Public {
+		p, err := tpm2.DecodePublic(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	rsa, ecc := makeEK(t, sim, decode(rsaWant)), makeEK(t, sim, decode(eccWant))
+	defineNV(t, sim, 0x01c00002, ekIndexAttrs, "", certify(t, rsa))
+	defineNV(t, sim, 0x01c00003, ekIndexAttrs, "", nonce)
+	defineNV(t, sim, 0x01c00004, ekIndexAttrs, "", handL1(nil))
+	defineNV(t, sim, 0x01c0000a, ekIndexAttrs, "", certify(t, ecc))
+	defineNV(t, sim, 0x01c0000b, ekIndexAttrs, "", nonce)
+	defineNV(t, sim, 0x01c0000c, ekIndexAttrs, "", handL2(nil, nil))
+	eks, err := DiscoverEKs(sim)
+	if err != nil || len(eks) != 2 {
+		t.Fatalf("got %+v %v", eks, err)
+	}
+	for i, want := range [][]byte{eccWant, rsaWant} {
+		if !bytes.Equal(eks[i].Template, want) {
+			t.Errorf("%s template\n got %x\nwant %x", eks[i].Alg, eks[i].Template, want)
+		}
+	}
+	if eks[0].Hash != hashOf(t, ecc) || eks[1].Hash != hashOf(t, rsa) {
+		t.Fatalf("keys %s %s", eks[0].Hash, eks[1].Hash)
+	}
 }
 
 // Activation recreates the key from the template discovery resolved, and

@@ -101,9 +101,9 @@ func profileOf(alg string) (ekProfile, error) {
 
 // DiscoverEKs finds the EKs an attestation sends: each whose certificate the
 // TPM holds in the Low Range, ECC first, or the RSA EK alone when the TPM
-// holds no certificate, which the inventory must then pin. A TPM that
-// certifies its EKs in the High Range alone is an unsupported profile, not
-// an uncertified one.
+// holds none there, which only an approved pin then admits. Certificates in
+// the High Range are not used; HighRangeNote says when they are the only
+// ones.
 func DiscoverEKs(rw io.ReadWriter) ([]*EK, error) {
 	var out []*EK
 	for _, p := range ekProfiles {
@@ -114,15 +114,6 @@ func DiscoverEKs(rw io.ReadWriter) ([]*EK, error) {
 		if cert == nil && (len(out) > 0 || p.alg == "ecc") {
 			continue
 		}
-		if cert == nil {
-			high, err := HighRangeEKCerts(rw)
-			if err != nil {
-				return nil, err
-			}
-			if len(high) > 0 {
-				return nil, fmt.Errorf("%w: the TPM holds EK certificates only in the High Range, at NV %#x", ErrUnsupportedEKProfile, high)
-			}
-		}
 		e, err := discover(rw, p, cert)
 		if err != nil {
 			return nil, err
@@ -130,6 +121,24 @@ func DiscoverEKs(rw io.ReadWriter) ([]*EK, error) {
 		out = append(out, e)
 	}
 	return out, nil
+}
+
+// HighRangeNote says why discovery sends no certificate when the TPM holds
+// EK certificates in the High Range alone, and is empty otherwise.
+func HighRangeNote(rw io.ReadWriter, eks []*EK) string {
+	for _, e := range eks {
+		if e.Cert != nil {
+			return ""
+		}
+	}
+	high, err := HighRangeEKCerts(rw)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("no Low Range EK certificate, and the High Range could not be listed: %v", err)
+	case len(high) > 0:
+		return fmt.Sprintf("no Low Range EK certificate; the TPM holds High Range EK certificates at NV %#x, which this client does not support, so its EK goes uncertified and only an approved pin admits it", high)
+	}
+	return ""
 }
 
 // The handle range the registry reserves for EK credentials, the High
@@ -217,7 +226,10 @@ func discover(rw io.ReadWriter, p ekProfile, cert []byte) (*EK, error) {
 		return nil, fmt.Errorf("%s EK certificate: %w", p.name, &NVError{Index: p.cert, Class: ErrNVMalformed, Err: err})
 	}
 	der, err := x509.MarshalPKIXPublicKey(c.PublicKey)
-	if err != nil || !bytes.Equal(der, e.PublicDER) {
+	if err != nil {
+		return nil, fmt.Errorf("%s EK certificate: %w", p.name, &NVError{Index: p.cert, Class: ErrNVMalformed, Err: fmt.Errorf("its public key: %w", err)})
+	}
+	if !bytes.Equal(der, e.PublicDER) {
 		return nil, fmt.Errorf("%s EK: %w: the certificate at NV %#x does not certify the EK %s that its template makes", p.name, ErrEKCertMismatch, p.cert, e.Hash)
 	}
 	return e, nil
@@ -363,17 +375,26 @@ func readEKIndex(rw io.ReadWriter, index uint32) ([]byte, error) {
 	case pub.DataSize == 0:
 		return nil, nvFail(index, ErrNVMalformed, "defined with no data")
 	}
+	// The owner's authorization is not subject to dictionary-attack
+	// protection, but the index's own is unless it sets noDA: a wrong guess
+	// there would count against the TPM's lockout.
 	auth := direct.AuthHandle{Handle: direct.TPMRHOwner, Auth: direct.PasswordAuth(nil)}
 	switch {
 	case pub.Attributes.OwnerRead:
-	case pub.Attributes.AuthRead:
+	case pub.Attributes.AuthRead && pub.Attributes.NoDA:
 		auth = direct.AuthHandle{Handle: h, Name: rsp.NVName, Auth: direct.PasswordAuth(nil)}
+	case pub.Attributes.AuthRead:
+		return nil, nvFail(index, ErrNVPermission, "readable only with its own authorization, which dictionary-attack protection covers; not tried")
 	default:
 		return nil, nvFail(index, ErrNVPermission, "readable by neither the owner nor its own authorization")
 	}
+	chunk, err := nvReadChunk(rw)
+	if err != nil {
+		return nil, &NVError{Index: index, Class: ErrNVTransport, Err: err}
+	}
 	out := make([]byte, 0, pub.DataSize)
 	for len(out) < int(pub.DataSize) {
-		n := min(nvChunk, int(pub.DataSize)-len(out))
+		n := min(chunk, int(pub.DataSize)-len(out))
 		got, err := direct.NVRead{
 			AuthHandle: auth,
 			NVIndex:    direct.NamedHandle{Handle: h, Name: rsp.NVName},
@@ -389,6 +410,35 @@ func readEKIndex(rw io.ReadWriter, index uint32) ([]byte, error) {
 		out = append(out, got.Data.Buffer...)
 	}
 	return out, nil
+}
+
+// nvReadChunk is the most one TPM2_NV_Read asks for: TPM_PT_NV_BUFFER_MAX,
+// at most nvChunk.
+func nvReadChunk(rw io.ReadWriter) (int, error) {
+	max, err := tpmProperty(rw, tpmPTNVBufferMax)
+	if err != nil {
+		return 0, fmt.Errorf("read TPM_PT_NV_BUFFER_MAX: %w", err)
+	}
+	if max == 0 {
+		return 0, errors.New("TPM_PT_NV_BUFFER_MAX is 0")
+	}
+	return min(int(max), nvChunk), nil
+}
+
+const tpmPTNVBufferMax = 0x12c
+
+// tpmProperty reads one TPM property, which the TPM must report.
+func tpmProperty(rw io.ReadWriter, prop uint32) (uint32, error) {
+	vals, _, err := tpm2.GetCapability(rw, tpm2.CapabilityTPMProperties, 1, prop)
+	if err != nil {
+		return 0, err
+	}
+	if len(vals) == 1 {
+		if p, ok := vals[0].(tpm2.TaggedProperty); ok && uint32(p.Tag) == prop {
+			return p.Value, nil
+		}
+	}
+	return 0, fmt.Errorf("the TPM does not report property %#x", prop)
 }
 
 // nvPublic answers an index's public area, or nothing and no error when the
