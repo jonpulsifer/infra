@@ -25,9 +25,9 @@ metadata:
     # The provider reads its config only at startup.
     configmap.reloader.stakater.com/reload: oidc-discovery-provider
 spec:
-  # 0 until a node carries lolwtf.ca/tpm=true and its agent attests; a
-  # Pending pod would raise a replicas alert. Set to 1 then.
-  replicas: 0
+  # Two, on different TPM nodes, so one node's agent going down leaves the
+  # issuer up: GCP's workload pool and the tailnet federation fetch its keys.
+  replicas: 2
   selector:
     matchLabels:
       app.kubernetes.io/name: oidc-discovery-provider
@@ -42,6 +42,13 @@ spec:
       # Only these nodes run a SPIRE agent.
       nodeSelector:
         lolwtf.ca/tpm: "true"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: oidc-discovery-provider
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
