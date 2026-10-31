@@ -61,6 +61,10 @@ spec:
           # install keys reads them as no install.
           INSTALL: '{{ or (index . "install") "false" }}'
           INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          # The boot entries the fleet's OSes create, by name, as an extended regular expression: the
+          # Talos installer's and the Ubuntu installer's. next-boot keeps the one on this install's EFI
+          # system partition and deletes the others; entries of no fleet OS stay.
+          FLEET_OS_ENTRIES: "Talos Linux UKI|Ubuntu"
           DISK_SERIAL: '{{ or (index . "install_disk_serial") "" }}'
           INSTALL_CODE_FILE: /tmp/fleet/install_code
           ATTESTED_FILE: /tmp/fleet/attested
@@ -404,11 +408,14 @@ spec:
                   log "the installer failed; the lines above are its last output"
                   exit 1
                 fi
-          # After an install the disk boots, preferring the installer's Talos entry; after a wipe
-          # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
-          # each certain. The installer leaves efivarfs read-only, so the action remounts it, keeps only
-          # the entry on this install's EFI partition, puts it first in BootOrder, and fails the run
-          # when any step or read-back fails. A run that only attests leaves the firmware's boot order alone.
+          # After an install the disk boots, through the installer's entry on this install's EFI system
+          # partition; after a wipe with no install the network does, since a wiped disk has nothing to
+          # boot. BootNext makes each certain. The installer leaves efivarfs read-only, so the action
+          # remounts it, puts the entry first in BootOrder, and fails the run when any step or read-back
+          # fails. Every other entry of a fleet OS (FLEET_OS_ENTRIES) names a partition this run erased
+          # or another disk's, and goes, so an OS change or a retirement leaves none behind. A retired
+          # node powers off, so its next-boot only deletes them, and a failure there is logged and does
+          # not stop the power-off. A run that only attests leaves the firmware's boot order alone.
           - name: next-boot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:7db8a1b20e091ce11cd860da64daaaa4dd96c784e99980874ded11e20a184af0
             timeout: 120
@@ -418,14 +425,14 @@ spec:
               - |
                 set -eu
                 log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
-                if [ "$RETIRE" = true ]; then
-                  log "a retired node powers off; no next boot"
-                  exit 0
-                fi
-                fail() { log "$*; the run fails, and the node stays in HookOS"; exit 1; }
                 if [ "$INSTALL" != true ] && [ "$WIPE" != true ]; then
                   log "nothing installed or wiped; the firmware's boot order decides the next boot"
                   exit 0
+                fi
+                if [ "$RETIRE" = true ]; then
+                  fail() { log "$*; the retired node powers off with its boot entries as they are"; exit 0; }
+                else
+                  fail() { log "$*; the run fails, and the node stays in HookOS"; exit 1; }
                 fi
                 # HookOS mounts efivarfs read-write, but the Talos installer remounts it read-only when it is
                 # done, and efivarfs has one superblock, so every mount of it in HookOS is read-only after an
@@ -436,19 +443,33 @@ spec:
                 err=$(mount -o remount,rw /sys/firmware/efi/efivars 2>&1) || fail "efivarfs stays read-only ($err)"
                 entries=$(efibootmgr -v 2>&1) || fail "efibootmgr failed ($entries)"
                 num() { sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*/\1/p'; }
+                guid=""
                 if [ "$INSTALL" = true ]; then
-                  # The installer's entry is the one on this install's EFI partition. Others named like it are
-                  # stale, from earlier installs or other disks, and go.
-                  esp=$(sgdisk -p "$DISK" | awk '$NF == "EFI" { print $1; exit }')
-                  [ -n "$esp" ] || fail "$DISK has no partition named EFI"
-                  guid=$(sgdisk -i "$esp" "$DISK" | sed -n 's/^Partition unique GUID: //p' | tr 'A-F' 'a-f')
-                  [ -n "$guid" ] || fail "$DISK's EFI partition has no GUID"
-                  n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
-                  [ -n "$n" ] || fail "no boot entry names $DISK's EFI partition ($guid)"
-                  for s in $(printf '%s\n' "$entries" | grep -F 'Talos Linux UKI' | grep -iv "$guid" | num); do
-                    err=$(efibootmgr -q -b "$s" -B 2>&1) || fail "the stale entry Boot$s cannot be deleted ($err)"
-                    log "deleted the stale entry Boot$s"
+                  # The installer's entry is the one on this install's EFI system partition, found by its
+                  # type, since Ubuntu's has no name.
+                  esp=""
+                  for p in $(sgdisk -p "$DISK" | awk '$1 ~ /^[0-9]+$/ { print $1 }'); do
+                    if sgdisk -i "$p" "$DISK" | grep -qi '^Partition GUID code: C12A7328-F81F-11D2-BA4B-00A0C93EC93B'; then
+                      esp=$p
+                      break
+                    fi
                   done
+                  [ -n "$esp" ] || fail "$DISK has no EFI system partition"
+                  guid=$(sgdisk -i "$esp" "$DISK" | sed -n 's/^Partition unique GUID: //p' | tr 'A-F' 'a-f')
+                  [ -n "$guid" ] || fail "$DISK's EFI system partition has no GUID"
+                  n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
+                  [ -n "$n" ] || fail "no boot entry names $DISK's EFI system partition ($guid)"
+                fi
+                for s in $(printf '%s\n' "$entries" | grep -E "^Boot[0-9A-Fa-f]{4}\*? ($FLEET_OS_ENTRIES)([[:space:]]|$)" | num); do
+                  if [ -n "$guid" ] && printf '%s\n' "$entries" | grep -i "^Boot$s" | grep -qi "$guid"; then continue; fi
+                  err=$(efibootmgr -q -b "$s" -B 2>&1) || fail "the stale entry Boot$s cannot be deleted ($err)"
+                  log "deleted the stale entry Boot$s"
+                done
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ]; then
                   what="the installed disk"
                 else
                   n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)

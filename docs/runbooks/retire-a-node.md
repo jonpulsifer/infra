@@ -52,7 +52,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflows -w
    ```
 
-   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. `wipe-disk` clears the signatures and then erases the whole disk, so it runs longer than a wipe: an NVMe sanitize or format takes seconds to minutes, a discard seconds, and a zeroing as long as the disk takes to write, up to the action's 900 second limit.
+   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. `wipe-disk` clears the signatures and then erases the whole disk, so it runs longer than a wipe: an NVMe sanitize or format takes seconds to minutes, a discard seconds, and a zeroing as long as the disk takes to write, up to the action's 900 second limit. `next-boot` deletes the firmware's boot entries for the fleet's OSes, which name the erased disk.
 
 3. Make sure that NetBox shows the device as `offline`.
 
