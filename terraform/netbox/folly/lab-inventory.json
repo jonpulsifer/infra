@@ -104,6 +104,11 @@
       "model": "JetKVM",
       "manufacturer": "jetkvm",
       "existing_slug": null
+    },
+    "hue-bridge": {
+      "model": "Hue Bridge (revision unverified)",
+      "manufacturer": "philips-hue",
+      "existing_slug": null
     }
   },
   "devices": {
@@ -189,7 +194,9 @@
       "client_group": "k8s",
       "client": "retrofit",
       "network": "oldschool-kubernetes",
-      "interface": "lan"
+      "interface": "lan",
+      "rack": "oldschool",
+      "description": "Bottom HP mini in the compute stack; compute assembly occupies U1\u2013U3"
     },
     "oldschool": {
       "site": "oldschool",
@@ -201,7 +208,9 @@
       "client_group": "k8s",
       "client": "oldschool",
       "network": "oldschool-kubernetes",
-      "interface": "lan"
+      "interface": "lan",
+      "rack": "oldschool",
+      "description": "Middle HP mini in the compute stack, above retrofit; compute assembly occupies U1\u2013U3"
     },
     "hotrod": {
       "site": "oldschool",
@@ -213,7 +222,9 @@
       "client_group": "k8s",
       "client": "hotrod",
       "network": "oldschool-kubernetes",
-      "interface": "lan"
+      "interface": "lan",
+      "rack": "oldschool",
+      "description": "Top HP mini in the compute stack, above oldschool; compute assembly occupies U1\u2013U3"
     },
     "weatherpi4": {
       "site": "oldschool",
@@ -232,7 +243,9 @@
       "role": "console",
       "status": "active",
       "mac": "44:b7:d0:e6:4b:39",
-      "interface": "lan"
+      "interface": "lan",
+      "rack": "oldschool",
+      "description": "On top of the 10-inch rack, beside the Hue Bridge"
     },
     "folly-gym-0cd9": {
       "site": "folly",
@@ -357,7 +370,9 @@
       "role": "gateway",
       "status": "active",
       "mac": "0c:ea:14:ea:a2:56",
-      "interface": "management"
+      "interface": "management",
+      "rack": "oldschool",
+      "description": "Cloud Gateway Max on the U8 shelf"
     },
     "oldschool-main-switch": {
       "site": "oldschool",
@@ -365,7 +380,9 @@
       "role": "switch",
       "status": "active",
       "mac": "8c:ed:e1:72:1d:03",
-      "interface": "management"
+      "interface": "management",
+      "rack": "oldschool",
+      "description": "On the U5 shelf, below the U6 12-port Cat6 patch panel"
     },
     "oldschool-u7-pro-wall": {
       "site": "oldschool",
@@ -439,6 +456,14 @@
       "client_group": "unmanaged-infra",
       "client": "Wall Unit PoE Switch",
       "interface": "management"
+    },
+    "oldschool-hue-bridge": {
+      "site": "oldschool",
+      "model": "hue-bridge",
+      "role": "home-automation",
+      "status": "active",
+      "rack": "oldschool",
+      "description": "On top of the 10-inch rack, beside the JetKVM; hardware revision and network identity need verification"
     }
   }
 }

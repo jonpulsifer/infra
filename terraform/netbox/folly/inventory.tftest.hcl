@@ -1,6 +1,7 @@
 # The nodes file's checks, against fixtures in testdata/ on documentation
 # addresses, with every provider mocked.
 mock_provider "netbox" {
+  mock_resource "netbox_rack" { defaults = { id = "1" } }
   mock_resource "netbox_manufacturer" { defaults = { id = "1" } }
   mock_resource "netbox_device_role" { defaults = { id = "1" } }
   mock_resource "netbox_platform" { defaults = { id = "1" } }
@@ -212,9 +213,13 @@ run "rejects_a_disk_serial_on_a_model" {
 run "lab_preserves_lifecycle_and_records_both_racks" {
   command = plan
   plan_options {
-    target = [restapi_object.lab_declared, netbox_rack.lab, netbox_ip_address.lab]
+    target = [restapi_object.lab_declared, restapi_object.lab_rack, netbox_rack.lab, netbox_ip_address.lab]
   }
   variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = alltrue([for d in restapi_object.lab_rack : keys(jsondecode(d.data)) == ["rack"]])
+    error_message = "A confirmed rack assignment must preserve the device's other fields and unit position."
+  }
   assert {
     condition     = alltrue([for d in restapi_object.lab_declared : !contains(keys(jsondecode(d.data)), "status") && !contains(keys(jsondecode(d.data)), "custom_fields") && !contains(keys(jsondecode(d.data)), "rack")])
     error_message = "Inventory updates must preserve lifecycle, custom fields and rack placement."
@@ -226,5 +231,19 @@ run "lab_preserves_lifecycle_and_records_both_racks" {
   assert {
     condition     = netbox_ip_address.lab["retrofit"].ip_address == "${jsondecode(module.oldschool_topology.data.NODE_ADDRESSES).retrofit}/${split("/", module.oldschool_topology.data.K8S_NODE_CIDR)[1]}"
     error_message = "Oldschool node addresses must come from the offsite topology."
+  }
+}
+
+run "rack_elevations_fit_and_record_the_current_stack" {
+  command = plan
+  plan_options { target = [netbox_device.rack_component] }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = netbox_device.rack_component["oldschool-compute-stack"].rack_position == 1 && netbox_device_type.rack_component["stack-10"].u_height == 3
+    error_message = "The current oldschool compute stack occupies U1 through U3."
+  }
+  assert {
+    condition     = netbox_device.rack_component["folly-power-distribution-pro"].rack_position == 1 && netbox_device_type.rack_component["ubiquiti-pdu"].u_height == 2 && netbox_device.rack_component["folly-cyberpower-pdu"].rack_position == 3
+    error_message = "Folly's Ubiquiti PDU occupies U1–U2, below the CyberPower PDU at U3."
   }
 }

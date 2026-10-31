@@ -6,9 +6,9 @@ For each node it declares the device with its site, role, platform, device type 
 
 Terraform creates a device as `planned` and never updates it in place, so the status, `desired_action` and the fields talos-attest and fleet-controller write stay theirs. `restapi_object.declared` sends a node's serial, model, primary IPv4 and declared custom fields as a PATCH of those keys alone, when the node is created or its entry changes. Its approved EK binding goes to `approved_ek_hash` and `approved_ek_hash_ecc`, null when the entry has none; fleetd alone writes the observed `ek_hash` and `ek_hash_ecc`. Removing an entry deletes the device, its address and its cable.
 
-`lab-inventory.json` declares the additional physical hosts and network equipment. MACs and reserved addresses reference UniFi clients and the topology files where those sources exist. Controller-only equipment records its observed base MAC on a management interface; DHCP addresses, wireless links, rack positions and unverified cables stay unset. `cabling.tf` records the three oldschool node links that the switch confirms. Status is set on creation and then belongs to the owner. Declared metadata updates use PATCH without custom fields or rack placement.
+`lab-inventory.json` declares the additional physical hosts and network equipment. MACs and reserved addresses reference UniFi clients and the topology files where those sources exist. Controller-only equipment records its observed base MAC on a management interface; DHCP addresses, wireless links, unverified rack unit positions and cables stay unset. Devices with a confirmed `rack` in the inventory receive that rack association through a separate PATCH; their descriptions record shelf and stack order. `cabling.tf` records the three oldschool node links that the switch confirms. Status is set on creation and then belongs to the owner. Declared metadata updates use PATCH without custom fields or rack placement.
 
-`sites.tf` declares the oldschool site and both racks. `networks.tf` reads each UniFi `network-catalog.json` and the topology files for VLANs and missing prefixes. Existing folly seed objects remain in NetBox.
+`sites.tf` declares the oldschool site and both racks. `rack-components.json` records their current shelves, panels, power units and elevations; `rack-components.tf` checks unit bounds and overlap. The oldschool compute shelf and stack occupy U1–U3 as one assembly. Shelf contents retain zero-unit device records and descriptions. Folly’s gateway and switch occupy U12 and U10, and the OptiPlex sits on U6. `networks.tf` reads each UniFi `network-catalog.json` and the topology files for VLANs and missing prefixes. Existing folly seed objects remain in NetBox.
 
 ## Develop
 
@@ -61,13 +61,16 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [netbox_custom_field_choice_set.fleet](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/custom_field_choice_set) | resource |
 | [netbox_device.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
 | [netbox_device.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
+| [netbox_device.rack_component](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device) | resource |
 | [netbox_device_interface.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
 | [netbox_device_interface.lab_wifi](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
 | [netbox_device_interface.oldschool_node_port](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_interface) | resource |
 | [netbox_device_primary_ip.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_primary_ip) | resource |
 | [netbox_device_role.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_role) | resource |
+| [netbox_device_role.rack_component](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_role) | resource |
 | [netbox_device_type.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_type) | resource |
 | [netbox_device_type.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_type) | resource |
+| [netbox_device_type.rack_component](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/device_type) | resource |
 | [netbox_event_rule.fleet_controller](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/event_rule) | resource |
 | [netbox_interface_template.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/interface_template) | resource |
 | [netbox_ip_address.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/resources/ip_address) | resource |
@@ -93,6 +96,9 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [restapi_object.datetime_field](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.lab_declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.lab_rack](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.mounted_device](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.shelved_node](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [netbox_device_interfaces.created](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.existing](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |

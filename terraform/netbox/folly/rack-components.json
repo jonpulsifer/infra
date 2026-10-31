@@ -1,0 +1,146 @@
+{
+  "models": {
+    "blank-19": {
+      "model": "19-inch blanking panel",
+      "manufacturer": "unknown",
+      "height": 1
+    },
+    "blank-10": {
+      "model": "10-inch blanking panel",
+      "manufacturer": "unknown",
+      "height": 1
+    },
+    "shelf-19": {
+      "model": "19-inch rack shelf",
+      "manufacturer": "unknown",
+      "height": 1
+    },
+    "shelf-10": {
+      "model": "10-inch rack shelf",
+      "manufacturer": "unknown",
+      "height": 1
+    },
+    "stack-10": {
+      "model": "10-inch shelf with stacked mini PCs",
+      "manufacturer": "unknown",
+      "height": 3
+    },
+    "brush-19": {
+      "model": "19-inch brush cable panel",
+      "manufacturer": "unknown",
+      "height": 1
+    },
+    "patch-24": {
+      "model": "24-position Cat6 patch panel",
+      "manufacturer": "cable-matters",
+      "height": 1
+    },
+    "patch-12": {
+      "model": "12-position Cat6 patch panel",
+      "manufacturer": "iwillink",
+      "height": 1
+    },
+    "cyberpower-pdu": {
+      "model": "PDU15M2F12R",
+      "manufacturer": "cyberpower",
+      "height": 1
+    },
+    "ubiquiti-pdu": {
+      "model": "Power Distribution Pro",
+      "manufacturer": "ubiquiti",
+      "height": 2
+    }
+  },
+  "components": {
+    "folly-blank-11": {
+      "rack": "folly",
+      "model": "blank-19",
+      "unit": 11,
+      "description": ""
+    },
+    "folly-patch-panel": {
+      "rack": "folly",
+      "model": "patch-24",
+      "unit": 9,
+      "description": "Cable Matters Cat6 keystone panel; jack population and rear terminations need verification"
+    },
+    "folly-brush-panel": {
+      "rack": "folly",
+      "model": "brush-19",
+      "unit": 8,
+      "description": ""
+    },
+    "folly-shelf-7": {
+      "rack": "folly",
+      "model": "shelf-19",
+      "unit": 7,
+      "description": "Small network appliances and Raspberry Pi; host identities need verification"
+    },
+    "folly-shelf-6": {
+      "rack": "folly",
+      "model": "shelf-19",
+      "unit": 6,
+      "description": "Dell OptiPlex 3050 on the right"
+    },
+    "folly-shelf-5": {
+      "rack": "folly",
+      "model": "shelf-19",
+      "unit": 5,
+      "description": "Two HP mini PCs; host identities need verification"
+    },
+    "folly-shelf-4": {
+      "rack": "folly",
+      "model": "shelf-19",
+      "unit": 4,
+      "description": ""
+    },
+    "folly-cyberpower-pdu": {
+      "rack": "folly",
+      "model": "cyberpower-pdu",
+      "unit": 3,
+      "description": ""
+    },
+    "folly-power-distribution-pro": {
+      "rack": "folly",
+      "model": "ubiquiti-pdu",
+      "unit": 1,
+      "description": "Occupies U1 and U2; power feeds and outlet assignments need verification"
+    },
+    "oldschool-gateway-shelf": {
+      "rack": "oldschool",
+      "model": "shelf-10",
+      "unit": 8,
+      "description": "Cloud Gateway Max"
+    },
+    "oldschool-blank-7": {
+      "rack": "oldschool",
+      "model": "blank-10",
+      "unit": 7,
+      "description": ""
+    },
+    "oldschool-patch-panel": {
+      "rack": "oldschool",
+      "model": "patch-12",
+      "unit": 6,
+      "description": "iWillink Cat6 keystone panel; jack population and rear terminations need verification"
+    },
+    "oldschool-switch-shelf": {
+      "rack": "oldschool",
+      "model": "shelf-10",
+      "unit": 5,
+      "description": "USW Flex 2.5G 8 PoE"
+    },
+    "oldschool-blank-4": {
+      "rack": "oldschool",
+      "model": "blank-10",
+      "unit": 4,
+      "description": ""
+    },
+    "oldschool-compute-stack": {
+      "rack": "oldschool",
+      "model": "stack-10",
+      "unit": 1,
+      "description": "Current U1\u2013U3 assembly: retrofit below oldschool, with hotrod on top"
+    }
+  }
+}
