@@ -98,14 +98,19 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [restapi_object.lab_declared](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.lab_rack](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.mounted_device](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.mounted_type](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.rack_anchor](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.shelved_node](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [netbox_device_interfaces.created](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.existing](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
 | [netbox_device_interfaces.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |
+| [netbox_device_role.anchor](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_role.gateway](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_role.node](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_role.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_role) | data source |
 | [netbox_device_type.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_type) | data source |
+| [netbox_device_type.mounted_switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_type) | data source |
+| [netbox_devices.anchors](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/devices) | data source |
 | [netbox_devices.nodes](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/devices) | data source |
 | [netbox_devices.switch](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/devices) | data source |
 | [netbox_manufacturers.lab](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/manufacturers) | data source |

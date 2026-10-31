@@ -3,6 +3,8 @@ locals {
   rack_components = local.rack_inventory.components
   shelved_nodes = {
     optiplex = { rack = "folly", shelf = "U6, right-hand side" }
+    riptide  = { rack = "folly", shelf = "U5, left-hand side" }
+    shale    = { rack = "folly", shelf = "U5, right-hand side" }
   }
   mounted_devices = {
     folly_gateway = { rack = "folly", unit = 12 }
@@ -16,6 +18,29 @@ locals {
     flatten([for c in values(local.rack_components) : range(c.unit, c.unit + local.rack_inventory.models[c.model].height) if c.rack == rack]),
     [for d in values(local.mounted_devices) : d.unit if d.rack == rack],
   ) }
+}
+
+data "netbox_device_type" "mounted_switch" {
+  slug = "ubiquiti-usw-24-poe"
+}
+
+resource "restapi_object" "mounted_type" {
+  for_each = {
+    gateway = data.netbox_device_type.lab["UDMPRO"].id
+    switch  = data.netbox_device_type.mounted_switch.id
+  }
+  path                    = "/dcim/device-types"
+  object_id               = tostring(each.value)
+  create_method           = "PATCH"
+  create_path             = "/dcim/device-types/{id}/"
+  read_path               = "/dcim/device-types/{id}/"
+  update_path             = "/dcim/device-types/{id}/"
+  destroy_method          = "PATCH"
+  destroy_path            = "/dcim/device-types/{id}/"
+  destroy_data            = jsonencode({})
+  ignore_server_additions = true
+  data                    = jsonencode({ u_height = 1 })
+  depends_on              = [netbox_permission.terraform_manage]
 }
 
 resource "netbox_device_role" "rack_component" {
@@ -79,6 +104,7 @@ resource "restapi_object" "mounted_device" {
     position = each.value.unit
     face     = "front"
   })
+  depends_on = [restapi_object.mounted_type]
 }
 
 resource "restapi_object" "shelved_node" {
@@ -93,5 +119,39 @@ resource "restapi_object" "shelved_node" {
   destroy_path            = "/dcim/devices/{id}/"
   destroy_data            = jsonencode({})
   ignore_server_additions = true
-  data                    = jsonencode({ rack = tonumber(netbox_rack.lab[each.value.rack].id) })
+  data                    = jsonencode({ rack = tonumber(netbox_rack.lab[each.value.rack].id), description = "Shelf ${each.value.shelf}" })
+}
+
+data "netbox_device_role" "anchor" {
+  name = "anchor"
+}
+
+data "netbox_devices" "anchors" {
+  filter {
+    name  = "site_id"
+    value = data.netbox_site.folly.id
+  }
+  filter {
+    name  = "role_id"
+    value = data.netbox_device_role.anchor.id
+  }
+}
+
+locals {
+  anchor_ids = { for d in data.netbox_devices.anchors.devices : d.name => d.device_id }
+}
+
+resource "restapi_object" "rack_anchor" {
+  for_each                = toset(["capsule", "spore", "forge"])
+  path                    = "/dcim/devices"
+  object_id               = tostring(local.anchor_ids[each.key])
+  create_method           = "PATCH"
+  create_path             = "/dcim/devices/{id}/"
+  read_path               = "/dcim/devices/{id}/"
+  update_path             = "/dcim/devices/{id}/"
+  destroy_method          = "PATCH"
+  destroy_path            = "/dcim/devices/{id}/"
+  destroy_data            = jsonencode({})
+  ignore_server_additions = true
+  data                    = jsonencode({ rack = tonumber(netbox_rack.lab["folly"].id), description = "Anchor on top of folly's 19-inch rack" })
 }
