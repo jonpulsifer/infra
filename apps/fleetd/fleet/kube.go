@@ -41,6 +41,8 @@ var (
 	HardwareResource = Resource{"tinkerbell.org", "v1alpha1", "hardware", "Hardware"}
 	WorkflowResource = Resource{"tinkerbell.org", "v1alpha1", "workflows", "Workflow"}
 	MachineResource  = Resource{"bmc.tinkerbell.org", "v1alpha1", "machines", "Machine"}
+	JobResource      = Resource{"bmc.tinkerbell.org", "v1alpha1", "jobs", "Job"}
+	TaskResource     = Resource{"bmc.tinkerbell.org", "v1alpha1", "tasks", "Task"}
 )
 
 func (r Resource) apiVersion() string { return r.Group + "/" + r.Version }
@@ -223,6 +225,26 @@ func (o Object) FailedAction() (name, state, message string) {
 		}
 	}
 	return "", "", ""
+}
+
+// Condition is the status.conditions entry of the type: its status, message
+// and time, the last zero when the entry carries none. It is false when the
+// object has no such entry.
+func (o Object) Condition(kind string) (status, message string, at time.Time, ok bool) {
+	st, _ := o["status"].(map[string]any)
+	conds, _ := st["conditions"].([]any)
+	for _, c := range conds {
+		cond, _ := c.(map[string]any)
+		if t, _ := cond["type"].(string); t != kind {
+			continue
+		}
+		status, _ = cond["status"].(string)
+		message, _ = cond["message"].(string)
+		s, _ := cond["time"].(string)
+		at, _ = time.Parse(time.RFC3339, s)
+		return status, message, at, true
+	}
+	return "", "", time.Time{}, false
 }
 
 // Annotate sets annotations on an existing object with a merge patch that

@@ -50,9 +50,15 @@ func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retire {
 		t.Fatalf("patches %v", nb.patches)
 	}
-	want := "fleetd: the retirement ends Workflow " + prov + " (provision) and starts " + retire + "; a power cycle stops " + prov
+	want := "fleetd: the retirement ends Workflow " + prov + " (provision) and starts " + retire + ": the BMC powered the machine off (Rufio Job stop-" + prov + "), which stopped " + prov + ", and fleetd deleted it"
 	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
 		t.Fatalf("journals %v", nb.journals)
+	}
+	if got := kube.get(wfBase + retire).Annotations()[SupersedesAnnotation]; got != prov {
+		t.Errorf("the retirement does not name the run it superseded: %q", got)
+	}
+	if kube.posts(jobBase) != 1 || kube.get(jobBase+"stop-"+prov) != nil {
+		t.Errorf("the stop Job was not made once and pruned: %v", kube.log)
 	}
 	nb.set("last_workflow", retire)
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -209,8 +215,30 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if kube.get(wfBase+retire) != nil || len(nb.journalWith("deleted the unfinished retirement Workflow "+retire)) != 1 {
+		if kube.get(wfBase+retire) != nil || len(nb.journalWith("which stopped the retirement Workflow "+retire+", and fleetd deleted it")) != 1 {
 			t.Fatalf("the retirement survived: journals %v", nb.journals)
+		}
+		post, del := kube.logIndex("POST "+strings.TrimSuffix(jobBase, "/")), kube.logIndex("DELETE "+wfBase+retire)
+		if post < 0 || post > del || kube.posts(jobBase) != 1 {
+			t.Fatalf("the retirement was deleted before the power-off: %v", kube.log)
+		}
+	})
+	t.Run("a BMC that refuses keeps it", func(t *testing.T) {
+		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire})}, ifaces: riptideIfaces()}
+		kube := &fakeKube{objects: map[string]Object{wfBase + retire: running()}, bmc: "refuse"}
+		r, done := newTest(t, nb, kube)
+		defer done()
+		for range 3 {
+			if err := r.Reconcile(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if names := kube.workflows(); len(names) != 1 || names[0] != retire || kube.deletes(retire) != 0 || kube.posts(jobBase) != 1 {
+			t.Fatalf("workflows %v, Job posts %d", names, kube.posts(jobBase))
+		}
+		want := "the cancellation could not stop the retirement Workflow " + retire + ": the BMC did not power the machine off (Rufio Job stop-" + retire + " failed: failed to perform PowerAction: 500 Internal Server Error)"
+		if len(nb.journals) != 1 || len(nb.journalWith(want)) != 1 || len(nb.journalWith("Power the machine off by hand")) != 1 || nb.journals[0]["kind"] != "danger" {
+			t.Fatalf("journals %v", nb.journals)
 		}
 	})
 	t.Run("without a BMC", func(t *testing.T) {
@@ -226,7 +254,7 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 		if names := kube.workflows(); len(names) != 1 || names[0] != retire || kube.deletes(retire) != 0 {
 			t.Fatalf("workflows %v", names)
 		}
-		if len(nb.journalWith("no BMC can stop the machine")) != 1 {
+		if len(nb.journalWith("no BMC can stop the machine, so the cancellation cannot stop the retirement")) != 1 {
 			t.Fatalf("journals %v", nb.journals)
 		}
 	})

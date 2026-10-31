@@ -169,6 +169,17 @@ config stays for the node's next try. Each reconcile pass also drops the unread 
 that is not `planned`, or that NetBox no longer lists as live. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
 burn state.
 
+`FLEET_CONFIG_DIR` is a tmpfs, so a reboot of spore drops every config that waits, and the record
+of a served one whose release NetBox has not taken. A run goes on through the outage, so its node
+boots its install and asks for a config fleetd no longer holds. fleetd keeps the configs off disk on
+purpose: each carries the cluster's secrets, a control plane's its CA keys, and a file deleted from
+flash is not gone. A fetch for a UUID with no config is looked up in NetBox by `smbios_uuid`, at most
+once every ten minutes per machine and once a second in all, since the endpoint is
+unauthenticated. When it is a `planned` device whose `last_workflow` is its provision, fleetd counts
+`fleet_install_config_missing_total` on each lookup and journals once per run that the node asks
+for a config fleetd does not hold; the owner sets `desired_action` to `provision`. A UUID NetBox
+does not hold is only logged.
+
 ## NetBox contract
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
@@ -219,19 +230,44 @@ and the journal line ends `desired_action changed to <action> while fleetd start
 edit inside the one round trip between that read and the PATCH is still overwritten.
 
 A device set `decommissioning` while a run of another action goes gets its retirement at once
-when it has a BMC. In one pass fleetd reads the run again, deletes it with that read's
-`resourceVersion`, creates the retire Workflow with `bootMode: netboot`, and journals `the retirement ends Workflow X
-(<action>) and starts Y; a power cycle stops X`. Rufio's power cycle stops the run's current
-action before the retirement's first. A run that changed between the read and the delete answers
-409 and stays; the journal says so once, and the next pass tries again. A device without a BMC keeps the run: a deleted run's current action
-goes on, writes the disk and leaves the agent stuck reporting it. The journal says once that the
-retirement waits for X and that powering the machine off ends it, and the retirement starts on
-the pass after X ends.
+when its BMC can stop the machine. A deleted run's current action goes on, writes the disk and
+leaves the agent stuck reporting it, so fleetd deletes the run only once the machine is off. It
+creates the Rufio Job `stop-X`, one `powerAction: off`, and waits up to 30 seconds for it; Rufio
+completes a power-off only once the BMC reports the machine off. A Job still running is the next
+pass's to read. Once it completes, fleetd reads the run again, deletes it with that read's
+`resourceVersion`, creates the retire Workflow with `bootMode: netboot` and the annotation
+`lolwtf.ca/supersedes: X`, and journals `the retirement ends Workflow X (<action>) and starts Y:
+the BMC powered the machine off (Rufio Job stop-X), which stopped X, and fleetd deleted it`. A run
+that changed between the read and the delete answers 409 and stays; the journal says so once, and
+the next pass tries again. A run that ended meanwhile is not deleted, and the retirement starts as
+after any run. Neither a `Contactable` Machine nor a power-status read says the BMC will act: a BMC
+that answers both can refuse every `ComputerSystem.Reset`. Only the completed power-off does.
 
-A device the owner moves out of `decommissioning` has its unfinished retirement deleted the same
-way, with a BMC and a fresh read's `resourceVersion`, and journaled; an action already running on the
-machine runs to its end, and the next run's power cycle stops it. Without a BMC the retirement is
-kept and journaled, and once it passes its global timeout it ends as any run does.
+A BMC that refuses the power-off, and a device without a BMC, keep the run. The journal says once
+that the retirement waits for X, with the failed Task's message from the Rufio Job when there is
+one, and the retirement starts on the pass after X ends. Powering the machine off by hand ends X at
+its global timeout. Each pass deletes a `stop-` Job, with its Tasks, once its run is gone or has
+ended.
+
+A retirement that ends `FAILED` at its boot job, `netboot-Y`, ran no action: Tinkerbell's controller
+fails the Workflow from `PREPARING` within seconds of the Rufio Job's failure, with the condition
+`BootJobFailed`, and nothing retries it. fleetd journals it once as `danger`, with the failed Task's
+message, the run the retirement superseded, and when it tries again. While the device stays
+`decommissioning`, fleetd starts a new retirement 5 minutes after the failure, then waits twice as
+long after each failure, up to 4 hours; the annotation `lolwtf.ca/attempt` counts. The new run goes
+through `start`'s rules: the failed one is deleted first, an unfinished run is never doubled, and a
+run whose record NetBox refused is adopted. A retirement that failed at an action is the owner's,
+as before. A provision, wipe or attest that ends at its boot job is journaled with the Job's
+message and runs again only when the owner sets `desired_action`.
+
+A device the owner moves out of `decommissioning` cancels its unfinished retirement, whose wipe would
+destroy the disk the owner chose to keep, so fleetd stops it the same way: the `stop-` Job powers the
+machine off, then a fresh read's `resourceVersion` deletes the retirement, and the journal says the
+disk may be partly wiped. A BMC that refuses the power-off keeps the retirement running, and the
+`danger` journal line says once that the cancellation could not stop it, with the BMC's answer, and
+that powering the machine off by hand stops it. Without a BMC the retirement is kept and the journal
+says the cancellation cannot stop it. A kept retirement ends at its global timeout once the machine
+is off, as any run does.
 
 A node retired mid-install never fetches its config: [Config](#config) drops it.
 

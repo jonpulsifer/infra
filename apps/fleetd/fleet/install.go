@@ -50,7 +50,11 @@ type Installer struct {
 	mu         sync.Mutex
 	prepared   bool
 	journaled  map[string]time.Time
-	unreleased map[string]bool
+	lastLookup time.Time
+	// missingTold names the machine and run pairs whose missing config is
+	// journaled.
+	missingTold map[string]bool
+	unreleased  map[string]bool
 	// releasing names the codes whose release runs now, so a pass's retry
 	// and a fetch's release never write it twice.
 	releasing map[string]bool
@@ -390,18 +394,51 @@ func (i *Installer) releaseOnce(ctx context.Context, p Pending) {
 	}
 }
 
-// notFound journals a fetch with a code other than the one rendered for the
-// machine. A machine gets at most one such entry per notFoundEvery; a fetch
-// for a UUID with no config is only logged, so a flood of guesses reaches
-// neither NetBox nor the journal, and a fetch of a config past its TTL is
-// the expiry's to journal.
+// missingLookupEvery spaces the NetBox lookups that fetches for UUIDs with no
+// config cause, across every UUID, since the endpoint is unauthenticated.
+const missingLookupEvery = time.Second
+
+// notFound journals a 404 the owner must act on, and logs any other. A
+// fetch with a code other than the one rendered for the machine is
+// journaled. So is a fetch for a machine fleetd holds no config for, when
+// NetBox shows a planned device whose last run is a provision: a reboot of
+// spore since the render, or the TTL, dropped its config, and the node asks
+// in vain until the owner provisions it again. That one is counted on every
+// lookup, so its alert lasts while the node asks, and journaled once per run.
+// A machine causes at most one NetBox lookup per notFoundEvery, and all of
+// them together one per missingLookupEvery, so a flood of guesses reaches
+// NetBox at a bounded rate and the journal not at all. A fetch with the held
+// code of a config past its TTL is the expiry's to journal.
 func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Time) {
-	p, ok := i.Configs.Holds(uuid)
-	if !ok || p.Code == code {
+	p, held := i.Configs.Holds(uuid)
+	if held && p.Code == code {
 		log.Printf("talos-config: 404 for uuid %q", uuid)
 		return
 	}
+	if !i.lookupAllowed(uuid, held, now) {
+		log.Printf("talos-config: 404 for uuid %q", uuid)
+		return
+	}
+	var err error
+	if held {
+		err = i.otherCode(ctx, p, now)
+	} else {
+		err = i.missing(ctx, uuid, now)
+	}
+	if err != nil {
+		log.Printf("talos-config: journal the 404 for uuid %q: %v", uuid, err)
+		i.mu.Lock()
+		delete(i.journaled, uuid)
+		i.mu.Unlock()
+	}
+}
+
+// lookupAllowed marks the machine's lookup unless one was made within
+// notFoundEvery, or, for a UUID with no config, any was made within
+// missingLookupEvery. The caller unmarks a lookup that failed.
+func (i *Installer) lookupAllowed(uuid string, held bool, now time.Time) bool {
 	i.mu.Lock()
+	defer i.mu.Unlock()
 	if i.journaled == nil {
 		i.journaled = map[string]time.Time{}
 	}
@@ -410,25 +447,65 @@ func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Ti
 			delete(i.journaled, k)
 		}
 	}
-	_, recent := i.journaled[uuid]
-	if !recent {
-		i.journaled[uuid] = now
+	if _, recent := i.journaled[uuid]; recent {
+		return false
 	}
-	i.mu.Unlock()
-	if recent {
-		return
+	if !held {
+		if now.Sub(i.lastLookup) < missingLookupEvery {
+			return false
+		}
+		i.lastLookup = now
 	}
+	i.journaled[uuid] = now
+	return true
+}
+
+// otherCode journals a fetch with a code other than the held one.
+func (i *Installer) otherCode(ctx context.Context, p Pending, now time.Time) error {
 	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
-	if err == nil {
-		comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config with a code other than the one rendered for it, and got 404", timestamp(now))
-		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	if err != nil {
+		return err
+	}
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config with a code other than the one rendered for it, and got 404", timestamp(now))
+	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+}
+
+// missing counts and journals a fetch by a planned device's node after its
+// provision, for which fleetd holds no config. A UUID NetBox does not hold
+// is only logged.
+func (i *Installer) missing(ctx context.Context, uuid string, now time.Time) error {
+	d, err := i.NetBox.BySMBIOSUUID(ctx, i.Site, uuid)
+	if errors.Is(err, ErrNoDevice) {
+		log.Printf("talos-config: 404 for uuid %q, which NetBox does not hold", uuid)
+		return nil
 	}
 	if err != nil {
-		log.Printf("journal the 404 of %s: %v", p.Node, err)
-		i.mu.Lock()
-		delete(i.journaled, uuid)
-		i.mu.Unlock()
+		return err
 	}
+	if d.Status != "planned" || !strings.HasPrefix(d.LastWorkflow, "provision-"+d.Name+"-") {
+		log.Printf("talos-config: 404 for %s, which is %s with last_workflow %q", d.Name, d.Status, d.LastWorkflow)
+		return nil
+	}
+	i.Metrics.ConfigMissing.Add(1)
+	key := uuid + "/" + d.LastWorkflow
+	i.mu.Lock()
+	told := i.missingTold[key]
+	i.mu.Unlock()
+	if told {
+		return nil
+	}
+	Audit("fleet.expire", i.Site, d, d.LastWorkflow, "config missing: the node asked for one fleetd does not hold")
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: a reboot of spore since the render of %s drops it, as does the TTL. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), d.LastWorkflow)
+	if err := i.NetBox.Update(ctx, d, "", nil, "warning", comment); err != nil {
+		return err
+	}
+	i.mu.Lock()
+	if i.missingTold == nil {
+		i.missingTold = map[string]bool{}
+	}
+	i.missingTold[key] = true
+	i.mu.Unlock()
+	return nil
 }
 
 // Tick expires the configs nobody fetched within their TTL, retries the

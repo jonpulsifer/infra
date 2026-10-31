@@ -43,7 +43,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 1. In NetBox, set the device's status to `decommissioning`.
 
-   Result: within two minutes, `last_workflow` names `retire-<node>-<unix seconds>`. When another run of the node is going, such as an install, the journal says `the retirement ends Workflow <run> (<action>) and starts retire-<node>-<unix seconds>`: Rufio's power cycle stops that run, and fleetd drops the config it rendered for the install.
+   Result: within two minutes, `last_workflow` names `retire-<node>-<unix seconds>`. When another run of the node is going, such as an install, fleetd first has the BMC power the machine off through the Rufio Job `stop-<run>`, and the journal then says `the retirement ends Workflow <run> (<action>) and starts retire-<node>-<unix seconds>: the BMC powered the machine off`. fleetd drops the config it rendered for the install.
 
 2. Watch the `Workflow`.
 
@@ -93,11 +93,13 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | No `retire-` `Workflow` | The device has no primary MAC, `install_disk` or `install_disk_serial`, or fleetd is down | Read the device's journal, and `journalctl -u fleetd` on spore |
-| The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
+| The `Workflow` ends `FAILED` within seconds with `BootJobFailed`, and the `danger` journal line says `ended FAILED before any action ran: its BMC job netboot-<workflow> failed: <message>` | The BMC refused a power action or did not answer, so no action ran and nothing was wiped | Fix the BMC: the message is the BMC's answer, and `kubectl -n tinkerbell get machine <node> -o yaml` on spore shows whether Rufio reaches it. fleetd starts the retirement again at the time the line gives, 5 minutes after the first failure and twice as long after each one, up to 4 hours, while the device stays `decommissioning` |
+| The journal says `the retirement waits for Workflow <run> (<action>): the BMC did not power the machine off` | The BMC refused the power-off that stops the run, so fleetd keeps the run: deleting it would not stop its action | Wait: the retirement starts on the pass after the run ends. Fix the BMC, or the retirement's own boot job fails the same way. Powering the machine off by hand ends the run at its global timeout |
 | `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk. Nothing was wiped | Read the machine's disks, and correct `disk` or `disk_serial` in the nodes file, or wipe the disk at the machine |
-| The device stays `decommissioning` after a failed run | fleetd journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
+| The device stays `decommissioning` after a run that failed at an action | fleetd journals a failed retirement once and stops; it retries only a retirement that failed at its BMC job | Read the journal line, which names the action, and the action's output with `journalctl -u tinkerbell \| grep <address>` on spore. Wipe the disk at the machine, then set the status to `offline` |
 | The journal says `the retirement waits for Workflow <run>` | The device has no BMC, so nothing can stop the run that is going | Power the machine off. The run ends at its global timeout, and the retirement starts on the pass after; power the machine on, and it network-boots |
-| The device went back out of `decommissioning` mid-retirement | fleetd deletes the retirement when the device has a BMC and journals it; an action already running on the machine runs to its end, so the disk may be partly wiped | Set `desired_action` to `provision` to install the node again |
+| The device went back out of `decommissioning` mid-retirement | fleetd has the BMC power the machine off, which stops the wipe, then deletes the retirement and journals it. The disk may be partly wiped | Set `desired_action` to `provision` to install the node again |
+| The journal says `the cancellation could not stop the retirement Workflow <run>` or `the cancellation cannot stop the retirement` | The BMC refused the power-off, or the device has no BMC, so the retirement goes on and wipes the disk | Power the machine off by hand. The retirement then ends at its global timeout, and a new `desired_action` starts after it |
 
 ## Related
 
