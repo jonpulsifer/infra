@@ -36,13 +36,24 @@ resource "netbox_permission" "terraform_manage" {
   object_types = [
     "dcim.cable",
     "dcim.device",
+    "dcim.devicerole",
     "dcim.devicetype",
+    "dcim.frontport",
+    "dcim.rearport",
+    "dcim.interface",
     "dcim.interfacetemplate",
+    "dcim.macaddress",
+    "dcim.manufacturer",
+    "dcim.platform",
+    "dcim.rack",
+    "dcim.site",
     "extras.customfield",
     "extras.customfieldchoiceset",
     "extras.eventrule",
     "extras.webhook",
     "ipam.ipaddress",
+    "ipam.prefix",
+    "ipam.vlan",
     "users.objectpermission",
     "users.user",
   ]
@@ -59,6 +70,7 @@ resource "netbox_permission" "terraform_read" {
     "dcim.manufacturer",
     "dcim.platform",
     "dcim.site",
+    "extras.tag",
   ]
   users = [tonumber(netbox_user.terraform.id)]
 }

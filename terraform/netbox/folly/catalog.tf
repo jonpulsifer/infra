@@ -97,8 +97,12 @@ data "netbox_manufacturers" "node" {
   }
 }
 
-# The switch the nodes' cables reach: the site's one device with the switch role.
+# Select the node switch by name so other switches can share its role and site.
 data "netbox_devices" "switch" {
+  filter {
+    name  = "name"
+    value = one(keys(yamldecode(file("${path.module}/../../network/unifi/folly/clients.yaml")).switches))
+  }
   filter {
     name  = "site_id"
     value = data.netbox_site.folly.id
@@ -111,7 +115,7 @@ data "netbox_devices" "switch" {
   lifecycle {
     postcondition {
       condition     = length(self.devices) == 1
-      error_message = "NetBox's site folly must hold exactly one device with the role switch."
+      error_message = "NetBox must hold the folly node switch named in UniFi's clients.yaml."
     }
   }
 }

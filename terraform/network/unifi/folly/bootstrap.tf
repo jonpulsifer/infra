@@ -37,7 +37,7 @@ locals {
 # the gateway (kubernetes_to_boot in firewall.tf). No switch port carries the
 # network untagged, so it has no DHCP.
 resource "unifi_network" "bootstrap" {
-  name               = "bootstrap"
+  name               = local.network_catalog.bootstrap.name
   subnet             = local.bootstrap_cidr
   vlan               = tonumber(local.anchor_topology.BOOTSTRAP_VLAN)
   domain_name        = local.lab_domain

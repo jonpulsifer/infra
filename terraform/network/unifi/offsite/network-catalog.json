@@ -1,0 +1,10 @@
+{
+  "default": {
+    "name": "Default",
+    "subnet": "192.168.1.1/24"
+  },
+  "kubernetes": {
+    "name": "Kubernetes",
+    "vlan": 2
+  }
+}

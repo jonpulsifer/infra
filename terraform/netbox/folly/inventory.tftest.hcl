@@ -1,6 +1,15 @@
 # The nodes file's checks, against fixtures in testdata/ on documentation
 # addresses, with every provider mocked.
 mock_provider "netbox" {
+  mock_resource "netbox_device_rear_port" { defaults = { id = "1" } }
+  mock_resource "netbox_device_front_port" { defaults = { id = "1" } }
+  mock_resource "netbox_rack" { defaults = { id = "1" } }
+  mock_resource "netbox_manufacturer" { defaults = { id = "1" } }
+  mock_resource "netbox_device_role" { defaults = { id = "1" } }
+  mock_resource "netbox_platform" { defaults = { id = "1" } }
+  mock_resource "netbox_site" { defaults = { id = "1" } }
+  mock_resource "netbox_device_interface" { defaults = { id = "1" } }
+  mock_data "netbox_device_type" { defaults = { id = "1" } }
   mock_resource "netbox_custom_field_choice_set" {
     defaults = { id = "1" }
   }
@@ -46,7 +55,7 @@ override_module {
 override_module {
   target = module.anchor_topology
   outputs = {
-    data = { CAPSULE_IP = "198.51.100.1", SPORE_IP = "198.51.100.2" }
+    data = { CAPSULE_IP = "198.51.100.1", SPORE_IP = "198.51.100.2", ANCHOR_CIDR = "198.51.100.0/24", FUTURE_CIDR = "203.0.113.0/24", BOOTSTRAP_CIDR = "198.18.0.0/24", BOOTSTRAP_VLAN = "9" }
   }
 }
 
@@ -85,7 +94,7 @@ run "grants_fleetd_no_delete" {
   command = plan
 
   plan_options {
-    target = [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add]
+    target = [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add, netbox_permission.terraform_read]
   }
 
   variables {
@@ -95,6 +104,10 @@ run "grants_fleetd_no_delete" {
   assert {
     condition     = alltrue([for p in [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add] : !contains(p.actions, "delete")])
     error_message = "fleetd deletes nothing in NetBox, so it must hold no delete permission."
+  }
+  assert {
+    condition     = contains(netbox_permission.terraform_read.object_types, "extras.tag") && netbox_permission.terraform_read.actions == toset(["view"])
+    error_message = "Terraform must be able to look up existing tags without managing them."
   }
 }
 
@@ -201,4 +214,60 @@ run "rejects_a_disk_serial_on_a_model" {
   }
 
   expect_failures = [data.netbox_site.folly]
+}
+
+run "lab_preserves_lifecycle_and_records_both_racks" {
+  command = plan
+  assert {
+    condition     = alltrue([for t in netbox_device_type.lab : can(regex("^[a-z0-9_-]+$", t.slug))])
+    error_message = "Device-type slugs must contain only NetBox-compatible characters."
+  }
+  plan_options {
+    target = [restapi_object.lab_declared, restapi_object.lab_rack, netbox_rack.lab, netbox_ip_address.lab]
+  }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = alltrue([for d in restapi_object.lab_rack : keys(jsondecode(d.data)) == ["rack"]])
+    error_message = "A confirmed rack assignment must preserve the device's other fields and unit position."
+  }
+  assert {
+    condition     = alltrue([for d in restapi_object.lab_declared : !contains(keys(jsondecode(d.data)), "status") && !contains(keys(jsondecode(d.data)), "custom_fields") && !contains(keys(jsondecode(d.data)), "rack")])
+    error_message = "Inventory updates must preserve lifecycle, custom fields and rack placement."
+  }
+  assert {
+    condition     = netbox_rack.lab["folly"].u_height == 12 && netbox_rack.lab["folly"].width == 19 && netbox_rack.lab["oldschool"].u_height == 8 && netbox_rack.lab["oldschool"].width == 10
+    error_message = "Each site must hold the owner's specified rack."
+  }
+  assert {
+    condition     = netbox_ip_address.lab["retrofit"].ip_address == "${jsondecode(module.oldschool_topology.data.NODE_ADDRESSES).retrofit}/${split("/", module.oldschool_topology.data.K8S_NODE_CIDR)[1]}"
+    error_message = "Oldschool node addresses must come from the offsite topology."
+  }
+}
+
+run "rack_elevations_fit_and_record_the_current_stack" {
+  command = plan
+  plan_options { target = [netbox_device.rack_component] }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = netbox_device.rack_component["oldschool-compute-stack"].rack_position == 1 && netbox_device_type.rack_component["stack-10"].u_height == 3
+    error_message = "The current oldschool compute stack occupies U1 through U3."
+  }
+  assert {
+    condition     = netbox_device.rack_component["folly-power-distribution-pro"].rack_position == 1 && netbox_device_type.rack_component["ubiquiti-pdu"].u_height == 2 && netbox_device.rack_component["folly-cyberpower-pdu"].rack_position == 3
+    error_message = "Folly's Ubiquiti PDU occupies U1–U2, below the CyberPower PDU at U3."
+  }
+}
+
+run "oldschool_cables_trace_through_the_panel" {
+  command = plan
+  plan_options { target = [netbox_cable.oldschool_node, netbox_cable.oldschool_patch_switch, netbox_cable.oldschool_uplink_switch, netbox_cable.oldschool_uplink_gateway] }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = netbox_device_front_port.oldschool["retrofit"].name == "8" && netbox_device_front_port.oldschool["oldschool"].name == "9" && netbox_device_front_port.oldschool["hotrod"].name == "10" && netbox_device_front_port.oldschool["uplink"].name == "12"
+    error_message = "Node and uplink paths must use the owner's confirmed panel ports."
+  }
+  assert {
+    condition     = alltrue([for c in netbox_cable.oldschool_node : one(c.b_termination).object_type == "dcim.rearport"]) && alltrue([for c in netbox_cable.oldschool_patch_switch : one(c.a_termination).object_type == "dcim.frontport"])
+    error_message = "Nodes and switches must connect to opposite sides of the panel."
+  }
 }
