@@ -12,9 +12,9 @@ specs:
   storage: 256 GB SK hynix SC311 SATA SSD
   os: Talos Linux 1.14
   firmware: BIOS 1.27.0
-  tpm: Nuvoton TPM 2.0, discrete and on, with EK certificates in NV
+  tpm: Nuvoton TPM 2.0 with EK certificates in NV; the running node has no /dev/tpmrm0, so tpm_off in clusters/folly/talos/nodes.tf treats it as off
   boot: Image Factory systemd-boot UKI, Secure Boot off
-  disks: plain until the signed install, then sealed to the TPM
+  disks: plain; a signed install seals them to the TPM after tpm_off drops optiplex
 ---
 
 optiplex is the only control-plane node of the folly [Kubernetes](../platform/kubernetes.md) cluster. It runs [Talos Linux](../platform/kubernetes/talos.md), and `clusters/folly/talos/` configures it.

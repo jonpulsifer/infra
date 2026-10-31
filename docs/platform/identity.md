@@ -153,7 +153,7 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 ## Live state
 
-riptide, surge, swell and optiplex carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. optiplex's agent does not start, since its node has no `/dev/tpmrm0`, and fleetd does not list optiplex, whose verdict does not pass. swell is down. The allow list holds the EK hashes of riptide and optiplex. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
+riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 

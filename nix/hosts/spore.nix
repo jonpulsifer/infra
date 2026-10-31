@@ -12,7 +12,6 @@ let
   # its alias and workloads, by EK hash or LDevID CN, come from fleetd's spire-nodes.json as fleet-
   # entries, so a node fleetd withdraws loses them.
   ekHashes = {
-    optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
   # Kubernetes service accounts that get an SVID on every node fleetd registers.
