@@ -70,7 +70,7 @@ the installed Talos to ask DNS for its config host. Delete that VM, or make your
 tink-lab.sh vm create n1 --disk sys:8G --disk data:4G:virtio --disk fast:4G:nvme --install-disk /dev/vda
 tink-lab.sh provision n1             # a Workflow as fleetd makes it; Rufio power-cycles the VM into PXE
 tink-lab.sh wait n1 600              # until SUCCESS, FAILED or TIMEOUT; exits 0 on SUCCESS
-tink-lab.sh reconcile n1             # fleetd's pass: netboot off once no Workflow runs
+tink-lab.sh reconcile n1             # fleetd's pass: ends or nudges overdue Workflows, netboot off once none runs
 tink-lab.sh observe n1
 ```
 
@@ -83,6 +83,13 @@ Other commands:
 - `provision --action wipe|attest|retire` runs the other fleetd actions.
 - `--set KEY=VALUE` overrides a `hardwareMap` key, and `--unset KEY` leaves one out, as a controller
   that predates the key would. A test that does this must say so.
+- `reconcile NAME [--interval S] [--rv RV] [--list FILE]` follows fleetd's `nudgeOverdue`: an
+  unfinished Workflow with a `globalExecutionStop` more than the interval (default 120 s,
+  `FLEET_INTERVAL`) past it gets the `lolwtf.ca/overdue-at` annotation; one with none is deleted
+  once its creation plus `status.globalTimeout` (1800 s if missing) is more than the interval past,
+  through a delete with a `resourceVersion` precondition (409 keeps it). Retirements are skipped.
+  `--rv` sends another precondition and `--list` acts on a saved earlier listing, which stand in
+  for a report that lands between fleetd's list and its delete.
 - `--again` creates a second Workflow while one runs.
 - `--no-boot` leaves out the boot mode, as fleetd does for a device without a BMC or a machine that
   waits in HookOS. Rufio does not power-cycle the VM, and the agent of the boot it is in takes the

@@ -17,7 +17,7 @@
 #   template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the
 #                                       provision Template, or of FILE, with other timeouts
 #   slow-installer SECONDS              the class's installer, writing ticks to its disk first
-#   reconcile NAME | wait NAME TIMEOUT [STATE]
+#   reconcile NAME [--interval S] [--rv RV] [--list FILE] | wait NAME TIMEOUT [STATE]
 #   power NAME on|off|soft|cycle|status
 #   cut NAME [--when COND] [--delay S] [--on-after S]
 #   agent-net NAME cut|restore [--when COND] [--reject]
@@ -798,13 +798,80 @@ provision() {
     "hardwareMap=$(jq -c .spec.hardwareMap <<<"$wf")"
 }
 
-# reconcile sets the Hardware's netboot flags as a fleetd pass does: on while a Workflow for the
-# machine has not finished, off otherwise.
+# reconcile is one fleetd pass for the machine (Reconciler.device in apps/fleetd/fleet/reconcile.go):
+# nudgeOverdue, then the Hardware's netboot flags, on while a Workflow has not finished and off
+# otherwise. Like fleetd, it lists the machine's Workflows once, and acts on that list.
+#   - An unfinished Workflow with status.globalExecutionStop, more than INTERVAL past it, gets the
+#     lolwtf.ca/overdue-at annotation (annotateOverdue).
+#   - An unfinished, non-retire Workflow with none is deleted once creationTimestamp +
+#     status.globalTimeout (1800 s when missing) is more than INTERVAL past (endWithoutDeadline).
+#     The delete carries a resourceVersion precondition, so a write since the list answers 409 and
+#     keeps the Workflow. The deleted Workflow no longer counts for netboot.
+# --interval S is FLEET_INTERVAL (default 120, fleetd's 2m). --rv RV sends RV as the precondition
+# instead of the listed resourceVersion, which stands in for a write between fleetd's list and its
+# delete (the race); it applies to every Workflow ended in the pass. --list FILE acts on that saved
+# `workflows` listing instead of a fresh one, as fleetd acts on a list a report has outdated since.
 reconcile() {
-  local name=$1 netboot
+  local name=$1 netboot interval=120 rv="" w now wf_name kept="[]" listfile=""
+  shift
   need_vm "$name"
-  netboot=$(workflows "$name" | jq '[.[] | (.status.state // "") | ltrimstr("STATE_")
-    | select(. != "SUCCESS" and . != "FAILED" and . != "TIMEOUT")] | length > 0')
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --interval) interval=$2 && shift 2 ;;
+      --rv) rv=$2 && shift 2 ;;
+      --list) listfile=$2 && shift 2 ;;
+      *) die "reconcile: unknown $1" ;;
+    esac
+  done
+  local list
+  if [ -n "$listfile" ]; then list=$(cat "$listfile"); else list=$(workflows "$name"); fi
+  now=$(date +%s)
+  while read -r w; do
+    [ -n "$w" ] || continue
+    wf_name=$(jq -r .metadata.name <<<"$w")
+    if finished "$(jq -r '.status.state // ""' <<<"$w")"; then
+      kept=$(jq -c --argjson w "$w" '. + [$w]' <<<"$kept")
+      continue
+    fi
+    local stop created timeout
+    stop=$(jq -r '.status.globalExecutionStop // empty' <<<"$w")
+    if [ -n "$stop" ]; then
+      kept=$(jq -c --argjson w "$w" '. + [$w]' <<<"$kept")
+      if [ $((now - $(date -d "$stop" +%s))) -gt "$interval" ]; then
+        KUBE -n "$NS" annotate workflow "$wf_name" --overwrite "lolwtf.ca/overdue-at=$(date -u +%FT%TZ)" >/dev/null
+        event event=reconcile-overdue vm="$name" workflow="$wf_name" action=annotated stop="$stop"
+      fi
+      continue
+    fi
+    created=$(jq -r '.metadata.creationTimestamp // empty' <<<"$w")
+    timeout=$(jq -r '.status.globalTimeout // 0 | if . > 0 then . else 1800 end' <<<"$w")
+    if [ -z "$created" ] || [ "$(jq -r '.metadata.labels["lolwtf.ca/action"] // ""' <<<"$w")" = retire ] \
+      || [ $((now - $(date -d "$created" +%s) - timeout)) -le "$interval" ]; then
+      kept=$(jq -c --argjson w "$w" '. + [$w]' <<<"$kept")
+      continue
+    fi
+    local code body
+    body=$(jq -cn --arg rv "${rv:-$(jq -r .metadata.resourceVersion <<<"$w")}" \
+      '{apiVersion: "v1", kind: "DeleteOptions", preconditions: {resourceVersion: $rv}}')
+    code=$(inns curl -s -o "$dir/delete.out" -w '%{http_code}' -X DELETE --cacert "$dir/pki/ca.crt" \
+      --cert "$dir/pki/admin.crt" --key "$dir/pki/admin.key" -H 'Content-Type: application/json' -d "$body" \
+      "https://127.0.0.1:6443/apis/tinkerbell.org/v1alpha1/namespaces/$NS/workflows/$wf_name")
+    case $code in
+      200 | 404)
+        event event=reconcile-overdue vm="$name" workflow="$wf_name" action=deleted http="$code" \
+          created="$created" global_timeout="$timeout" precondition_rv="${rv:-$(jq -r .metadata.resourceVersion <<<"$w")}" \
+          journal="never reported its first action within its global timeout"
+        ;;
+      409)
+        kept=$(jq -c --argjson w "$w" '. + [$w]' <<<"$kept")
+        event event=reconcile-overdue vm="$name" workflow="$wf_name" action=kept http=409 \
+          precondition_rv="${rv:-$(jq -r .metadata.resourceVersion <<<"$w")}"
+        ;;
+      *) die "reconcile: end $wf_name: HTTP $code: $(cat "$dir/delete.out")" ;;
+    esac
+  done < <(jq -c '.[]' <<<"$list")
+  netboot=$(jq '[.[] | (.status.state // "") | ltrimstr("STATE_")
+    | select(. != "SUCCESS" and . != "FAILED" and . != "TIMEOUT")] | length > 0' <<<"$kept")
   apply_hardware "$name" "$netboot"
   event event=reconcile vm="$name" netboot="$netboot"
 }
@@ -1404,7 +1471,7 @@ case $cmd in
     ;;
   reconcile)
     tools
-    reconcile "${1:?reconcile needs a machine}"
+    reconcile "${1:?reconcile needs a machine}" "${@:2}"
     ;;
   wait)
     tools
