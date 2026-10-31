@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -30,6 +32,8 @@ const (
 	testUUID = "4c4c4544-0042-3510-8051-b4c04f565432"
 	testCode = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-abcde"
 	provWF   = "provision-riptide-1700000000"
+
+	configPath = "/talos/config?uuid=" + testUUID + "&code=" + testCode
 )
 
 type installTest struct {
@@ -874,6 +878,50 @@ func TestConfigsSurviveARestart(t *testing.T) {
 	it.in.Tick(context.Background())
 	if _, ok := it.in.Configs.Holds(testUUID); ok || it.in.Metrics.Expired.Load() != 1 {
 		t.Fatal("a config past its TTL survived the restart")
+	}
+}
+
+// A pass that runs past the TTL while a fetch waits on its NetBox read
+// leaves the config to the fetch: the node gets it, the release runs, and
+// nothing tells the owner to provision the node again.
+func TestTheTTLDoesNotDropAConfigUnderAFetch(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	var clock atomic.Int64
+	clock.Store(testNow.UnixNano())
+	it.in.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
+	reached, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	reads := it.nb.handler()
+	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			once.Do(func() { close(reached); <-release })
+		}
+		reads.ServeHTTP(w, r)
+	}))
+	defer held.Close()
+	it.in.NetBox = &NetBox{URL: held.URL, Token: "nbt_x.y", Client: held.Client()}
+	done := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		it.in.ServeHTTP(w, httptest.NewRequest(http.MethodGet, configPath, nil))
+		done <- w.Code
+	}()
+	<-reached
+	clock.Store(testNow.Add(3 * time.Hour).UnixNano())
+	it.in.Tick(context.Background())
+	close(release)
+	if code := <-done; code != http.StatusOK {
+		t.Fatalf("the fetch answered %d", code)
+	}
+	it.in.Drain()
+	if len(it.nb.journalWith("provision the node again")) != 0 || it.in.Metrics.Expired.Load() != 0 {
+		t.Fatalf("the TTL dropped a config under a fetch: %v", it.nb.journals)
+	}
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
+		t.Fatalf("the release: %v", p)
 	}
 }
 

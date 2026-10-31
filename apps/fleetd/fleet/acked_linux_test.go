@@ -67,8 +67,6 @@ func (it *installTest) serve(t *testing.T, writeTimeout time.Duration, useTLS bo
 	return s
 }
 
-const configPath = "/talos/config?uuid=" + testUUID + "&code=" + testCode
-
 // get fetches the config and waits for the handler and what it started.
 func (s *bootServer) get() (int, []byte, error) {
 	resp, err := s.Client().Get(s.URL + configPath)
@@ -123,7 +121,7 @@ func stalledGet(t *testing.T, addr string) net.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: enroll\r\n\r\n", configPath)
+	fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: enroll\r\nConnection: close\r\n\r\n", configPath)
 	head := make([]byte, 2048)
 	if _, err := io.ReadFull(c, head); err != nil {
 		t.Fatal(err)
@@ -198,6 +196,57 @@ func TestAnAnswerUnacknowledgedAtTheDeadlineDoesNotBurn(t *testing.T) {
 	}
 	if got := it.nb.journalWith("at the write deadline"); len(got) != 1 {
 		t.Fatalf("journals %v", it.nb.journals)
+	}
+}
+
+// The device leaves planned while a fetch writes its config. The journal
+// says the node may have it, and the fetch's end settles it: a node that
+// takes it all is journaled as having the withdrawn config, without the
+// active release; one that breaks off leaves it dropped and burned.
+func TestAWithdrawalDuringAFetchIsJournaledTruthfully(t *testing.T) {
+	for _, reads := range []bool{true, false} {
+		t.Run(fmt.Sprintf("reads=%v", reads), func(t *testing.T) {
+			it := newInstallTest(t, "planned", nil)
+			it.putConfig(t, bigConfig)
+			s := it.serve(t, 30*time.Second, false)
+			c := stalledGet(t, s.Listener.Addr().String())
+			defer c.Close()
+			it.nb.set("status", map[string]any{"value": "decommissioning"})
+			ctx := context.Background()
+			d, err := it.in.NetBox.BySerial(ctx, "folly", "MXL0172Q6L")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := it.in.Withdraw(ctx, d); err != nil {
+				t.Fatal(err)
+			}
+			if len(it.nb.journalWith("a fetch was writing its Talos config")) != 1 || len(it.nb.journalWith("the node gets no config")) != 0 {
+				t.Fatalf("the withdrawal's journal: %v", it.nb.journals)
+			}
+			if reads {
+				if _, err := io.Copy(io.Discard, c); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				c.Close()
+			}
+			if err := s.wait(5 * time.Second); err != nil {
+				t.Fatal(err)
+			}
+			if _, held := it.in.Configs.Holds(testUUID); held || !it.in.Configs.Spent(testUUID, testCode) {
+				t.Fatal("the withdrawn config was not dropped and burned")
+			}
+			got := it.nb.journalWith("the node fetched the config fleetd withdrew at")
+			if reads != (len(got) == 1) || journalCount(it.nb, "success") != 0 {
+				t.Fatalf("the fetch's end: %v", it.nb.journals)
+			}
+			if p := lastPatch(it.nb); p != nil && p["status"] != nil {
+				t.Fatalf("a withdrawn config's fetch changed the status: %v", p)
+			}
+			if !reads && len(it.in.Configs.Unreleased()) != 0 {
+				t.Fatal("a broken-off fetch left a record")
+			}
+		})
 	}
 }
 

@@ -172,8 +172,14 @@ answers, a fetch reads the device from NetBox, and serves the config only while 
 dropped, burned and journaled, and the fetch gets 404. So does a device NetBox no longer holds,
 without a journal. When NetBox does not answer within ten seconds, the fetch gets 503 and the
 config stays for the node's next try. Each reconcile pass also drops the unread config of a device
-that is not `planned`, or that NetBox no longer lists as live. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
-burn state.
+that is not `planned`, or that NetBox no longer lists as live. The TTL bounds when a fetch may
+start: a pass never expires a config a fetch holds, and expires it on a later pass if the fetch
+gives it back. A pass that withdraws a config a fetch holds marks it withdrawn and journals that a
+fetch was writing it, so the node may have it. The fetch's end settles it: when the node
+acknowledged it all, fleetd journals that the node fetched the withdrawn config and leaves the
+status as it is; otherwise the config is dropped and burned. A fetch logs that the config stays only
+when it does. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and burn state, and
+a config withdrawn under a fetch is dropped at the restart.
 
 `FLEET_CONFIG_DIR` is a tmpfs, so a reboot of spore drops every config that waits, and the record
 of a served one whose release NetBox has not taken. A run goes on through the outage, so its node
