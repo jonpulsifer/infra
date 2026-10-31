@@ -169,7 +169,7 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | Rejoin the cluster from a retired worker's disk | Not solved | A worker's config carries its own bootstrap token, which expires hours after the render (`apps/fleetd/fleet/jointoken.go`); the Talos root gives the workers fleetd installs a token no Secret holds; retirement deletes the node's Node, its kubelet's CSRs and its token (`apps/fleetd/fleet/drain.go`). | A disk image from before the wipe keeps the kubelet's client certificate, valid for up to a year, which Kubernetes cannot revoke, and the cluster-wide trustd token. A disk written before the per-node tokens holds the cluster-wide bootstrap token until the owner rotates it. |
 | Use the online issuer after management-host compromise | Not solved | YubiKey custody limits key extraction. | Authorized signing access and fleetd's other credentials remain valuable. |
 | Continue provisioning through loss of spore | Not solved | Boot services sit outside folly. | Spore remains a common dependency; this is not a redundant provisioning service. |
-| Prove that retirement erases all sensitive data | Not solved | The retirement workflow wipes the system disk. | A workflow result is not proof of physical media sanitization or erasure of backups. |
+| Prove that retirement erases all sensitive data | Not solved | The retirement workflow wipes the system disk and erases it whole by NVMe format, ATA secure erase, discard or overwrite, and checks sampled blocks afterwards. | A workflow result is not proof of physical media sanitization or erasure of backups. |
 
 ## 8. Failure behavior and acceptance
 

@@ -8,8 +8,8 @@
 # installs on, a provision of a worker class wipes, installs Talos and boots the disk; a provision
 # fleetd does not install (installs off, a control plane, a TPM 1.2 node) wipes, and the node boots
 # the network into HookOS (the iPXE default item) until a Workflow runs; an attest only netboots
-# HookOS, which attests; a wipe wipes and netboots into HookOS; a retirement wipes and powers the
-# node off. Nothing in git starts a run: fleetd on spore (apps/fleetd) creates a Workflow when a
+# HookOS, which attests; a wipe wipes and netboots into HookOS; a retirement wipes, erases the whole
+# disk and powers the node off. Nothing in git starts a run: fleetd on spore (apps/fleetd) creates a Workflow when a
 # NetBox device's desired_action is set or an intake pass admits it, and netboot goes off when the
 # run succeeds, so Smee has no script for the MAC on the next boot.
 #
@@ -110,6 +110,94 @@ spec:
                   esac
                   log "$DISK reports the serial $DISK_SERIAL"
                 }
+                # A retirement erases the whole disk after the signature wipe. That wipe leaves everything past
+                # the first 16 MiB of each partition, and the data volume is not encrypted, so the disk would
+                # otherwise keep it. The methods run from the fastest sure erase to a full overwrite: an NVMe
+                # format (crypto erase when the controller has it, else user data erase), an ATA secure erase,
+                # a secure discard, a discard, and a zeroing of the whole disk. After each, sampled blocks that
+                # held data before must read differently, and the next method runs when they do not. A disk that
+                # no method erases fails the action, and the retirement stays with the owner.
+                BEFORE=/tmp/erase-before
+                SAMPLES=""
+                ZERO=$(head -c 4096 /dev/zero | sha256sum | cut -d' ' -f1)
+                hash_at() { dd if="$DISK" bs=4096 skip="$1" count=1 2>/dev/null | sha256sum | cut -d' ' -f1; }
+                plan_samples() {
+                  size=$(blockdev --getsize64 "$DISK")
+                  SAMPLES=""
+                  i=0
+                  while [ "$i" -lt 16 ]; do
+                    SAMPLES="$SAMPLES $(( size * i / 16 / 4096 + 256 ))"
+                    i=$((i + 1))
+                  done
+                  for part in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                    pname=${part##*/}
+                    pstart=$(cat "/sys/class/block/$pname/start")
+                    plen=$(cat "/sys/class/block/$pname/size")
+                    if [ "$plen" -ge 131072 ]; then
+                      SAMPLES="$SAMPLES $(( pstart / 8 + 8192 )) $(( (pstart + plen / 2) / 8 )) $(( (pstart + plen) / 8 - 256 ))"
+                    fi
+                  done
+                }
+                snapshot() { for s in $SAMPLES; do echo "$s $(hash_at "$s")"; done; }
+                verify_erase() {
+                  blockdev --flushbufs "$DISK" || true
+                  held=0
+                  kept=0
+                  while read -r s h; do
+                    [ "$h" = "$ZERO" ] && continue
+                    held=$((held + 1))
+                    if [ "$(hash_at "$s")" = "$h" ]; then kept=$((kept + 1)); fi
+                  done <"$BEFORE"
+                  log "$held sampled blocks held data before the erase; $kept still do"
+                  [ "$kept" -eq 0 ]
+                }
+                budget_end=$(( $(date +%s) + 780 ))
+                remaining() { echo $(( budget_end - $(date +%s) )); }
+                erase_nvme() {
+                  case "$name" in nvme*) ;; *) return 1 ;; esac
+                  command -v nvme >/dev/null || return 1
+                  info=$(nvme id-ctrl "$DISK" 2>/dev/null) || return 1
+                  oacs=$(echo "$info" | awk '$1 == "oacs" { print $3 }')
+                  fna=$(echo "$info" | awk '$1 == "fna" { print $3 }')
+                  [ $(( ${oacs:-0} & 2 )) -ne 0 ] || return 1
+                  if [ $(( ${fna:-0} & 4 )) -ne 0 ]; then ses=2; else ses=1; fi
+                  log "nvme format --ses=$ses $DISK"
+                  timeout "$(remaining)" nvme format "$DISK" --ses="$ses" --force --timeout=$(( $(remaining) * 1000 ))
+                }
+                erase_ata() {
+                  command -v hdparm >/dev/null || return 1
+                  info=$(hdparm -I "$DISK" 2>/dev/null) || return 1
+                  for need in enabled locked frozen; do
+                    echo "$info" | grep -q "not[[:space:]]*$need" || { log "$DISK has no usable ATA security ($need)"; return 1; }
+                  done
+                  mins=$(echo "$info" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)min for SECURITY ERASE UNIT.*/\1/p' | head -n 1)
+                  if [ -n "$mins" ] && [ $(( mins * 60 + 60 )) -gt "$(remaining)" ]; then
+                    log "the ATA secure erase takes $mins min, longer than the action has"
+                    return 1
+                  fi
+                  mode=--security-erase
+                  if echo "$info" | grep -q 'supported: enhanced erase'; then mode=--security-erase-enhanced; fi
+                  hdparm --user-master u --security-set-pass fleet-erase "$DISK" >/dev/null || return 1
+                  log "hdparm $mode $DISK"
+                  if hdparm --user-master u "$mode" fleet-erase "$DISK"; then return 0; fi
+                  hdparm --user-master u --security-disable fleet-erase "$DISK" >/dev/null 2>&1 || true
+                  return 1
+                }
+                erase_discard_secure() { timeout "$(remaining)" blkdiscard --secure --force "$DISK"; }
+                erase_discard() { timeout "$(remaining)" blkdiscard --force "$DISK"; }
+                erase_overwrite() { timeout "$(remaining)" blkdiscard --zeroout --force "$DISK"; }
+                erase_disk() {
+                  for method in nvme ata discard_secure discard overwrite; do
+                    if [ "$(remaining)" -le 0 ]; then log "no time is left to erase $DISK"; return 1; fi
+                    if "erase_$method"; then
+                      if verify_erase; then log "erased $DISK by $method"; return 0; fi
+                      log "$method ran, but a sampled block still holds data"
+                    else
+                      log "$method is unsupported or failed on $DISK"
+                    fi
+                  done
+                  return 1
+                }
                 # A run that attests fails when this boot's attestation did, before it wipes
                 # anything, and the install code gates the wipe of a run that installs, so a
                 # refused machine keeps its disk.
@@ -175,6 +263,7 @@ spec:
                   fi
                   log "$INSTALLER_IMAGE is here"
                 fi
+                if [ "$RETIRE" = true ]; then plan_samples; fi
                 log "wiping every partition of $DISK"
                 for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
                   wipefs --all --force "$p"
@@ -184,6 +273,10 @@ spec:
                 sgdisk --zap-all "$DISK"
                 dd if=/dev/zero of="$DISK" bs=1M count=1 conv=fsync
                 dd if=/dev/zero of="$DISK" bs=512 count=2048 conv=fsync seek=$(( $(blockdev --getsz "$DISK") - 2048 ))
+                if [ "$RETIRE" = true ]; then
+                  snapshot >"$BEFORE"
+                  erase_disk || { log "$DISK could not be erased; the retirement stops with the disk partly wiped"; exit 1; }
+                fi
                 blockdev --rereadpt "$DISK" || true
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
                 log "wiped $DISK"

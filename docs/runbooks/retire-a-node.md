@@ -3,7 +3,7 @@ title: Retire a node
 description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleetd wipes it, then remove its entry from the nodes file.
 ---
 
-Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleetd](../apps/fleetd.md) then wipes the system disk and powers the node off, deletes its `Node`, its kubelet's CSRs and its bootstrap token, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
+Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleetd](../apps/fleetd.md) then wipes and erases the whole system disk and powers the node off, deletes its `Node`, its kubelet's CSRs and its bootstrap token, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain acts on the cluster.
@@ -19,7 +19,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 ## Back up and drain
 
 > [!WARNING]
-> The retirement erases every partition of the system disk, with every local-path volume on it. Velero copies only the volumes of a running pod with the annotation `backup.velero.io/backup-volumes`, so take the backup before the drain.
+> The retirement erases the whole system disk, with every local-path volume on it, and the erase cannot be undone. Velero copies only the volumes of a running pod with the annotation `backup.velero.io/backup-volumes`, so take the backup before the drain.
 
 1. Take a Velero backup.
 
@@ -52,7 +52,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
    ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tinkerbell get workflows -w
    ```
 
-   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. The node powers off. `SUCCESS` means the power-off started, so step 3 is how you know it happened.
+   Result: `RUNNING` through `wipe-disk`, `next-boot` and `reboot`, then `SUCCESS`. `wipe-disk` clears the signatures and then erases the whole disk, so it runs longer than a wipe: an NVMe format or an ATA secure erase takes seconds to minutes, and a zeroing of the whole disk takes as long as the disk takes to write, up to the action's 900 second limit. The node powers off. `SUCCESS` means the power-off started, so step 3 is how you know it happened.
 
 3. Make sure that NetBox shows the device as `offline`.
 
@@ -89,6 +89,8 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | Kubernetes | fleetd deletes its `Node`, its kubelet's CSRs and its bootstrap token. A disk image from before the wipe still holds the kubelet's client certificate, which nothing revokes |
 | Talos | The Talos root stops managing the node |
 | Tinkerbell | fleetd deletes its `Hardware` and `Machine` |
+| fleetd attest | fleetd marks its record `retired` before it sets the device `offline`. The record stays for audit, serves no LDevID even while NetBox is down, and leaves the expiry metrics |
+| Disk | The whole disk is erased, the `data` volume included. `wipe-disk` tries an NVMe format (crypto erase when the controller has it), an ATA secure erase, a secure discard, a discard and a zeroing of the disk in that order, and counts a method only when sampled blocks that held data read differently afterwards. The action's output says which method ran |
 | NetBox | The apply deletes the device with its history. To use the machine again, follow [Provision a node](provision-a-node.md) |
 
 ## If something goes wrong
@@ -99,6 +101,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | The `Workflow` ends `FAILED` within seconds with `BootJobFailed`, and the `danger` journal line says `ended FAILED before any action ran: its BMC job netboot-<workflow> failed: <message>` | The BMC refused a power action or did not answer, so no action ran and nothing was wiped | Fix the BMC: the message is the BMC's answer, and `kubectl -n tinkerbell get machine <node> -o yaml` on spore shows whether Rufio reaches it. fleetd starts the retirement again at the time the line gives, 5 minutes after the first failure and twice as long after each one, up to 4 hours, while the device stays `decommissioning` |
 | The journal says `the retirement waits for Workflow <run> (<action>): the BMC did not power the machine off` | The BMC refused the power-off that stops the run, so fleetd keeps the run: deleting it would not stop its action | Wait: the retirement starts on the pass after the run ends. Fix the BMC, or the retirement's own boot job fails the same way. Powering the machine off by hand ends the run at its global timeout |
 | `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk. Nothing was wiped | Read the machine's disks, and correct `disk` or `disk_serial` in the nodes file, or wipe the disk at the machine |
+| `wipe: <method> ran, but a sampled block still holds data`, or `wipe: <disk> could not be erased` | No method erased the disk within the action's time, for example a frozen ATA disk with no discard support, or a disk too large to zero in 900 seconds. The signatures are wiped, but the data may remain | Unfreeze the disk and run the retirement again, or erase the disk at the machine, then set the status to `offline` |
 | The device stays `decommissioning` after a run that failed at an action | fleetd journals a failed retirement once and stops; it retries only a retirement that failed at its BMC job | Read the journal line, which names the action, and the action's output with `journalctl -u tinkerbell \| grep <address>` on spore. Wipe the disk at the machine, then set the status to `offline`. fleetd removes from the cluster only a node its retirement wiped, so run `kubectl --context folly delete node <node>` and `kubectl --context folly -n kube-system delete secrets -l lolwtf.ca/node=<node>` |
 | The `Workflow` is `SUCCESS`, the device stays `decommissioning`, and the journal says `could not take <node> out of the cluster` | folly's API does not answer, or it refuses fleetd's account, whose token is `fleetd/folly-cordon-token` in `nix/secrets/spore.sops.yaml`. The disk is wiped | Read the error in the line. Each pass tries again, and the device goes `offline` once folly's API answers |
 | The journal says `the retirement waits until <time> for PodDisruptionBudgets to allow evicting <pods>` | A PodDisruptionBudget refuses an eviction, as when its other pods are not ready | Wait: at the time the line gives, fleetd deletes the `Node` anyway, which removes the pods |
