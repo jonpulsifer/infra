@@ -28,9 +28,10 @@
 #                                       restart tink-worker
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
-# workflow=STATE (or FINISHED), console=TEXT (serial output after the hook started) or
-# log=PROC:TEXT (a new line in logs/PROC.log). Hooks print one JSON object per event and append it
-# to events.jsonl in the state directory.
+# workflow=STATE (or FINISHED), console=TEXT (serial output after the hook started),
+# log=PROC:TEXT (a new line in logs/PROC.log) or, for a hook, disk=DISK:STAGE (the machine's disk
+# gains a GPT, a formatted EFI partition or Talos's META; STAGE is gpt, esp or meta). Hooks print
+# one JSON object per event and append it to events.jsonl in the state directory.
 #
 # Needs nix (for TOOLS), jq, yq, python3, curl and gh, KVM, and unprivileged user namespaces.
 # State lives in TINK_LAB_DIR (default ~/.cache/tink-lab).
@@ -873,10 +874,18 @@ qemu_pid() {
 }
 running_vm() { qemu_pid "$1" >/dev/null; }
 
+# power_cut_now kills the machine's QEMU and its swtpm, as a power cut takes the TPM down with the
+# board; qemu starts a new swtpm on the next power-on, from the TPM's saved NV state. It returns
+# once QEMU is dead, so a power-on right after it is not taken for a machine that is still on.
 power_cut_now() {
   local pid
   if pid=$(qemu_pid "$1"); then
     kill -9 "$pid"
+    pkill -9 -f "swtpm socket.*$run/$1/swtpm.sock" 2>/dev/null || true
+    for _ in $(seq 50); do
+      running_vm "$1" || break
+      sleep 0.1
+    done
     echo "$pid"
   fi
 }
@@ -959,7 +968,7 @@ observe() {
   disks=$(jq -c '.disks[]' "$(vmdir "$name")/vm.json" | while read -r disk; do
     f=$(jq -r .file <<<"$disk")
     jq -c --argjson s "$(read_sentinels "$f" "$name-$(jq -r .name <<<"$disk")")" \
-      --argjson p "$(sfdisk -J "$f" 2>/dev/null | jq -c '[.partitiontable.partitions[]? | {start, size, type, name}]' || echo '[]')" \
+      --argjson p "$(python3 -I "$here/diskstate.py" show "$f" 2>/dev/null | jq -c .partitions || echo '[]')" \
       '{name, bus, serial, slot, attached: (.detached != true), intact: ($s | all(.intact)), sentinels: $s,
         partitions: $p}' <<<"$disk"
   done | jq -sc .)
@@ -972,7 +981,8 @@ observe() {
       serial=$(cat $b/serial $b/device/serial 2>/dev/null | head -n 1 | tr -d " ")
       wwid=$(cat $b/wwid $b/device/wwid 2>/dev/null | head -n 1 | tr -d " ") path=$(readlink -f $b)"; done;
       echo ====; ls /dev/disk/by-id | cat'
-    if out=$(console "$name" 20 "cat /proc/cmdline; echo ====; nerdctl -n services.linuxkit exec hook-docker ls -la /worker/fleet 2>&1; echo ====;" \
+    if out=$(console "$name" 20 "cat /proc/cmdline; echo ====; nerdctl -n services.linuxkit exec hook-docker ls -la /worker/fleet 2>&1;" \
+      "echo code=\$(nerdctl -n services.linuxkit exec hook-docker head -c 4 /worker/fleet/install_code 2>/dev/null); echo ====;" \
       "nerdctl -n services.linuxkit exec hook-docker docker ps -a --no-trunc --format '{{json .}}'; echo ====;" \
       "${blocks//$'\n'/ }" 2>/dev/null); then
       hook=$(python3 -I "$here/hookos-observe.py" <<<"$out")
@@ -1278,11 +1288,40 @@ watch_action() {
   return "$rc"
 }
 
+# watch_console blocks until the machine's serial console prints TEXT. It follows the log with
+# inotify, so a hook acts within milliseconds of the line, where wait_cond polls every 0.5 s.
+watch_console() {
+  local name=$1 text=$2 timeout=$3 line pid rc=124
+  exec {c}< <(exec timeout "$timeout" tail -n 0 -F "$(vmdir "$name")/serial.log" 2>/dev/null \
+    | sed -u 's/\x1b\[[0-9;?]*[a-zA-Z]//g')
+  pid=$!
+  while IFS= read -r -u "$c" line; do
+    if [[ $line == *"$text"* ]]; then
+      rc=0
+      break
+    fi
+  done
+  exec {c}<&-
+  pkill -P "$pid" 2>/dev/null || true
+  return "$rc"
+}
+
+# watch_disk blocks until the machine's disk DISK gains STAGE (gpt, esp or meta), read from its
+# image every 20 ms (diskstate.py).
+watch_disk() {
+  local name=$1 disk=${2%%:*} stage=${2#*:} timeout=$3 file
+  file=$(jq -r --arg d "$disk" '.disks[] | select(.name == $d) | .file' "$(vmdir "$name")/vm.json")
+  [ -n "$file" ] || die "machine $name has no disk $disk"
+  python3 -I "$here/diskstate.py" watch "$file" "$stage" "$timeout"
+}
+
 at_boundary() {
   local name=$1 start=$SECONDS
   if [ -n "$when" ]; then
     case $when in
       action=*) watch_action "$name" "${when#action=}" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
+      console=*) watch_console "$name" "${when#console=}" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
+      disk=*) watch_disk "$name" "${when#disk=}" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
       *) wait_cond "$name" "$when" "${TINK_LAB_WHEN_TIMEOUT:-3600}" || die "$when did not hold" ;;
     esac
     event event=boundary vm="$name" when="$when" waited="$((SECONDS - start))"

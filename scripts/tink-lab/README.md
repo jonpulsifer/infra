@@ -119,13 +119,20 @@ wait after the boundary. A COND is one of:
   it (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`, `TIMEOUT`). A hook reads it from a watch on the
   API, so it acts 10-20 ms after the agent's report. `wait` polls it every 0.5 s.
 - `workflow=STATE`, or `workflow=FINISHED` for any terminal state.
-- `console=TEXT`: serial output written after the hook started, ANSI codes stripped.
+- `console=TEXT`: serial output written after the hook started, ANSI codes stripped. A hook
+  follows the console with inotify and acts within about 10 ms of the line; `wait` polls it every
+  0.5 s.
 - `log=PROC:TEXT`: a new line in `logs/PROC.log`. For example, `log=dnsmasq:query[A] enroll` is
   Talos's first config fetch, and `log=tinkerbell:` matches what the agent sends to syslog.
+- `disk=DISK:STAGE`, for a hook: the machine's disk DISK gains a GPT (`gpt`), a FAT filesystem on
+  the partition named `EFI` (`esp`), or Talos's META on the partition named `META` (`meta`). The
+  hook reads the disk image every 20 ms. A stage the disk holds when the hook starts counts only
+  after it has gone, so `disk=disk0:gpt` on an installed disk waits for the wipe and the new
+  install's GPT.
 
 | Hook | Does | Output |
 | --- | --- | --- |
-| `cut NAME [--when C] [--delay S] [--on-after S]` | SIGKILL of the VM's QEMU: a hard power cut. `--on-after` powers it on again through the BMC, with no boot override. | `power-cut` `{vm, when, delay, pid}`, then `power` |
+| `cut NAME [--when C] [--delay S] [--on-after S]` | SIGKILL of the VM's QEMU and its swtpm: a hard power cut. The next power-on starts a new swtpm from the TPM's saved state. `--on-after` powers it on again through the BMC, with no boot override. | `power-cut` `{vm, when, delay, pid}`, then `power` |
 | `power NAME on\|off\|soft\|cycle\|status` | Redfish `ComputerSystem.Reset` (On, ForceOff, GracefulShutdown, PowerCycle) on the VM's BMC, the call Rufio makes. | `power` `{vm, reset}`; `status` prints `{vm, power, boot}` |
 | `agent-net NAME cut\|restore [--when C] [--reject]` | nft drops (or with `--reject`, resets) the VM's TCP to the Tink server's port 42113 only, both ways. DHCP, HTTP and the registry still work. | `agent-net` `{vm, action, verdict}` |
 | `kill PROC [--signal SIG] [--when C]` | Signals a process (default KILL). For `--when`, set `TINK_LAB_VM` to the machine to watch. Tinkerbell processes restart after 15 s, unless they die of TERM, INT, HUP or PIPE. | `kill` `{proc, signal, pid}` |
@@ -148,10 +155,13 @@ wait after the boundary. A COND is one of:
 - `hardware`: `allowPXE`, `allowWorkflow` and the declared disk.
 - `rufio_jobs`: each job's conditions.
 - `disks`: for each disk, the bus, serial, slot, `attached`, every sentinel, `intact`, and the GPT
-  partitions.
+  partitions. Each partition has its filesystem signature (`fs`: `vfat`, `talos-meta`, `ext4`,
+  `xfs` or null), the MiB that hold anything (`used_mib`), and, on `META`, the keys of both copies.
+  Key `0x0b`, the install code, shows its first 4 characters only.
 - `efi`: BootOrder, BootNext, and each `Boot####` entry with its description and kind (`disk`,
   `pxe-ipv4`, `http`, `firmware`).
-- `hookos`, when HookOS's shell answers within 20 s: `/proc/cmdline`, the `/worker/fleet` listing,
+- `hookos`, when HookOS's shell answers within 20 s: `/proc/cmdline`, the `/worker/fleet` listing
+  with the first 4 characters of the boot's install code (`code=`),
   hook-docker's containers (`docker ps -a`), which show a surviving installer or a
   `provision-reboot` container, the kernel's disks (`blocks`: name, removable, sectors, serial,
   WWID and sysfs path, which shows the bus), and the `/dev/disk/by-id` names (`by_id`). `blocks`
@@ -220,7 +230,13 @@ The test numbers are those in the test plan.
     BootNext: Read-only file system)` on every run. Check this on hardware before treating it as a
     finding (test 9).
 - **Power cuts are SIGKILL of QEMU.** Writes that QEMU had already passed to the host survive, as
-  a disk's own cache might not. Raw disk images, no cache mode set.
+  a disk's own cache might not. Raw disk images, no cache mode set. Writes still in the guest's
+  page cache are lost, as on hardware. In four cuts during the Talos installer, the disk held a
+  GPT with no filesystem, an empty formatted ESP, or the whole ESP and META, never part of the UKI.
+- **Some boots wait minutes for DHCP.** After some power cuts, the next boot's first DHCP
+  exchange (iPXE's or Talos's) reached dnsmasq only 110-175 s after power-on, while OVMF's PXE DHCP
+  was answered at once. The cause is not found. Time recovery from the Workflow's events and the
+  console, not from the first DNS query.
 - **Action boundaries come from the API.** An action finishes in HookOS before the API shows it.
   The window between the two is the agent's report. For test 2, cut the agent's network while the
   action runs (`--when action=install:RUNNING`), so it finishes and cannot report. next-boot and
@@ -246,6 +262,7 @@ The test numbers are those in the test plan.
 | `efivars.py` | Reads and writes BootNext and BootOrder in an OVMF variable store, through `virt-fw-vars`. |
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
+| `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, and watches for `disk=` boundaries. |
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
