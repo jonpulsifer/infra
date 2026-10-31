@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -19,8 +20,9 @@ import (
 // the machine its install code. The installer checks the device's state in
 // NetBox and Tinkerbell, renders the config with the class inputs and the
 // worker secrets, or the full bundle for a joining control plane, and keeps
-// it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first
-// complete GET burns it and sets the device active; a GET with another code
+// it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first GET
+// whose every byte the node acknowledged burns it and sets the device
+// active; a GET with another code
 // is journaled once per machine and code window; a config nobody fetched
 // goes after its TTL.
 type Installer struct {
@@ -54,6 +56,9 @@ type Installer struct {
 	// missingTold names the machine and run pairs whose missing config is
 	// journaled.
 	missingTold map[string]bool
+	// refetchTold names the machine and run pairs whose ask for a served
+	// config is journaled.
+	refetchTold map[string]bool
 	unreleased  map[string]bool
 	// releasing names the codes whose release runs now, so a pass's retry
 	// and a fetch's release never write it twice.
@@ -250,10 +255,11 @@ func (i *Installer) Warm(ctx context.Context) {
 }
 
 // ServeHTTP answers GET /talos/config?uuid=<uuid>&code=<code> with the
-// config whole, and burns it once all of it is written. A HEAD, a
-// conditional request or another method serves nothing; a Range is ignored,
-// so the answer is always the whole file.
+// config whole, and burns it once the node has acknowledged every byte of
+// the answer. A HEAD, a conditional request or another method serves
+// nothing; a Range is ignored, so the answer is always the whole file.
 func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -275,8 +281,19 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// stays gives back a config the fetch did not deliver, and names what
+	// became of it.
+	stays := func() string {
+		if i.Configs.Unclaim(uuid, code) {
+			return "the config stays"
+		}
+		i.pending()
+		return "the config was withdrawn during the fetch and is dropped"
+	}
 	if status := i.stillPlanned(r.Context(), p); status != http.StatusOK {
-		i.Configs.Unclaim(uuid, code)
+		if left := stays(); status == http.StatusServiceUnavailable {
+			log.Printf("talos-config: %s's fetch got 503; %s", p.Node, left)
+		}
 		http.Error(w, http.StatusText(status), status)
 		return
 	}
@@ -284,32 +301,82 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/yaml")
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Length", strconv.Itoa(len(cfg)))
+	if err := armReset(r, true); err != nil {
+		log.Printf("talos-config: %s's fetch: make a close a reset: %v", p.Node, err)
+	}
 	w.WriteHeader(http.StatusOK)
 	n, err := w.Write(cfg)
 	if err == nil {
 		err = http.NewResponseController(w).Flush()
 	}
-	if err != nil || n != len(cfg) {
-		i.Configs.Unclaim(uuid, code)
-		log.Printf("talos-config: %s's fetch ended after %d of %d bytes; the config stays", p.Node, n, len(cfg))
+	if err == nil && n != len(cfg) {
+		err = io.ErrShortWrite
+	}
+	if err != nil {
+		err = fmt.Errorf("the write ended after %d of %d bytes: %w", n, len(cfg), err)
+	} else {
+		// Write and Flush return once fleetd's kernel takes the bytes,
+		// whether the node gets any of them or not.
+		err = awaitAck(r, ackDeadline(r, start))
+	}
+	// A partial write and an unacknowledged answer end alike, whichever
+	// comes first on a given network and socket buffer.
+	if err != nil {
+		err = resetConn(r, err)
+		left := stays()
+		log.Printf("talos-config: %s at %s did not acknowledge its config: %v; %s", p.Node, r.RemoteAddr, err, left)
+		i.async(func(ctx context.Context) { i.unacked(ctx, p, r.RemoteAddr, now, err, left) })
 		return
+	}
+	if err := armReset(r, false); err != nil {
+		log.Printf("talos-config: %s's fetch: make a close graceful again: %v", p.Node, err)
 	}
 	served, ok := i.Configs.Burn(uuid, code, now)
 	if !ok {
+		log.Printf("talos-config: %s's config was replaced during the fetch, which served the old one", p.Node)
 		return
 	}
 	log.Printf("served %s's config at %s; it is dropped", served.Node, timestamp(now))
 	// The answer is complete, so the release runs after the handler: a slow
 	// NetBox never holds the node's fetch, and a release that fails is
 	// retried by the next pass.
+	i.async(func(ctx context.Context) {
+		i.releaseOnce(ctx, served)
+		i.pending()
+	})
+}
+
+// async runs a NetBox write after the handler; Drain waits for it.
+func (i *Installer) async(f func(context.Context)) {
 	i.inflight.Add(1)
 	go func() {
 		defer i.inflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		i.releaseOnce(ctx, served)
-		i.pending()
+		f(ctx)
 	}()
+}
+
+// sentence capitalizes a log clause for a journal entry.
+func sentence(s string) string {
+	if s == "" {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// unacked journals a fetch whose answer the node did not acknowledge: the
+// config stays for the node's next try, unless it was withdrawn meanwhile,
+// and the owner sees that a peer with the code got some of it.
+func (i *Installer) unacked(ctx context.Context, p Pending, peer string, at time.Time, why error, left string) {
+	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if err == nil {
+		comment := fmt.Sprintf("fleetd: at %s fleetd wrote the Talos config to %s, and the peer did not acknowledge all of it: %v. %s", timestamp(at), peer, why, sentence(left))
+		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	}
+	if err != nil {
+		log.Printf("journal %s's unacknowledged fetch: %v", p.Node, err)
+	}
 }
 
 // stillPlanned reads the config's device from NetBox at fetch time and
@@ -328,7 +395,7 @@ func (i *Installer) stillPlanned(ctx context.Context, p Pending) int {
 		i.dropGone(p)
 		return http.StatusNotFound
 	case err != nil:
-		log.Printf("talos-config: %s's fetch refused: NetBox does not answer: %v; the config stays", p.Node, err)
+		log.Printf("talos-config: %s's fetch refused: NetBox does not answer: %v", p.Node, err)
 		return http.StatusServiceUnavailable
 	case d.Status != "planned":
 		i.Configs.Unclaim(p.UUID, p.Code)
@@ -361,11 +428,18 @@ func (i *Installer) WithdrawGone(devices []Device) {
 // dropGone drops the config of a device NetBox no longer holds, which has no
 // journal to write to.
 func (i *Installer) dropGone(p Pending) {
-	if _, ok := i.Configs.Drop(p.Serial, i.Now()); !ok {
+	_, fetching, ok := i.Configs.Drop(p.Serial, i.Now())
+	if !ok {
 		return
 	}
 	i.pending()
-	Audit("fleet.expire", i.Site, Device{Serial: p.Serial, Name: p.Node, Class: p.Class}, p.Workflow, "withdrawn: NetBox no longer lists the device")
+	d := Device{Serial: p.Serial, Name: p.Node, Class: p.Class}
+	if fetching {
+		Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn while a fetch writes it: NetBox no longer lists the device")
+		log.Printf("talos-config: withdrew %s's config while a fetch was writing it, so the node may have it; NetBox no longer lists the device", p.Node)
+		return
+	}
+	Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn: NetBox no longer lists the device")
 	log.Printf("talos-config: dropped %s's unread config; NetBox no longer lists the device", p.Node)
 }
 
@@ -408,8 +482,14 @@ const missingLookupEvery = time.Second
 // A machine causes at most one NetBox lookup per notFoundEvery, and all of
 // them together one per missingLookupEvery, so a flood of guesses reaches
 // NetBox at a bounded rate and the journal not at all. A fetch with the held
-// code of a config past its TTL is the expiry's to journal.
+// code of a config past its TTL is the expiry's to journal. A fetch with a
+// code fleetd served comes first: only a node that held the code can send
+// it, and it is refetched's.
 func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Time) {
+	if s, ok := i.Configs.Served(uuid, code); ok {
+		i.refetched(ctx, uuid, s, now)
+		return
+	}
 	p, held := i.Configs.Holds(uuid)
 	if held && p.Code == code {
 		log.Printf("talos-config: 404 for uuid %q", uuid)
@@ -431,6 +511,41 @@ func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Ti
 		delete(i.journaled, uuid)
 		i.mu.Unlock()
 	}
+}
+
+// refetched counts a fetch with a code whose config fleetd served, on every
+// ask so the alert lasts while the node asks, and journals it once per run
+// whatever the device's status. The node acknowledged the whole config and
+// did not keep it, so it asks with a spent code until the owner provisions it
+// again: fleetd never serves a config twice, since the code is a bearer
+// credential that sits in META and on the node's console.
+func (i *Installer) refetched(ctx context.Context, uuid string, s Served, now time.Time) {
+	i.Metrics.ConfigRefetched.Add(1)
+	key := uuid + "/" + s.Workflow
+	i.mu.Lock()
+	told := i.refetchTold[key]
+	i.mu.Unlock()
+	if told || !i.lookupAllowed("served/"+uuid, true, now) {
+		log.Printf("talos-config: %s asked again for the config fleetd served it at %s", s.Node, timestamp(s.At))
+		return
+	}
+	d, err := i.NetBox.BySerial(ctx, i.Site, s.Serial)
+	if err == nil {
+		Audit("fleet.refetch", i.Site, d, s.Workflow, "the node asked again for the config fleetd served it")
+		comment := fmt.Sprintf("fleetd: at %s the node asked again for the Talos config fleetd served it at %s for Workflow %s. Its kernel acknowledged every byte, and the node did not keep it: a power loss or a reset before Talos wrote it to STATE. Its code is spent and fleetd serves no config twice, so the node asks in vain. Set desired_action to provision; the disk holds no STATE to lose", timestamp(now), timestamp(s.At), s.Workflow)
+		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if err != nil {
+		log.Printf("talos-config: journal %s's ask for its served config: %v", s.Node, err)
+		delete(i.journaled, "served/"+uuid)
+		return
+	}
+	if i.refetchTold == nil {
+		i.refetchTold = map[string]bool{}
+	}
+	i.refetchTold[key] = true
 }
 
 // lookupAllowed marks the machine's lookup unless one was made within
@@ -495,7 +610,13 @@ func (i *Installer) missing(ctx context.Context, uuid string, now time.Time) err
 		return nil
 	}
 	Audit("fleet.expire", i.Site, d, d.LastWorkflow, "config missing: the node asked for one fleetd does not hold")
-	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: a reboot of spore since the render of %s drops it, as does the TTL. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), d.LastWorkflow)
+	cause := fmt.Sprintf("a reboot of spore since the render of %s drops it, as does the TTL", d.LastWorkflow)
+	for _, p := range i.Configs.Unreleased() {
+		if p.UUID == uuid && p.Workflow == d.LastWorkflow {
+			cause = fmt.Sprintf("fleetd served the config of %s at %s, NetBox has not taken its release, and the node did not keep it", p.Workflow, timestamp(p.Fetched))
+		}
+	}
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: %s. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), cause)
 	if err := i.NetBox.Update(ctx, d, "", nil, "warning", comment); err != nil {
 		return err
 	}
@@ -525,20 +646,30 @@ func (i *Installer) Tick(ctx context.Context) {
 }
 
 // release sets a device active once its config was served. A device the
-// owner moved out of planned meanwhile keeps its status.
+// owner moved out of planned meanwhile keeps its status, and so does one
+// whose config was withdrawn while the fetch wrote it.
 func (i *Installer) release(ctx context.Context, p Pending) error {
 	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if errors.Is(err, ErrNoDevice) && !p.Withdrawn.IsZero() {
+		i.Configs.Released(p)
+		Audit("fleet.release", i.Site, Device{Serial: p.Serial, Name: p.Node, Class: p.Class}, p.Workflow, "a withdrawn config fetched; NetBox no longer lists the device")
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	status := "active"
+	status, level := "active", "success"
 	comment := fmt.Sprintf("fleetd: the node fetched its Talos config at %s; the device is active and the config is dropped", timestamp(p.Fetched))
-	if d.Status != "planned" {
+	switch {
+	case !p.Withdrawn.IsZero():
+		status, level = "", "warning"
+		comment = fmt.Sprintf("fleetd: the node fetched the config fleetd withdrew at %s; the fetch was writing it at the withdrawal and the node got all of it at %s. The status stays %s", timestamp(p.Withdrawn), timestamp(p.Fetched), d.Status)
+	case d.Status != "planned":
 		status = ""
 		comment = fmt.Sprintf("fleetd: the node fetched its Talos config at %s and the config is dropped; the status stays %s", timestamp(p.Fetched), d.Status)
 	}
 	fields := map[string]any{"attest_consumed_at": timestamp(p.Fetched)}
-	if err := i.NetBox.Update(ctx, d, status, fields, "success", comment); err != nil {
+	if err := i.NetBox.Update(ctx, d, status, fields, level, comment); err != nil {
 		return err
 	}
 	i.Configs.Released(p)
@@ -606,11 +737,16 @@ func (i *Installer) Withdraw(ctx context.Context, d Device) error {
 	if d.Status == "planned" {
 		return nil
 	}
-	p, ok := i.Configs.Drop(d.Serial, i.Now())
+	p, fetching, ok := i.Configs.Drop(d.Serial, i.Now())
 	if !ok {
 		return nil
 	}
 	i.pending()
+	if fetching {
+		Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn while a fetch writes it: the device is "+d.Status)
+		comment := fmt.Sprintf("fleetd: the device is %s; a fetch was writing its Talos config, rendered at %s for Workflow %s, so the node may have it. fleetd journals the fetch's end if the node got all of it", d.Status, timestamp(p.Rendered), p.Workflow)
+		return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	}
 	Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn: the device is "+d.Status)
 	comment := fmt.Sprintf("fleetd: the device is %s, so fleetd dropped the Talos config rendered at %s for Workflow %s before the node fetched it; the node gets no config", d.Status, timestamp(p.Rendered), p.Workflow)
 	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)

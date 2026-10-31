@@ -78,6 +78,16 @@ spec:
           annotations:
             message: An installed node asks for a Talos config fleetd does not hold
             description: "A planned device's node asked for its first config after its provision, and fleetd holds none for it: a reboot of spore since the render drops every config that waits, as does the TTL. The node asks in vain and the device stays planned. Read the device's journal in NetBox, then set desired_action to provision. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+        # A node that acknowledged its config and lost it before Talos saved it asks again with
+        # its spent code, and fleetd serves no config twice. fleetd counts every such ask, so the
+        # alert lasts while the node asks and clears 30 minutes after.
+        - alert: FleetInstallConfigRefetched
+          expr: sum by (instance) (increase(fleet_install_config_refetched_total{job="node-exporter"}[30m])) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: An installed node asks again for a Talos config fleetd served it
+            description: "A node asked for its config with a code whose config fleetd already served. Its kernel acknowledged every byte, and it did not keep the config: a power loss or a reset before Talos wrote it to STATE. The code is spent, so the node asks in vain whatever its device's status says. Read the device's journal in NetBox, then set desired_action to provision; the disk holds no STATE to lose. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
         # A provision's SUCCESS means the reboot started, not that the disk booted. fleetd counts
         # a planned device that attests from HookOS after its provision succeeded, once per run.
         - alert: FleetNodeBootedHookOSAfterInstall

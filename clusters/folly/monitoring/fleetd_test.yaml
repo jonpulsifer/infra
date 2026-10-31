@@ -53,6 +53,28 @@ tests:
         alertname: FleetInstallConfigMissing
         exp_alerts: []
 
+  # A node asks again for its served config from minute 10 to minute 20, then is provisioned again.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_install_config_refetched_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1+1x10 11x40
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: An installed node asks again for a Talos config fleetd served it
+              description: "A node asked for its config with a code whose config fleetd already served. Its kernel acknowledged every byte, and it did not keep the config: a power loss or a reset before Talos wrote it to STATE. The code is spent, so the node asks in vain whatever its device's status says. Read the device's journal in NetBox, then set desired_action to provision; the disk holds no STATE to lose. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 55m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts: []
+
   # A node booted HookOS after its install at minute 10.
   - interval: 1m
     input_series:

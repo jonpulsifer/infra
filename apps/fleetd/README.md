@@ -155,9 +155,17 @@ and gives up when its context ends.
 ## Config
 
 `GET /talos/config?uuid=<uuid>&code=<code>` answers the config whole with `Cache-Control: no-store`.
-The first response whose bytes are all written burns it; after the answer, fleetd sets the device
-`active` and writes `attest_consumed_at`, and a release NetBox refuses is retried each pass and
-journaled once. One fetch claims a config at a time. HEAD and
+The first response whose every byte the node acknowledged burns it. A written answer is in
+fleetd's socket buffer, not on the node, so after the flush the fetch polls the socket's send queue
+(`SIOCOUTQ`, under TLS the socket below the records) every 10 ms until it is empty. When the
+connection closes first, or the server's `WriteTimeout` ends, fleetd resets the connection with a
+zero linger, so its kernel stops retransmitting the answer to a network that comes back. The config
+stays for the node's next fetch, and fleetd journals that the peer did not acknowledge it, with the
+peer's address. The boot listener speaks HTTP/1.1
+alone, since an HTTP/2 connection carries many streams and its send queue describes none of them.
+After the burn, fleetd sets the device `active` and writes `attest_consumed_at`, and a release
+NetBox refuses is retried each pass and journaled once. One fetch claims a config at a time,
+including while it waits for the acknowledgement. HEAD and
 other methods are 405, `If-None-Match` and `If-Modified-Since` are 400, and a Range is ignored. A
 machine has one config at a time: a new render burns the old code. A spent code stays refused for
 a day. A fetch with another code is journaled at most every ten minutes per machine. Before it
@@ -166,8 +174,14 @@ answers, a fetch reads the device from NetBox, and serves the config only while 
 dropped, burned and journaled, and the fetch gets 404. So does a device NetBox no longer holds,
 without a journal. When NetBox does not answer within ten seconds, the fetch gets 503 and the
 config stays for the node's next try. Each reconcile pass also drops the unread config of a device
-that is not `planned`, or that NetBox no longer lists as live. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
-burn state.
+that is not `planned`, or that NetBox no longer lists as live. The TTL bounds when a fetch may
+start: a pass never expires a config a fetch holds, and expires it on a later pass if the fetch
+gives it back. A pass that withdraws a config a fetch holds marks it withdrawn and journals that a
+fetch was writing it, so the node may have it. The fetch's end settles it: when the node
+acknowledged it all, fleetd journals that the node fetched the withdrawn config and leaves the
+status as it is; otherwise the config is dropped and burned. A fetch logs that the config stays only
+when it does. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and burn state, and
+a config withdrawn under a fetch is dropped at the restart.
 
 `FLEET_CONFIG_DIR` is a tmpfs, so a reboot of spore drops every config that waits, and the record
 of a served one whose release NetBox has not taken. A run goes on through the outage, so its node
@@ -177,8 +191,18 @@ flash is not gone. A fetch for a UUID with no config is looked up in NetBox by `
 once every ten minutes per machine and once a second in all, since the endpoint is
 unauthenticated. When it is a `planned` device whose `last_workflow` is its provision, fleetd counts
 `fleet_install_config_missing_total` on each lookup and journals once per run that the node asks
-for a config fleetd does not hold; the owner sets `desired_action` to `provision`. A UUID NetBox
-does not hold is only logged.
+for a config fleetd does not hold; the owner sets `desired_action` to `provision`. When fleetd
+served that run's config and NetBox has not taken its release, the journal names the served config
+instead of a reboot or the TTL. A UUID NetBox does not hold is only logged.
+
+Each served config leaves a record for a day, under a hash of the UUID and code, in `served.json`
+beside `burned.json`. A fetch whose UUID and code match one comes from a node that acknowledged its
+config and did not keep it, as after a power loss before Talos wrote it to STATE. fleetd counts
+`fleet_install_config_refetched_total` on every such ask, whatever the device's status, and
+journals once per run that the node asks again, with the serve time and the action: set
+`desired_action` to `provision`. Its NetBox lookup is limited to one per machine every ten minutes,
+and only a holder of the code can cause it. fleetd never serves the config again: the code is a
+bearer credential for the cluster's join secrets, in the clear in META and on the node's console.
 
 A node that boots HookOS after its provision succeeded attests again as a `planned` device whose
 `desired_action` is `none`, whose `last_workflow` is that provision and whose config is unread.

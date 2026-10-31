@@ -117,6 +117,7 @@ func run(log *slog.Logger) error {
 		go func() { errc <- s.Serve(ln) }()
 	}
 	boot := server(bootHandler(srv, r.Installer))
+	confirmAcks(boot)
 	servers = append(servers, boot)
 	go serveBoot(ctx, log, boot, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
 	go srv.V.RunBackfill(ctx, 10*time.Minute)
@@ -221,6 +222,17 @@ func serveBoot(ctx context.Context, log *slog.Logger, s *http.Server, addr strin
 		case <-time.After(retry):
 		}
 	}
+}
+
+// confirmAcks lets the config's answer read its connection's send queue, so
+// the config burns only once the node acknowledged every byte. The listener
+// speaks HTTP/1.1 alone: HTTP/2 shares a connection among streams and writes
+// each stream's data after the handler's flush, so the queue would not
+// describe one answer. Talos's fetch and the device flow need nothing more.
+func confirmAcks(s *http.Server) {
+	s.ConnContext = fleet.ConnContext
+	s.Protocols = new(http.Protocols)
+	s.Protocols.SetHTTP1(true)
 }
 
 // bootHandler serves what a netbooting machine and a first boot reach: the
