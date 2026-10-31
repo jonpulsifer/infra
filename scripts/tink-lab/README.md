@@ -23,7 +23,7 @@ real scheduling, real acknowledgements and real Rufio jobs.
 | HookOS | The signed UKI from the `talos-folly` release in `HOOKOS_RELEASE`, checked against GitHub's asset digest. | Secure Boot is off, so systemd-stub takes iPXE's command line instead of the signed one. See below. |
 | Agent | `tink_agent_image` from `clusters/folly/talos/netboot.json` (tink-agent-autoid), by digest, with `agent/entry.sh` layered in front of its entrypoint. | Attestation is a stand-in. The wrapper writes `/worker/fleet/attested` and a fresh 43-character install code, then runs the lab's `entry.sh`, whose own attestation skips itself. `--attest nocode` or `--attest fail` on `vm create` changes the verdict. |
 | Images | The Template's tools image, the agent and each class's installer, from `class-inputs.json`. They are copied from GHCR into a local registry. DNS answers `ghcr.io` with the registry, and HookOS's `insecure_registries=ghcr.io` lets it pull over HTTP. | Same references and digests. The installer is a tag, as in `class-inputs.json`. |
-| Install | `ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5` writes the disk and META. Talos boots from the disk, syncs time from `ntp.py` (chrony's part on spore) and asks for its config at the `talos.config` URL. | There is no config server. The config host does not resolve in the namespace, so Talos retries forever. |
+| Install | `ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5` writes the disk and META. Talos boots from the disk, syncs time from `ntp.py` (chrony's part on spore) and asks for its config at the `talos.config` URL. | The config host does not resolve in the namespace, so Talos retries forever, unless `talos-boot NAME http` points it at fleetd's boot listener over HTTP (fleetd in the loop). |
 | Firmware | OVMF 202602 with a swtpm TPM 2.0, q35, KVM, 2 vCPU and 3 GiB. | No Secure Boot keys are enrolled, so Secure Boot is off. The VM's own PXE and HTTP boot entries exist, and IPv6 PXE is off. |
 
 ### The command line and the isolation
@@ -129,15 +129,18 @@ stand-in NetBox that serves NAME as its only device. It is `fleetd/main.go` buil
 the renderer, the cluster client, the TFTP links and the SPIRE file. So `Admit` and renders do not
 run, and a device stays `planned` after a provision. Its `Installer` has no renderer: `config NAME
 put` puts a config as a render at intake does, and `config NAME fetch` asks fleetd's own
-`/talos/config` handler for it, as the installed node's first boot does. The node itself cannot
-fetch it: the config host does not resolve in the namespace.
+`/talos/config` handler for it, as the installed node's first boot does. fleetd also serves that
+handler as its boot listener does, with that server's timeouts, at `192.0.2.1:8447` in plain HTTP,
+and `talos-boot NAME http` makes the installed Talos fetch from it; see the installed node's fetch.
 `fleetd/redfish-machine.patch` adds a `redfish` case to `Config.Machine`, so the Machine fleetd
 applies drives the VM's Redfish BMC where the lab has AMT.
 
 ```sh
-tink-lab.sh template pmain --from <(git show origin/main:clusters/folly/tinkerbell/template.yaml)
+git show origin/main:clusters/folly/tinkerbell/template.yaml >/tmp/pmain.yaml   # a file: --from reads
+tink-lab.sh template pmain --from /tmp/pmain.yaml                                # it inside the namespace
 tink-lab.sh fleetd start n1 --template pmain     # --interval DUR (FLEET_INTERVAL, 2m), --status S,
-                                                 # --installer IMAGE (every class's installer)
+                                                 # --installer IMAGE (every class's installer),
+                                                 # --config-ttl DUR (FLEET_CONFIG_TTL; here 1h)
 tink-lab.sh netbox n1 set desired_action=provision --webhooks 20   # the owner's edit, then 20 webhooks
 tink-lab.sh netbox n1 set status=decommissioning
 tink-lab.sh webhook 5                            # five signed webhooks at once
@@ -148,6 +151,7 @@ tink-lab.sh fleetd restart --kill --down 5                # a crash and the unit
 tink-lab.sh fleetd hold '^PATCH /api/dcim/devices/'      # fleetd's matching NetBox calls wait unsent
 tink-lab.sh fleetd hold release
 tink-lab.sh config n1 put                        # a config for the machine, under a fresh code
+tink-lab.sh config n1 put --file worker.yaml --meta-code   # those bytes, under the code in META
 tink-lab.sh config n1 fetch                      # GET /talos/config with that code; records the status
 tink-lab.sh bmc n1 fail-power on|off             # the BMC answers 500 to every power action
 tink-lab.sh fleetd stop
@@ -173,11 +177,43 @@ tink-lab.sh fleetd stop
   the client's 30 s timeout fails as a NetBox that does not answer does.
 - `fleetd run` starts the fleetd process alone with the environment `fleetd start` wrote, after a
   `kill -9` of the PID in `pids/fleetd`, for an outage longer than a test can predict.
+- `config NAME put --file F` puts F's bytes instead of a one-line stand-in, and `--meta-code` puts
+  it under the install code in the machine's META (`diskstate.py code`), which the installed Talos
+  sends, instead of a fresh one.
 - `bmc NAME fail-power on` makes the machine's BMC answer every `ComputerSystem.Reset` with a 500
   and leave the power as it is, so Rufio's netboot job fails.
 - fleetd's log, with its `fleet.*` audit lines, is `logs/fleetd.log`; netbox.py's requests are in
   `logs/netbox.log`. `reset` clears the stand-in's state; the build stays in `fleetd/` until the
   ref, `fleetd/main.go` or the patch changes.
+
+### The installed node's fetch
+
+`talos-boot NAME http` (the machine off) adds a systemd-boot entry to the installed ESP that boots
+the Talos UKI with its own command line, but `talos.config` at
+`http://192.0.2.1:8447/talos/config?uuid=${uuid}&code=${code}` and `console=ttyS0` added, so the
+serial log carries Talos's fetch, its retries and `persisted to STATE`. It makes the entry the
+default and deletes the installer's `LoaderEntryDefault`. Secure Boot is off, so systemd-stub takes
+the entry's options. `talos-boot NAME reset` removes the entry. A new install rewrites the ESP, so
+run it after each provision.
+
+What differs from the lab: plain HTTP to an address, not HTTPS to `enroll.lolwtf.ca`, because the
+installed Talos trusts only its own root store and a test CA would need another image. Talos's
+download code and retries, fleetd's handler, its claim, burn and release, and the server's
+timeouts are the real ones.
+
+```sh
+tink-lab.sh power n1 off
+tink-lab.sh talos-boot n1 http
+tink-lab.sh config n1 put --file worker.yaml --meta-code
+tink-lab.sh config-net n1 cut --after 1700       # fleetd's answers to n1 stop past 1,700 bytes
+tink-lab.sh power n1 on
+tink-lab.sh config-net n1 restore
+```
+
+`config-net NAME cut [--after BYTES]` drops fleetd's packets to the machine from port 8447 once
+the connection's answer has carried BYTES, as conntrack counts them (IP and TCP headers included),
+and sets the bridge's `gso_max_segs` to 1 so each packet is one segment. fleetd's kernel keeps
+retransmitting, as across a network that dies. It takes `--when` and `--delay`. `restore` lifts it.
 
 ## Hooks
 
@@ -288,9 +324,10 @@ The test numbers are those in the test plan.
   `provision --again` makes a second Workflow directly, which fleetd never does.
   - The stand-in issues no LDevID and no SPIRE registration, so the credential questions of test 10
     need the real attest path.
-- **No config server for the node.** The installed Talos reaches its first config fetch and stops
-  there. fleetd in the loop serves `/talos/config` to `config fetch` on the host, not to the node.
-  Test 8 needs a name and certificate the installed Talos trusts.
+- **The node's config fetch is plain HTTP.** Without `talos-boot NAME http`, the installed Talos
+  reaches its first config fetch and stops there. With it, the node fetches from fleetd's handler
+  by address over HTTP, not by name over HTTPS: no DNS answer, no certificate and no TLS records.
+  A test CA would need a Talos image that trusts it.
 - **Secure Boot is off.** No PCR 7 policy, no signed command line and no db or dbx is exercised.
   Test 9 covers BootNext, BootOrder, stale entries, PXE first and a full variable store (`efi`),
   but not refused images.
@@ -338,10 +375,10 @@ The test numbers are those in the test plan.
 | `efivars.py` | Reads and writes BootNext, BootOrder and `Boot####` entries in an OVMF variable store, and fills it, through `virt-fw-vars`. |
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
-| `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, and watches for `disk=` boundaries. |
+| `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, the whole install code and a UKI's command line for `config` and `talos-boot`, and watches for `disk=` boundaries. |
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
 | `netbox.py` | The stand-in NetBox for fleetd in the loop: one device, its interface, and a record of fleetd's writes. |
-| `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref, with a config stand-in and request holds. |
+| `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref, with a config stand-in, the boot listener for `/talos/config`, and request holds. |
 | `fleetd/redfish-machine.patch` | Lets `Config.Machine` write a Redfish Machine for the VMs' BMCs. |

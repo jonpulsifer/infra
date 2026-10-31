@@ -34,8 +34,13 @@
 #   fleetd run                          start the fleetd process alone again, after a kill
 #   netbox NAME set KEY=VALUE|status=S... [--webhooks N] | NAME show | writes | fail-patch on|off
 #   webhook [N]                         N signed NetBox webhooks to fleetd at once
-#   config NAME put | fetch             put a config for the machine in fleetd's Installer, or fetch
+#   config NAME put [--file F] [--meta-code] | fetch
+#                                       put a config for the machine in fleetd's Installer, or fetch
 #                                       it as the installed node does
+#   config-net NAME cut [--after BYTES] | restore [--when COND] [--delay S]
+#                                       drop fleetd's config answers to the machine past BYTES
+#   talos-boot NAME http | reset        the installed Talos fetches its config from fleetd's boot
+#                                       listener over HTTP, or as installed (the machine is off)
 #   bmc NAME fail-power on|off          the machine's BMC refuses (500) or performs power actions
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
@@ -55,7 +60,7 @@ run=${XDG_RUNTIME_DIR:-/tmp}/tink-lab-$(basename "$dir")
 mkdir -p "$dir" "$run"
 
 TOOLS=(qemu_kvm OVMFFull.fd swtpm python3Packages.virt-firmware socat dnsmasq nftables kubectl
-  skopeo crane distribution openssl iproute2 util-linux)
+  skopeo crane distribution openssl iproute2 util-linux mtools)
 
 # The binary is the amd64 build of the release nix/services/tinkerbell.nix runs on spore; the
 # SHA-256 is its line in the release's checksums-embedded.txt.
@@ -1426,6 +1431,9 @@ at_boundary() {
 FLEETD_REF=${TINK_LAB_FLEETD_REF:-origin/main}
 NETBOX_PORT=8000
 FLEETD_PORT=8446
+# fleetd's boot listener, which serves the config to the installed node over HTTP; the lab's serves
+# HTTPS on 443 for the enrollment name.
+CONFIG_PORT=8447
 fleetd_build() {
   local rev key src=$dir/fleetd/src
   rev=$(git -C "$repo" rev-parse "$FLEETD_REF")
@@ -1464,7 +1472,7 @@ fleetd_device() {
 # fleetd deletes the Hardware and Machine of every other machine, as it does for a device NetBox no
 # longer lists. The classes are clusters/folly/fleet/classes.json with each Template named TEMPLATE.
 fleetd_start() {
-  local name=${1:?fleetd start needs a machine} tmpl=provision interval=2m status=active installer="" installs
+  local name=${1:?fleetd start needs a machine} tmpl=provision interval=2m status=active installer="" installs ttl=1h
   shift
   need_vm "$name"
   while [ $# -gt 0 ]; do
@@ -1473,6 +1481,7 @@ fleetd_start() {
       --interval) interval=$2 && shift 2 ;;
       --status) status=$2 && shift 2 ;;
       --installer) installer=$2 && shift 2 ;;
+      --config-ttl) ttl=$2 && shift 2 ;;
       *) die "fleetd start: unknown $1" ;;
     esac
   done
@@ -1501,10 +1510,10 @@ fleetd_start() {
     FLEET_KUBE_CERT_FILE="$dir/pki/admin.crt" FLEET_KUBE_KEY_FILE="$dir/pki/admin.key" \
     FLEET_WEBHOOK_SECRET_FILE="$dir/fleetd/webhook-secret" FLEET_WEBHOOK_ADDR="127.0.0.1:$FLEETD_PORT" \
     TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" TINK_LAB_HOLD_FILE="$dir/fleetd/hold" \
-    TINK_LAB_INSTALLS="$installs" >"$dir/fleetd/env"
+    TINK_LAB_INSTALLS="$installs" TINK_LAB_BOOT_ADDR="$BOOT:$CONFIG_PORT" TINK_LAB_CONFIG_TTL="$ttl" >"$dir/fleetd/env"
   fleetd_run
   event event=fleetd-start vm="$name" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
-    installs="$installs"
+    installs="$installs" config_ttl="$ttl"
 }
 
 # fleetd_run starts the fleetd process with the environment fleetd_start wrote, so a restart keeps
@@ -1600,19 +1609,37 @@ fleetd_hold() {
 
 # config_cmd puts a config for the machine in fleetd's Installer, as a render at intake does, with a
 # fresh code and the Workflow NetBox names, or fetches it as the installed node's first boot does
-# (GET /talos/config), and records the HTTP status.
+# (GET /talos/config), and records the HTTP status. --file puts that file's bytes (a stand-in line
+# by default), and --meta-code the code the install wrote to META, which the installed node sends.
 config_cmd() {
-  local name=${1:?config needs a machine} code uuid wf rc
+  local name=${1:?config needs a machine} code uuid wf rc file="" meta=false
   need_vm "$name"
   uuid=$(vmjson "$name" .uuid)
   case ${2:-} in
     put)
-      code=$(openssl rand 32 | basenc --base64url | tr -d '=\n')
+      shift 2
+      while [ $# -gt 0 ]; do
+        case $1 in
+          --file) file=$2 && shift 2 ;;
+          --meta-code) meta=true && shift ;;
+          *) die "config put: unknown $1" ;;
+        esac
+      done
+      if [ "$meta" = true ]; then
+        code=$(python3 -I "$here/diskstate.py" code "$(jq -r '.disks[0].file' "$(vmdir "$name")/vm.json")") \
+          || die "config: no code in $name's META"
+      else
+        code=$(openssl rand 32 | basenc --base64url | tr -d '=\n')
+      fi
       wf=$(jq -r --arg n "$name" '.devices[] | select(.name == $n) | .custom_fields.last_workflow' "$dir/fleetd/netbox/devices.json")
-      jq -n --arg u "$uuid" --arg c "$code" --arg n "$name" --arg w "$wf" \
-        '{UUID: $u, Code: $c, Serial: ("TL-" + $n), Node: $n, Class: "worker-g5", Workflow: $w}' >"$dir/fleetd/config.json"
+      if [ -n "$file" ]; then base64 -w0 "$file"; fi >"$dir/fleetd/config.b64"
+      jq -n --arg u "$uuid" --arg c "$code" --arg n "$name" --arg w "$wf" --rawfile b "$dir/fleetd/config.b64" \
+        '{UUID: $u, Code: $c, Serial: ("TL-" + $n), Node: $n, Class: "worker-g5", Workflow: $w}
+          + (if $b != "" then {Config: $b} else {} end)' >"$dir/fleetd/config.json"
+      rm -f "$dir/fleetd/config.b64"
       rc=$(inns curl -s -o /dev/null -w '%{http_code}' -X POST -d @"$dir/fleetd/config.json" "http://127.0.0.1:$FLEETD_PORT/lab/config")
-      event event=config vm="$name" action=put workflow="$wf" code="${code:0:4}" http="$rc"
+      event event=config vm="$name" action=put workflow="$wf" code="${code:0:4}" http="$rc" \
+        bytes="$(if [ -n "$file" ]; then wc -c <"$file"; else echo 0; fi)" meta_code="$meta"
       ;;
     fetch)
       [ -f "$dir/fleetd/config.json" ] || die "config: no config put for $name"
@@ -1622,6 +1649,78 @@ config_cmd() {
       ;;
     *) die "config: NAME put or NAME fetch" ;;
   esac
+}
+
+# config_net drops fleetd's boot listener's packets to the machine once the connection's answer
+# has carried BYTES (default 0) bytes, counted as conntrack counts them: IP and TCP headers
+# included. fleetd's kernel keeps retransmitting what the drop eats, as across a network that
+# dies, until restore. While cut, the bridge takes no segmentation offload (gso_max_segs 1), so
+# each packet is one MSS and the cut falls inside a small answer; with offload, one write leaves
+# as one packet, and the cut drops all of it.
+config_net() {
+  local name=$1 what=$2 after=0 ip
+  need_vm "$name"
+  [ "${3:-}" = --after ] && after=$4
+  ip=$(vmjson "$name" .ip)
+  case $what in
+    cut)
+      inns sh -c "echo 1 >/proc/sys/net/netfilter/nf_conntrack_acct; ip link set dev $BRIDGE gso_max_segs 1"
+      inns nft -f - <<NFT
+table inet tinklab_config_$name {
+  chain out { type filter hook output priority -10; ip daddr $ip ip saddr $BOOT tcp sport $CONFIG_PORT ct reply bytes > $after drop; }
+}
+NFT
+      ;;
+    restore)
+      inns nft delete table inet "tinklab_config_$name" 2>/dev/null || true
+      inns ip link set dev "$BRIDGE" gso_max_segs 65535
+      ;;
+    *) die "config-net: cut or restore" ;;
+  esac
+  event event=config-net vm="$name" action="$what" after="$after"
+}
+
+# talos_boot adds a systemd-boot entry on the machine's ESP that boots the installed UKI with its
+# own command line, but talos.config at fleetd's boot listener over HTTP and console=ttyS0 added,
+# so the serial log carries Talos's fetch. It deletes the LoaderEntryDefault the installer set, so
+# loader.conf's default picks the entry. Secure Boot is off, so systemd-stub takes the entry's
+# options. reset removes the entry; the UKI boots as systemd-boot's first entry. The machine must
+# be off.
+talos_boot() {
+  local name=${1:?talos-boot needs a machine} what=${2:-} img start at uki cmdline tmp url
+  need_vm "$name"
+  running_vm "$name" && die "talos-boot: power $name off first"
+  img=$(jq -r '.disks[0].file' "$(vmdir "$name")/vm.json")
+  start=$(sfdisk -J "$img" | jq '.partitiontable.partitions[] | select(.name == "EFI") | .start')
+  [ -n "$start" ] || die "talos-boot: $name's disk has no EFI partition"
+  at="$img@@$((start * 512))"
+  tmp=$(mktemp)
+  case $what in
+    http)
+      uki=$(mdir -b -i "$at" ::/EFI/Linux | grep -m 1 -E 'Talos-[^/]*\.efi$') || die "talos-boot: no Talos UKI"
+      cmdline=$(mtype -i "$at" "$uki" | python3 -I "$here/diskstate.py" cmdline)
+      url="http://$BOOT:$CONFIG_PORT/talos/config?uuid=\${uuid}&code=\${code}"
+      cmdline=$(awk -v u="$url" '{ for (i = 1; i <= NF; i++) if ($i ~ /^talos\.config=/) $i = "talos.config=" u; print }' <<<"$cmdline")
+      printf 'title tink-lab Talos, config over HTTP\nefi %s\noptions %s console=ttyS0\n' "${uki#::}" "$cmdline" >"$tmp"
+      mmd -i "$at" ::/loader/entries 2>/dev/null || true
+      mcopy -o -i "$at" "$tmp" ::/loader/entries/tink-lab.conf
+      mtype -i "$at" ::/loader/loader.conf | grep -v '^default ' >"$tmp" || true
+      echo 'default tink-lab.conf' >>"$tmp"
+      mcopy -o -i "$at" "$tmp" ::/loader/loader.conf
+      # The installer sets LoaderEntryDefault to its UKI, which overrides loader.conf's default.
+      virt-fw-vars -i "$(vmdir "$name")/vars.fd" -o "$tmp" -d LoaderEntryDefault >/dev/null
+      cp "$tmp" "$(vmdir "$name")/vars.fd"
+      event event=talos-boot vm="$name" action=http "options=$cmdline console=ttyS0"
+      ;;
+    reset)
+      mdel -i "$at" ::/loader/entries/tink-lab.conf 2>/dev/null || true
+      mtype -i "$at" ::/loader/loader.conf | grep -v '^default ' >"$tmp" || true
+      mcopy -o -i "$at" "$tmp" ::/loader/loader.conf
+      event event=talos-boot vm="$name" action=reset
+      ;;
+    *) die "talos-boot: NAME http or NAME reset" ;;
+  esac
+  rm -f "$tmp"
 }
 
 # bmc_cmd makes the machine's BMC refuse its power actions with a 500, or perform them again.
@@ -1874,6 +1973,16 @@ case $cmd in
     tools
     config_cmd "$@"
     ;;
+  config-net)
+    tools
+    parse_when "$@"
+    at_boundary "${rest[0]:?config-net needs a machine}"
+    config_net "${rest[@]}"
+    ;;
+  talos-boot)
+    tools
+    talos_boot "$@"
+    ;;
   bmc)
     bmc_cmd "$@"
     ;;
@@ -1894,7 +2003,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,48p' "$0" >&2
+    sed -n '2,53p' "$0" >&2
     exit 2
     ;;
 esac

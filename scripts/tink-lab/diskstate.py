@@ -4,6 +4,10 @@
                                        signature and the MiB that hold anything, and Talos's META
                                        keys (key 0x0b, the install code, shows its first 4
                                        characters only)
+  diskstate.py code IMAGE              the install code in META's first copy, whole, for a test
+                                       that serves the node's config under it
+  diskstate.py cmdline < UKI           the command line of a UKI's first profile, its first
+                                       .cmdline section
   diskstate.py watch IMAGE STAGE TIMEOUT
                                        exit 0 when the disk gains STAGE, 124 at TIMEOUT. STAGE is
                                        gpt (a GPT header), esp (a FAT signature on the partition
@@ -97,6 +101,37 @@ def meta(f, start):
     return copies
 
 
+def code(path):
+    f = os.open(path, os.O_RDONLY)
+    try:
+        for p in partitions(f) or []:
+            if p["name"] != "META":
+                continue
+            block = read(f, p["start"] * SECTOR, ADV)
+            at = 4
+            while block[:4] == META_MAGIC and at + 8 <= len(block) - 32:
+                key, length = struct.unpack_from(">II", block, at)
+                if key == 0 and length == 0:
+                    break
+                if key == 0x0B:
+                    return block[at + 8 : at + 8 + length].decode("ascii")
+                at += 8 + length
+    finally:
+        os.close(f)
+    return None
+
+
+def cmdline(uki):
+    pe = struct.unpack_from("<I", uki, 0x3C)[0]
+    count, optional = struct.unpack_from("<H", uki, pe + 6)[0], struct.unpack_from("<H", uki, pe + 20)[0]
+    table = pe + 24 + optional
+    for i in range(count):
+        name, size, _, _, raw = struct.unpack_from("<8sIIII", uki, table + 40 * i)
+        if name.rstrip(b"\0") == b".cmdline":
+            return uki[raw : raw + size].decode("ascii").rstrip("\0").strip()
+    return None
+
+
 def show(path):
     f = os.open(path, os.O_RDONLY)
     try:
@@ -144,7 +179,17 @@ def watch(path, stage, timeout):
 if __name__ == "__main__":
     if sys.argv[1] == "show":
         print(json.dumps(show(sys.argv[2]), separators=(",", ":")))
+    elif sys.argv[1] == "cmdline":
+        c = cmdline(sys.stdin.buffer.read())
+        if c is None:
+            sys.exit("no .cmdline section")
+        print(c)
+    elif sys.argv[1] == "code":
+        c = code(sys.argv[2])
+        if c is None:
+            sys.exit("no install code in META")
+        print(c)
     elif sys.argv[1] == "watch":
         sys.exit(watch(sys.argv[2], sys.argv[3], float(sys.argv[4])))
     else:
-        sys.exit("diskstate.py show IMAGE | watch IMAGE gpt|esp|meta TIMEOUT")
+        sys.exit("diskstate.py show IMAGE | code IMAGE | cmdline < UKI | watch IMAGE gpt|esp|meta TIMEOUT")

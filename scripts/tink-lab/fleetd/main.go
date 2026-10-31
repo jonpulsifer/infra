@@ -2,7 +2,9 @@
 // them, against tink-lab's API and netbox.py. It wires what apps/fleetd/main.go's newFleet wires,
 // less the verifier, the renderer, the cluster client, the TFTP links and the SPIRE file. Its
 // Installer has no renderer: POST /lab/config puts a config as a render would, and GET
-// /talos/config serves it through the Installer's own handler. While the file TINK_LAB_HOLD_FILE
+// /talos/config serves it through the Installer's own handler. With TINK_LAB_BOOT_ADDR set, the
+// handler is also served there as fleetd's boot listener serves it, with that server's timeouts,
+// in plain HTTP, so an installed node can fetch its config. While the file TINK_LAB_HOLD_FILE
 // holds a regular expression that matches "METHOD PATH?QUERY" of a request to NetBox, the request
 // waits unsent until the file goes or stops matching, so a test can stop fleetd between two of its
 // NetBox calls. tink-lab.sh copies it into an export of apps/fleetd and builds it there.
@@ -56,8 +58,12 @@ func main() {
 	netbox := &fleet.NetBox{URL: os.Getenv("FLEET_NETBOX_URL"), Token: token,
 		Client: &http.Client{Timeout: 30 * time.Second, Transport: hold{os.Getenv("TINK_LAB_HOLD_FILE"), http.DefaultTransport}}}
 	metrics := fleet.NewMetrics()
+	ttl, err := time.ParseDuration(os.Getenv("TINK_LAB_CONFIG_TTL"))
+	if err != nil || ttl <= 0 {
+		ttl = time.Hour
+	}
 	installer := &fleet.Installer{Site: cfg.Site, NetBox: netbox, Kube: kube, Configs: &fleet.Configs{},
-		TTL: time.Hour, Metrics: metrics, Now: time.Now}
+		TTL: ttl, Metrics: metrics, Now: time.Now}
 	r := &fleet.Reconciler{
 		Config:    cfg,
 		NetBox:    netbox,
@@ -74,21 +80,46 @@ func main() {
 	mux.Handle("GET /metrics", r.Metrics)
 	mux.Handle("GET /talos/config", installer)
 	mux.HandleFunc("POST /lab/config", func(w http.ResponseWriter, req *http.Request) {
-		var p fleet.Pending
-		if err := json.NewDecoder(req.Body).Decode(&p); err != nil {
+		var in struct {
+			fleet.Pending
+			Config []byte
+		}
+		if err := json.NewDecoder(req.Body).Decode(&in); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		p := in.Pending
 		p.Rendered, p.TTL = time.Now(), installer.TTL
-		if err := installer.Configs.Put(p, []byte("# tink-lab: a stand-in config for "+p.Node+"\n")); err != nil {
+		body := in.Config
+		if len(body) == 0 {
+			body = []byte("# tink-lab: a stand-in config for " + p.Node + "\n")
+		}
+		if err := installer.Configs.Put(p, body); err != nil {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		log.Printf("tink-lab: put a config for %s (workflow %s)", p.Node, p.Workflow)
+		log.Printf("tink-lab: put a config for %s (workflow %s, %d bytes)", p.Node, p.Workflow, len(body))
 		w.WriteHeader(http.StatusCreated)
 	})
 	srv := &http.Server{Addr: os.Getenv("FLEET_WEBHOOK_ADDR"), Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go r.Loop(ctx, trigger)
+	if addr := os.Getenv("TINK_LAB_BOOT_ADDR"); addr != "" {
+		boot := http.NewServeMux()
+		boot.Handle("/talos/config", installer)
+		boot.HandleFunc("/", http.NotFound)
+		bs := &http.Server{Addr: addr, Handler: boot, ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout: 30 * time.Second, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+		go func() {
+			<-ctx.Done()
+			_ = bs.Shutdown(context.Background())
+		}()
+		go func() {
+			if err := bs.ListenAndServe(); err != http.ErrServerClosed {
+				log.Fatal(err)
+			}
+		}()
+		log.Printf("tink-lab: the boot listener serves /talos/config at %s, config TTL %s", addr, ttl)
+	}
 	go func() {
 		<-ctx.Done()
 		_ = srv.Shutdown(context.Background())
