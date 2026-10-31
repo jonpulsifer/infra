@@ -43,11 +43,43 @@ func ackDeadline(r *http.Request, start time.Time) time.Time {
 // Only HTTP/1 is confirmed: HTTP/2 shares the connection among streams and
 // writes a stream's data on its own schedule, so the send queue says nothing
 // about one answer.
+//
+// When it gives up, it resets the connection: the kernel would otherwise go
+// on retransmitting the answer, and a node whose network comes back would
+// get a config fleetd holds unburned. Only an acknowledged retry delivers it.
 func awaitAck(r *http.Request, deadline time.Time) error {
 	c, ok := r.Context().Value(connKey{}).(net.Conn)
 	if !ok {
 		return nil
 	}
+	err := waitAck(r, c, deadline)
+	if err == nil {
+		return nil
+	}
+	if aerr := abort(c); aerr != nil {
+		return fmt.Errorf("%w; reset the connection: %v", err, aerr)
+	}
+	return fmt.Errorf("%w; fleetd reset the connection", err)
+}
+
+// abort closes the connection's socket with a zero linger, so the kernel
+// drops what it has not delivered and sends a reset. Under TLS it closes the
+// socket below, and net/http's next read or write on the conn fails, so the
+// connection is never reused.
+func abort(c net.Conn) error {
+	if t, ok := c.(*tls.Conn); ok {
+		c = t.NetConn()
+	}
+	if tc, ok := c.(*net.TCPConn); ok {
+		if err := tc.SetLinger(0); err != nil {
+			c.Close()
+			return err
+		}
+	}
+	return c.Close()
+}
+
+func waitAck(r *http.Request, c net.Conn, deadline time.Time) error {
 	if r.ProtoMajor != 1 {
 		return fmt.Errorf("%s shares its connection, so no acknowledgement confirms the answer", r.Proto)
 	}

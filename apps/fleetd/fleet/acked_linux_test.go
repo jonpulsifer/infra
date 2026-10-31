@@ -3,6 +3,8 @@ package fleet
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -108,6 +110,14 @@ func (s *bootServer) wait(within time.Duration) error {
 // reads the headers and the start of the body, and reads no more.
 func stalledGet(t *testing.T, addr string) net.Conn {
 	t.Helper()
+	c := stalledDial(t, addr)
+	startGet(t, c)
+	return c
+}
+
+// stalledDial connects with a small receive buffer.
+func stalledDial(t *testing.T, addr string) net.Conn {
+	t.Helper()
 	d := net.Dialer{Control: func(_, _ string, rc syscall.RawConn) error {
 		var serr error
 		if err := rc.Control(func(fd uintptr) {
@@ -121,6 +131,12 @@ func stalledGet(t *testing.T, addr string) net.Conn {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return c
+}
+
+// startGet sends the GET and reads the headers and the start of the body.
+func startGet(t *testing.T, c io.ReadWriter) {
+	t.Helper()
 	fmt.Fprintf(c, "GET %s HTTP/1.1\r\nHost: enroll\r\nConnection: close\r\n\r\n", configPath)
 	head := make([]byte, 2048)
 	if _, err := io.ReadFull(c, head); err != nil {
@@ -129,7 +145,6 @@ func stalledGet(t *testing.T, addr string) net.Conn {
 	if !bytes.HasPrefix(head, []byte("HTTP/1.1 200 ")) {
 		t.Fatalf("the stalled fetch began %q", head[:20])
 	}
-	return c
 }
 
 // The answer burns only once the node has acknowledged every byte; over TLS
@@ -181,22 +196,62 @@ func TestAnAnswerCutMidBodyDoesNotBurn(t *testing.T) {
 }
 
 // A node that holds its acknowledgements past the write deadline, as across
-// a network that died, leaves the config unburned.
+// a network that died, leaves the config unburned, and fleetd resets the
+// connection: a network that comes back delivers no more of the answer, and
+// only an acknowledged retry gets the config.
 func TestAnAnswerUnacknowledgedAtTheDeadlineDoesNotBurn(t *testing.T) {
-	it := newInstallTest(t, "planned", nil)
-	it.putConfig(t, bigConfig)
-	s := it.serve(t, 500*time.Millisecond, false)
-	c := stalledGet(t, s.Listener.Addr().String())
-	defer c.Close()
-	if err := s.wait(5 * time.Second); err != nil {
+	for _, useTLS := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tls=%v", useTLS), func(t *testing.T) {
+			it := newInstallTest(t, "planned", nil)
+			it.putConfig(t, bigConfig)
+			s := it.serve(t, 500*time.Millisecond, useTLS)
+			var c io.ReadCloser
+			if useTLS {
+				c = stalledTLSGet(t, s)
+			} else {
+				c = stalledGet(t, s.Listener.Addr().String())
+			}
+			defer c.Close()
+			if err := s.wait(5 * time.Second); err != nil {
+				t.Fatal(err)
+			}
+			if !it.held(testCode) {
+				t.Fatal("an unacknowledged answer burned the config")
+			}
+			if got := it.nb.journalWith("at the write deadline; fleetd reset the connection"); len(got) != 1 {
+				t.Fatalf("journals %v", it.nb.journals)
+			}
+			// The reader comes back after the deadline.
+			rest, err := io.ReadAll(c)
+			if err != nil && !errors.Is(err, syscall.ECONNRESET) {
+				t.Fatalf("the late read: %v", err)
+			}
+			if len(rest)+2048 >= len(bigConfig) {
+				t.Fatalf("the late reader got %d more bytes after the reset", len(rest))
+			}
+			if !it.held(testCode) {
+				t.Fatal("the late read burned the config")
+			}
+			code, body := s.mustGet(t)
+			if code != http.StatusOK || !bytes.Equal(body, bigConfig) || it.held(testCode) || journalCount(it.nb, "success") != 1 {
+				t.Fatalf("the retry: %d, %d bytes", code, len(body))
+			}
+		})
+	}
+}
+
+// stalledTLSGet is stalledGet over TLS.
+func stalledTLSGet(t *testing.T, s *bootServer) io.ReadCloser {
+	t.Helper()
+	raw := stalledDial(t, s.Listener.Addr().String())
+	cfg := s.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	cfg.NextProtos, cfg.ServerName = []string{"http/1.1"}, "example.com"
+	c := tls.Client(raw, cfg)
+	if err := c.Handshake(); err != nil {
 		t.Fatal(err)
 	}
-	if !it.held(testCode) {
-		t.Fatal("an unacknowledged answer burned the config")
-	}
-	if got := it.nb.journalWith("at the write deadline"); len(got) != 1 {
-		t.Fatalf("journals %v", it.nb.journals)
-	}
+	startGet(t, c)
+	return c
 }
 
 // The device leaves planned while a fetch writes its config. The journal

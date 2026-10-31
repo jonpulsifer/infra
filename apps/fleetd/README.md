@@ -158,8 +158,10 @@ and gives up when its context ends.
 The first response whose every byte the node acknowledged burns it. A written answer is in
 fleetd's socket buffer, not on the node, so after the flush the fetch polls the socket's send queue
 (`SIOCOUTQ`, under TLS the socket below the records) every 10 ms until it is empty. When the
-connection closes first, or the server's `WriteTimeout` ends, the config stays for the node's next
-fetch, and fleetd journals that the peer did not acknowledge it. The boot listener speaks HTTP/1.1
+connection closes first, or the server's `WriteTimeout` ends, fleetd resets the connection with a
+zero linger, so its kernel stops retransmitting the answer to a network that comes back. The config
+stays for the node's next fetch, and fleetd journals that the peer did not acknowledge it, with the
+peer's address. The boot listener speaks HTTP/1.1
 alone, since an HTTP/2 connection carries many streams and its send queue describes none of them.
 After the burn, fleetd sets the device `active` and writes `attest_consumed_at`, and a release
 NetBox refuses is retried each pass and journaled once. One fetch claims a config at a time,

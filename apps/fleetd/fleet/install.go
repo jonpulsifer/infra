@@ -313,7 +313,7 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// the node gets any of them or not.
 	if err := awaitAck(r, ackDeadline(r, start)); err != nil {
 		left := stays()
-		log.Printf("talos-config: %s did not acknowledge its config: %v; %s", p.Node, err, left)
+		log.Printf("talos-config: %s at %s did not acknowledge its config: %v; %s", p.Node, r.RemoteAddr, err, left)
 		i.async(func(ctx context.Context) { i.unacked(ctx, p, r.RemoteAddr, now, err, left) })
 		return
 	}
