@@ -12,6 +12,7 @@ on:
       - 'apps/lookout/windows/**'
       - 'images/*/gh'
       - 'clusters/offsite/apps/elevenlabs/**'
+      - 'nix/services/spire/*.sh'
       - 'mise.toml'
       - '.github/workflows/shell.yml'
   pull_request:
@@ -44,3 +45,5 @@ jobs:
         run: bash .github/scripts/elevenlabs-reconcile_test.sh
       - name: Test the DevID CA YubiKey script
         run: bash scripts/devid-ca-yubikey_test.sh
+      - name: Test the SPIRE fleet entry applier
+        run: bash nix/services/spire/fleet-entries_test.sh

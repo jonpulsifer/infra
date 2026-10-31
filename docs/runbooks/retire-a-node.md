@@ -14,6 +14,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 - You can sign in to NetBox at `https://capsule.<tailnet>`.
 - The node is a worker with a BMC. optiplex is folly's only control-plane node, and this runbook does not retire it.
 - `<node>` is the host name.
+- Retire one node at a time. spore's SPIRE applier withdraws at most one node a run and refuses a run that would withdraw more. To retire several at once, first name each one in `/var/lib/spire-fleet-entries/withdraw` on spore, as [Identity](../platform/identity.md#fleetd-entries) describes.
 
 ## Back up and drain
 
