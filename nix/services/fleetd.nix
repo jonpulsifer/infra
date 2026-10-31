@@ -16,7 +16,8 @@
 #
 # With fleetd/folly-cordon-token sealed, it reaches the cluster's API as
 # clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account: it cordons a node it
-# quarantined, and creates the bootstrap token each worker's install config carries.
+# quarantined, creates the bootstrap token each worker's install config carries, and takes a retired
+# node out of the cluster.
 {
   config,
   lib,

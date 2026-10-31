@@ -54,7 +54,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
-| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, and a quarantine is journaled for the owner to cordon |
+| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, a quarantine is journaled for the owner to cordon, and a retirement leaves the Node to the owner |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line each Hardware's iPXE script passes |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt` | The Secret per `bmc_type` a Machine names |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
@@ -315,6 +315,24 @@ says the cancellation cannot stop it. A kept retirement ends at its global timeo
 is off, as any run does.
 
 A node retired mid-install never fetches its config: [Config](#config) drops it.
+
+## Retirement and the cluster
+
+Once the retirement Workflow succeeds, before the device goes `offline`, fleetd takes the node out
+of the cluster (`fleet/drain.go`). It cordons the node and evicts each pod bound to it but a
+DaemonSet's, a static pod's mirror and one already terminating, as `kubectl drain` does. An
+eviction a PodDisruptionBudget refuses holds the next step for up to `DrainTimeout`, ten minutes
+from the first refusal, which the Workflow's annotation `lolwtf.ca/drain-started-at` keeps across
+a restart; the journal says once that it waits. fleetd then deletes the Node, which has the
+cluster delete the pods left on it, every CSR the node's kubelet made or that names the node, and
+the node's bootstrap token, and journals what it did on the `offline` line. A control plane's
+Node is left to the owner. Each step tolerates an object already gone. While the cluster's API
+does not answer or refuses a step, the wiped device stays `decommissioning` with its Hardware and
+Machine, the journal says once why, the pass reports the error, and each pass tries again.
+
+Nothing revokes a kubelet's client certificate. A disk image from before the wipe holds one,
+valid for up to a year, and its kubelet can register the Node again. The deleted Node and token
+are the limit of what the cluster lets fleetd revoke.
 
 ## Overdue Workflows
 
