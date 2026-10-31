@@ -495,7 +495,9 @@ func TestRenewalRefusedWhilePlanned(t *testing.T) {
 
 // A binding that changes while Evidence runs either refuses the pass, or
 // the pass issues and pins against the binding that held at its re-check,
-// never a mix of the two.
+// never a mix of the two. A change that lands between the re-check's device
+// read and its changelog read refuses as unauthored: the newest change no
+// longer sets the value the device read showed.
 func TestEvidenceRacingABindingChange(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
@@ -513,7 +515,7 @@ func TestEvidenceRacingABindingChange(t *testing.T) {
 		res, err := h.run(serial, simMAC)
 		wg.Wait()
 		if err != nil {
-			if r := refusal(t, err); r.Verdict.Reason != reasonBinding {
+			if r := refusal(t, err); r.Verdict.Reason != reasonBinding && r.Verdict.Reason != reasonBindingAuthor {
 				t.Fatalf("%s: %+v", serial, r.Verdict)
 			}
 			continue
