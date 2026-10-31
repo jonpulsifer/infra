@@ -51,6 +51,9 @@ Use this procedure if you lose a workstation or a talosconfig.
 > [!WARNING]
 > A lost workstation holds the admin certificates and the talosconfig. Nothing can revoke them. Only a CA rotation withdraws them, as [PKI](../platform/pki.md) describes.
 
+> [!CAUTION]
+> On folly, a Kubernetes CA rotation strands each worker [fleetd](../apps/fleetd.md) installed: Talos deletes a kubelet certificate that no accepted CA signed, and the kubelet then bootstraps with the token the Talos root gives it, which no Secret holds. A lost talosconfig alone needs only the Talos API CA, `talosctl rotate-ca --kubernetes=false`. After a rotation of the Kubernetes CA, do [Rejoin fleetd's workers after a CA rotation](../platform/pki.md#rejoin-fleetds-workers-after-a-ca-rotation).
+
 1. Run `talosctl rotate-ca` on each cluster, as [PKI](../platform/pki.md) describes.
 2. Issue a new talosconfig, as [Issue a talosconfig](issue-a-talosconfig.md) describes.
 

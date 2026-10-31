@@ -93,7 +93,17 @@ Until `scripts/pki/devid-ca.sh` or the YubiKey runbook commits one, `terraform/p
 - After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
 - After Atlantis applies or replaces the DevID CA, run `scripts/pki/devid-ca.sh` and commit what it writes. A new CA leaves every LDevID untrusted until its node attests again.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
-- On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one.
+- On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one, and `--kubernetes=false` limits the rotation to the Talos API CA, which is all a talosconfig needs.
+- On folly, rotate the Kubernetes CA only with a plan for the workers [fleetd](../apps/fleetd.md) installed, `fleet_workers` in `clusters/folly/talos/talos.tf`. Talos deletes a kubelet certificate that no accepted CA signed, and their kubelets then bootstrap with the token the Talos root gives them, which no Secret holds, so they stay off the cluster until [they install again](#rejoin-fleetds-workers-after-a-ca-rotation).
+
+## Rejoin fleetd's workers after a CA rotation
+
+A rotation of folly's Kubernetes CA leaves each worker in `fleet_workers` without a kubelet certificate and without a token that joins. Each one installs again through fleetd, which gives it a token of its own.
+
+1. Commit the new CA to `clusters/folly/config/kubernetes-ca.pem`, and deploy spore from `main`, as [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md) describes. fleetd reaches folly's API with that CA.
+2. For one worker at a time, follow [Reprovision a node](../runbooks/reprovision-a-node.md). The reinstall erases the node's local-path volumes, so restore them as that runbook says.
+
+   Result: the node is `Ready` with a new kubelet certificate.
 
 ## Where it lives
 
