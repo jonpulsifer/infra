@@ -53,6 +53,28 @@ tests:
         alertname: FleetInstallConfigMissing
         exp_alerts: []
 
+  # A node booted HookOS after its install at minute 10.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_hookos_after_success_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1x100
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetNodeBootedHookOSAfterInstall
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: FleetNodeBootedHookOSAfterInstall
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: A node booted HookOS after its install succeeded
+              description: "A planned device attested from HookOS after its provision Workflow succeeded, so its firmware did not boot the installed disk, as when PXE is first in its boot order. Read the device's journal in NetBox, fix its boot order, or set desired_action to provision. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 80m
+        alertname: FleetNodeBootedHookOSAfterInstall
+        exp_alerts: []
+
   # spore's boot files and enrollment name serve until minute 10, then both checks fail.
   - interval: 1m
     input_series:

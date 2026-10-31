@@ -23,6 +23,11 @@ const OverdueAnnotation = "lolwtf.ca/overdue-at"
 // journaled, so that a restart does not journal it again.
 const EndedJournaledAnnotation = "lolwtf.ca/ended-journaled"
 
+// HookOSAfterAnnotation marks a provision Workflow that succeeded and whose
+// node then booted HookOS, which fleetd has journaled, so that a restart does
+// not journal it again.
+const HookOSAfterAnnotation = "lolwtf.ca/hookos-after-journaled"
+
 // TemplateGlobalTimeout is the provision Template's global_timeout, for a
 // Workflow whose status does not carry one yet.
 const TemplateGlobalTimeout = 1800 * time.Second

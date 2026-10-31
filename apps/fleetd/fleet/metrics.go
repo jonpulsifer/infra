@@ -27,6 +27,7 @@ type Metrics struct {
 	Expired          atomic.Int64
 	AutoProvisioned  atomic.Int64
 	ConfigMissing    atomic.Int64
+	HookOSAfter      atomic.Int64
 
 	mu               sync.Mutex
 	devices          map[string]int
@@ -95,6 +96,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_released_total", "Devices set active after their config was served.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
 	counter("fleet_install_config_missing_total", "Config fetches by a planned device's node after its provision that fleetd holds no config for.", m.ConfigMissing.Load())
+	counter("fleet_hookos_after_success_total", "Provision runs that succeeded and whose node then booted HookOS instead of its install.", m.HookOSAfter.Load())
 	counter("fleet_admit_autoprovisioned_total", "Admissions that started a provision the owner did not ask for.", m.AutoProvisioned.Load())
 	fmt.Fprintf(w, "# HELP fleet_install_configs_pending Rendered Talos configs not served yet.\n# TYPE fleet_install_configs_pending gauge\nfleet_install_configs_pending %d\n", m.pending)
 	age := func(t time.Time) float64 {
