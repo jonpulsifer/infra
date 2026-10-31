@@ -240,7 +240,10 @@ type fakeKube struct {
 	// racing replaces an object just before its delete, as a write that lands
 	// between fleetd's read and its delete.
 	racing map[string]Object
-	log    []string
+	// created runs after each create, as a write another party makes while
+	// fleetd starts a run.
+	created func()
+	log     []string
 }
 
 func matches(o Object, selector string) bool {
@@ -285,6 +288,7 @@ func (f *fakeKube) handler() http.Handler {
 						}
 					}
 				}
+				o.metadata()["resourceVersion"] = bumped(old)
 				f.objects[r.URL.Path] = o
 			case "application/merge-patch+json":
 				if !exists {
@@ -303,6 +307,7 @@ func (f *fakeKube) handler() http.Handler {
 						a[k] = v
 					}
 				}
+				old.metadata()["resourceVersion"] = bumped(old)
 			default:
 				http.Error(w, "content type "+ct, http.StatusUnsupportedMediaType)
 				return
@@ -317,7 +322,11 @@ func (f *fakeKube) handler() http.Handler {
 				return
 			}
 			o["metadata"].(map[string]any)["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
+			o["metadata"].(map[string]any)["resourceVersion"] = "1"
 			f.objects[path] = o
+			if f.created != nil {
+				f.created()
+			}
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("{}"))
 		case http.MethodGet:
@@ -384,7 +393,16 @@ func (f *fakeKube) workflows() []string {
 func (f *fakeKube) setState(name, state string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.objects[wfBase+name]["status"] = map[string]any{"state": state}
+	o := f.objects[wfBase+name]
+	o["status"] = map[string]any{"state": state}
+	o.metadata()["resourceVersion"] = bumped(o)
+}
+
+// bumped is the resourceVersion an object takes on a write, as the API
+// server gives every write a new one.
+func bumped(o Object) string {
+	rv, _ := strconv.Atoi(o.ResourceVersion())
+	return strconv.Itoa(rv + 1)
 }
 
 func workflowObject(name, node, action, created, state string) Object {
@@ -856,7 +874,8 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 		t.Fatalf("%v after two passes", n)
 	}
 
-	// The owner sets desired_action again mid-run: no second run.
+	// The owner asks for another action mid-run: no second run, and the
+	// request waits, set, for the run to end.
 	nb.set("desired_action", "attest")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -864,13 +883,12 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if n := kube.workflows(); len(n) != 1 || n[0] != wfName {
 		t.Fatalf("a second run started mid-run: %v", n)
 	}
-	last := nb.patches[len(nb.patches)-1]
-	if last["custom_fields"].(map[string]any)["desired_action"] != "none" || last["custom_fields"].(map[string]any)["last_workflow"] != wfName {
-		t.Errorf("mid-run patch %v", last)
+	if len(nb.patches) != 1 {
+		t.Errorf("a waiting request was written: %v", nb.patches)
 	}
 
-	// The run finishes; a new action deletes the finished run and starts one.
-	nb.set("desired_action", "attest")
+	// The run finishes; the first pass after it deletes the finished run and
+	// starts the waiting request.
 	nb.set("status", "active")
 	kube.setState(wfName, "SUCCESS")
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -880,7 +898,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if len(n) != 1 || !strings.HasPrefix(n[0], "attest-riptide-") {
 		t.Fatalf("after the finished run: %v", n)
 	}
-	last = nb.patches[len(nb.patches)-1]
+	last := nb.patches[len(nb.patches)-1]
 	if _, has := last["status"]; has {
 		t.Errorf("attest changed the status: %v", last)
 	}
@@ -974,35 +992,133 @@ func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
 	assertNetboot(t, kube, false, "a hand-set allowPXE with no run")
 }
 
+func (f *fakeKube) creates() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, l := range f.log {
+		if l == "POST "+strings.TrimSuffix(wfBase, "/") {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakeNetBox) failPatches(fail bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failPatch = fail
+}
+
+func (f *fakeNetBox) journalWith(substr string) []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, j := range f.journals {
+		if c, _ := j["comments"].(string); strings.Contains(c, substr) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// The Workflow is the request's record. While NetBox refuses the write that
+// names a run, every pass, a restart's included, adopts the run and tries the
+// write again, before and after the run ends; no pass starts a second one.
 func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), failPatch: true}
+	for _, end := range []string{"STATE_SUCCESS", "STATE_FAILED", ""} {
+		name := strings.TrimPrefix(end, "STATE_")
+		if name == "" {
+			name = "unfinished"
+		}
+		t.Run(name, func(t *testing.T) {
+			nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), failPatch: true}
+			kube := &fakeKube{}
+			r, done := newTest(t, nb, kube)
+			defer done()
+			failing := func(r *Reconciler, n int) {
+				t.Helper()
+				for range n {
+					if err := r.Reconcile(context.Background()); err == nil || !strings.Contains(err.Error(), "record Workflow") {
+						t.Fatalf("a failed PATCH was not reported: %v", err)
+					}
+				}
+			}
+
+			failing(r, 3)
+			names := kube.workflows()
+			if len(names) != 1 {
+				t.Fatalf("workflows after three failing passes: %v", names)
+			}
+			if end != "" {
+				kube.setState(names[0], end)
+			}
+			failing(r, 3)
+			restarted := &Reconciler{Config: r.Config, NetBox: r.NetBox, Kube: r.Kube, Metrics: NewMetrics(), Now: r.Now}
+			failing(restarted, 2)
+			if n := kube.workflows(); len(n) != 1 || n[0] != names[0] || kube.creates() != 1 {
+				t.Fatalf("a failing write started another run: %v, %d creates", n, kube.creates())
+			}
+
+			nb.failPatches(false)
+			if err := r.Reconcile(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if n := kube.workflows(); len(n) != 1 || n[0] != names[0] || kube.creates() != 1 {
+				t.Fatalf("the recovery pass changed the run: %v", n)
+			}
+			if len(nb.patches) != 1 {
+				t.Fatalf("recovery patches %v", nb.patches)
+			}
+			p := nb.patches[0]
+			cf := p["custom_fields"].(map[string]any)
+			if cf["last_workflow"] != names[0] || cf["desired_action"] != "none" {
+				t.Fatalf("recovery patch %v", p)
+			}
+			state := strings.TrimPrefix(end, "STATE_")
+			if end == "" {
+				state = "not yet picked up"
+			}
+			if got := nb.journalWith("its record was late, and it is " + state); len(got) != 1 {
+				t.Errorf("journals %v", nb.journals)
+			}
+			// A run that ended already did its work; one still going moves the
+			// device as its start would have.
+			if _, moved := p["status"]; moved != (end == "") {
+				t.Errorf("status in the recovery patch %v", p)
+			}
+		})
+	}
+}
+
+// A retirement whose write failed is adopted the same way, and once NetBox
+// names it, its success takes the device offline.
+func TestFailedNetBoxWriteRetiresOnce(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", nil)}, ifaces: riptideIfaces(), failPatch: true, apply: true}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
-
-	for i := 0; i < 3; i++ {
+	for range 2 {
 		if err := r.Reconcile(context.Background()); err == nil {
 			t.Fatal("a failed PATCH was not reported")
 		}
 	}
-	names := kube.workflows()
-	if len(names) != 1 {
-		t.Fatalf("workflows after three failing passes: %v", names)
+	name := kube.workflows()[0]
+	kube.setState(name, "STATE_SUCCESS")
+	if err := r.Reconcile(context.Background()); err == nil {
+		t.Fatal("a failed PATCH was not reported")
 	}
-	nb.mu.Lock()
-	nb.failPatch = false
-	nb.mu.Unlock()
-	if err := r.Reconcile(context.Background()); err != nil {
-		t.Fatal(err)
+	nb.failPatches(false)
+	for range 2 {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if n := kube.workflows(); len(n) != 1 || n[0] != names[0] {
-		t.Fatalf("the recovery pass changed the run: %v", n)
+	if kube.creates() != 1 {
+		t.Fatalf("%d retirements created", kube.creates())
 	}
-	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != names[0] {
-		t.Fatalf("recovery patch %v", nb.patches)
-	}
-	if r.Metrics.WorkflowsCreated.Load() != 1 {
-		t.Errorf("created %d", r.Metrics.WorkflowsCreated.Load())
+	if last := nb.patches[len(nb.patches)-1]; last["status"] != "offline" {
+		t.Fatalf("patches %v", nb.patches)
 	}
 }
 

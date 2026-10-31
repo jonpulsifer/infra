@@ -43,7 +43,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 1. In NetBox, set the device's status to `decommissioning`.
 
-   Result: within two minutes, `last_workflow` names `retire-<node>-<unix seconds>`.
+   Result: within two minutes, `last_workflow` names `retire-<node>-<unix seconds>`. When another run of the node is going, such as an install, the journal says `the retirement ends Workflow <run> (<action>) and starts retire-<node>-<unix seconds>`: Rufio's power cycle stops that run, and fleetd drops the config it rendered for the install.
 
 2. Watch the `Workflow`.
 
@@ -96,6 +96,8 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
 | `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk. Nothing was wiped | Read the machine's disks, and correct `disk` or `disk_serial` in the nodes file, or wipe the disk at the machine |
 | The device stays `decommissioning` after a failed run | fleetd journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
+| The journal says `the retirement waits for Workflow <run>` | The device has no BMC, so nothing can stop the run that is going | Power the machine off. The run ends at its global timeout, and the retirement starts on the pass after; power the machine on, and it network-boots |
+| The device went back out of `decommissioning` mid-retirement | fleetd deletes the retirement when the device has a BMC and journals it; an action already running on the machine runs to its end, so the disk may be partly wiped | Set `desired_action` to `provision` to install the node again |
 
 ## Related
 

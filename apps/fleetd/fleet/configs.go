@@ -333,6 +333,38 @@ func (c *Configs) Expire(now time.Time) []Pending {
 	return out
 }
 
+// Drop drops and burns the unread config of the machine with the serial, and
+// returns it.
+func (c *Configs) Drop(serial string, now time.Time) (Pending, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	for uuid, p := range c.pending {
+		if p.Serial == serial && p.Fetched.IsZero() {
+			delete(c.pending, uuid)
+			delete(c.bytes, uuid)
+			c.burn(p.UUID, p.Code, now)
+			c.keep(uuid)
+			return p, true
+		}
+	}
+	return Pending{}, false
+}
+
+// Unread lists the configs no node has fetched.
+func (c *Configs) Unread() []Pending {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	var out []Pending
+	for _, p := range c.pending {
+		if p.Fetched.IsZero() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Unreleased lists the served configs NetBox has no release for.
 func (c *Configs) Unreleased() []Pending {
 	c.mu.Lock()

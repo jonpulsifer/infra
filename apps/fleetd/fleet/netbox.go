@@ -374,6 +374,20 @@ func (n *NetBox) BySerial(ctx context.Context, site, serial string) (Device, err
 	return Device{}, ErrNoDevice
 }
 
+// ByID is the site's node with this ID, read now.
+func (n *NetBox) ByID(ctx context.Context, site string, id int) (Device, error) {
+	devices, err := n.Find(ctx, site, "id", fmt.Sprint(id))
+	if err != nil {
+		return Device{}, err
+	}
+	for _, d := range devices {
+		if d.ID == id {
+			return d, nil
+		}
+	}
+	return Device{}, ErrNoDevice
+}
+
 // BySMBIOSUUID is the site's node whose smbios_uuid is this UUID.
 func (n *NetBox) BySMBIOSUUID(ctx context.Context, site, uuid string) (Device, error) {
 	devices, err := n.Find(ctx, site, "cf_smbios_uuid", uuid)

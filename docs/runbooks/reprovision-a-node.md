@@ -74,7 +74,9 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
-| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. fleetd records the request against the running `Workflow`. A run that never reports its first action ends after its global timeout with a journal line that says `never reported its first action`; then set `desired_action` again |
+| A new `desired_action` starts nothing, and the journal says `<action> waits: Workflow <run> (<its action>) is still running` | A run of another action is unfinished | Wait for it. `desired_action` stays set, and the first pass after the run ends starts it. A run that never reports its first action ends after its global timeout with a journal line that says `never reported its first action` |
+| The journal says `is already running; the request is that run` | You asked for the action of the run that is going | Nothing. The running `Workflow` is the request |
+| The journal says `its record was late` | NetBox refused fleetd's write that names the run, so the request stayed set | Nothing. fleetd adopts the run it started, finished or not, and starts no second one |
 | The power fails during a run | The run stops where the power cut it | Find the symptom in [Provision a node](provision-a-node.md#if-something-goes-wrong): `never reported its first action`, `is not empty, skipping install`, `passed its global timeout`, or a 404 for the config |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry | Boot `IPV4 Network` from the F9 menu |
 | `install: no install code` | The boot's attestation got no code | Read the `attest.install` audit line in `journalctl -u fleetd` on spore, then set `desired_action` again |

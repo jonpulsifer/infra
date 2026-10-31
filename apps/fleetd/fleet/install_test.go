@@ -408,11 +408,93 @@ func TestReleaseLeavesAStatusTheOwnerChanged(t *testing.T) {
 	if code, _ := it.render(goodRequest()); code != 201 {
 		t.Fatal(code)
 	}
+	it.nb.failPatches(true)
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
 	it.nb.set("status", map[string]any{"value": "decommissioning"})
-	it.fetch(http.MethodGet, testUUID, testCode, nil)
+	it.nb.failPatches(false)
+	it.in.Tick(context.Background())
 	p := lastPatch(it.nb)
 	if p == nil || p["status"] != nil || p["custom_fields"] == nil {
 		t.Fatalf("the release patch: %v", p)
+	}
+}
+
+// A fetch reads the device from NetBox and is served only while the device
+// is planned. A device that left planned or that NetBox no longer holds loses
+// its config; a NetBox that does not answer keeps it, and the fetch fails
+// closed with 503 for the node to try again.
+func TestAFetchServesOnlyAPlannedDevice(t *testing.T) {
+	t.Run("decommissioning", func(t *testing.T) {
+		it := newInstallTest(t, "planned", nil)
+		if code, _ := it.render(goodRequest()); code != 201 {
+			t.Fatal(code)
+		}
+		it.nb.set("status", map[string]any{"value": "decommissioning"})
+		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+			t.Fatalf("a decommissioning node fetched its config: %d", w.Code)
+		}
+		if it.held(testCode) || !it.in.Configs.Spent(testUUID, testCode) {
+			t.Fatal("the config was not dropped and burned")
+		}
+		if len(it.nb.journalWith("the device is decommissioning, so fleetd dropped the Talos config")) != 1 {
+			t.Fatalf("journals %v", it.nb.journals)
+		}
+	})
+	t.Run("NetBox down", func(t *testing.T) {
+		it := newInstallTest(t, "planned", nil)
+		if code, _ := it.render(goodRequest()); code != 201 {
+			t.Fatal(code)
+		}
+		down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, "down", http.StatusBadGateway)
+		}))
+		defer down.Close()
+		good := it.in.NetBox
+		it.in.NetBox = &NetBox{URL: down.URL, Token: "nbt_x.y", Client: down.Client()}
+		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusServiceUnavailable {
+			t.Fatalf("a fetch NetBox could not vouch for answered %d", w.Code)
+		}
+		if !it.held(testCode) {
+			t.Fatal("the config was dropped while NetBox was down")
+		}
+		it.in.NetBox = good
+		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+			t.Fatalf("the retry answered %d", w.Code)
+		}
+	})
+	t.Run("gone from NetBox", func(t *testing.T) {
+		it := newInstallTest(t, "planned", nil)
+		if code, _ := it.render(goodRequest()); code != 201 {
+			t.Fatal(code)
+		}
+		it.nb.mu.Lock()
+		it.nb.devices = nil
+		it.nb.mu.Unlock()
+		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+			t.Fatalf("a deleted device's node fetched its config: %d", w.Code)
+		}
+		if it.held(testCode) || !it.in.Configs.Spent(testUUID, testCode) {
+			t.Fatal("the config was not dropped and burned")
+		}
+	})
+}
+
+// A pass drops the unread config of a device NetBox no longer lists among its
+// live devices, such as one deleted or set offline.
+func TestAPassWithdrawsTheConfigOfAGoneDevice(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	it.in.WithdrawGone([]Device{{Serial: "mxl0172q6l"}})
+	if !it.held(testCode) {
+		t.Fatal("a listed device's config was dropped")
+	}
+	it.in.WithdrawGone([]Device{{Serial: "OTHER"}})
+	if it.held(testCode) || !it.in.Configs.Spent(testUUID, testCode) {
+		t.Fatal("a gone device's config was kept")
 	}
 }
 
@@ -621,7 +703,16 @@ func TestTheConfigIsAnsweredBeforeItsRelease(t *testing.T) {
 		t.Fatal(code)
 	}
 	hang := make(chan struct{})
-	slow := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-hang }))
+	// The fetch's read of the device answers; the release's writes hang.
+	reads := it.nb.handler()
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			reads.ServeHTTP(w, r)
+			return
+		}
+		<-hang
+		http.Error(w, "gave up", http.StatusGatewayTimeout)
+	}))
 	defer slow.Close()
 	good := *it.in.NetBox
 	it.in.NetBox = &NetBox{URL: slow.URL, Token: "nbt_x.y", Client: slow.Client()}

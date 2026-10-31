@@ -174,6 +174,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 			}
 		}
+		if r.Installer != nil {
+			if err := r.Installer.Withdraw(ctx, d); err != nil {
+				errs = append(errs, fmt.Errorf("%s: withdraw its config: %w", d.Name, err))
+			}
+		}
 		if err := r.device(ctx, d); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", d.Name, err))
 		}
@@ -185,6 +190,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	// An empty list is left alone: it is a NetBox with no nodes, or a filter
 	// gone wrong, and either way nothing to delete over.
 	if len(devices) > 0 {
+		if r.Installer != nil {
+			r.Installer.WithdrawGone(devices)
+		}
 		for _, res := range []Resource{HardwareResource, MachineResource} {
 			objs, err := r.Kube.List(ctx, res, ManagedLabel+"="+FieldManager)
 			if err != nil {
@@ -274,11 +282,13 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		var kept []Object
 		for _, wf := range workflows {
 			if wf.Labels()[ActionLabel] == ActionRetire && !Finished(wf.State()) {
-				if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
-					return fmt.Errorf("abandon %s: %w", wf.Name(), err)
+				ended, err := r.abandon(ctx, d, wf)
+				if err != nil {
+					return err
 				}
-				Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "abandoned: the device left decommissioning")
-				continue
+				if ended {
+					continue
+				}
 			}
 			kept = append(kept, wf)
 		}
@@ -342,9 +352,10 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 // before then has no deadline, so the controller never ends it, and the next
 // netboot resumes it and wipes the disk. fleetd deletes such a Workflow once
 // its creation plus its global timeout is more than a pass past: a deleted
-// Workflow is no order to wipe, and Admit renders no code for it. A retirement
-// is left alone: decommissioning asks for it again at once, and the owner ends
-// it by moving the device out of decommissioning.
+// Workflow is no order to wipe, and Admit renders no code for it. The
+// retirement of a decommissioning device is left alone: decommissioning asks
+// for it again at once, and the owner ends it by moving the device out of
+// decommissioning.
 func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Object) ([]Object, error) {
 	now := r.Now()
 	var kept []Object
@@ -358,7 +369,10 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 		}
 		if stop, ok := wf.GlobalExecutionStop(); ok {
 			kept = append(kept, wf)
-			if now.Sub(stop) > r.Config.Interval {
+			// One annotation is the write that makes the controller act; a
+			// write every pass would only change the run under every pass's
+			// other writes.
+			if _, done := wf.Annotations()[OverdueAnnotation]; !done && now.Sub(stop) > r.Config.Interval {
 				if err := r.annotateOverdue(ctx, d, wf, stop, now); err != nil {
 					return nil, err
 				}
@@ -440,7 +454,7 @@ func (r *Reconciler) annotateOverdue(ctx context.Context, d Device, wf Object, s
 // first report that lands in between keeps the run.
 func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object, now time.Time) (bool, error) {
 	created := wf.Created()
-	if created.IsZero() || wf.Labels()[ActionLabel] == ActionRetire {
+	if created.IsZero() || (wf.Labels()[ActionLabel] == ActionRetire && d.Status == "decommissioning") {
 		return false, nil
 	}
 	timeout, ok := wf.GlobalTimeout()
@@ -465,67 +479,148 @@ func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object
 // start makes sure one Workflow runs for the device and that NetBox names it,
 // and returns its name. A run that is still going is adopted, never
 // doubled: a second netboot Workflow would power-cycle the node mid-wipe.
-// The device's finished Workflows are deleted first, because Tinkerbell's
-// server may answer the agent with the first finished Workflow it finds for
-// its ID. A new run's Hardware allows netboot before the Workflow exists, so
-// Smee answers the firmware as soon as Rufio power-cycles it; a create that
-// fails leaves the flags on until the next pass turns them off. With hookos,
-// the machine already waits in HookOS, so Rufio stays out of the run.
+// The Workflow is the request's record: a run this request started, whose
+// NetBox write failed, is adopted finished or not and recorded again, never
+// run twice. The device's finished Workflows are deleted before a create,
+// because Tinkerbell's server may answer the agent with the first finished
+// Workflow it finds for its ID. A new run's Hardware allows netboot before the
+// Workflow exists, so Smee answers the firmware as soon as Rufio power-cycles
+// it; a create that fails leaves the flags on until the next pass turns them
+// off. With hookos, the machine already waits in HookOS, so Rufio stays out
+// of the run.
 func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object, hookos bool) (string, error) {
-	var name, running string
-	manual := false
+	running := firstUnfinished(workflows)
+	if running == nil && len(workflows) > 0 && unrecorded(d, action, workflows[0]) {
+		return r.adopt(ctx, d, action, workflows[0])
+	}
+	if err := r.deleteFinished(ctx, workflows); err != nil {
+		return "", err
+	}
+	if running != nil {
+		return r.adopt(ctx, d, action, running)
+	}
+	name, err := r.create(ctx, d, action, hookos)
+	if err != nil {
+		return "", err
+	}
+	comment := fmt.Sprintf("fleetd: started Workflow %s (%s)", name, action)
+	switch {
+	case hookos:
+		comment += "; the machine attested from HookOS, where it waits, and takes it"
+	case d.ManualBoot():
+		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	}
+	return r.record(ctx, d, action, name, NextStatus(action, d.Status), comment)
+}
+
+func firstUnfinished(workflows []Object) Object {
+	for _, wf := range workflows {
+		if !Finished(wf.State()) {
+			return wf
+		}
+	}
+	return nil
+}
+
+func (r *Reconciler) deleteFinished(ctx context.Context, workflows []Object) error {
 	for _, wf := range workflows {
 		if Finished(wf.State()) {
 			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
-				return "", fmt.Errorf("delete finished %s: %w", wf.Name(), err)
+				return fmt.Errorf("delete finished %s: %w", wf.Name(), err)
 			}
-			continue
-		}
-		if running == "" {
-			running = wf.Name()
 		}
 	}
-	if running != "" {
-		name = running
-	} else {
-		wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
-		if err != nil {
-			Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
-			if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
-				return "", jerr
-			}
-			return "", err
+	return nil
+}
+
+// create makes a new run of the action, with the Hardware's netboot on first.
+func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos bool) (string, error) {
+	wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
+	if err != nil {
+		Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
+		if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
+			return "", jerr
 		}
-		name = wf.Name()
-		if err := r.applyHardware(ctx, d, true); err != nil {
-			return "", err
-		}
-		if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
-			return "", fmt.Errorf("create Workflow %s: %w", name, err)
-		}
-		r.Metrics.WorkflowsCreated.Add(1)
-		manual = hookos || d.ManualBoot()
+		return "", err
 	}
-	status := NextStatus(action, d.Status)
+	if err := r.applyHardware(ctx, d, true); err != nil {
+		return "", err
+	}
+	if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
+		return "", fmt.Errorf("create Workflow %s: %w", wf.Name(), err)
+	}
+	r.Metrics.WorkflowsCreated.Add(1)
+	return wf.Name(), nil
+}
+
+// unrecorded says whether wf, the device's newest Workflow, is a run of the
+// action that NetBox does not name, which fleetd created for this request
+// and could not record. fleetd names every run it starts in last_workflow in
+// the same write that clears desired_action, so while that write fails the
+// request stays set, and the newest run of its action is the request's run.
+func unrecorded(d Device, action string, wf Object) bool {
+	return wf.Labels()[ActionLabel] == action && wf.Name() != d.LastWorkflow
+}
+
+// adopt names an existing run in NetBox instead of starting one. A run of the
+// action is the request's run, and the request is consumed. A run of another
+// action leaves the request set and NetBox unwritten, so the first pass after
+// the run ends starts it. The status moves only while the run goes: a run
+// that has ended already did its work.
+func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Object) (string, error) {
+	name, its := wf.Name(), wf.Labels()[ActionLabel]
+	if its != action {
+		if d.DesiredAction != action {
+			return name, nil
+		}
+		why := fmt.Sprintf("fleetd: %s waits: Workflow %s (%s) is still running; it starts when %s ends", action, name, its, name)
+		return name, r.journalOnce(ctx, "waits/"+name+"/"+action, d, "info", why)
+	}
+	status := ""
+	if !Finished(wf.State()) {
+		status = NextStatus(action, d.Status)
+	}
 	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
 		return name, nil
 	}
-	fields := map[string]any{"desired_action": "none", "last_workflow": name}
-	comment := fmt.Sprintf("fleetd: started Workflow %s (%s)", name, action)
-	switch {
-	case manual && hookos:
-		comment += "; the machine attested from HookOS, where it waits, and takes it"
-	case manual:
-		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	comment := fmt.Sprintf("fleetd: Workflow %s (%s) is already running; the request is that run", name, action)
+	if unrecorded(d, action, wf) {
+		comment = fmt.Sprintf("fleetd: started Workflow %s (%s); its record was late, and it is %s", name, action, stateWord(wf))
 	}
-	if running != "" {
-		comment = fmt.Sprintf("fleetd: Workflow %s is still running; %s waits for it", name, action)
+	return r.record(ctx, d, action, name, status, comment)
+}
+
+// record writes a run to NetBox: last_workflow the run, the status the action
+// moves the device to, and desired_action back to none. NetBox 4.5 takes no
+// precondition on a PATCH, so fleetd reads the device again just before it
+// and clears desired_action only while it still holds the request the pass
+// read; a request the owner set since stays, and waits for the run.
+func (r *Reconciler) record(ctx context.Context, d Device, action, name, status, comment string) (string, error) {
+	now, err := r.NetBox.ByID(ctx, r.Config.Site, d.ID)
+	if err != nil {
+		return "", fmt.Errorf("record Workflow %s: read %s again: %w", name, d.Name, err)
+	}
+	fields := map[string]any{"last_workflow": name}
+	switch now.DesiredAction {
+	case d.DesiredAction:
+		fields["desired_action"] = "none"
+	case "none", "":
+	default:
+		comment += fmt.Sprintf("; desired_action changed to %s while fleetd started it, so it stays set and waits for %s", now.DesiredAction, name)
 	}
 	if err := r.NetBox.Update(ctx, d, status, fields, "info", comment); err != nil {
 		return "", fmt.Errorf("record Workflow %s: %w", name, err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, name, action)
 	return name, nil
+}
+
+// stateWord is a Workflow's state for the journal.
+func stateWord(wf Object) string {
+	if s := strings.TrimPrefix(wf.State(), "STATE_"); s != "" {
+		return s
+	}
+	return "not yet picked up by Tinkerbell"
 }
 
 // retire runs one retire Workflow for a decommissioning device and, when the
@@ -541,14 +636,12 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 		if why := d.Unidentified(ActionRetire); why != "" {
 			return r.journalOnce(ctx, "unidentified/"+d.Name+"/"+ActionRetire, d, "warning", "fleetd: the retirement waits: "+why)
 		}
-		_, err := r.start(ctx, d, ActionRetire, workflows, false)
-		return err
+		return r.startRetire(ctx, d, workflows)
 	}
 	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
 	if errors.Is(err, ErrNotFound) {
 		// Pruned or lost before it finished: run the retirement again.
-		_, err := r.start(ctx, d, ActionRetire, workflows, false)
-		return err
+		return r.startRetire(ctx, d, workflows)
 	}
 	if err != nil {
 		return fmt.Errorf("get Workflow %s: %w", d.LastWorkflow, err)
@@ -569,6 +662,105 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 		Audit("fleet.retire", r.Config.Site, d, d.LastWorkflow, "wiped")
 	}
 	return nil
+}
+
+// startRetire starts the retirement, which supersedes a run of another action
+// that is still going. With a BMC, fleetd reads that run again and deletes it
+// only while it is as that read shows it, then creates the retirement with a
+// netboot in the same pass: Rufio's power cycle stops the run's current action before the
+// retirement's first. Without a BMC nothing can stop the machine, and a
+// deleted run's current action would go on, write the disk and leave the
+// agent stuck reporting it, so the retirement waits for the run to end.
+func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Object) error {
+	running := firstUnfinished(workflows)
+	if running == nil || running.Labels()[ActionLabel] == ActionRetire {
+		_, err := r.start(ctx, d, ActionRetire, workflows, false)
+		return err
+	}
+	old, action := running.Name(), running.Labels()[ActionLabel]
+	if !d.HasBMC() {
+		why := fmt.Sprintf("fleetd: the retirement waits for Workflow %s (%s); power the machine off to end it, and it retires on its next network boot", old, action)
+		return r.journalOnce(ctx, "retire-waits/"+old, d, "warning", why)
+	}
+	fresh, err := r.Kube.Get(ctx, WorkflowResource, old)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, nil), false)
+		return err
+	case err != nil:
+		return fmt.Errorf("read %s: %w", old, err)
+	case Finished(fresh.State()):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, fresh), false)
+		return err
+	}
+	err = r.Kube.DeleteUnchanged(ctx, WorkflowResource, old, fresh.ResourceVersion())
+	if errors.Is(err, ErrConflict) {
+		why := fmt.Sprintf("fleetd: the retirement could not end Workflow %s (%s), which changed between fleetd's read and its delete; the next pass tries again", old, action)
+		return r.journalOnce(ctx, "supersede-conflict/"+old, d, "info", why)
+	}
+	if err != nil {
+		return fmt.Errorf("end %s: %w", old, err)
+	}
+	Audit("fleet.workflow", r.Config.Site, d, old, "ended: the retirement supersedes it")
+	if err := r.deleteFinished(ctx, workflows); err != nil {
+		return err
+	}
+	name, err := r.create(ctx, d, ActionRetire, false)
+	if err != nil {
+		return err
+	}
+	comment := fmt.Sprintf("fleetd: the retirement ends Workflow %s (%s) and starts %s; a power cycle stops %s", old, action, name, old)
+	_, err = r.record(ctx, d, ActionRetire, name, "", comment)
+	return err
+}
+
+// swap replaces the named Workflow in the list with o, or drops it when o is
+// nil.
+func swap(workflows []Object, name string, o Object) []Object {
+	out := make([]Object, 0, len(workflows))
+	for _, wf := range workflows {
+		switch {
+		case wf.Name() != name:
+			out = append(out, wf)
+		case o != nil:
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// abandon ends the unfinished retirement of a device the owner took out of
+// decommissioning, and says whether it did. As startRetire does, it deletes
+// the run only with a BMC and only while the run is as a read just before
+// shows it.
+// The delete stops no action already running on the machine; the next run's
+// power cycle does. Without a BMC the run is kept, and it ends at its timeout
+// once the machine is off.
+func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, error) {
+	name := wf.Name()
+	if !d.HasBMC() {
+		why := fmt.Sprintf("fleetd: %s left decommissioning while the retirement Workflow %s runs, and no BMC can stop the machine, so the retirement goes on. Power the machine off to stop it; the run then ends at its global timeout, and a new desired_action starts after it", d.Name, name)
+		return false, r.journalOnce(ctx, "abandon-waits/"+name, d, "warning", why)
+	}
+	fresh, err := r.Kube.Get(ctx, WorkflowResource, name)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("read %s: %w", name, err)
+	case Finished(fresh.State()):
+		return false, nil
+	}
+	err = r.Kube.DeleteUnchanged(ctx, WorkflowResource, name, fresh.ResourceVersion())
+	if errors.Is(err, ErrConflict) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("abandon %s: %w", name, err)
+	}
+	Audit("fleet.workflow", r.Config.Site, d, name, "abandoned: the device left decommissioning")
+	why := fmt.Sprintf("fleetd: %s left decommissioning, so fleetd deleted the unfinished retirement Workflow %s. An action already running on the machine runs to its end, so the disk may be partly wiped; the next run's power cycle stops the machine", d.Name, name)
+	return true, r.journalOnce(ctx, "abandoned/"+name, d, "warning", why)
 }
 
 // prune deletes fleetd's Workflows older than the TTL.
