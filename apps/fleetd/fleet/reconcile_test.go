@@ -1189,6 +1189,14 @@ func TestRetirement(t *testing.T) {
 	kube := &fakeKube{objects: map[string]Object{wfBase + "wipe-riptide-1": workflowObject("wipe-riptide-1", "riptide", "wipe", old, "SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	defer done()
+	var retired []string
+	r.Retired = func(serial string) error {
+		if len(nb.patches) > 1 {
+			t.Error("the record was retired after the device went offline")
+		}
+		retired = append(retired, serial)
+		return nil
+	}
 
 	// First pass: a retire run starts, status stays, the finished wipe is deleted.
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -1228,6 +1236,9 @@ func TestRetirement(t *testing.T) {
 	}
 	if kube.get(hwPath) != nil || kube.get(mPath) != nil {
 		t.Error("Hardware or Machine survived the retirement")
+	}
+	if len(retired) != 1 || retired[0] != d["serial"] {
+		t.Errorf("retired serials %v, want [%v]", retired, d["serial"])
 	}
 }
 

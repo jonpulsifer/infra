@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var recordStatuses = []string{StatusAttested, StatusQuarantined}
+var recordStatuses = []string{StatusAttested, StatusQuarantined, StatusRetired}
 
 // Metrics renders the Prometheus text exposition.
 func (v *Verifier) Metrics() (string, error) {
@@ -74,14 +74,20 @@ func (v *Verifier) Metrics() (string, error) {
 			fmt.Fprintf(&b, "talos_attest_last_attested_timestamp_seconds{machine=%q} %d\n", r.Machine, r.AttestedAt.Unix())
 		}
 	}
-	head("talos_attest_last_checked_timestamp_seconds", "gauge", "When each running node's quote last passed, from the daily check or a renewal.")
+	live := make([]Record, 0, len(recs))
 	for _, r := range recs {
+		if r.Status != StatusRetired {
+			live = append(live, r)
+		}
+	}
+	head("talos_attest_last_checked_timestamp_seconds", "gauge", "When each running node's quote last passed, from the daily check or a renewal.")
+	for _, r := range live {
 		if !r.CheckedAt.IsZero() {
 			fmt.Fprintf(&b, "talos_attest_last_checked_timestamp_seconds{machine=%q} %d\n", r.Machine, r.CheckedAt.Unix())
 		}
 	}
 	head("talos_attest_pcr0_changed", "gauge", "1 when the running node's newest passing quote showed a PCR 0 that NetBox does not hold for the BIOS version it reported.")
-	for _, r := range recs {
+	for _, r := range live {
 		if !r.CheckedAt.IsZero() {
 			val := 0
 			if r.PCR0Changed {
@@ -91,7 +97,7 @@ func (v *Verifier) Metrics() (string, error) {
 		}
 	}
 	head("talos_attest_failed_no_quarantine", "gauge", "1 when a control-plane node's newest running quote proved a boot that misses the policy, which leaves the node in place; a passing quote clears it.")
-	for _, r := range recs {
+	for _, r := range live {
 		val := 0
 		if r.CheckFailed != "" {
 			val = 1
@@ -117,7 +123,7 @@ func (v *Verifier) Metrics() (string, error) {
 		fmt.Fprintf(&b, "talos_attest_check_last_timestamp_seconds{machine=%q,verdict=%q} %d\n", k[0], k[1], checks[k].Last.Unix())
 	}
 	head("talos_attest_ldevid_expiry_timestamp_seconds", "gauge", "When each machine's LDevID certificate expires.")
-	for _, r := range recs {
+	for _, r := range live {
 		if r.Issued() && !r.LDevIDNotAfter.IsZero() {
 			fmt.Fprintf(&b, "talos_attest_ldevid_expiry_timestamp_seconds{machine=%q} %d\n", r.Machine, r.LDevIDNotAfter.Unix())
 		}

@@ -615,6 +615,19 @@ func (v *Verifier) intakePass(s *session) {
 	v.Audit.Emit(AuditEntry{Event: auditIntake, Node: s.machine.Name, Serial: s.machine.Serial, Class: s.machine.Class, Status: protocol.VerdictPass, Reason: reason})
 }
 
+// Retire marks the record of a retired node's serial retired, so nothing
+// serves its LDevID again, whatever NetBox answers. It is idempotent.
+func (v *Verifier) Retire(serial string) error {
+	n, err := v.Store.Retire(serial, v.Now())
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		v.Log.Info("record retired", "serial", serial, "records", n)
+	}
+	return nil
+}
+
 // BackfillNetBox writes every pass fleetd's own intake produced to a
 // NetBox device whose verdict is empty, as after the verdict fields were
 // created. A record from before EKProven was kept counts as fleetd's
@@ -859,6 +872,9 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 	rec, found, err := v.Store.Record(m.Name)
 	if err != nil {
 		return protocol.RenewStart{}, err
+	}
+	if found && rec.Status == StatusRetired {
+		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is retired and gets no renewal; it attests from HookOS again once it is planned", m.Name))
 	}
 	var devidFiles map[string][]byte
 	// A record fleetd quarantined reaches a session only once NetBox

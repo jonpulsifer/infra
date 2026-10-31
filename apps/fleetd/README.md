@@ -86,7 +86,7 @@ and not answering, every request is 503 `refused`.
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding waits; [Approved EK binding](#approved-ek-binding) has the rules |
 | `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class and issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
-| `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine |
+| `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
 | `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the daily check, from the running node |
 
@@ -361,6 +361,13 @@ once that the run never reported its first action, that the disk may be partly w
 old install, and that `desired_action` runs it again. The retirement of a decommissioning device is
 left alone: decommissioning asks for it again at once, and moving the device out of
 decommissioning abandons it.
+
+When the retire Workflow succeeds, fleetd marks the verifier's record of the device's serial
+`retired` in process, with the time, and then sets the device `offline`. The record and its files
+stay for audit. A retired record serves nothing: `/devid`, its files and a renewal answer 404 and
+a refusal whatever NetBox says, including during a NetBox outage, and the LDevID expiry, check and
+PCR 0 metrics leave it out. `talos_attest_machine_status` reports it as `retired`. A device planned
+again with an approved binding attests from HookOS and gets a fresh record.
 
 ## Audit
 

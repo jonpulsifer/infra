@@ -64,6 +64,7 @@ func run(log *slog.Logger) error {
 		}
 		return out, nil
 	}
+	r.Retired = srv.V.Retire
 
 	var secret []byte
 	if f := os.Getenv("FLEET_WEBHOOK_SECRET_FILE"); f != "" {

@@ -45,8 +45,11 @@ type Record struct {
 	EKProven bool `json:"ek_proven,omitempty"`
 	// RSAEKCert is whether the TPM holds an RSA EK certificate, the only
 	// one SPIRE's tpm_devid agent reads.
-	RSAEKCert      bool      `json:"rsa_ek_cert"`
-	LDevIDSerial   string    `json:"ldevid_serial,omitempty"`
+	RSAEKCert    bool   `json:"rsa_ek_cert"`
+	LDevIDSerial string `json:"ldevid_serial,omitempty"`
+	// RetiredAt is when the node was retired; LDevIDSerial names the
+	// certificate it held.
+	RetiredAt      time.Time `json:"retired_at,omitzero"`
 	LDevIDNotAfter time.Time `json:"ldevid_not_after,omitzero"`
 	// LDevIDNotBefore is the certificate's CA-signed issue time: what orders
 	// one attestation of a serial against another, since a clock is
@@ -93,6 +96,9 @@ const (
 	StatusAttested    = "attested"
 	StatusQuarantined = "quarantined"
 	StatusPending     = "pending-approval"
+	// StatusRetired marks the record of a node that left the fleet: kept
+	// for audit, served by nothing.
+	StatusRetired = "retired"
 )
 
 // Issued reports whether the record's LDevID may be served.
@@ -254,6 +260,40 @@ func (s *Store) RetireOthers(serial, keep string) error {
 		}
 	}
 	return nil
+}
+
+// Retire marks every record that holds serial retired, with the time, and
+// reports how many it changed. The files stay for audit. A record already
+// retired keeps its first time. A later intake pass writes a fresh record
+// over it.
+func (s *Store) Retire(serial string, at time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs, err := s.records()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range recs {
+		if serialKey(r.Serial) != serialKey(serial) || r.Status == StatusRetired {
+			continue
+		}
+		r.Status, r.RetiredAt, r.UpdatedAt = StatusRetired, at, at
+		r.Confirmed = false
+		dir, err := s.machineDir(r.Machine)
+		if err != nil {
+			return n, err
+		}
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return n, err
+		}
+		if err := writeAtomic(filepath.Join(dir, "record.json"), append(b, '\n'), 0o640); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
 }
 
 // Pending is a first intake that waits for the owner: the EK hashes a
