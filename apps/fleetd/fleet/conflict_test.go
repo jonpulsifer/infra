@@ -216,3 +216,84 @@ func TestDecommissioningWithdrawsAnUnreadConfig(t *testing.T) {
 		t.Fatalf("journals %v", nb.journals)
 	}
 }
+
+// A wipe asked during a provision is neither run beside it nor consumed: it
+// stays set, the journal says once that it waits, and the first pass after the
+// provision ends starts it.
+func TestARequestDuringAnotherRunWaitsForIt(t *testing.T) {
+	const prov = "provision-riptide-1"
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "wipe", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	for range 3 {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if names := kube.workflows(); len(names) != 1 || names[0] != prov {
+		t.Fatalf("workflows %v", names)
+	}
+	if len(nb.patches) != 0 {
+		t.Fatalf("the waiting request was written: %v", nb.patches)
+	}
+	want := "fleetd: wipe waits: Workflow " + prov + " (provision) is still running; it starts when " + prov + " ends"
+	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
+		t.Fatalf("journals %v", nb.journals)
+	}
+
+	kube.setState(prov, "STATE_SUCCESS")
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "wipe-riptide-") {
+		t.Fatalf("the waiting wipe did not start: %v", names)
+	}
+	if cf := nb.patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != names[0] {
+		t.Fatalf("patches %v", nb.patches)
+	}
+	if len(nb.journalWith("fleetd: started Workflow "+names[0]+" (wipe)")) != 1 {
+		t.Fatalf("journals %v", nb.journals)
+	}
+}
+
+// The same action asked again during its run is that run: the request is
+// consumed, and the journal says so rather than that it waits.
+func TestTheSameRequestDuringItsRunIsThatRun(t *testing.T) {
+	const prov = "provision-riptide-1"
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "provision", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if kube.creates() != 0 || len(nb.patches) != 1 {
+		t.Fatalf("creates %d patches %v", kube.creates(), nb.patches)
+	}
+	if cf := nb.patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != prov {
+		t.Fatalf("patch %v", nb.patches[0])
+	}
+	want := "fleetd: Workflow " + prov + " (provision) is already running; the request is that run"
+	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
+		t.Fatalf("journals %v", nb.journals)
+	}
+}
+
+// An intake pass that asks for a provision while a wipe runs starts nothing
+// and renders nothing; the owner's provision waits for the wipe.
+func TestAdmitDuringAnotherRunRendersNothing(t *testing.T) {
+	const wipe = "wipe-swell-1699990000"
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"last_workflow": wipe, "desired_action": "provision"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.kube.objects[wfBase+wipe] = workflowObject(wipe, "swell", "wipe", testNow.Add(-time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING")
+	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, wipe) {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	if n := at.kube.workflows(); len(n) != 1 || n[0] != wipe || at.held(testCode) {
+		t.Fatalf("workflows %v", n)
+	}
+	if at.cf("desired_action") != "provision" || !at.journal("provision waits: Workflow "+wipe+" (wipe)") {
+		t.Fatalf("desired_action %v, journals %v", at.cf("desired_action"), at.nb.journals)
+	}
+}

@@ -860,7 +860,8 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 		t.Fatalf("%v after two passes", n)
 	}
 
-	// The owner sets desired_action again mid-run: no second run.
+	// The owner asks for another action mid-run: no second run, and the
+	// request waits, set, for the run to end.
 	nb.set("desired_action", "attest")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -868,13 +869,12 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if n := kube.workflows(); len(n) != 1 || n[0] != wfName {
 		t.Fatalf("a second run started mid-run: %v", n)
 	}
-	last := nb.patches[len(nb.patches)-1]
-	if last["custom_fields"].(map[string]any)["desired_action"] != "none" || last["custom_fields"].(map[string]any)["last_workflow"] != wfName {
-		t.Errorf("mid-run patch %v", last)
+	if len(nb.patches) != 1 {
+		t.Errorf("a waiting request was written: %v", nb.patches)
 	}
 
-	// The run finishes; a new action deletes the finished run and starts one.
-	nb.set("desired_action", "attest")
+	// The run finishes; the first pass after it deletes the finished run and
+	// starts the waiting request.
 	nb.set("status", "active")
 	kube.setState(wfName, "SUCCESS")
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -884,7 +884,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if len(n) != 1 || !strings.HasPrefix(n[0], "attest-riptide-") {
 		t.Fatalf("after the finished run: %v", n)
 	}
-	last = nb.patches[len(nb.patches)-1]
+	last := nb.patches[len(nb.patches)-1]
 	if _, has := last["status"]; has {
 		t.Errorf("attest changed the status: %v", last)
 	}

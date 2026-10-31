@@ -190,7 +190,14 @@ Tinkerbell's server hands an agent an action from any of its machine's Workflows
 each request, so two Workflows for one machine interleave and either can wipe what the other
 installed. fleetd keeps at most one unfinished Workflow per device. Each pass and each `Admit`
 take one lock, and every request reads the device's Workflows from the API server. A request
-that finds a run going never creates another.
+that finds a run going never creates another:
+
+| Request while run X goes | Outcome | Journal |
+| --- | --- | --- |
+| X's own action | Consumed: `desired_action` goes to `none` and `last_workflow` names X | `Workflow X (<action>) is already running; the request is that run` |
+| Another action | Left set, and NetBox is not written; the first pass after X ends starts it | Once: `<action> waits: Workflow X (<its action>) is still running; it starts when X ends` |
+| An intake's provision from `Admit` | No run and no code; the confirm is refused | Only the owner's `desired_action: provision` waits, as above |
+| `decommissioning` | See below | |
 
 The Workflow is the record of the request that started it. fleetd creates the run, then writes
 `desired_action: none` and `last_workflow` in one NetBox PATCH. When that write fails, the request

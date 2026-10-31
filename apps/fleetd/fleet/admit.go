@@ -92,6 +92,9 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		if err != nil {
 			return unavailable("%v", err)
 		}
+		if !strings.HasPrefix(name, "provision-"+d.Name+"-") {
+			return conflict("Workflow %s, which is no provision, is still running", name)
+		}
 		if d.DesiredAction != "provision" {
 			r.Metrics.AutoProvisioned.Add(1)
 			Audit("fleet.autoprovision", r.Config.Site, d, name, "provision")

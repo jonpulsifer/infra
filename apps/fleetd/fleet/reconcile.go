@@ -556,10 +556,20 @@ func unrecorded(d Device, action string, wf Object) bool {
 	return wf.Labels()[ActionLabel] == action && wf.Name() != d.LastWorkflow
 }
 
-// adopt names an existing run in NetBox instead of starting one. The status
-// moves only while the run goes: a run that has ended already did its work.
+// adopt names an existing run in NetBox instead of starting one. A run of the
+// action is the request's run, and the request is consumed. A run of another
+// action leaves the request set and NetBox unwritten, so the first pass after
+// the run ends starts it. The status moves only while the run goes: a run
+// that has ended already did its work.
 func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Object) (string, error) {
-	name := wf.Name()
+	name, its := wf.Name(), wf.Labels()[ActionLabel]
+	if its != action {
+		if d.DesiredAction != action {
+			return name, nil
+		}
+		why := fmt.Sprintf("fleetd: %s waits: Workflow %s (%s) is still running; it starts when %s ends", action, name, its, name)
+		return name, r.journalOnce(ctx, "waits/"+name+"/"+action, d, "info", why)
+	}
 	status := ""
 	if !Finished(wf.State()) {
 		status = NextStatus(action, d.Status)
@@ -567,7 +577,7 @@ func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Obje
 	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
 		return name, nil
 	}
-	comment := fmt.Sprintf("fleetd: Workflow %s is still running; %s waits for it", name, action)
+	comment := fmt.Sprintf("fleetd: Workflow %s (%s) is already running; the request is that run", name, action)
 	if unrecorded(d, action, wf) {
 		comment = fmt.Sprintf("fleetd: started Workflow %s (%s); its record was late, and it is %s", name, action, stateWord(wf))
 	}
