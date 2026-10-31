@@ -271,6 +271,11 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if status := i.stillPlanned(r.Context(), p); status != http.StatusOK {
+		i.Configs.Unclaim(uuid, code)
+		http.Error(w, http.StatusText(status), status)
+		return
+	}
 	h := w.Header()
 	h.Set("Content-Type", "text/yaml")
 	h.Set("Cache-Control", "no-store")
@@ -301,6 +306,63 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		i.releaseOnce(ctx, served)
 		i.pending()
 	}()
+}
+
+// stillPlanned reads the config's device from NetBox at fetch time and
+// answers 200 only while it is planned, the status a render requires and the
+// release moves on. A device that left planned, or that NetBox no longer
+// holds, loses the config (404). A NetBox that does not answer keeps it and
+// answers 503, and the node's next fetch tries again: the config carries the
+// cluster's secrets, so the fetch fails closed.
+func (i *Installer) stillPlanned(ctx context.Context, p Pending) int {
+	ctx, cancel := context.WithTimeout(ctx, fetchLookup)
+	defer cancel()
+	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	switch {
+	case errors.Is(err, ErrNoDevice):
+		i.Configs.Unclaim(p.UUID, p.Code)
+		i.dropGone(p)
+		return http.StatusNotFound
+	case err != nil:
+		log.Printf("talos-config: %s's fetch refused: NetBox does not answer: %v; the config stays", p.Node, err)
+		return http.StatusServiceUnavailable
+	case d.Status != "planned":
+		i.Configs.Unclaim(p.UUID, p.Code)
+		if err := i.Withdraw(ctx, d); err != nil {
+			log.Printf("journal the withdrawal of %s's config: %v", p.Node, err)
+		}
+		return http.StatusNotFound
+	}
+	return http.StatusOK
+}
+
+// fetchLookup bounds the NetBox read a fetch waits on.
+const fetchLookup = 10 * time.Second
+
+// WithdrawGone drops the unread configs whose device is not among NetBox's
+// live devices: deleted, offline or moved off the site. Each pass calls it
+// with a device list that is not empty.
+func (i *Installer) WithdrawGone(devices []Device) {
+	live := map[string]bool{}
+	for _, d := range devices {
+		live[strings.ToLower(d.Serial)] = true
+	}
+	for _, p := range i.Configs.Unread() {
+		if !live[strings.ToLower(p.Serial)] {
+			i.dropGone(p)
+		}
+	}
+}
+
+// dropGone drops the config of a device NetBox no longer holds, which has no
+// journal to write to.
+func (i *Installer) dropGone(p Pending) {
+	if _, ok := i.Configs.Drop(p.Serial, i.Now()); !ok {
+		return
+	}
+	i.pending()
+	Audit("fleet.expire", i.Site, Device{Serial: p.Serial, Name: p.Node, Class: p.Class}, p.Workflow, "withdrawn: NetBox no longer lists the device")
+	log.Printf("talos-config: dropped %s's unread config; NetBox no longer lists the device", p.Node)
 }
 
 // Drain waits for the releases that fetches started.

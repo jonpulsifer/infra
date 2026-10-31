@@ -160,9 +160,13 @@ The first response whose bytes are all written burns it; after the answer, fleet
 journaled once. One fetch claims a config at a time. HEAD and
 other methods are 405, `If-None-Match` and `If-Modified-Since` are 400, and a Range is ignored. A
 machine has one config at a time: a new render burns the old code. A spent code stays refused for
-a day. A fetch with another code is journaled at most every ten minutes per machine. Each reconcile
-pass drops, burns and journals the unread config of a device that is no longer `planned`, such as
-one set `decommissioning`. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
+a day. A fetch with another code is journaled at most every ten minutes per machine. Before it
+answers, a fetch reads the device from NetBox, and serves the config only while the device is
+`planned`. A device that left `planned`, such as one set `decommissioning`, loses its config: it is
+dropped, burned and journaled, and the fetch gets 404. So does a device NetBox no longer holds,
+without a journal. When NetBox does not answer within ten seconds, the fetch gets 503 and the
+config stays for the node's next try. Each reconcile pass also drops the unread config of a device
+that is not `planned`, or that NetBox no longer lists as live. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
 burn state.
 
 ## NetBox contract

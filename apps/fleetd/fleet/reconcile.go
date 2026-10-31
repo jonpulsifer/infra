@@ -190,6 +190,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	// An empty list is left alone: it is a NetBox with no nodes, or a filter
 	// gone wrong, and either way nothing to delete over.
 	if len(devices) > 0 {
+		if r.Installer != nil {
+			r.Installer.WithdrawGone(devices)
+		}
 		for _, res := range []Resource{HardwareResource, MachineResource} {
 			objs, err := r.Kube.List(ctx, res, ManagedLabel+"="+FieldManager)
 			if err != nil {

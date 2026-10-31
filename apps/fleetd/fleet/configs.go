@@ -351,6 +351,20 @@ func (c *Configs) Drop(serial string, now time.Time) (Pending, bool) {
 	return Pending{}, false
 }
 
+// Unread lists the configs no node has fetched.
+func (c *Configs) Unread() []Pending {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	var out []Pending
+	for _, p := range c.pending {
+		if p.Fetched.IsZero() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // Unreleased lists the served configs NetBox has no release for.
 func (c *Configs) Unreleased() []Pending {
 	c.mu.Lock()
