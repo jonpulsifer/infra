@@ -112,21 +112,28 @@ spec:
                 }
                 # A retirement erases the whole disk after the signature wipe. That wipe leaves everything past
                 # the first 16 MiB of each partition, and the data volume is not encrypted, so the disk would
-                # otherwise keep it. The methods run from the fastest sure erase to a full overwrite: an NVMe
-                # format (crypto erase when the controller has it, else user data erase), an ATA secure erase,
-                # a secure discard, a discard, and a zeroing of the whole disk. After each, sampled blocks that
-                # held data before must read differently, and the next method runs when they do not. A disk that
-                # no method erases fails the action, and the retirement stays with the owner.
+                # otherwise keep it. The methods run from the strongest to the weakest: an NVMe sanitize (crypto
+                # or block erase), an NVMe format with the namespace's own LBA format, a secure discard, a discard,
+                # and a zeroing of the whole disk. A method passes only on evidence: before each, random blocks are
+                # written at sample offsets past the first 16 MiB of the disk and of each partition, and after it
+                # every one of them must read differently, so a discard the device ignores fails and the next
+                # method runs. Zeroing runs in bounded chunks that stop at the deadline or on TERM, since the
+                # kernel cannot interrupt a chunk once it starts. A disk whose zeroing does not finish inside the
+                # action's time fails the action, because which regions of the data volume are free is unknown
+                # and a partial zeroing proves nothing. A discard is not a sanitize: TRIM only advises the device.
                 BEFORE=/tmp/erase-before
                 SAMPLES=""
+                TERMED=0
                 ZERO=$(head -c 4096 /dev/zero | sha256sum | cut -d' ' -f1)
+                budget_end=$(( $(date +%s) + 780 ))
+                remaining() { echo $(( budget_end - $(date +%s) )); }
                 hash_at() { dd if="$DISK" bs=4096 skip="$1" count=1 2>/dev/null | sha256sum | cut -d' ' -f1; }
                 plan_samples() {
                   size=$(blockdev --getsize64 "$DISK")
                   SAMPLES=""
-                  i=0
-                  while [ "$i" -lt 16 ]; do
-                    SAMPLES="$SAMPLES $(( size * i / 16 / 4096 + 256 ))"
+                  i=1
+                  while [ "$i" -le 16 ]; do
+                    SAMPLES="$SAMPLES $(( size * i / 17 / 4096 + 4096 ))"
                     i=$((i + 1))
                   done
                   for part in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
@@ -138,60 +145,90 @@ spec:
                     fi
                   done
                 }
-                snapshot() { for s in $SAMPLES; do echo "$s $(hash_at "$s")"; done; }
+                write_canaries() {
+                  for s in $SAMPLES; do
+                    head -c 4096 /dev/urandom | dd of="$DISK" bs=4096 seek="$s" conv=notrunc,fsync 2>/dev/null || return 1
+                  done
+                  blockdev --flushbufs "$DISK" || true
+                  for s in $SAMPLES; do echo "$s $(hash_at "$s")"; done >"$BEFORE"
+                }
                 verify_erase() {
                   blockdev --flushbufs "$DISK" || true
-                  held=0
+                  total=0
+                  missing=0
                   kept=0
                   while read -r s h; do
-                    [ "$h" = "$ZERO" ] && continue
-                    held=$((held + 1))
+                    total=$((total + 1))
+                    if [ "$h" = "$ZERO" ]; then missing=$((missing + 1)); continue; fi
                     if [ "$(hash_at "$s")" = "$h" ]; then kept=$((kept + 1)); fi
                   done <"$BEFORE"
-                  log "$held sampled blocks held data before the erase; $kept still do"
-                  [ "$kept" -eq 0 ]
+                  log "$total canary blocks written; $kept still read as written"
+                  [ "$total" -gt 0 ] && [ "$missing" -eq 0 ] && [ "$kept" -eq 0 ]
                 }
-                budget_end=$(( $(date +%s) + 780 ))
-                remaining() { echo $(( budget_end - $(date +%s) )); }
-                erase_nvme() {
+                nvme_ready() {
                   case "$name" in nvme*) ;; *) return 1 ;; esac
-                  command -v nvme >/dev/null || return 1
+                  command -v nvme >/dev/null
+                }
+                erase_nvme_sanitize() {
+                  nvme_ready || return 1
+                  sanicap=$(nvme id-ctrl "$DISK" 2>/dev/null | awk '$1 == "sanicap" { print $3 }')
+                  if [ $(( ${sanicap:-0} & 1 )) -ne 0 ]; then act=4
+                  elif [ $(( ${sanicap:-0} & 2 )) -ne 0 ]; then act=2
+                  else return 1
+                  fi
+                  log "nvme sanitize --sanact=$act $DISK"
+                  nvme sanitize "$DISK" --sanact="$act" || return 1
+                  while [ "$(remaining)" -gt 0 ] && [ "$TERMED" = 0 ]; do
+                    sstat=$(nvme sanitize-log "$DISK" 2>/dev/null | awk '/\(SSTAT\)/ { print $NF }')
+                    case $(( ${sstat:-0} & 7 )) in
+                      1|4) return 0 ;;
+                      3) log "the sanitize failed"; nvme sanitize "$DISK" --sanact=1 >/dev/null 2>&1 || true; return 1 ;;
+                    esac
+                    sleep 2
+                  done
+                  log "the sanitize did not finish before the deadline; the controller goes on with it"
+                  return 1
+                }
+                erase_nvme_format() {
+                  nvme_ready || return 1
                   info=$(nvme id-ctrl "$DISK" 2>/dev/null) || return 1
                   oacs=$(echo "$info" | awk '$1 == "oacs" { print $3 }')
                   fna=$(echo "$info" | awk '$1 == "fna" { print $3 }')
                   [ $(( ${oacs:-0} & 2 )) -ne 0 ] || return 1
                   if [ $(( ${fna:-0} & 4 )) -ne 0 ]; then ses=2; else ses=1; fi
-                  log "nvme format --ses=$ses $DISK"
-                  timeout "$(remaining)" nvme format "$DISK" --ses="$ses" --force --timeout=$(( $(remaining) * 1000 ))
-                }
-                erase_ata() {
-                  command -v hdparm >/dev/null || return 1
-                  info=$(hdparm -I "$DISK" 2>/dev/null) || return 1
-                  for need in enabled locked frozen; do
-                    echo "$info" | grep -q "not[[:space:]]*$need" || { log "$DISK has no usable ATA security ($need)"; return 1; }
-                  done
-                  mins=$(echo "$info" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)min for SECURITY ERASE UNIT.*/\1/p' | head -n 1)
-                  if [ -n "$mins" ] && [ $(( mins * 60 + 60 )) -gt "$(remaining)" ]; then
-                    log "the ATA secure erase takes $mins min, longer than the action has"
-                    return 1
-                  fi
-                  mode=--security-erase
-                  if echo "$info" | grep -q 'supported: enhanced erase'; then mode=--security-erase-enhanced; fi
-                  hdparm --user-master u --security-set-pass fleet-erase "$DISK" >/dev/null || return 1
-                  log "hdparm $mode $DISK"
-                  if hdparm --user-master u "$mode" fleet-erase "$DISK"; then return 0; fi
-                  hdparm --user-master u --security-disable fleet-erase "$DISK" >/dev/null 2>&1 || true
-                  return 1
+                  flbas=$(nvme id-ns "$DISK" 2>/dev/null | awk '$1 == "flbas" { print $3 }')
+                  lbaf=$(( (${flbas:-0} & 15) | (((${flbas:-0} >> 5) & 3) << 4) ))
+                  log "nvme format --ses=$ses --lbaf=$lbaf $DISK"
+                  timeout "$(remaining)" nvme format "$DISK" --ses="$ses" --lbaf="$lbaf" --force --timeout=$(( $(remaining) * 1000 ))
                 }
                 erase_discard_secure() { timeout "$(remaining)" blkdiscard --secure --force "$DISK"; }
                 erase_discard() { timeout "$(remaining)" blkdiscard --force "$DISK"; }
-                erase_overwrite() { timeout "$(remaining)" blkdiscard --zeroout --force "$DISK"; }
+                erase_overwrite() {
+                  size=$(blockdev --getsize64 "$DISK")
+                  chunk=$(( 64 * 1048576 ))
+                  off=0
+                  took=0
+                  while [ "$off" -lt "$size" ]; do
+                    if [ "$TERMED" = 1 ] || [ "$(remaining)" -le $(( took * 2 + 5 )) ]; then
+                      log "zeroed $(( off / 1048576 )) of $(( size / 1048576 )) MiB before the deadline; the rest of $DISK is not erased"
+                      return 1
+                    fi
+                    len=$chunk
+                    if [ $(( size - off )) -lt "$len" ]; then len=$(( size - off )); fi
+                    t0=$(date +%s)
+                    blkdiscard --zeroout --force --offset "$off" --length "$len" "$DISK" || return 1
+                    took=$(( $(date +%s) - t0 ))
+                    off=$(( off + len ))
+                  done
+                }
                 erase_disk() {
-                  for method in nvme ata discard_secure discard overwrite; do
-                    if [ "$(remaining)" -le 0 ]; then log "no time is left to erase $DISK"; return 1; fi
+                  trap 'TERMED=1' TERM INT
+                  for method in nvme_sanitize nvme_format discard_secure discard overwrite; do
+                    if [ "$TERMED" = 1 ] || [ "$(remaining)" -le 0 ]; then log "no time is left to erase $DISK"; return 1; fi
+                    write_canaries || { log "canary blocks cannot be written to $DISK"; return 1; }
                     if "erase_$method"; then
                       if verify_erase; then log "erased $DISK by $method"; return 0; fi
-                      log "$method ran, but a sampled block still holds data"
+                      log "$method ran, but the canary blocks were not erased"
                     else
                       log "$method is unsupported or failed on $DISK"
                     fi
@@ -274,8 +311,7 @@ spec:
                 dd if=/dev/zero of="$DISK" bs=1M count=1 conv=fsync
                 dd if=/dev/zero of="$DISK" bs=512 count=2048 conv=fsync seek=$(( $(blockdev --getsz "$DISK") - 2048 ))
                 if [ "$RETIRE" = true ]; then
-                  snapshot >"$BEFORE"
-                  erase_disk || { log "$DISK could not be erased; the retirement stops with the disk partly wiped"; exit 1; }
+                  erase_disk || { log "$DISK could not be erased; the retirement stops with the disk partly erased"; exit 1; }
                 fi
                 blockdev --rereadpt "$DISK" || true
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
