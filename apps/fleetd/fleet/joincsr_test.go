@@ -121,7 +121,7 @@ func (f *fakeJoinAPI) serve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		subjects := []any{}
+		subjects := []any{map[string]any{"kind": "Group", "name": ApprovalPlaceholder}}
 		for range f.subjects {
 			subjects = append(subjects, map[string]any{"kind": "Group", "name": JoinGroup})
 		}

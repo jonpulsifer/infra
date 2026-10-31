@@ -191,5 +191,5 @@ spec:
             severity: warning
           annotations:
             message: The controller manager's approval of a kubelet's first certificate binds subjects again
-            description: "system-bootstrap-approve-node-client-csr binds {{ $value }} subjects, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access empties it again. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
+            description: "system-bootstrap-approve-node-client-csr binds {{ $value }} subjects besides its placeholder, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access puts the placeholder back. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
 

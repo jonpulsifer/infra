@@ -377,16 +377,30 @@ const ApprovalBinding = "system-bootstrap-approve-node-client-csr"
 
 const approvalBindingPath = "/apis/rbac.authorization.k8s.io/v1/clusterrolebindings/" + ApprovalBinding
 
-// ApprovalSubjects counts the subjects of ApprovalBinding.
+// ApprovalPlaceholder is the group node-client-approval.yaml binds in place
+// of Talos's, so that Flux owns the binding's subjects. No one is in it.
+const ApprovalPlaceholder = "fleetd:no-node-client-approval"
+
+// ApprovalSubjects counts the subjects of ApprovalBinding other than
+// ApprovalPlaceholder.
 func (c *Cluster) ApprovalSubjects(ctx context.Context) (int, error) {
 	var b struct {
-		Subjects []json.RawMessage `json:"subjects"`
+		Subjects []struct {
+			Kind string `json:"kind"`
+			Name string `json:"name"`
+		} `json:"subjects"`
 	}
 	err := c.do(ctx, http.MethodGet, approvalBindingPath, "", nil, &b)
 	if errors.Is(err, ErrNotFound) {
 		return 0, nil
 	}
-	return len(b.Subjects), err
+	n := 0
+	for _, s := range b.Subjects {
+		if s.Kind != "Group" || s.Name != ApprovalPlaceholder {
+			n++
+		}
+	}
+	return n, err
 }
 
 // watchJoins reads what each pass needs of the cluster before NetBox, so it

@@ -173,10 +173,11 @@ The controller manager approves no certificate a bootstrap token asks for.
 `clusters/folly/tinkerbell-access/node-client-approval.yaml` holds the policy
 `node-client-bootstrap-approval`, which refuses its account, `certificate-controller`, the approval
 of any request whose requester is `system:bootstrap:*`, and takes over Talos's binding of
-`system:bootstrappers:nodes` to that approval with no subjects. The Talos root's Kubernetes upgrade
+`system:bootstrappers:nodes` to that approval, binding only `fleetd:no-node-client-approval`, a
+group no one is in (an empty list is never sent, so Flux would not own it). The Talos root's Kubernetes upgrade
 syncs Talos's bootstrap manifests with forced ownership and puts the subject back until Flux
 reconciles; the policy holds meanwhile, and each pass, NetBox or not, exports the subjects as
-`fleet_node_client_approval_subjects` (-1 when unread) for `NodeClientApprovalBindingRestored`.
+`fleet_node_client_approval_subjects` (subjects besides the placeholder; -1 when unread) for `NodeClientApprovalBindingRestored`.
 Each pass approves a pending
 `kubernetes.io/kube-apiserver-client-kubelet` CSR only when it is bound to the token that asked
 (`fleet/joincsr.go`):
