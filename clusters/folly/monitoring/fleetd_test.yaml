@@ -399,7 +399,7 @@ tests:
               message: "Kubelet certificate request csr-join has waited an hour"
               description: "A node's kubelet asked for its client certificate an hour ago and nobody approved it, so the node does not register. fleetd approves a worker it installs within a pass; read the device's NetBox journal for why it did not, and journalctl -u fleetd on spore. A join with the cluster's bootstrap token, such as shale's or a control plane's, is the owner's to approve. https://wiki.lolwtf.ca/runbooks/install-talos-on-a-node/"
 
-  # A Kubernetes upgrade puts the subject back at minute 10, and Flux empties it at minute 40.
+  # A Kubernetes upgrade puts the subject back at minute 10, and Flux puts the placeholder back at minute 40.
   - interval: 1m
     input_series:
       - series: 'fleet_node_client_approval_subjects{job="node-exporter",instance="spore"}'
@@ -416,7 +416,7 @@ tests:
               instance: spore
             exp_annotations:
               message: The controller manager's approval of a kubelet's first certificate binds subjects again
-              description: "system-bootstrap-approve-node-client-csr binds 1 subjects, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access empties it again. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
+              description: "system-bootstrap-approve-node-client-csr binds 1 subjects besides its placeholder, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access puts the placeholder back. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
       - eval_time: 45m
         alertname: NodeClientApprovalBindingRestored
         exp_alerts: []
