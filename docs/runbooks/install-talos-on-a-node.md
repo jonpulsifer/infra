@@ -135,7 +135,7 @@ The `clusters/<site>/talos/` apply installs Talos and reboots the node. Then do 
 
 ## Approve the node's first certificate
 
-On folly, the controller manager approves no kubelet certificate that a bootstrap token asks for: `clusters/folly/tinkerbell-access/node-client-approval.yaml` takes the bootstrappers out of its approval. [fleetd](../apps/fleetd.md) approves only a worker that it installs. A node that joins with the cluster's token, such as shale or a control plane, waits for you. A cluster that Talos bootstrapped approves its first nodes itself until Flux applies that file. offsite approves its nodes itself.
+On folly, the controller manager approves no kubelet certificate that a bootstrap token asks for: an admission policy in `clusters/folly/tinkerbell-access/node-client-approval.yaml` refuses it the approval. [fleetd](../apps/fleetd.md) approves only a worker that it installs. A node that joins with the cluster's token, such as shale or a control plane, waits for you. A cluster that Talos bootstrapped approves its first nodes itself until Flux applies that file. `KubeletCSRPending` fires when a request waits an hour. offsite approves its nodes itself.
 
 1. Find the node's request.
 
