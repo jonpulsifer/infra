@@ -366,7 +366,10 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 		}
 		if stop, ok := wf.GlobalExecutionStop(); ok {
 			kept = append(kept, wf)
-			if now.Sub(stop) > r.Config.Interval {
+			// One annotation is the write that makes the controller act; a
+			// write every pass would only change the run under every pass's
+			// other writes.
+			if _, done := wf.Annotations()[OverdueAnnotation]; !done && now.Sub(stop) > r.Config.Interval {
 				if err := r.annotateOverdue(ctx, d, wf, stop, now); err != nil {
 					return nil, err
 				}
@@ -645,9 +648,9 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 }
 
 // startRetire starts the retirement, which supersedes a run of another action
-// that is still going. With a BMC, fleetd deletes that run, only while it is
-// as the pass listed it, and creates the retirement with a netboot in the same
-// pass: Rufio's power cycle stops the run's current action before the
+// that is still going. With a BMC, fleetd reads that run again and deletes it
+// only while it is as that read shows it, then creates the retirement with a
+// netboot in the same pass: Rufio's power cycle stops the run's current action before the
 // retirement's first. Without a BMC nothing can stop the machine, and a
 // deleted run's current action would go on, write the disk and leave the
 // agent stuck reporting it, so the retirement waits for the run to end.
@@ -662,9 +665,21 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 		why := fmt.Sprintf("fleetd: the retirement waits for Workflow %s (%s); power the machine off to end it, and it retires on its next network boot", old, action)
 		return r.journalOnce(ctx, "retire-waits/"+old, d, "warning", why)
 	}
-	err := r.Kube.DeleteUnchanged(ctx, WorkflowResource, old, running.ResourceVersion())
+	fresh, err := r.Kube.Get(ctx, WorkflowResource, old)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, nil), false)
+		return err
+	case err != nil:
+		return fmt.Errorf("read %s: %w", old, err)
+	case Finished(fresh.State()):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, fresh), false)
+		return err
+	}
+	err = r.Kube.DeleteUnchanged(ctx, WorkflowResource, old, fresh.ResourceVersion())
 	if errors.Is(err, ErrConflict) {
-		return nil
+		why := fmt.Sprintf("fleetd: the retirement could not end Workflow %s (%s), which changed between fleetd's read and its delete; the next pass tries again", old, action)
+		return r.journalOnce(ctx, "supersede-conflict/"+old, d, "info", why)
 	}
 	if err != nil {
 		return fmt.Errorf("end %s: %w", old, err)
@@ -682,9 +697,25 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 	return err
 }
 
+// swap replaces the named Workflow in the list with o, or drops it when o is
+// nil.
+func swap(workflows []Object, name string, o Object) []Object {
+	out := make([]Object, 0, len(workflows))
+	for _, wf := range workflows {
+		switch {
+		case wf.Name() != name:
+			out = append(out, wf)
+		case o != nil:
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
 // abandon ends the unfinished retirement of a device the owner took out of
 // decommissioning, and says whether it did. As startRetire does, it deletes
-// the run only with a BMC and only while the run is as the pass listed it.
+// the run only with a BMC and only while the run is as a read just before
+// shows it.
 // The delete stops no action already running on the machine; the next run's
 // power cycle does. Without a BMC the run is kept, and it ends at its timeout
 // once the machine is off.
@@ -694,7 +725,16 @@ func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, er
 		why := fmt.Sprintf("fleetd: %s left decommissioning while the retirement Workflow %s runs, and no BMC can stop the machine, so the retirement goes on. Power the machine off to stop it; the run then ends at its global timeout, and a new desired_action starts after it", d.Name, name)
 		return false, r.journalOnce(ctx, "abandon-waits/"+name, d, "warning", why)
 	}
-	err := r.Kube.DeleteUnchanged(ctx, WorkflowResource, name, wf.ResourceVersion())
+	fresh, err := r.Kube.Get(ctx, WorkflowResource, name)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("read %s: %w", name, err)
+	case Finished(fresh.State()):
+		return false, nil
+	}
+	err = r.Kube.DeleteUnchanged(ctx, WorkflowResource, name, fresh.ResourceVersion())
 	if errors.Is(err, ErrConflict) {
 		return false, nil
 	}

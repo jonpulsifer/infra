@@ -209,17 +209,17 @@ still going moves the device's status. The rule holds across a restart, since th
 the API server.
 
 A device set `decommissioning` while a run of another action goes gets its retirement at once
-when it has a BMC. In one pass fleetd deletes the run with the `resourceVersion` the pass listed,
-creates the retire Workflow with `bootMode: netboot`, and journals `the retirement ends Workflow X
+when it has a BMC. In one pass fleetd reads the run again, deletes it with that read's
+`resourceVersion`, creates the retire Workflow with `bootMode: netboot`, and journals `the retirement ends Workflow X
 (<action>) and starts Y; a power cycle stops X`. Rufio's power cycle stops the run's current
-action before the retirement's first. A run that changed since the list answers 409, stays, and
-the next pass tries again. A device without a BMC keeps the run: a deleted run's current action
+action before the retirement's first. A run that changed between the read and the delete answers
+409 and stays; the journal says so once, and the next pass tries again. A device without a BMC keeps the run: a deleted run's current action
 goes on, writes the disk and leaves the agent stuck reporting it. The journal says once that the
 retirement waits for X and that powering the machine off ends it, and the retirement starts on
 the pass after X ends.
 
 A device the owner moves out of `decommissioning` has its unfinished retirement deleted the same
-way, with a BMC and the listed `resourceVersion`, and journaled; an action already running on the
+way, with a BMC and a fresh read's `resourceVersion`, and journaled; an action already running on the
 machine runs to its end, and the next run's power cycle stops it. Without a BMC the retirement is
 kept and journaled, and once it passes its global timeout it ends as any run does.
 
@@ -228,7 +228,7 @@ A node retired mid-install never fetches its config: [Config](#config) drops it.
 ## Overdue Workflows
 
 Tinkerbell's controller checks a Workflow's global timeout only when it reconciles that Workflow,
-and a silent agent writes nothing. Each pass, fleetd writes the annotation `lolwtf.ca/overdue-at` to
+and a silent agent writes nothing. fleetd writes the annotation `lolwtf.ca/overdue-at` once to
 every unfinished Workflow whose `status.globalExecutionStop` is more than `FLEET_INTERVAL` in the
 past, and the write makes the controller set `TIMEOUT`. The write is a merge patch on
 `metadata.annotations` alone, so `spec` and `status` stay with their owners. The journal says once

@@ -63,8 +63,9 @@ func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	}
 }
 
-// A run that changed between the pass's list and its delete, such as by an
-// action's report, is kept and nothing is created; the next pass supersedes it.
+// A run that changed between fleetd's read and its delete, such as by an
+// action's report, is kept and nothing is created; the journal says so once,
+// and the next pass supersedes it.
 func TestRetirementSupersedesOnlyTheRunItListed(t *testing.T) {
 	const prov = "provision-riptide-1"
 	moved := installing(prov)
@@ -83,7 +84,7 @@ func TestRetirementSupersedesOnlyTheRunItListed(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || names[0] != prov || kube.creates() != 0 {
 		t.Fatalf("a 409 on the delete still started the retirement: %v", names)
 	}
-	if len(nb.patches) != 0 || len(nb.journals) != 0 {
+	if len(nb.patches) != 0 || len(nb.journalWith("changed between fleetd's read and its delete; the next pass tries again")) != 1 {
 		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
 	}
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -92,6 +93,61 @@ func TestRetirementSupersedesOnlyTheRunItListed(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") {
 		t.Fatalf("the next pass did not supersede: %v", names)
 	}
+}
+
+func (f *fakeKube) annotations(name string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, l := range f.log {
+		if l == "PATCH "+wfBase+name {
+			n++
+		}
+	}
+	return n
+}
+
+// An overdue install is annotated once, and the write that bumps its
+// resourceVersion does not keep a retirement from superseding it: the delete
+// carries the version of a read made just before it.
+func TestRetirementSupersedesAnOverdueRun(t *testing.T) {
+	const prov = "provision-riptide-1"
+	overdue := func() Object {
+		return agedWorkflow(prov, 40*time.Minute, testNow.Add(-10*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING", "install")
+	}
+	t.Run("annotated once", func(t *testing.T) {
+		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+		kube := &fakeKube{objects: map[string]Object{wfBase + prov: overdue()}}
+		r, done := newTest(t, nb, kube)
+		defer done()
+		for range 3 {
+			if err := r.Reconcile(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if n := kube.annotations(prov); n != 1 {
+			t.Fatalf("the overdue run was annotated %d times", n)
+		}
+	})
+	t.Run("superseded in the pass that annotates it", func(t *testing.T) {
+		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+		kube := &fakeKube{objects: map[string]Object{wfBase + prov: overdue()}}
+		r, done := newTest(t, nb, kube)
+		defer done()
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if kube.annotations(prov) != 1 {
+			t.Fatal("the pass did not annotate the overdue run first")
+		}
+		names := kube.workflows()
+		if len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") {
+			t.Fatalf("the retirement did not supersede the overdue run: %v, journals %v", names, nb.journals)
+		}
+		if len(nb.journalWith("the retirement ends Workflow "+prov)) != 1 {
+			t.Fatalf("journals %v", nb.journals)
+		}
+	})
 }
 
 // Without a BMC nothing stops the machine, and a deleted run's action would

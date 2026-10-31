@@ -285,6 +285,7 @@ func (f *fakeKube) handler() http.Handler {
 						}
 					}
 				}
+				o.metadata()["resourceVersion"] = bumped(old)
 				f.objects[r.URL.Path] = o
 			case "application/merge-patch+json":
 				if !exists {
@@ -303,6 +304,7 @@ func (f *fakeKube) handler() http.Handler {
 						a[k] = v
 					}
 				}
+				old.metadata()["resourceVersion"] = bumped(old)
 			default:
 				http.Error(w, "content type "+ct, http.StatusUnsupportedMediaType)
 				return
@@ -387,8 +389,14 @@ func (f *fakeKube) setState(name, state string) {
 	defer f.mu.Unlock()
 	o := f.objects[wfBase+name]
 	o["status"] = map[string]any{"state": state}
+	o.metadata()["resourceVersion"] = bumped(o)
+}
+
+// bumped is the resourceVersion an object takes on a write, as the API
+// server gives every write a new one.
+func bumped(o Object) string {
 	rv, _ := strconv.Atoi(o.ResourceVersion())
-	o.metadata()["resourceVersion"] = strconv.Itoa(rv + 1)
+	return strconv.Itoa(rv + 1)
 }
 
 func workflowObject(name, node, action, created, state string) Object {
