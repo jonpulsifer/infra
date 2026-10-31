@@ -106,6 +106,7 @@ Atlantis plans this root on a pull request that changes a `.tf` file in it. A ch
 | [restapi_object.lab_rack](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.mounted_device](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.mounted_type](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
+| [restapi_object.oldschool_panel_mapping](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.rack_anchor](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [restapi_object.shelved_node](https://registry.terraform.io/providers/Mastercard/restapi/latest/docs/resources/object) | resource |
 | [netbox_device_interfaces.created](https://registry.terraform.io/providers/e-breuninger/netbox/latest/docs/data-sources/device_interfaces) | data source |

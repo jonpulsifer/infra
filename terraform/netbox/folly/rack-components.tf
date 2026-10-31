@@ -10,6 +10,10 @@ locals {
     folly_gateway = { rack = "folly", unit = 12 }
     folly_switch  = { rack = "folly", unit = 10 }
   }
+  mounted_device_types = {
+    folly_gateway = data.netbox_device_type.lab["UDMPRO"].id
+    folly_switch  = data.netbox_device_type.mounted_switch.id
+  }
   mounted_device_ids = {
     folly_gateway = netbox_device.lab["folly-fml.pulsifer.ca-a5e7"].id
     folly_switch  = data.netbox_devices.switch.devices[0].device_id
@@ -100,14 +104,16 @@ resource "restapi_object" "mounted_device" {
   destroy_data            = jsonencode({})
   ignore_server_additions = true
   data = jsonencode({
-    rack     = tonumber(netbox_rack.lab[each.value.rack].id)
-    position = each.value.unit
-    face     = "front"
+    device_type = tonumber(local.mounted_device_types[each.key])
+    rack        = tonumber(netbox_rack.lab[each.value.rack].id)
+    position    = each.value.unit
+    face        = "front"
   })
-  depends_on = [restapi_object.mounted_type]
+  depends_on = [restapi_object.mounted_type, restapi_object.lab_declared, netbox_device_primary_ip.lab]
 }
 
 resource "restapi_object" "shelved_node" {
+  depends_on              = [restapi_object.declared]
   for_each                = local.shelved_nodes
   path                    = "/dcim/devices"
   object_id               = tostring(netbox_device.node[each.key].id)

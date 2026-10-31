@@ -27,6 +27,8 @@ resource "unifi_wlan" "goggly" {
   bss_transition       = false
   fast_roaming_enabled = false
   no2ghz_oui           = false
+  # Network 10 ignores this WLAN field; a known value prevents computed drift.
+  bandsteering_mode = "off"
 
   lifecycle {
     ignore_changes = [passphrase]
@@ -53,6 +55,8 @@ resource "unifi_wlan" "nest" {
   bss_transition       = true
   fast_roaming_enabled = false
   no2ghz_oui           = true
+  # Network 10 ignores this WLAN field; a known value prevents computed drift.
+  bandsteering_mode = "off"
 
   lifecycle {
     ignore_changes = [passphrase]

@@ -134,6 +134,7 @@ resource "netbox_device_interface" "lab" {
 }
 
 resource "restapi_object" "lab_rack" {
+  depends_on              = [restapi_object.lab_declared, netbox_device_primary_ip.lab]
   for_each                = { for k, v in local.lab_devices : k => v if contains(keys(v), "rack") }
   path                    = "/dcim/devices"
   object_id               = tostring(netbox_device.lab[each.key].id)
@@ -165,6 +166,7 @@ resource "netbox_ip_address" "lab" {
 }
 
 resource "netbox_device_primary_ip" "lab" {
+  depends_on    = [restapi_object.lab_declared]
   for_each      = local.lab_addresses
   device_id     = netbox_device.lab[each.key].id
   ip_address_id = each.key == "homepi4" ? netbox_ip_address.lab_wifi[each.key].id : netbox_ip_address.lab[each.key].id
