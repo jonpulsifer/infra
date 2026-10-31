@@ -86,6 +86,17 @@ locals {
   # The TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
 
+  # The workers fleetd installs: those whose hardware has a TPM 2.0, which
+  # attests, whether or not tpm_off hides it now. Each joins with a bootstrap
+  # token fleetd creates for its install alone, which expires within hours
+  # (apps/fleetd). The config this root applies to them carries a token no
+  # Secret holds, so a disk with it cannot join folly again. A worker-g2
+  # node cannot attest, and joins with the bundle's token.
+  fleet_workers = [for name, n in local.nodes : name if n.role == "worker" && try(merge(
+    local.inventory.models[local.inventory.nodes[name].model], local.inventory.nodes[name],
+  ).tpm, null) == "2.0"]
+  no_join_token = "nojoin.0000000000000000"
+
   # A TPM node's running STATE and EPHEMERAL are encrypted, except these, which
   # were installed with plain volumes and keep them until a reinstall. Talos
   # refuses to mount a plain volume that its config calls encrypted.
@@ -145,6 +156,7 @@ module "talos" {
     patches            = [local.ephemeral_patch[n.class]]
     installer_image    = local.secureboot_installer
     install_generation = local.install_generation
+    bootstrap_token    = contains(local.fleet_workers, name) ? local.no_join_token : null
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes

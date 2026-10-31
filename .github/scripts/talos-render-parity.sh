@@ -166,7 +166,7 @@ data "talos_machine_configuration" "node" {
       secret = local.bundle.cluster.secret
     }
     secrets = {
-      bootstrap_token             = local.bundle.secrets.bootstraptoken
+      bootstrap_token             = coalesce(each.value.bootstrap_token, local.bundle.secrets.bootstraptoken)
       secretbox_encryption_secret = local.bundle.secrets.secretboxencryptionsecret
     }
     trustdinfo = {
@@ -207,13 +207,26 @@ for node in $(jq -r 'keys[]' "$inputs"); do
     args+=("$flag" "@$work/$node.patch.$i.yaml")
   done
 
+  # A node whose inputs replace the bootstrap token renders from a copy of
+  # the bundle that carries it.
+  token=$(jq -r --arg node "$node" '.[$node].bootstrap_token // empty' "$inputs")
+  secrets="$work/secrets.yaml"
+  if [[ -n "$token" ]]; then
+    secrets="$work/$node.secrets.yaml"
+    sed -E "s/^(    bootstraptoken: ).*/\1$token/" "$work/secrets.yaml" >"$secrets"
+    grep -q "^    bootstraptoken: $token\$" "$secrets" || {
+      echo "$node: the bundle copy does not carry its bootstrap token" >&2
+      exit 1
+    }
+  fi
+
   jq -r --arg node "$node" '.[$node] | .cluster_name, .cluster_endpoint, .talos_contract, .kubernetes_version' "$inputs" | {
     read -r name
     read -r endpoint
     read -r contract
     read -r kubernetes
     talosctl gen config "$name" "$endpoint" \
-      --with-secrets "$work/secrets.yaml" \
+      --with-secrets "$secrets" \
       --talos-version "$contract" \
       --kubernetes-version "$kubernetes" \
       --with-docs=false --with-examples=false \

@@ -76,6 +76,8 @@ The owner does this section, because it decrypts the signing key.
 
 ## Join the workers
 
+On folly, the root gives each TPM 2.0 worker, `fleet_workers` in `clusters/folly/talos/talos.tf`, a bootstrap token no Secret holds, so such a worker cannot join from the root's config. Install it as [Provision a node](provision-a-node.md) describes, once the new cluster's token for fleetd's account is in `fleetd/folly-cordon-token` of `nix/secrets/spore.sops.yaml` and spore is deployed. Join the other workers here.
+
 1. Boot each worker into the Talos installer, as [Install Talos on a node](install-talos-on-a-node.md) describes.
 2. Apply the root.
 

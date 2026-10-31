@@ -289,7 +289,8 @@ func TestTalosctlRender(t *testing.T) {
 // module's install render of the same node. .github/scripts/talos-render-
 // parity.sh evaluates the root and runs it with:
 //
-//	FLEET_PARITY_INPUTS  the module's install_inputs, per node
+//	FLEET_PARITY_INPUTS  the module's install_inputs, per node, with the
+//	                     bootstrap_token that replaces the bundle's, if any
 //	FLEET_PARITY_NODES   per node: class, disk, tpm, from the inventory
 //	FLEET_CLASS_INPUTS   the committed class-inputs.json
 //	FLEET_PARITY_BUNDLE  a throwaway talosctl gen secrets bundle
@@ -314,6 +315,7 @@ func TestRenderParity(t *testing.T) {
 		TalosContract     string   `json:"talos_contract"`
 		KubernetesVersion string   `json:"kubernetes_version"`
 		ConfigPatches     []string `json:"config_patches"`
+		BootstrapToken    string   `json:"bootstrap_token"`
 	}
 	var facts map[string]struct {
 		Class   string `json:"class"`
@@ -363,21 +365,27 @@ func TestRenderParity(t *testing.T) {
 			t.Errorf("%s: fleetd's render: %v", name, err)
 			continue
 		}
-		want, err := module.gen(ctx, bundle, in.MachineType, in.ClusterName, in.ClusterEndpoint, in.TalosContract, in.KubernetesVersion, in.ConfigPatches)
+		// The module renders a node whose inputs name a bootstrap token with
+		// it in place of the bundle's.
+		moduleBundle, moduleToken := bundle, worker.Secrets.BootstrapToken
+		if in.BootstrapToken != "" {
+			moduleBundle, moduleToken = withBootstrapToken(t, bundle, in.BootstrapToken), in.BootstrapToken
+		}
+		want, err := module.gen(ctx, moduleBundle, in.MachineType, in.ClusterName, in.ClusterEndpoint, in.TalosContract, in.KubernetesVersion, in.ConfigPatches)
 		if err != nil {
 			t.Errorf("%s: the module's render: %v", name, err)
 			continue
 		}
 		// A worker's config carries the bootstrap token fleetd made for its
-		// install where the module's carries the cluster's. That one value
-		// differs by design, once, at cluster.token; every other byte must
-		// match.
+		// install where the module's carries the cluster's, or the one its
+		// inputs name. That one value differs by design, once, at
+		// cluster.token; every other byte must match.
 		if token != "" {
 			if n := bytes.Count(got, []byte(token)); n != 1 || !bytes.Contains(got, []byte("    token: "+token+"\n")) {
 				t.Errorf("%s: fleetd's render carries its own token %d times, or not as cluster.token", name, n)
 				continue
 			}
-			got = bytes.ReplaceAll(got, []byte(token), []byte(worker.Secrets.BootstrapToken))
+			got = bytes.ReplaceAll(got, []byte(token), []byte(moduleToken))
 		}
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: fleetd's render differs from the module's:\n--- controller\n%s\n--- module\n%s", name, got, want)
@@ -394,6 +402,29 @@ func TestRenderParity(t *testing.T) {
 	if _, ok := moduleInputs["joining-cp"]; !ok || controlPlanes < 2 {
 		t.Errorf("compared %d control planes; the parity needs the root's and joining-cp", controlPlanes)
 	}
+}
+
+// withBootstrapToken writes a copy of the bundle whose bootstrap token is
+// the one given.
+func withBootstrapToken(t *testing.T, bundle, token string) string {
+	t.Helper()
+	raw, err := os.ReadFile(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := parseWorkerSecrets(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := strings.Replace(string(raw), "bootstraptoken: "+w.Secrets.BootstrapToken+"\n", "bootstraptoken: "+token+"\n", 1)
+	if out == string(raw) {
+		t.Fatal("the bundle carries no bootstraptoken line")
+	}
+	f := filepath.Join(t.TempDir(), "secrets.yaml")
+	if err := os.WriteFile(f, []byte(out), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return f
 }
 
 func fullFakeBundle(prefix string) string {
