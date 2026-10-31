@@ -48,6 +48,9 @@ func (r Resource) apiVersion() string { return r.Group + "/" + r.Version }
 // ErrNotFound is a 404 from the API.
 var ErrNotFound = errors.New("not found")
 
+// ErrConflict is a 409 from the API, such as a failed delete precondition.
+var ErrConflict = errors.New("409 Conflict")
+
 // NewKube reads the CA and client certificate files.
 func NewKube(server, caFile, certFile, keyFile, namespace string) (*Kube, error) {
 	ca, err := os.ReadFile(caFile)
@@ -103,7 +106,11 @@ func (k *Kube) do(ctx context.Context, method, path, contentType string, body []
 	}
 	if resp.StatusCode/100 != 2 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(msg)))
+		status := errors.New(resp.Status)
+		if resp.StatusCode == http.StatusConflict {
+			status = ErrConflict
+		}
+		return fmt.Errorf("%s %s: %w: %s", method, path, status, strings.TrimSpace(string(msg)))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -132,6 +139,12 @@ func (o Object) Created() time.Time {
 	return t
 }
 
+// ResourceVersion is metadata.resourceVersion.
+func (o Object) ResourceVersion() string {
+	s, _ := o.metadata()["resourceVersion"].(string)
+	return s
+}
+
 // Labels is metadata.labels.
 func (o Object) Labels() map[string]string {
 	out := map[string]string{}
@@ -158,6 +171,15 @@ func (o Object) GlobalExecutionStop() (time.Time, bool) {
 	s, _ := st["globalExecutionStop"].(string)
 	t, err := time.Parse(time.RFC3339, s)
 	return t, err == nil && !t.IsZero()
+}
+
+// GlobalTimeout is status.globalTimeout, the global timeout Tinkerbell's
+// controller copies from the rendered Template. It is false when the field is
+// missing or not positive, as before the controller's first reconcile.
+func (o Object) GlobalTimeout() (time.Duration, bool) {
+	st, _ := o["status"].(map[string]any)
+	s, _ := st["globalTimeout"].(float64)
+	return time.Duration(s) * time.Second, s > 0
 }
 
 // CurrentAction is status.currentState.actionName, the action a Workflow's
@@ -223,6 +245,25 @@ func (k *Kube) List(ctx context.Context, r Resource, selector string) ([]Object,
 		return nil, err
 	}
 	return list.Items, nil
+}
+
+// DeleteUnchanged removes an object only while its resourceVersion is the one
+// given, so a write since that read keeps it and answers ErrConflict. A
+// missing object is no error.
+func (k *Kube) DeleteUnchanged(ctx context.Context, r Resource, name, resourceVersion string) error {
+	body, err := json.Marshal(map[string]any{
+		"apiVersion":    "v1",
+		"kind":          "DeleteOptions",
+		"preconditions": map[string]any{"resourceVersion": resourceVersion},
+	})
+	if err != nil {
+		return err
+	}
+	err = k.do(ctx, http.MethodDelete, k.path(r, name), "application/json", body, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
 }
 
 // Delete removes an object; a missing one is no error.

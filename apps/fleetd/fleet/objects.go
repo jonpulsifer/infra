@@ -19,6 +19,10 @@ const (
 // global timeout, so that Tinkerbell's controller reconciles it.
 const OverdueAnnotation = "lolwtf.ca/overdue-at"
 
+// TemplateGlobalTimeout is the provision Template's global_timeout, for a
+// Workflow whose status does not carry one yet.
+const TemplateGlobalTimeout = 1800 * time.Second
+
 // ActionRetire is the Workflow the fleet runs for a decommissioning
 // device. It is no desired_action: the status asks for it.
 const ActionRetire = "retire"

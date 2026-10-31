@@ -188,10 +188,23 @@ Tinkerbell's controller checks a Workflow's global timeout only when it reconcil
 and a silent agent writes nothing. Each pass, fleetd writes the annotation `lolwtf.ca/overdue-at` to
 every unfinished Workflow whose `status.globalExecutionStop` is more than `FLEET_INTERVAL` in the
 past, and the write makes the controller set `TIMEOUT`. The write is a merge patch on
-`metadata.annotations` alone, so `spec` and `status` stay with their owners. A Workflow with no
-deadline, or one that does not parse, is left alone. The journal says once per Workflow which action
-was current; for `reboot` it says the install and next-boot reported success and the reboot's report
-was lost.
+`metadata.annotations` alone, so `spec` and `status` stay with their owners. The journal says once
+per Workflow which action was current; for `reboot` it says the install and next-boot reported
+success and the reboot's report was lost.
+
+The controller sets `globalExecutionStop` only once the first action, wipe-disk, reports a start
+time, and tink-agent sends one only with the action's result. A run cut off before that report, by a
+power loss, a machine that never reaches HookOS or an agent that dies, has no deadline, and the next
+netboot resumes it and wipes the disk. fleetd deletes an unfinished Workflow with no deadline, or
+one that does not parse, once its `creationTimestamp` plus `status.globalTimeout` is more than
+`FLEET_INTERVAL` in the past; without `status.globalTimeout` it takes the Template's 1,800 seconds.
+The delete carries the `resourceVersion` the pass read, so a first report that lands in between
+keeps the run. A deleted Workflow leaves netboot off, `Admit` renders no code for it, and the next
+`desired_action` starts a new run. A run fleetd boots by hand, on a device without a BMC, must reach
+wipe-disk within that window. One `fleet.workflow` audit line says `ended`, and the journal says
+once that the run never reported its first action, that the disk may be partly wiped or may hold the
+old install, and that `desired_action` runs it again. A retirement is left alone: decommissioning
+asks for it again at once, and moving the device out of decommissioning abandons it.
 
 ## Audit
 

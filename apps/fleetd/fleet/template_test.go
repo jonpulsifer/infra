@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -27,7 +28,8 @@ type tinkAction struct {
 }
 
 type tinkWorkflow struct {
-	Tasks []struct {
+	GlobalTimeout int `yaml:"global_timeout"`
+	Tasks         []struct {
 		Volumes     []string          `yaml:"volumes"`
 		Environment map[string]string `yaml:"environment"`
 		Actions     []tinkAction      `yaml:"actions"`
@@ -123,6 +125,15 @@ func TestTemplateRendersAWorkflowWithoutInstallKeys(t *testing.T) {
 	// A Workflow without the attest key fails closed: it attests.
 	if env["INSTALL"] != "false" || env["INSTALLER_IMAGE"] != "" || env["ATTEST"] != "true" || env["DISK_SERIAL"] != "" {
 		t.Fatalf("a Workflow without install keys: %v", env)
+	}
+}
+
+// fleetd ends a Workflow that has no deadline by the Template's global
+// timeout when the Workflow's status carries none.
+func TestTemplateGlobalTimeoutIsFleetdsFallback(t *testing.T) {
+	got := time.Duration(renderTemplate(t, provisionMap(t)).GlobalTimeout) * time.Second
+	if got != TemplateGlobalTimeout {
+		t.Fatalf("the Template's global_timeout is %s, TemplateGlobalTimeout %s", got, TemplateGlobalTimeout)
 	}
 }
 
