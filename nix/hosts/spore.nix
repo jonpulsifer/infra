@@ -7,22 +7,15 @@
   ...
 }:
 let
-  # The EK public key hash read on each node that attests by EK, the fallback for a node with no
-  # LDevID (docs/platform/identity.md).
+  # The EK attestor's allow list: the EK public key hash read on each node that may attest by EK, the
+  # fallback for a node with no LDevID (docs/platform/identity.md). The list admits an agent only;
+  # its alias and workloads, by EK hash or LDevID CN, come from fleetd's spire-nodes.json as fleet-
+  # entries, so a node fleetd withdraws loses them.
   ekHashes = {
     optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
-  # A node's alias by the LDevID that fleetd issues it, whose subject CN is the node's name, comes
-  # from fleetd's spire-nodes.json alone, as a fleet- entry, so a node fleetd withdraws loses it.
-  tpmNodes = lib.sort lib.lessThan (lib.attrNames ekHashes);
-  trustDomain = config.homelab.spire.trustDomain;
-  nodeID = name: "spiffe://${trustDomain}/node/${name}";
-  nodeAliases = lib.mapAttrsToList (name: hash: {
-    spiffeID = nodeID name;
-    selectors = [ "tpm:pub_hash:${hash}" ];
-  }) ekHashes;
-  # Kubernetes service accounts that get an SVID on every TPM node.
+  # Kubernetes service accounts that get an SVID on every node fleetd registers.
   workloads = [
     {
       ns = "spire-smoke";
@@ -97,19 +90,6 @@ in
       ../../terraform/pki/certs/folly-devid-ca-spore.pem
       ../../terraform/pki/certs/folly-devid-ca-capsule.pem
     ];
-    entries =
-      nodeAliases
-      ++ lib.concatMap (
-        name:
-        map (w: {
-          spiffeID = "spiffe://${trustDomain}/ns/${w.ns}/sa/${w.sa}";
-          parentID = nodeID name;
-          selectors = [
-            "k8s:ns:${w.ns}"
-            "k8s:sa:${w.sa}"
-          ];
-        }) workloads
-      ) tpmNodes;
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;

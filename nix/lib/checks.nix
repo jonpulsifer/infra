@@ -207,7 +207,7 @@ in
       "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
   # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. The
-  # LDevID aliases are fleetd's, so spore declares none. An agent matches a node entry only when it
+  # node aliases are fleetd's, so spore declares none. An agent matches a node entry only when it
   # has every selector, so a node with two attestors needs two aliases, which a key tells apart.
   spire-devid =
     let
@@ -248,8 +248,6 @@ in
         lib.attrNames (
           lib.filterAttrs (_: v: v != null) c.services.spire.server.settings.plugins.NodeAttestor
         );
-      aliases =
-        c: name: lib.filter (e: e.spiffeID == "spiffe://lolwtf.ca/node/${name}") c.homelab.spire.entries;
       sync = c: c.systemd.services.spire-server-entries.script;
       devidData = both.services.spire.server.settings.plugins.NodeAttestor.tpm_devid.plugin_data;
       failures = lib.filter (failure: failure != null) [
@@ -280,31 +278,10 @@ in
           else
             "tpm_devid does not read the DevID and endorsement CA files"
         )
+        # fleetd's spire-nodes.json holds every node alias, so the applier withdraws it.
         (
-          if
-            lib.all
-              (
-                name:
-                let
-                  selectors = c: map (e: e.selectors) (aliases c name);
-                in
-                lib.length (selectors ekOnly) == 1
-                && lib.hasPrefix "tpm:pub_hash:" (lib.head (lib.head (selectors ekOnly)))
-                && selectors both == selectors ekOnly
-              )
-              [
-                "optiplex"
-                "riptide"
-              ]
-          then
-            null
-          else
-            "a node in ekHashes does not have exactly one alias, by EK hash"
-        )
-        # fleetd's spire-nodes.json holds every LDevID alias, so the applier withdraws it.
-        (
-          if lib.any (e: lib.any (lib.hasPrefix "tpm_devid:") e.selectors) both.homelab.spire.entries then
-            "spore declares a tpm_devid alias, which fleetd's file holds"
+          if lib.any (e: e.parentID == null) (ekOnly.homelab.spire.entries ++ both.homelab.spire.entries) then
+            "spore declares a node alias, which fleetd's file holds"
           else
             null
         )

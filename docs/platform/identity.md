@@ -30,8 +30,8 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- Each LDevID alias is a `fleet-*` entry for a node fleetd lists in `spire-nodes.json`, so a node gets it with no deploy and loses it when fleetd withdraws it. spore declares none.
-- Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
+- Each node alias, by LDevID CN or EK hash, is a `fleet-*` entry for a node fleetd lists in `spire-nodes.json`, so a node gets it with no deploy and loses it when fleetd withdraws it. spore declares none.
+- Change the EK allow list in `ekHashes` and the workload entries in `workloads` of `nix/hosts/spore.nix`. The allow list admits an agent; its alias by EK hash comes from fleetd's file, as the LDevID alias does. spore declares no entry, and the sync deletes any entry whose ID starts with `git-` and leaves entries made by hand.
 - An agent matches a node entry only when it has every selector, so a node has one alias for each attestor: by EK hash, and by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
 - `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
@@ -44,7 +44,7 @@ Two owners write registration entries, and the entry ID says which.
 
 | Owner | IDs | Holds |
 | --- | --- | --- |
-| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`: the alias for each node in `ekHashes`, and the `workloads` under them |
+| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`, which declares none, so the sync prunes every `git-*` entry |
 | fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the bans of withdrawn and revoked nodes' agents |
 
 fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]`, EK hashes of 64 lowercase hex characters and LDevID fingerprints of 40, and leaves every entry as it is when the file is malformed or names a node or an EK hash as both registered and revoked. A node is in `nodes` while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and bans each agent whose node selector no entry carries any longer.
@@ -160,7 +160,7 @@ riptide, surge, swell and optiplex carry the `lolwtf.ca/tpm=true` label. riptide
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
 - `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
-- `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
+- `nix/hosts/spore.nix`: the EK allow list `ekHashes` and the `workloads`
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
