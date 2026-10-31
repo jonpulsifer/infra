@@ -3,10 +3,10 @@ title: Retire a node
 description: Drain a folly worker, back up its volumes, and set its NetBox device to decommissioning, so that fleetd wipes it, then remove its entry from the nodes file.
 ---
 
-Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleetd](../apps/fleetd.md) then wipes the system disk and powers the node off, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
+Use this runbook to take a worker out of folly for good. You drain the node and set its [NetBox](../platform/netbox.md) device to `decommissioning`. [fleetd](../apps/fleetd.md) then wipes the system disk and powers the node off, deletes its `Node`, its kubelet's CSRs and its bootstrap token, and sets the device to `offline`. A pull request then removes its entry from the nodes file, which deletes the device.
 
 > [!WARNING]
-> This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain and the `Node` deletion act on the cluster.
+> This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle, and the drain acts on the cluster.
 
 ## Before you start
 
@@ -56,15 +56,16 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 3. Make sure that NetBox shows the device as `offline`.
 
-   Result: the device's journal says that the node is offline and its Tinkerbell objects are gone.
+   Result: the device's journal says that fleetd cordoned and drained the node and deleted its `Node`, the CSRs of its kubelet and its bootstrap token, and that the device is offline and its Tinkerbell objects are gone.
 
-4. Delete the node's `Node` object.
+4. Make sure that the cluster holds no `Node` and no bootstrap token for the node.
 
    ```bash
-   kubectl --context folly delete node <node>
+   kubectl --context folly get node <node>
+   kubectl --context folly -n kube-system get secrets -l lolwtf.ca/node=<node>
    ```
 
-   Result: `node "<node>" deleted`.
+   Result: `Error from server (NotFound): nodes "<node>" not found`, and `No resources found in kube-system namespace.`
 
 ## Drop the node from the nodes file
 
@@ -85,6 +86,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | --- | --- |
 | UniFi | The apply deletes its DNS record, and its switch port keeps its Kubernetes override |
 | SPIRE | At `decommissioning`, fleetd lists the node as revoked, and the applier on spore bans its agents, by LDevID or EK hash, within minutes. A banned agent cannot attest again, and SPIRE has no other revocation of an LDevID. The applier deletes the node's `fleet-*` aliases, so no workload entry names it. fleetd renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
+| Kubernetes | fleetd deletes its `Node`, its kubelet's CSRs and its bootstrap token. A disk image from before the wipe still holds the kubelet's client certificate, which nothing revokes |
 | Talos | The Talos root stops managing the node |
 | Tinkerbell | fleetd deletes its `Hardware` and `Machine` |
 | NetBox | The apply deletes the device with its history. To use the machine again, follow [Provision a node](provision-a-node.md) |
@@ -97,7 +99,9 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | The `Workflow` ends `FAILED` within seconds with `BootJobFailed`, and the `danger` journal line says `ended FAILED before any action ran: its BMC job netboot-<workflow> failed: <message>` | The BMC refused a power action or did not answer, so no action ran and nothing was wiped | Fix the BMC: the message is the BMC's answer, and `kubectl -n tinkerbell get machine <node> -o yaml` on spore shows whether Rufio reaches it. fleetd starts the retirement again at the time the line gives, 5 minutes after the first failure and twice as long after each one, up to 4 hours, while the device stays `decommissioning` |
 | The journal says `the retirement waits for Workflow <run> (<action>): the BMC did not power the machine off` | The BMC refused the power-off that stops the run, so fleetd keeps the run: deleting it would not stop its action | Wait: the retirement starts on the pass after the run ends. Fix the BMC, or the retirement's own boot job fails the same way. Powering the machine off by hand ends the run at its global timeout |
 | `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk. Nothing was wiped | Read the machine's disks, and correct `disk` or `disk_serial` in the nodes file, or wipe the disk at the machine |
-| The device stays `decommissioning` after a run that failed at an action | fleetd journals a failed retirement once and stops; it retries only a retirement that failed at its BMC job | Read the journal line, which names the action, and the action's output with `journalctl -u tinkerbell \| grep <address>` on spore. Wipe the disk at the machine, then set the status to `offline` |
+| The device stays `decommissioning` after a run that failed at an action | fleetd journals a failed retirement once and stops; it retries only a retirement that failed at its BMC job | Read the journal line, which names the action, and the action's output with `journalctl -u tinkerbell \| grep <address>` on spore. Wipe the disk at the machine, then set the status to `offline`. fleetd removes from the cluster only a node its retirement wiped, so run `kubectl --context folly delete node <node>` and `kubectl --context folly -n kube-system delete secrets -l lolwtf.ca/node=<node>` |
+| The `Workflow` is `SUCCESS`, the device stays `decommissioning`, and the journal says `could not take <node> out of the cluster` | folly's API does not answer, or it refuses fleetd's account, whose token is `fleetd/folly-cordon-token` in `nix/secrets/spore.sops.yaml`. The disk is wiped | Read the error in the line. Each pass tries again, and the device goes `offline` once folly's API answers |
+| The journal says `the retirement waits until <time> for PodDisruptionBudgets to allow evicting <pods>` | A PodDisruptionBudget refuses an eviction, as when its other pods are not ready | Wait: at the time the line gives, fleetd deletes the `Node` anyway, which removes the pods |
 | The journal says `the retirement waits for Workflow <run>` | The device has no BMC, so nothing can stop the run that is going | Power the machine off. The run ends at its global timeout, and the retirement starts on the pass after; power the machine on, and it network-boots |
 | The device went back out of `decommissioning` mid-retirement | fleetd has the BMC power the machine off, which stops the wipe, then deletes the retirement and journals it. The disk may be partly wiped | Set `desired_action` to `provision` to install the node again |
 | The journal says `the cancellation could not stop the retirement Workflow <run>` or `the cancellation cannot stop the retirement` | The BMC refused the power-off, or the device has no BMC, so the retirement goes on and wipes the disk | Power the machine off by hand. The retirement then ends at its global timeout, and a new `desired_action` starts after it |

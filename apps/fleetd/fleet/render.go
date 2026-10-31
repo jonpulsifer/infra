@@ -215,13 +215,15 @@ func LoadBundle(path string, worker WorkerSecrets) error {
 
 // Node is what a render takes from a NetBox device: its name, class,
 // install disk, TPM spec version ("2.0" for a node that seals its disks) and
-// primary IPv4 address.
+// primary IPv4 address. A worker also takes its own bootstrap token, which
+// its config carries as cluster.token in place of the cluster's.
 type Node struct {
-	Name    string
-	Class   string
-	Disk    string
-	TPM     string
-	Address string
+	Name           string
+	Class          string
+	Disk           string
+	TPM            string
+	Address        string
+	BootstrapToken string
 }
 
 // Renderer turns a node into its machine config.
@@ -243,7 +245,8 @@ var ErrNoClass = errors.New("the node's class is not in the class inputs")
 // Talosctl renders with `talosctl gen config --with-secrets`, the recipe that
 // matches the Talos provider byte for byte. A worker is rendered from a
 // throwaway bundle, and the six values a worker config carries are then
-// replaced with the real ones, so the server needs no CA key for it. A
+// replaced with the real ones, so the server needs no CA key for it. Its
+// bootstrap token is the node's own, never the bundle's. A
 // control plane is rendered from the full bundle at BundlePath, as the Talos
 // root renders it; without one it is refused.
 type Talosctl struct {
@@ -328,6 +331,10 @@ func (t *Talosctl) Render(ctx context.Context, n Node) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the worker secrets: %w", err)
 	}
+	if !joinTokenPattern.MatchString(n.BootstrapToken) {
+		return nil, fmt.Errorf("worker %q has no bootstrap token of its own", n.Name)
+	}
+	real["secrets.bootstraptoken"] = n.BootstrapToken
 	return substitute(out, t.decoyValues, real)
 }
 

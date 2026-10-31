@@ -23,10 +23,12 @@ locals {
 ephemeral "talos_machine_configuration" "node" {
   for_each = var.nodes
 
-  cluster_name       = local.topology.CLUSTER_NAME
-  cluster_endpoint   = local.cluster_endpoint
-  machine_type       = each.value.role
-  machine_secrets    = local.machine_secrets
+  cluster_name     = local.topology.CLUSTER_NAME
+  cluster_endpoint = local.cluster_endpoint
+  machine_type     = each.value.role
+  machine_secrets = each.value.bootstrap_token == null ? local.machine_secrets : merge(local.machine_secrets, {
+    secrets = merge(local.machine_secrets.secrets, { bootstrap_token = each.value.bootstrap_token })
+  })
   talos_version      = var.talos_contract
   kubernetes_version = var.kubernetes_version
   config_patches     = local.config_patches[each.key]

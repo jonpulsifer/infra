@@ -54,7 +54,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
-| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the cordon account's token; all three or none |
+| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, a quarantine is journaled for the owner to cordon, and a retirement leaves the Node to the owner |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line each Hardware's iPXE script passes |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt` | The Secret per `bmc_type` a Machine names |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
@@ -62,7 +62,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them nothing renders |
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
-| `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's |
+| `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's. With a renderer, `FLEET_CONFIG_TTL` is at most `4h`, so a worker's token fits the cluster's 8-hour cap |
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
 | `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker that never ran a Workflow starts its provision |
@@ -151,6 +151,23 @@ code is never logged. `tink-attest` unwraps it and writes it to `-install-code`,
 run starts only after the render's device gates pass (`Installer.Ready`), and the Template wipes a
 provision's disk only after the boot's pass and with the code. `Admit` waits for a reconcile pass
 and gives up when its context ends.
+
+## Bootstrap token
+
+A worker's config carries a Kubernetes bootstrap token of its own as `cluster.token`, never the
+cluster's. Each render creates it in the cluster's `kube-system` as the Secret
+`bootstrap-token-<id>`, where `<id>` is six characters of a hash of the node's name
+(`fleet/jointoken.go`), so a node has one token and a new render replaces the last one's, across
+passes and restarts. The token authenticates in `system:bootstrappers:nodes` alone, which Talos's
+bootstrap manifests bind to a kubelet's first client-certificate request, and expires
+`FLEET_CONFIG_TTL` plus four hours after the render. fleetd replaces a token by deleting it and
+creating it again, since the account's admission policy admits no update and no expiration past
+eight hours from the token's creation; fleetd refuses to start with a `FLEET_CONFIG_TTL` past four
+hours. The kubelet uses it once, for its TLS
+bootstrap; it then authenticates and renews with its own client certificate, so the expiry stops
+nothing that runs, and a config left on a disk cannot join again. A render that cannot create the
+token, as while the cluster's API does not answer, is a 503 and answers no install code. A control
+plane renders from the full bundle and carries the cluster's token.
 
 ## Config
 
@@ -301,6 +318,24 @@ says the cancellation cannot stop it. A kept retirement ends at its global timeo
 is off, as any run does.
 
 A node retired mid-install never fetches its config: [Config](#config) drops it.
+
+## Retirement and the cluster
+
+Once the retirement Workflow succeeds, before the device goes `offline`, fleetd takes the node out
+of the cluster (`fleet/drain.go`). It cordons the node and evicts each pod bound to it but a
+DaemonSet's, a static pod's mirror and one already terminating, as `kubectl drain` does. An
+eviction a PodDisruptionBudget refuses holds the next step for up to `DrainTimeout`, ten minutes
+from the first refusal, which the Workflow's annotation `lolwtf.ca/drain-started-at` keeps across
+a restart; the journal says once that it waits. fleetd then deletes the Node, which has the
+cluster delete the pods left on it, every CSR the node's kubelet made or that names the node, and
+the node's bootstrap token, and journals what it did on the `offline` line. A control plane's
+Node is left to the owner. Each step tolerates an object already gone. While the cluster's API
+does not answer or refuses a step, the wiped device stays `decommissioning` with its Hardware and
+Machine, the journal says once why, the pass reports the error, and each pass tries again.
+
+Nothing revokes a kubelet's client certificate. A disk image from before the wipe holds one,
+valid for up to a year, and its kubelet can register the Node again. The deleted Node and token
+are the limit of what the cluster lets fleetd revoke.
 
 ## Overdue Workflows
 

@@ -658,8 +658,10 @@ func stateWord(wf Object) string {
 }
 
 // retire runs one retire Workflow for a decommissioning device and, when the
-// Workflow named in last_workflow succeeds, deletes the device's objects and
-// sets it offline. A retirement that failed at its BMC job ran nothing, and
+// Workflow named in last_workflow succeeds, takes the node out of the cluster
+// (removeNode), deletes the device's objects and sets it offline. While the
+// cluster's API does not answer, the wiped device stays decommissioning and
+// each pass tries again. A retirement that failed at its BMC job ran nothing, and
 // starts again after a backoff (retryRetire). One that failed at an action is
 // journaled once and left for the owner, who moves the status on by hand.
 func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workflows []Object) error {
@@ -684,12 +686,20 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 	state := wf.State()
 	switch {
 	case Succeeded(state):
+		removed, done, err := r.removeNode(ctx, d, wf)
+		if err != nil {
+			why := fmt.Sprintf("fleetd: Workflow %s wiped the disk and powered the node off, and fleetd could not take %s out of the cluster: %v. The device stays decommissioning, and each pass tries again", d.LastWorkflow, d.Name, err)
+			return errors.Join(fmt.Errorf("take %s out of the cluster: %w", d.Name, err), r.journalOnce(ctx, "remove-node/"+d.LastWorkflow, d, "warning", why))
+		}
+		if !done {
+			return nil
+		}
 		for _, res := range []Resource{HardwareResource, MachineResource} {
 			if err := r.deleteManaged(ctx, res, d.Name); err != nil {
 				return fmt.Errorf("delete %s: %w", res.Kind, err)
 			}
 		}
-		comment := fmt.Sprintf("fleetd: Workflow %s wiped the disk and powered the node off; the device is offline and its Tinkerbell objects are gone", d.LastWorkflow)
+		comment := fmt.Sprintf("fleetd: Workflow %s wiped the disk and powered the node off; %s. The device is offline and its Tinkerbell objects are gone", d.LastWorkflow, removed)
 		if err := r.NetBox.Update(ctx, d, "offline", nil, "success", comment); err != nil {
 			return err
 		}

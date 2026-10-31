@@ -18,8 +18,9 @@ import (
 //
 // Admit renders at the end of an intake pass, before the verifier answers
 // the machine its install code. The installer checks the device's state in
-// NetBox and Tinkerbell, renders the config with the class inputs and the
-// worker secrets, or the full bundle for a joining control plane, and keeps
+// NetBox and Tinkerbell, renders the config with the class inputs, the
+// worker secrets and a bootstrap token it creates for the worker alone, or
+// the full bundle for a joining control plane, and keeps
 // it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first GET
 // whose every byte the node acknowledged burns it and sets the device
 // active; a GET with another code
@@ -46,8 +47,11 @@ type Installer struct {
 	// bootstraps etcd on. It never installs from here: a control plane the
 	// fleet renders joins the cluster that one serves.
 	Bootstrap string
-	Metrics   *Metrics
-	Now       func() time.Time
+	// Tokens creates each worker config's own bootstrap token in the
+	// cluster. Without it no worker renders.
+	Tokens  JoinTokens
+	Metrics *Metrics
+	Now     func() time.Time
 
 	mu         sync.Mutex
 	prepared   bool
@@ -177,13 +181,22 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if err := i.gates(ctx, d); err != nil {
 		return d, err
 	}
-	cfg, err := i.Renderer.Render(ctx, Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address})
+	n := Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address}
+	rendered, ttl := i.Now(), i.ttl(d.Class)
+	if i.Renderer.MachineType(d.Class) == "worker" {
+		token, err := i.Tokens.Mint(ctx, d.Name, rendered.Add(ttl+JoinTokenGrace))
+		if err != nil {
+			return d, unavailable("create %s's bootstrap token: %v", d.Name, err)
+		}
+		n.BootstrapToken = token
+	}
+	cfg, err := i.Renderer.Render(ctx, n)
 	if err != nil {
 		return d, unavailable("render %s: %v", d.Name, err)
 	}
 	p := Pending{
 		UUID: req.UUID, Code: req.Code, Serial: d.Serial, Node: d.Name, Class: d.Class,
-		Workflow: d.LastWorkflow, Rendered: i.Now(), TTL: i.ttl(d.Class),
+		Workflow: d.LastWorkflow, Rendered: rendered, TTL: ttl,
 	}
 	if err := i.Configs.Put(p, cfg); errors.Is(err, ErrBurned) {
 		return d, conflict("the code is spent")
@@ -213,6 +226,10 @@ func (i *Installer) gates(ctx context.Context, d Device) error {
 	switch i.Renderer.MachineType(d.Class) {
 	case "":
 		return unavailable("the class inputs have no class %q", d.Class)
+	case "worker":
+		if i.Tokens == nil {
+			return unavailable("%s is a worker, whose config carries a bootstrap token fleetd creates in the cluster, and fleetd has no credentials for the cluster's API", d.Name)
+		}
 	case "controlplane":
 		if !i.ControlPlanes {
 			return conflict("%s is a control plane, which the owner renders", d.Name)

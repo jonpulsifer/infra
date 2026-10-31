@@ -100,7 +100,7 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	r.Config.Installs = map[string]string{"worker-g5": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"}
 	at.rend = &fakeRenderer{types: map[string]string{"worker-g5": "worker", "controlplane": "controlplane"}}
 	r.Installer = &Installer{
-		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Renderer: at.rend, Configs: &Configs{},
+		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Renderer: at.rend, Tokens: &fakeTokens{}, Configs: &Configs{},
 		TTL: 2 * time.Hour, Metrics: r.Metrics, Now: func() time.Time { return testNow },
 	}
 	at.r = r

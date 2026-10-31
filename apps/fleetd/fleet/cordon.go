@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,9 +21,10 @@ import (
 // plane's failed-no-quarantine is not one.
 const QuarantinedVerdict = "quarantined"
 
-// Cluster is a client for the one call fleetd makes to the site's
-// own Kubernetes API: cordoning a quarantined node. Its ServiceAccount may
-// patch nodes and do nothing else.
+// Cluster is a client for the site's own Kubernetes API, as the account in
+// clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml: it cordons a
+// quarantined node, creates each worker install's bootstrap token, and takes
+// a retired node out of the cluster.
 type Cluster struct {
 	Server string
 	Token  string
@@ -59,25 +61,53 @@ func NewCluster(server, caFile, tokenFile string) (*Cluster, error) {
 // Cordon marks the node unschedulable, as kubectl cordon does. A node the
 // cluster does not know is ErrNotFound.
 func (c *Cluster) Cordon(ctx context.Context, node string) error {
-	path := "/api/v1/nodes/" + url.PathEscape(node)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.Server+path, bytes.NewReader([]byte(`{"spec":{"unschedulable":true}}`)))
+	return c.do(ctx, http.MethodPatch, "/api/v1/nodes/"+url.PathEscape(node), "application/merge-patch+json", json.RawMessage(`{"spec":{"unschedulable":true}}`), nil)
+}
+
+// errEvictionBlocked is a 429 from an eviction: a PodDisruptionBudget does
+// not allow it now.
+var errEvictionBlocked = errors.New("429 Too Many Requests")
+
+// do sends one request with the account's token. A 404 is ErrNotFound, a 409
+// ErrConflict and a 429 errEvictionBlocked.
+func (c *Cluster) do(ctx context.Context, method, path, contentType string, body, out any) error {
+	var payload io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		payload = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.Server+path, payload)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.Token)
-	req.Header.Set("Content-Type", "application/merge-patch+json")
 	req.Header.Set("Accept", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", contentType)
+	}
 	resp, err := c.Client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
-	}
 	if resp.StatusCode/100 != 2 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("PATCH %s: %s: %s", path, resp.Status, strings.TrimSpace(string(msg)))
+		status := errors.New(resp.Status)
+		switch resp.StatusCode {
+		case http.StatusNotFound:
+			return ErrNotFound
+		case http.StatusConflict:
+			status = ErrConflict
+		case http.StatusTooManyRequests:
+			status = errEvictionBlocked
+		}
+		return fmt.Errorf("%s %s: %w: %s", method, path, status, strings.TrimSpace(string(msg)))
+	}
+	if out != nil {
+		return json.NewDecoder(resp.Body).Decode(out)
 	}
 	return nil
 }

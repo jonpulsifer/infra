@@ -102,7 +102,7 @@ Use this runbook when a cluster moves to Talos, and before a talosconfig certifi
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| mate logs `the sandbox talosconfig could not be read`, with `grants os:admin`. | The Document holds a certificate with a role other than `os:reader`. | Issue the Rowbutt talosconfig again. Then rotate the OS CA with `talosctl rotate-ca`, because the stored certificate cannot be revoked. |
+| mate logs `the sandbox talosconfig could not be read`, with `grants os:admin`. | The Document holds a certificate with a role other than `os:reader`. | Issue the Rowbutt talosconfig again. Then rotate the OS CA with `talosctl rotate-ca --kubernetes=false`, because the stored certificate cannot be revoked. A rotation of the Kubernetes CA too strands the workers fleetd installed, as [PKI](../platform/pki.md#rejoin-fleetds-workers-after-a-ca-rotation) says. |
 | mate logs `no sandbox talosconfig yet`. | The Secret `mate-sandbox-talos` is absent. | Make sure that the item exists and the ExternalSecret has synced. |
 | `config contexts` shows `<site>-1`. | The merge renamed a context that was already in the file. | Start again in a new directory. |
 

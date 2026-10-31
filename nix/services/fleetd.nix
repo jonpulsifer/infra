@@ -14,9 +14,10 @@
 # - HTTP on port 8446 of the Anchor network for NetBox's event-rule webhook, and /metrics.
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
 #
-# With fleetd/folly-cordon-token sealed, it cordons a node it quarantined through the cluster's API,
-# as clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account, which may cordon nodes
-# only.
+# With fleetd/folly-cordon-token sealed, it reaches the cluster's API as
+# clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account: it cordons a node it
+# quarantined, creates the bootstrap token each worker's install config carries, and takes a retired
+# node out of the cluster.
 {
   config,
   lib,
@@ -159,6 +160,10 @@ in
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
         message = "homelab.fleetd.controlPlanes needs installs, fleetd/worker-secrets and fleetd/bundle in spore's sops file.";
       }
+      {
+        assertion = !workerSecrets || cordon;
+        message = "fleetd/worker-secrets needs fleetd/folly-cordon-token in spore's sops file: each worker's config carries a bootstrap token fleetd creates through that account.";
+      }
     ];
 
     sops.secrets = {
@@ -174,7 +179,8 @@ in
       "fleetd/webhook-secret" = { };
     }
     // lib.optionalAttrs cordon {
-      # The cordon account's token; without it a quarantine is journaled for the owner to cordon.
+      # fleetd's account on the cluster's API; without it no worker renders, and a quarantine is
+      # journaled for the owner to cordon.
       "fleetd/folly-cordon-token" = { };
     }
     // lib.optionalAttrs workerSecrets {
