@@ -133,6 +133,23 @@ spec:
                   exit 1
                 fi
                 check_disk "nothing wiped"
+                # The installer writes EFI variables after it has written the disk, so a variable store that
+                # refuses writes would fail the run with the disk wiped. Write and remove a 1 KiB variable first:
+                # efivarfs takes a variable in one write, its 4-byte attributes and then the data.
+                if [ "$INSTALL" = true ]; then
+                  efi=/sys/firmware/efi/efivars
+                  probe=$efi/FleetWriteProbe-7e1ab0f1-0000-4000-8000-0000000000aa
+                  { mountpoint -q "$efi" || mount -t efivarfs efivarfs "$efi"; } 2>/dev/null || true
+                  mount -o remount,rw "$efi" 2>/dev/null || true
+                  { printf '\007\000\000\000'; head -c 1024 /dev/zero; } >/tmp/probe
+                  if ! err=$(dd if=/tmp/probe of="$probe" bs=2048 2>&1); then
+                    rm -f "$probe" 2>/dev/null || true
+                    log "the firmware refuses to store EFI variables ($(printf '%s' "$err" | head -n 1)); nothing wiped"
+                    exit 1
+                  fi
+                  chattr -i "$probe" 2>/dev/null || true
+                  rm -f "$probe" || { log "the probe variable $probe cannot be removed; nothing wiped"; exit 1; }
+                fi
                 # HookOS's image cache is RAM and empty on every boot, so the installer is fetched on
                 # every provision. Fetch it before the wipe: a registry fault then refuses the run with
                 # the disk intact, and install pulls nothing. The docker client runs in the background
@@ -260,7 +277,9 @@ spec:
                 fi
           # After an install the disk boots, preferring the installer's Talos entry; after a wipe
           # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
-          # each certain. A run that only attests leaves the firmware's boot order alone.
+          # each certain. The installer leaves efivarfs read-only, so the action remounts it, keeps only
+          # the entry on this install's EFI partition, puts it first in BootOrder, and fails the run
+          # when any step or read-back fails. A run that only attests leaves the firmware's boot order alone.
           - name: next-boot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 120
@@ -274,36 +293,51 @@ spec:
                   log "a retired node powers off; no next boot"
                   exit 0
                 fi
-                # BootNext is a convenience: with netboot off for the node, a refused PXE falls
-                # through to the installed disk anyway, so an EFI failure here is logged, not fatal.
-                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
-                  log "efivarfs did not mount ($err); the firmware's boot order decides the next boot"
-                  exit 0
-                fi
-                if ! entries=$(efibootmgr -v 2>&1); then
-                  log "efibootmgr failed ($entries); the firmware's boot order decides the next boot"
-                  exit 0
-                fi
-                if [ "$INSTALL" = true ]; then
-                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Talos.*/\1/p' | head -n 1)
-                  [ -n "$n" ] || n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
-                  what="the installed disk"
-                elif [ "$WIPE" = true ]; then
-                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
-                  what="IPv4 network"
-                else
+                fail() { log "$*; the run fails, and the node stays in HookOS"; exit 1; }
+                if [ "$INSTALL" != true ] && [ "$WIPE" != true ]; then
                   log "nothing installed or wiped; the firmware's boot order decides the next boot"
                   exit 0
                 fi
-                if [ -z "$n" ]; then
-                  log "no entry for $what; the firmware's boot order decides the next boot"
-                  exit 0
+                # HookOS mounts efivarfs read-write, but the Talos installer remounts it read-only when it is
+                # done, and efivarfs has one superblock, so every mount of it in HookOS is read-only after an
+                # install. Remount it read-write.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  fail "efivarfs did not mount ($err)"
                 fi
-                if err=$(efibootmgr -q -n "$n" 2>&1); then
-                  log "Boot$n ($what) is the next boot"
+                err=$(mount -o remount,rw /sys/firmware/efi/efivars 2>&1) || fail "efivarfs stays read-only ($err)"
+                entries=$(efibootmgr -v 2>&1) || fail "efibootmgr failed ($entries)"
+                num() { sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*/\1/p'; }
+                if [ "$INSTALL" = true ]; then
+                  # The installer's entry is the one on this install's EFI partition. Others named like it are
+                  # stale, from earlier installs or other disks, and go.
+                  esp=$(sgdisk -p "$DISK" | awk '$NF == "EFI" { print $1; exit }')
+                  [ -n "$esp" ] || fail "$DISK has no partition named EFI"
+                  guid=$(sgdisk -i "$esp" "$DISK" | sed -n 's/^Partition unique GUID: //p' | tr 'A-F' 'a-f')
+                  [ -n "$guid" ] || fail "$DISK's EFI partition has no GUID"
+                  n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
+                  [ -n "$n" ] || fail "no boot entry names $DISK's EFI partition ($guid)"
+                  for s in $(printf '%s\n' "$entries" | grep -F 'Talos Linux UKI' | grep -iv "$guid" | num); do
+                    err=$(efibootmgr -q -b "$s" -B 2>&1) || fail "the stale entry Boot$s cannot be deleted ($err)"
+                    log "deleted the stale entry Boot$s"
+                  done
+                  what="the installed disk"
                 else
-                  log "BootNext refused ($err); the firmware's boot order decides the next boot"
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  [ -n "$n" ] || fail "no IPv4 network boot entry"
+                  what="IPv4 network"
                 fi
+                # The entry goes first in BootOrder, so every later boot without an override takes it too, and
+                # BootNext makes the next one certain.
+                order=$(efibootmgr | sed -n 's/^BootOrder: //p' | tr ',' '\n' | grep -iv "^$n\$" | while read -r o; do
+                  efibootmgr | grep -qi "^Boot$o" && printf ',%s' "$o"; done)
+                err=$(efibootmgr -q -o "$n$order" 2>&1) || fail "BootOrder refused ($err)"
+                err=$(efibootmgr -q -n "$n" 2>&1) || fail "BootNext refused ($err)"
+                now=$(efibootmgr)
+                got_next=$(printf '%s\n' "$now" | sed -n 's/^BootNext: //p')
+                got_order=$(printf '%s\n' "$now" | sed -n 's/^BootOrder: //p')
+                [ "$got_next" = "$n" ] || fail "BootNext reads back as '${got_next}', not $n"
+                case "$got_order" in "$n"|"$n",*) ;; *) fail "BootOrder reads back as '${got_order}', not $n first" ;; esac
+                log "Boot$n ($what) is the next boot and first in BootOrder ($got_order)"
           # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f

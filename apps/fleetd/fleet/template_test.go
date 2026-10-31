@@ -459,6 +459,11 @@ func TestWipeFetchesTheInstallerFirst(t *testing.T) {
 	}
 	dir := t.TempDir()
 	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
+	efi := filepath.Join(dir, "efivars")
+	if err := os.Mkdir(efi, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script = strings.ReplaceAll(script, "/sys/firmware/efi/efivars", efi)
 	script, dev := withFakeDisks(t, script, dir,
 		fakeDisk{name: "nvme0n1", file: "device/serial", serial: "30DF7020FGKL        \n"})
 	bin := filepath.Join(dir, "bin")
@@ -490,5 +495,67 @@ func TestWipeFetchesTheInstallerFirst(t *testing.T) {
 	}
 	if out := run("false", "ghcr.io/x/y:v1"); strings.Contains(out, "pulling") || !strings.Contains(out, "wiping every partition") {
 		t.Errorf("a run without install fetched an installer: %q", out)
+	}
+}
+
+// The installer writes EFI variables after the wipe, so wipe-disk proves the
+// variable store takes a write before it touches the disk, and refuses with
+// the disk untouched when it does not.
+func TestWipeProbesTheEFIStoreBeforeWiping(t *testing.T) {
+	script := actionScripts(t)["wipe-disk"]
+	probe := strings.Index(script, "refuses to store EFI variables")
+	wipe := strings.Index(script, "wipefs --all")
+	if probe < 0 || wipe < 0 || probe > wipe {
+		t.Fatalf("the EFI write probe (%d) does not precede the wipe (%d)", probe, wipe)
+	}
+	wf := renderTemplate(t, provisionMap(t))
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
+	script = strings.ReplaceAll(script, "/sys/firmware/efi/efivars", filepath.Join(dir, "no-such-efivars"))
+	script, dev := withFakeDisks(t, script, dir,
+		fakeDisk{name: "nvme0n1", file: "device/serial", serial: "30DF7020FGKL        \n"})
+	attested, code := filepath.Join(dir, "attested"), filepath.Join(dir, "install_code")
+	os.WriteFile(attested, nil, 0o600)
+	os.WriteFile(code, []byte(testCode), 0o600)
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(sh, "-c", script)
+	cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH")}
+	for k, v := range wf.Tasks[0].Environment {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL=true", "INSTALLER_IMAGE=ghcr.io/x/y:v1", "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dev, "nvme0n1"))
+	out, err := cmd.CombinedOutput()
+	if err == nil || !strings.Contains(string(out), "refuses to store EFI variables") || !strings.Contains(string(out), "nothing wiped") || strings.Contains(string(out), "wiping every partition") {
+		t.Errorf("an EFI store that refuses writes did not stop the wipe: %v %q", err, out)
+	}
+}
+
+// The Talos installer leaves efivarfs read-only, so next-boot remounts it,
+// sets BootOrder and BootNext, and fails the run unless both read back.
+func TestNextBootSetsAndVerifiesTheBootEntry(t *testing.T) {
+	script := actionScripts(t)["next-boot"]
+	for _, want := range []string{
+		"mount -o remount,rw /sys/firmware/efi/efivars",
+		`efibootmgr -q -o "$n$order"`,
+		`efibootmgr -q -n "$n"`,
+		`[ "$got_next" = "$n" ] || fail`,
+		`fail "BootOrder reads back`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("next-boot lacks %q", want)
+		}
+	}
+	if strings.Contains(script, "did not mount ($err); the firmware") {
+		t.Error("next-boot still tolerates an EFI failure")
 	}
 }
