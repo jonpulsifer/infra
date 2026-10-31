@@ -38,6 +38,8 @@ resource "netbox_permission" "terraform_manage" {
     "dcim.device",
     "dcim.devicerole",
     "dcim.devicetype",
+    "dcim.frontport",
+    "dcim.rearport",
     "dcim.interface",
     "dcim.interfacetemplate",
     "dcim.macaddress",

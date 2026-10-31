@@ -1,6 +1,8 @@
 # The nodes file's checks, against fixtures in testdata/ on documentation
 # addresses, with every provider mocked.
 mock_provider "netbox" {
+  mock_resource "netbox_device_rear_port" { defaults = { id = "1" } }
+  mock_resource "netbox_device_front_port" { defaults = { id = "1" } }
   mock_resource "netbox_rack" { defaults = { id = "1" } }
   mock_resource "netbox_manufacturer" { defaults = { id = "1" } }
   mock_resource "netbox_device_role" { defaults = { id = "1" } }
@@ -245,5 +247,19 @@ run "rack_elevations_fit_and_record_the_current_stack" {
   assert {
     condition     = netbox_device.rack_component["folly-power-distribution-pro"].rack_position == 1 && netbox_device_type.rack_component["ubiquiti-pdu"].u_height == 2 && netbox_device.rack_component["folly-cyberpower-pdu"].rack_position == 3
     error_message = "Folly's Ubiquiti PDU occupies U1–U2, below the CyberPower PDU at U3."
+  }
+}
+
+run "oldschool_cables_trace_through_the_panel" {
+  command = plan
+  plan_options { target = [netbox_cable.oldschool_node, netbox_cable.oldschool_patch_switch, netbox_cable.oldschool_uplink_switch, netbox_cable.oldschool_uplink_gateway] }
+  variables { nodes_file = "testdata/valid.yaml" }
+  assert {
+    condition     = netbox_device_front_port.oldschool["retrofit"].name == "8" && netbox_device_front_port.oldschool["oldschool"].name == "9" && netbox_device_front_port.oldschool["hotrod"].name == "10" && netbox_device_front_port.oldschool["uplink"].name == "12"
+    error_message = "Node and uplink paths must use the owner's confirmed panel ports."
+  }
+  assert {
+    condition     = alltrue([for c in netbox_cable.oldschool_node : one(c.b_termination).object_type == "dcim.rearport"]) && alltrue([for c in netbox_cable.oldschool_patch_switch : one(c.a_termination).object_type == "dcim.frontport"])
+    error_message = "Nodes and switches must connect to opposite sides of the panel."
   }
 }

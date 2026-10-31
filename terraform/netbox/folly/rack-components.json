@@ -122,7 +122,7 @@
       "rack": "oldschool",
       "model": "patch-12",
       "unit": 6,
-      "description": "iWillink Cat6 keystone panel; jack population and rear terminations need verification"
+      "description": "Nodes on ports 8\u201310; port 11 blank; port 12 gateway uplink; remaining jack population and rear termination types need verification"
     },
     "oldschool-switch-shelf": {
       "rack": "oldschool",
