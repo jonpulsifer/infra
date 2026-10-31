@@ -51,7 +51,7 @@ data "netbox_device_type" "lab" {
 resource "netbox_device_type" "lab" {
   for_each        = { for k, v in local.lab_models : k => v if v.existing_slug == null }
   model           = each.value.model
-  slug            = "lab-${lower(each.key)}"
+  slug            = "lab-${replace(lower(each.key), "/[^a-z0-9_-]/", "-")}"
   manufacturer_id = local.lab_manufacturers[each.value.manufacturer]
   u_height        = 0
   is_full_depth   = false

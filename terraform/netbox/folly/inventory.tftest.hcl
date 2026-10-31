@@ -218,6 +218,10 @@ run "rejects_a_disk_serial_on_a_model" {
 
 run "lab_preserves_lifecycle_and_records_both_racks" {
   command = plan
+  assert {
+    condition     = alltrue([for t in netbox_device_type.lab : can(regex("^[a-z0-9_-]+$", t.slug))])
+    error_message = "Device-type slugs must contain only NetBox-compatible characters."
+  }
   plan_options {
     target = [restapi_object.lab_declared, restapi_object.lab_rack, netbox_rack.lab, netbox_ip_address.lab]
   }
