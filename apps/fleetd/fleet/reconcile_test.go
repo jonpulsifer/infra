@@ -317,6 +317,7 @@ func (f *fakeKube) handler() http.Handler {
 				return
 			}
 			o["metadata"].(map[string]any)["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
+			o["metadata"].(map[string]any)["resourceVersion"] = "1"
 			f.objects[path] = o
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("{}"))
@@ -384,7 +385,10 @@ func (f *fakeKube) workflows() []string {
 func (f *fakeKube) setState(name, state string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.objects[wfBase+name]["status"] = map[string]any{"state": state}
+	o := f.objects[wfBase+name]
+	o["status"] = map[string]any{"state": state}
+	rv, _ := strconv.Atoi(o.ResourceVersion())
+	o.metadata()["resourceVersion"] = strconv.Itoa(rv + 1)
 }
 
 func workflowObject(name, node, action, created, state string) Object {

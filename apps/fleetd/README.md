@@ -160,8 +160,10 @@ The first response whose bytes are all written burns it; after the answer, fleet
 journaled once. One fetch claims a config at a time. HEAD and
 other methods are 405, `If-None-Match` and `If-Modified-Since` are 400, and a Range is ignored. A
 machine has one config at a time: a new render burns the old code. A spent code stays refused for
-a day. A fetch with another code is journaled at most every ten minutes per machine. With
-`FLEET_CONFIG_DIR`, configs survive a restart with their TTL and burn state.
+a day. A fetch with another code is journaled at most every ten minutes per machine. Each reconcile
+pass drops, burns and journals the unread config of a device that is no longer `planned`, such as
+one set `decommissioning`. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
+burn state.
 
 ## NetBox contract
 
@@ -199,6 +201,23 @@ its record was late, and it is <state>`. The pass reports the failed write each 
 still going moves the device's status. The rule holds across a restart, since the record is in
 the API server.
 
+A device set `decommissioning` while a run of another action goes gets its retirement at once
+when it has a BMC. In one pass fleetd deletes the run with the `resourceVersion` the pass listed,
+creates the retire Workflow with `bootMode: netboot`, and journals `the retirement ends Workflow X
+(<action>) and starts Y; a power cycle stops X`. Rufio's power cycle stops the run's current
+action before the retirement's first. A run that changed since the list answers 409, stays, and
+the next pass tries again. A device without a BMC keeps the run: a deleted run's current action
+goes on, writes the disk and leaves the agent stuck reporting it. The journal says once that the
+retirement waits for X and that powering the machine off ends it, and the retirement starts on
+the pass after X ends.
+
+A device the owner moves out of `decommissioning` has its unfinished retirement deleted the same
+way, with a BMC and the listed `resourceVersion`, and journaled; an action already running on the
+machine runs to its end, and the next run's power cycle stops it. Without a BMC the retirement is
+kept and journaled, and once it passes its global timeout it ends as any run does.
+
+A node retired mid-install never fetches its config: [Config](#config) drops it.
+
 ## Overdue Workflows
 
 Tinkerbell's controller checks a Workflow's global timeout only when it reconciles that Workflow,
@@ -220,8 +239,9 @@ keeps the run. A deleted Workflow leaves netboot off, `Admit` renders no code fo
 `desired_action` starts a new run. A run fleetd boots by hand, on a device without a BMC, must reach
 wipe-disk within that window. One `fleet.workflow` audit line says `ended`, and the journal says
 once that the run never reported its first action, that the disk may be partly wiped or may hold the
-old install, and that `desired_action` runs it again. A retirement is left alone: decommissioning
-asks for it again at once, and moving the device out of decommissioning abandons it.
+old install, and that `desired_action` runs it again. The retirement of a decommissioning device is
+left alone: decommissioning asks for it again at once, and moving the device out of
+decommissioning abandons it.
 
 ## Audit
 

@@ -460,6 +460,23 @@ func (i *Installer) expire(ctx context.Context, p Pending) error {
 	return i.NetBox.Update(ctx, found, "", nil, "warning", comment)
 }
 
+// Withdraw drops the unread config of a device that is no longer planned and
+// journals it, so a node the owner moved on, such as one being retired, never
+// fetches the cluster's secrets. Each reconcile pass calls it.
+func (i *Installer) Withdraw(ctx context.Context, d Device) error {
+	if d.Status == "planned" {
+		return nil
+	}
+	p, ok := i.Configs.Drop(d.Serial, i.Now())
+	if !ok {
+		return nil
+	}
+	i.pending()
+	Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn: the device is "+d.Status)
+	comment := fmt.Sprintf("fleetd: the device is %s, so fleetd dropped the Talos config rendered at %s for Workflow %s before the node fetched it; the node gets no config", d.Status, timestamp(p.Rendered), p.Workflow)
+	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+}
+
 // pending refreshes the counts and oldest times of the unread configs and
 // of the served ones NetBox has no release for.
 func (i *Installer) pending() {
