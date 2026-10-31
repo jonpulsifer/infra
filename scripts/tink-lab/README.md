@@ -76,7 +76,10 @@ tink-lab.sh observe n1
 
 Each disk reports the serial its spec names, or `tl<index><disk>`. The machine declares the first
 disk's serial as its install disk's, as `disk_serial` in the nodes file does, unless
-`--install-disk-serial` names another.
+`--install-disk-serial` names another. `--drive-opts OPTS` adds QEMU drive options to every disk
+of the machine. By default QEMU ignores a guest's discard, as a drive may ignore TRIM;
+`discard=unmap` passes it to the image, and `throttling.bps-write=BYTES` makes the disk slow to
+write.
 
 Other commands:
 
@@ -101,6 +104,12 @@ Other commands:
   copies another Template file instead, such as a proposed fix from another branch. The `template`
   event records the source and a hash of the applied `spec.data`. The committed Template stays as
   it is.
+- `tools-image TAG [--apk PKG]... [--overlay DIR]` pushes `ghcr.io/tink-lab/tools:TAG` and prints
+  it by digest: the Template's tools image, with Alpine packages added by the image's own `apk`
+  (run outside the namespace, in a user namespace of its own, since the namespace has no route to
+  Alpine's mirrors) and DIR's files laid over it, such as a wrapper in `/usr/local/bin` that makes
+  one tool fail. Run it from a copy of the Template whose image references are replaced with it
+  (`template --from`). A test that does this must say so.
 - `slow-installer SECONDS` pushes `ghcr.io/tink-lab/slow-installer:SECONDS`, the class's installer
   behind `slow-installer.sh`. It writes a tick to the install disk every second for SECONDS, 1 MiB
   from its end, and echoes it to the console. Then it runs the real installer. Use it with
@@ -246,6 +255,7 @@ wait after the boundary. A COND is one of:
 | `host-restart [DOWN] [--when C] [--delay S]` | Stands in for a reboot of spore: Tinkerbell (every part with split), fleetd, the registry, the HTTP server and NTP stop, and start again DOWN seconds later (default 0) in `up`'s order. The machines, their BMCs, netbox.py (NetBox runs on capsule) and dnsmasq (DHCP and DNS are UniFi's) keep running. etcd's directory stays, as spore's `/var/lib/tinkerbell` does on its NVMe root. For `--when`, set `TINK_LAB_VM`. | `stop` and `start` for each, then `host-restart` `{down, procs, fleetd}` |
 | `stop PROC`, `start PROC` | Stops a process for good, or starts it. PROC is `tinkerbell` (or, with split, `etcd`, `apiserver`, `tink-server`, `tink-controller`, `smee`, `rufio`), `dnsmasq`, `registry`, `http`, `ntp` or `bmc-NAME`. `down` and `up` stop and start everything, the machines too; `host-restart` keeps them running. | `stop`, `start` `{proc, pid}` |
 | `disk NAME sentinel` | Rewrites each disk's sentinels: a GPT with one partition named `sentinel-VM-DISK`, and a record at 1 MiB, 17 MiB, the middle, and 2 MiB from the end. `vm create` writes them too. | `disk` |
+| `disk NAME data DISK [STEP]`, `scan DISK` | `data` (the machine off) appends a partition named `data` over the disk's free space and writes a record every STEP bytes of it (default 256 KiB), as a volume's contents. `scan` reads the whole image and counts the MiB that hold anything and the lab's records left in them. | `disk` `{result}` |
 | `disk NAME shuffle` | Reverses the order in which the disks take PCI slots and SATA ports, from the next power-on. Virtio names follow slot order, so `/dev/vda` becomes another disk. | `disk` `{order}` |
 | `disk NAME usb-attach DISK SIZE` | A USB disk with sentinels, hotplugged when the VM runs and kept for later boots. | `disk` `{disk, serial, hotplug}` |
 | `disk NAME detach DISK`, `attach DISK` | Takes a disk out of the VM, or puts it back, from the next power-on; a USB disk also unplugs or plugs in at once. The image stays, and `observe` still reads its sentinels. | `disk` `{disk, attached}` |
@@ -375,7 +385,7 @@ The test numbers are those in the test plan.
 | `efivars.py` | Reads and writes BootNext, BootOrder and `Boot####` entries in an OVMF variable store, and fills it, through `virt-fw-vars`. |
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
-| `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, the whole install code and a UKI's command line for `config` and `talos-boot`, and watches for `disk=` boundaries. |
+| `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, the whole install code and a UKI's command line for `config` and `talos-boot`, watches for `disk=` boundaries, and fills and scans a disk for `disk data` and `disk scan`. |
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |

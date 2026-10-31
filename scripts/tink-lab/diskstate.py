@@ -8,6 +8,10 @@
                                        that serves the node's config under it
   diskstate.py cmdline < UKI           the command line of a UKI's first profile, its first
                                        .cmdline section
+  diskstate.py fill IMAGE LABEL STEP  write a record every STEP bytes of the partition named data
+  diskstate.py scan IMAGE              JSON: the MiB of the whole image that hold anything, how many
+                                       lab records (sentinels and data) are left, and the first
+                                       such MiB
   diskstate.py watch IMAGE STAGE TIMEOUT
                                        exit 0 when the disk gains STAGE, 124 at TIMEOUT. STAGE is
                                        gpt (a GPT header), esp (a FAT signature on the partition
@@ -147,6 +151,41 @@ def show(path):
     return out
 
 
+def fill(path, label, step):
+    f = os.open(path, os.O_RDWR)
+    try:
+        part = next((p for p in partitions(f) or [] if p["name"] == "data"), None)
+        if part is None:
+            sys.exit("no partition named data")
+        start, end = part["start"] * SECTOR, (part["start"] + part["sectors"]) * SECTOR
+        count = 0
+        for at in range(start, end, step):
+            os.pwrite(f, f"TINKLAB-DATA disk={label} offset={at}\n".encode(), at)
+            count += 1
+        os.fsync(f)
+    finally:
+        os.close(f)
+    return {"partition": part, "step": step, "records": count}
+
+
+def scan(path):
+    zero = bytes(MIB)
+    held, records, mib = [], 0, 0
+    f = os.open(path, os.O_RDONLY)
+    try:
+        while True:
+            chunk = read(f, mib * MIB, MIB)
+            if not chunk:
+                break
+            if chunk != zero[: len(chunk)]:
+                held.append(mib)
+                records += chunk.count(b"TINKLAB-")
+            mib += 1
+    finally:
+        os.close(f)
+    return {"mib": mib, "held_mib": len(held), "records": records, "first_held_mib": held[:8]}
+
+
 def holds(f, stage):
     parts = partitions(f)
     if stage == "gpt":
@@ -189,7 +228,12 @@ if __name__ == "__main__":
         if c is None:
             sys.exit("no install code in META")
         print(c)
+    elif sys.argv[1] == "fill":
+        print(json.dumps(fill(sys.argv[2], sys.argv[3], int(sys.argv[4])), separators=(",", ":")))
+    elif sys.argv[1] == "scan":
+        print(json.dumps(scan(sys.argv[2]), separators=(",", ":")))
     elif sys.argv[1] == "watch":
         sys.exit(watch(sys.argv[2], sys.argv[3], float(sys.argv[4])))
     else:
-        sys.exit("diskstate.py show IMAGE | code IMAGE | cmdline < UKI | watch IMAGE gpt|esp|meta TIMEOUT")
+        sys.exit("diskstate.py show IMAGE | code IMAGE | cmdline < UKI | fill IMAGE LABEL STEP | scan IMAGE"
+                 " | watch IMAGE gpt|esp|meta TIMEOUT")

@@ -10,7 +10,8 @@
 #   kubectl ARGS... | sh                kubectl against the local API, or a shell in the namespace
 #   selftest [NAME]                     provision a machine end to end and print the times
 #   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--install-disk-serial S]
-#             [--attest VERDICT]
+#             [--attest VERDICT] [--drive-opts OPTS]   OPTS go on every disk's QEMU -drive, such
+#                                       as discard=unmap so a discard reaches the image
 #   vm delete NAME | vm console NAME TIMEOUT CMD... | vm screen NAME FILE.png
 #   provision NAME [--action A] [--set KEY=VALUE]... [--unset KEY]... [--again] [--template NAME]
 #             [--no-boot]
@@ -22,7 +23,9 @@
 #   cut NAME [--when COND] [--delay S] [--on-after S]
 #   agent-net NAME cut|restore [--when COND] [--reject]
 #   kill PROC [--signal SIG] [--when COND] | stop PROC | start PROC
-#   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK
+#   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK|data DISK [STEP]|scan DISK
+#   tools-image TAG [--apk PKG]... [--overlay DIR]   the Template's tools image with Alpine packages
+#                                       and DIR's files added, as ghcr.io/tink-lab/tools:TAG
 #   efi NAME show|next ENTRY|order ENTRY,...|entry N DESC PARTUUID FILE|delete N|fill [FREE]|unfill
 #   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow [--when COND] [--delay S]
 #   observe NAME [--no-console]
@@ -628,7 +631,7 @@ read_sentinels() {
 }
 
 vm_create() {
-  local name=$1 idx d spec dname size bus serial install="" install_serial="" verdict=pass json='[]' n=0 disks=()
+  local name=$1 idx d spec dname size bus serial install="" install_serial="" verdict=pass json='[]' n=0 disks=() opts=""
   shift
   [[ "$name" =~ ^[a-z][a-z0-9-]{0,15}$ ]] || die "a machine's name is a short DNS label"
   [ -f "$(vmdir "$name")/vm.json" ] && die "machine $name exists"
@@ -638,10 +641,12 @@ vm_create() {
       --install-disk) install=$2 && shift 2 ;;
       --install-disk-serial) install_serial=$2 && shift 2 ;;
       --attest) verdict=$2 && shift 2 ;;
+      --drive-opts) opts=$2 && shift 2 ;;
       *) die "vm create: unknown $1" ;;
     esac
   done
   [ ${#disks[@]} -gt 0 ] || disks=(disk0:8G)
+  [[ $opts =~ ^[a-z0-9_.=,-]*$ ]] || die "--drive-opts takes QEMU drive options, such as discard=unmap"
   idx=1
   while grep -qs "\"index\": $idx," "$dir"/vms/*/vm.json; do idx=$((idx + 1)); done
   d=$(vmdir "$name")
@@ -662,12 +667,12 @@ vm_create() {
     elif .bus == "nvme" then "/dev/nvme0n1" else "/dev/sda" end' <<<"$json")
   [ -n "$install_serial" ] || install_serial=$(jq -r '.[0].serial' <<<"$json")
   jq -n --arg name "$name" --argjson index "$idx" --argjson disks "$json" --arg install "$install" \
-    --arg install_serial "$install_serial" --arg verdict "$verdict" --arg net "$NET" '{name: $name, index: $index,
+    --arg install_serial "$install_serial" --arg verdict "$verdict" --arg net "$NET" --arg opts "$opts" '{name: $name, index: $index,
       mac: ("52:54:00:7e:00:" + ($index | tostring | if length == 1 then "0" + . else . end)),
       ip: ($net + "." + (100 + $index | tostring)), tap: ("tap" + ($index | tostring)),
       uuid: ("7e1ab000-0000-4000-8000-" + ($index | tostring | "000000000000"[length:] + .)),
       bmc_port: (8440 + $index), install_disk: $install,
-      install_disk_serial: $install_serial, attest: $verdict, disks: $disks}' >"$d/vm.json"
+      install_disk_serial: $install_serial, attest: $verdict, drive_opts: $opts, disks: $disks}' >"$d/vm.json"
   echo "$(vmjson "$name" .mac),$(vmjson "$name" .ip),$name" >"$dir/dhcp-hosts/$name"
   start_bmc "$name"
   apply_machine "$name"
@@ -986,8 +991,9 @@ power_cut_now() {
 
 # qemu execs the machine's QEMU, with its TPM; the BMC runs it, inside the namespace.
 qemu() {
-  local name=$1 d disk i=0 bus file serial args=() pci=16 sata=0
+  local name=$1 d disk i=0 bus file serial args=() pci=16 sata=0 opts
   d=$(vmdir "$name")
+  opts=$(vmjson "$name" '.drive_opts // ""')
   mkdir -p "$run/$name"
   if ! [ -S "$run/$name/swtpm.sock" ] || ! pgrep -f "swtpm socket.*$run/$name/swtpm.sock" >/dev/null; then
     rm -f "$run/$name/swtpm.sock"
@@ -996,7 +1002,7 @@ qemu() {
   fi
   while read -r disk; do
     bus=$(jq -r .bus <<<"$disk") file=$(jq -r .file <<<"$disk") serial=$(jq -r .serial <<<"$disk")
-    args+=(-drive "if=none,id=d$i,format=raw,file=$file")
+    args+=(-drive "if=none,id=d$i,format=raw,file=$file${opts:+,$opts}")
     case $bus in
       virtio)
         args+=(-device "virtio-blk-pci,drive=d$i,serial=$serial,addr=$(printf '0x%x' "$pci")")
@@ -1279,6 +1285,54 @@ slow_installer() {
   event event=slow-installer seconds="$secs" image="ghcr.io/tink-lab/slow-installer:$secs" digest="$digest"
 }
 
+# tools_image pushes ghcr.io/tink-lab/tools:TAG and prints it by digest: the Template's tools image,
+# with Alpine packages that the image's own apk adds (outside the namespace, which has no route to
+# Alpine's mirrors) and DIR's files laid over it. A copy of a Template that pins another tools
+# image runs it; the finding that does so must say so.
+tools_image() {
+  local tag=${1:?tools-image needs a tag} base stage pkgs=() overlay="" layers=() digest
+  shift
+  [[ $tag =~ ^[a-z0-9][a-z0-9._-]{0,63}$ ]] || die "tools-image needs a tag of lowercase letters, digits, dots and dashes"
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --apk) pkgs+=("$2") && shift 2 ;;
+      --overlay) overlay=$(realpath "$2") && shift 2 ;;
+      *) die "tools-image: unknown $1" ;;
+    esac
+  done
+  base=$(push_ref "$(images | grep -F /tink-reprovision-tools@ | head -n 1)")
+  stage=$dir/build/tools-$tag
+  rm -rf "$stage" && mkdir -p "$stage/root"
+  if [ ${#pkgs[@]} -gt 0 ]; then
+    inns crane export --insecure --platform linux/amd64 "$base" - | tar -xf - -C "$stage/root"
+    cp -L /etc/resolv.conf "$stage/root/etc/resolv.conf"
+    # The image's apk, as root in a user namespace of its own, adds the packages and lists what each
+    # new one installed; those files and apk's database are the layer.
+    # shellcheck disable=SC2016
+    unshare -rm sh -ec 'r=$1; shift
+      mount --rbind /dev "$r/dev"; mount --rbind /proc "$r/proc"
+      chroot "$r" /sbin/apk info | sort >"$r/../before"
+      chroot "$r" /sbin/apk add -q --no-cache "$@"
+      chroot "$r" /sbin/apk info | sort | comm -13 "$r/../before" - | while read -r p; do
+        chroot "$r" /sbin/apk info -qL "$p"; done | sed "/^$/d" >"$r/../files"
+      echo lib/apk/db/installed >>"$r/../files"' sh "$stage/root" "${pkgs[@]}" >>"$dir/logs/agent.log" 2>&1 \
+      || die "apk add failed; see $dir/logs/agent.log"
+    tar --owner=0 --group=0 -C "$stage/root" -cf "$stage/apk.tar" -T "$stage/files"
+    layers+=(-f "$stage/apk.tar")
+  fi
+  if [ -n "$overlay" ]; then
+    (cd "$overlay" && find . -mindepth 1 | sort) | tar --owner=0 --group=0 --no-recursion -C "$overlay" -cf "$stage/overlay.tar" -T -
+    layers+=(-f "$stage/overlay.tar")
+  fi
+  [ ${#layers[@]} -gt 0 ] || die "tools-image needs --apk or --overlay"
+  inns crane append --insecure --platform linux/amd64 -b "$base" "${layers[@]}" -t "$REG/tink-lab/tools:$tag" \
+    >>"$dir/logs/agent.log" 2>&1 || die "the build failed; see $dir/logs/agent.log"
+  digest=$(inns crane digest --insecure "$REG/tink-lab/tools:$tag")
+  rm -rf "$stage"
+  event event=tools-image tag="$tag" image="ghcr.io/tink-lab/tools@$digest" "apk=${pkgs[*]}" overlay="$overlay" >&2
+  echo "ghcr.io/tink-lab/tools@$digest"
+}
+
 # monitor runs each line of stdin as a monitor command, through QMP, which answers before the
 # connection closes.
 monitor() {
@@ -1343,7 +1397,23 @@ disk_cmd() {
       event event=disk vm="$name" action="$what" disk="$dname" \
         "attached=$(jq -c '[.disks | sort_by(.slot)[] | select(.detached != true) | .name]' "$d/vm.json")"
       ;;
-    *) die "disk: sentinel, shuffle, usb-attach, detach or attach" ;;
+    data | scan)
+      # data appends a partition named data over the disk's free space and writes a record every
+      # STEP bytes of it (default 256 KiB), as a volume's contents; scan reads the whole image for
+      # the MiB that still hold anything and the lab's records left in them.
+      dname=${3:?$what needs a disk name}
+      disk=$(jq -r --arg n "$dname" '.disks[] | select(.name == $n) | .file' "$d/vm.json")
+      [ -n "$disk" ] || die "$name has no disk $dname"
+      if [ "$what" = data ]; then
+        running_vm "$name" && die "power $name off before writing its disks"
+        printf 'name=data\n' | sfdisk -q --append "$disk" >/dev/null
+        event event=disk vm="$name" action=data disk="$dname" \
+          "result=$(python3 -I "$here/diskstate.py" fill "$disk" "$name-$dname" "${4:-262144}")"
+      else
+        event event=disk vm="$name" action=scan disk="$dname" "result=$(python3 -I "$here/diskstate.py" scan "$disk")"
+      fi
+      ;;
+    *) die "disk: sentinel, shuffle, usb-attach, detach, attach, data or scan" ;;
   esac
 }
 
@@ -1932,6 +2002,10 @@ case $cmd in
     tools
     slow_installer "$@"
     ;;
+  tools-image)
+    tools
+    tools_image "$@"
+    ;;
   fleetd)
     tools
     case ${1:-} in
@@ -2003,7 +2077,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,53p' "$0" >&2
+    sed -n '2,56p' "$0" >&2
     exit 2
     ;;
 esac
