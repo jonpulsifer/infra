@@ -73,7 +73,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
+| The `Workflow` ends `FAILED` within seconds with `BootJobFailed`, and the journal says `ended FAILED before any action ran: its BMC job netboot-<workflow> failed: <message>` | The BMC refused a power action or did not answer, so no action ran | Fix the BMC: the message is the BMC's answer, and `kubectl -n tinkerbell get machine <node> -o yaml` on spore shows whether Rufio reaches it. Then set `desired_action` again |
 | A new `desired_action` starts nothing, and the journal says `<action> waits: Workflow <run> (<its action>) is still running` | A run of another action is unfinished | Wait for it. `desired_action` stays set, and the first pass after the run ends starts it. A run that never reports its first action ends after its global timeout with a journal line that says `never reported its first action` |
 | The journal says `is already running; the request is that run` | You asked for the action of the run that is going | Nothing. The running `Workflow` is the request |
 | The journal says `its record was late` | NetBox refused fleetd's write that names the run, so the request stayed set | Nothing. fleetd adopts the run it started, finished or not, and starts no second one |

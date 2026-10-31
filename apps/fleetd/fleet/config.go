@@ -74,6 +74,9 @@ type Config struct {
 	// AutoProvision lets an admitted device with a class and an address,
 	// which never ran a Workflow, start its provision without the owner.
 	AutoProvision bool
+	// BMCJobWait is how long a pass waits for the Rufio Job that powers a
+	// machine off before it supersedes the machine's run.
+	BMCJobWait time.Duration
 }
 
 // LoadConfig reads the FLEET_* environment that README.md lists.
@@ -85,6 +88,7 @@ func LoadConfig() (Config, error) {
 		HookOSCmdline: os.Getenv("FLEET_HOOKOS_CMDLINE"),
 		BMCSecrets:    map[string]string{"amt": "bmc-amt"},
 		AMTPort:       16992,
+		BMCJobWait:    30 * time.Second,
 	}
 	for _, k := range []string{"FLEET_HOOKOS_URL", "FLEET_HOOKOS_CMDLINE"} {
 		if _, err := required(k); err != nil {

@@ -50,9 +50,15 @@ func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retire {
 		t.Fatalf("patches %v", nb.patches)
 	}
-	want := "fleetd: the retirement ends Workflow " + prov + " (provision) and starts " + retire + "; a power cycle stops " + prov
+	want := "fleetd: the retirement ends Workflow " + prov + " (provision) and starts " + retire + ": the BMC powered the machine off (Rufio Job stop-" + prov + "), which stopped " + prov + ", and fleetd deleted it"
 	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
 		t.Fatalf("journals %v", nb.journals)
+	}
+	if got := kube.get(wfBase + retire).Annotations()[SupersedesAnnotation]; got != prov {
+		t.Errorf("the retirement does not name the run it superseded: %q", got)
+	}
+	if kube.posts(jobBase) != 1 || kube.get(jobBase+"stop-"+prov) != nil {
+		t.Errorf("the stop Job was not made once and pruned: %v", kube.log)
 	}
 	nb.set("last_workflow", retire)
 	if err := r.Reconcile(context.Background()); err != nil {

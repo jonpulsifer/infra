@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -395,7 +396,8 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 // the journal write succeeds, so a restart does not journal it again. A crash
 // between the two journals it twice at most. The Workflow's own message says
 // only that the action completed, and the reason is on the machine's console
-// and in spore's tinkerbell journal.
+// and in spore's tinkerbell journal. A Workflow that ended at its boot job ran
+// no action, and the reason is the BMC's answer in the Rufio Job.
 func (r *Reconciler) reportEnded(ctx context.Context, d Device, wf Object) error {
 	state := strings.TrimPrefix(wf.State(), "STATE_")
 	if state != "FAILED" && state != "TIMEOUT" {
@@ -404,28 +406,49 @@ func (r *Reconciler) reportEnded(ctx context.Context, d Device, wf Object) error
 	if _, done := wf.Annotations()[EndedJournaledAnnotation]; done {
 		return nil
 	}
-	action, actionState, message := wf.FailedAction()
-	if action == "" {
-		action, actionState = wf.CurrentAction(), state
+	boot, atBoot, err := r.bootJobFailure(ctx, wf)
+	if err != nil {
+		return err
 	}
-	detail := fmt.Sprintf("action %q ended %s", action, actionState)
-	if message != "" {
-		detail += fmt.Sprintf(" with the message %q", message)
-	}
+	retire := wf.Labels()[ActionLabel] == ActionRetire
 	kind := "warning"
-	var why string
-	if wf.Labels()[ActionLabel] == ActionRetire {
+	if retire {
 		kind = "danger"
-		why = fmt.Sprintf("fleetd: the retirement Workflow %s ended %s; %s. The retirement did not complete: the disk may not be wiped, so the node may still hold its data and its identity, and the device stays decommissioning", wf.Name(), state, detail)
-	} else {
-		why = fmt.Sprintf("fleetd: Workflow %s ended %s; %s. Set desired_action to run it again", wf.Name(), state, detail)
 	}
-	why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s", d.Address)
+	var why, at string
+	if atBoot {
+		at = "its BMC job"
+		why = fmt.Sprintf("fleetd: Workflow %s ended %s before any action ran: %s. Rufio did not network-boot the machine, so the run did nothing; the conditions of the Machine %s say whether its BMC answers: kubectl -n tinkerbell get machine %s -o yaml on spore", wf.Name(), state, boot, d.Name, d.Name)
+		if !retire {
+			why += ". Fix the BMC, then set desired_action to run it again"
+		} else {
+			if old := wf.Annotations()[SupersedesAnnotation]; old != "" {
+				why += fmt.Sprintf(". The BMC had powered the machine off before fleetd deleted Workflow %s, which this retirement superseded, so %s stopped there, and the disk holds what it wrote until then", old, old)
+			}
+			why += fmt.Sprintf(". The retirement did not start: the disk is not wiped, so the node still holds its data and its identity, and the device stays decommissioning. fleetd starts the retirement again at %s (attempt %d); fix the BMC", timestamp(retryAt(wf)), attempt(wf)+1)
+		}
+	} else {
+		action, actionState, message := wf.FailedAction()
+		if action == "" {
+			action, actionState = wf.CurrentAction(), state
+		}
+		at = action
+		detail := fmt.Sprintf("action %q ended %s", action, actionState)
+		if message != "" {
+			detail += fmt.Sprintf(" with the message %q", message)
+		}
+		if retire {
+			why = fmt.Sprintf("fleetd: the retirement Workflow %s ended %s; %s. The retirement did not complete: the disk may not be wiped, so the node may still hold its data and its identity, and the device stays decommissioning", wf.Name(), state, detail)
+		} else {
+			why = fmt.Sprintf("fleetd: Workflow %s ended %s; %s. Set desired_action to run it again", wf.Name(), state, detail)
+		}
+		why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s", d.Address)
+	}
 	if err := r.journalOnce(ctx, "ended/"+wf.Name(), d, kind, why); err != nil {
 		return err
 	}
-	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended "+state+" at "+action)
-	err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{EndedJournaledAnnotation: r.Now().UTC().Format(time.RFC3339)})
+	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended "+state+" at "+at)
+	err = r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{EndedJournaledAnnotation: r.Now().UTC().Format(time.RFC3339)})
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return fmt.Errorf("annotate ended %s: %w", wf.Name(), err)
 	}
@@ -499,7 +522,7 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 	if running != nil {
 		return r.adopt(ctx, d, action, running)
 	}
-	name, err := r.create(ctx, d, action, hookos)
+	name, err := r.create(ctx, d, action, hookos, nil)
 	if err != nil {
 		return "", err
 	}
@@ -533,9 +556,17 @@ func (r *Reconciler) deleteFinished(ctx context.Context, workflows []Object) err
 	return nil
 }
 
-// create makes a new run of the action, with the Hardware's netboot on first.
-func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos bool) (string, error) {
+// create makes a new run of the action, with the Hardware's netboot on first,
+// and the annotations.
+func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos bool, annotations map[string]string) (string, error) {
 	wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
+	if err == nil && len(annotations) > 0 {
+		a := map[string]any{}
+		for k, v := range annotations {
+			a[k] = v
+		}
+		wf.metadata()["annotations"] = a
+	}
 	if err != nil {
 		Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
 		if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
@@ -625,8 +656,9 @@ func stateWord(wf Object) string {
 
 // retire runs one retire Workflow for a decommissioning device and, when the
 // Workflow named in last_workflow succeeds, deletes the device's objects and
-// sets it offline. A failed retirement is journaled once and left for the
-// owner, who moves the status on by hand.
+// sets it offline. A retirement that failed at its BMC job ran nothing, and
+// starts again after a backoff (retryRetire). One that failed at an action is
+// journaled once and left for the owner, who moves the status on by hand.
 func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workflows []Object) error {
 	if !isRetireWorkflow(d.LastWorkflow, d.Name) {
 		if !hardware {
@@ -660,17 +692,46 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 		}
 		r.Metrics.Retired.Add(1)
 		Audit("fleet.retire", r.Config.Site, d, d.LastWorkflow, "wiped")
+	case Finished(state):
+		return r.retryRetire(ctx, d, wf, workflows)
 	}
 	return nil
 }
 
+// retryRetire starts the retirement again once wf, the last one, ended at its
+// BMC job and retryAt has passed. Such a run did nothing, so another is safe,
+// and the wait doubles with each attempt, so a BMC that stays broken costs one
+// Rufio Job per wait. The new run counts the attempt, and start's rules hold:
+// the failed run is deleted first, and an unfinished run is never doubled.
+func (r *Reconciler) retryRetire(ctx context.Context, d Device, wf Object, workflows []Object) error {
+	_, atBoot, err := r.bootJobFailure(ctx, wf)
+	if err != nil || !atBoot || r.Now().Before(retryAt(wf)) {
+		return err
+	}
+	if firstUnfinished(workflows) != nil {
+		return r.startRetire(ctx, d, workflows)
+	}
+	if err := r.deleteFinished(ctx, workflows); err != nil {
+		return err
+	}
+	n := attempt(wf) + 1
+	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{AttemptAnnotation: strconv.Itoa(n)})
+	if err != nil {
+		return err
+	}
+	comment := fmt.Sprintf("fleetd: the retirement Workflow %s ended at its BMC job at %s; fleetd started %s to try again (attempt %d)", wf.Name(), timestamp(endedAt(wf)), name, n)
+	_, err = r.record(ctx, d, ActionRetire, name, "", comment)
+	return err
+}
+
 // startRetire starts the retirement, which supersedes a run of another action
-// that is still going. With a BMC, fleetd reads that run again and deletes it
-// only while it is as that read shows it, then creates the retirement with a
-// netboot in the same pass: Rufio's power cycle stops the run's current action before the
-// retirement's first. Without a BMC nothing can stop the machine, and a
-// deleted run's current action would go on, write the disk and leave the
-// agent stuck reporting it, so the retirement waits for the run to end.
+// that is still going. A deleted run's current action goes on, writes the disk
+// and leaves the agent stuck reporting it, so fleetd deletes the run only once
+// the machine is off. With a BMC, it asks Rufio to power the machine off
+// (stopMachine); once the BMC reports it off, fleetd reads the run again,
+// deletes it only while it is as that read shows it, and creates the
+// retirement with a netboot. A BMC that refuses leaves the run, and the
+// retirement waits for it to end, as it does without a BMC.
 func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Object) error {
 	running := firstUnfinished(workflows)
 	if running == nil || running.Labels()[ActionLabel] == ActionRetire {
@@ -693,6 +754,28 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, fresh), false)
 		return err
 	}
+	outcome, refusal, err := r.stopMachine(ctx, d, old)
+	switch {
+	case err != nil:
+		return err
+	case outcome == jobFailed:
+		why := fmt.Sprintf("fleetd: the retirement waits for Workflow %s (%s): the BMC did not power the machine off (Rufio Job %s failed: %s). A deleted run's current action would go on, so fleetd keeps %s, and the retirement starts on the pass after it ends. Fix the BMC; or power the machine off by hand, and %s ends at its global timeout", old, action, stopJob(old), refusal, old, old)
+		return r.journalOnce(ctx, "retire-waits/"+old, d, "warning", why)
+	case outcome != jobCompleted:
+		return nil
+	}
+	// The machine is off; a report may have landed while it powered off.
+	fresh, err = r.Kube.Get(ctx, WorkflowResource, old)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, nil), false)
+		return err
+	case err != nil:
+		return fmt.Errorf("read %s: %w", old, err)
+	case Finished(fresh.State()):
+		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, fresh), false)
+		return err
+	}
 	err = r.Kube.DeleteUnchanged(ctx, WorkflowResource, old, fresh.ResourceVersion())
 	if errors.Is(err, ErrConflict) {
 		why := fmt.Sprintf("fleetd: the retirement could not end Workflow %s (%s), which changed between fleetd's read and its delete; the next pass tries again", old, action)
@@ -705,11 +788,11 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 	if err := r.deleteFinished(ctx, workflows); err != nil {
 		return err
 	}
-	name, err := r.create(ctx, d, ActionRetire, false)
+	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{SupersedesAnnotation: old})
 	if err != nil {
 		return err
 	}
-	comment := fmt.Sprintf("fleetd: the retirement ends Workflow %s (%s) and starts %s; a power cycle stops %s", old, action, name, old)
+	comment := fmt.Sprintf("fleetd: the retirement ends Workflow %s (%s) and starts %s: the BMC powered the machine off (Rufio Job %s), which stopped %s, and fleetd deleted it", old, action, name, stopJob(old), old)
 	_, err = r.record(ctx, d, ActionRetire, name, "", comment)
 	return err
 }
@@ -782,5 +865,6 @@ func (r *Reconciler) prune(ctx context.Context) error {
 		}
 		r.Metrics.WorkflowsPruned.Add(1)
 	}
+	errs = append(errs, r.pruneJobs(ctx))
 	return errors.Join(errs...)
 }

@@ -244,6 +244,33 @@ type fakeKube struct {
 	// fleetd starts a run.
 	created func()
 	log     []string
+	// bmc is what Rufio makes of a Job fleetd creates: "" completes it at
+	// once, "refuse" fails its first Task as a BMC that answers 500 does, and
+	// "down" leaves it running.
+	bmc string
+}
+
+// runJob plays Rufio for a Job fleetd created. The caller holds mu.
+func (f *fakeKube) runJob(path string, job Object) {
+	switch f.bmc {
+	case "down":
+		return
+	case "refuse":
+		task := strings.Replace(path, "/jobs/", "/tasks/", 1) + "-task-0"
+		f.objects[task] = Object{"metadata": map[string]any{"name": job.Name() + "-task-0", "resourceVersion": "2"}, "status": map[string]any{
+			"conditions": []any{map[string]any{"type": "Failed", "status": "True", "message": "failed to perform PowerAction:\n\t500 Internal Server Error\n\n"}},
+		}}
+		job["status"] = map[string]any{"conditions": []any{
+			map[string]any{"type": "Running", "status": "True"},
+			map[string]any{"type": "Failed", "status": "True", "message": "task tinkerbell/" + job.Name() + "-task-0 failed"},
+		}}
+	default:
+		job["status"] = map[string]any{"conditions": []any{
+			map[string]any{"type": "Running", "status": "True"},
+			map[string]any{"type": "Completed", "status": "True"},
+		}}
+	}
+	job.metadata()["resourceVersion"] = bumped(job)
 }
 
 func matches(o Object, selector string) bool {
@@ -324,6 +351,9 @@ func (f *fakeKube) handler() http.Handler {
 			o["metadata"].(map[string]any)["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 			o["metadata"].(map[string]any)["resourceVersion"] = "1"
 			f.objects[path] = o
+			if strings.Contains(path, "/jobs/") {
+				f.runJob(path, o)
+			}
 			if f.created != nil {
 				f.created()
 			}
