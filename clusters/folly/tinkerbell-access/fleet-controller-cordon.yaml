@@ -1,8 +1,9 @@
 ---
-# fleetd on spore cordons a node it quarantined as this account, whose name
-# is the one its sealed token names. RBAC lets it patch nodes, and the admission policy below
-# narrows that to a cordon. Its token is `fleetd/folly-cordon-token`
-# in nix/secrets/spore.sops.yaml.
+# fleetd on spore reaches folly's API as this account, whose name is the one its sealed token
+# names: `fleetd/folly-cordon-token` in nix/secrets/spore.sops.yaml. It cordons a node it
+# quarantined, creates the bootstrap token each worker's install config carries, and takes a
+# retired node out of the cluster: cordon, evict its pods, delete its Node, its CSRs and its
+# token. The admission policies below narrow each write.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,7 +24,17 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["patch"]
+    verbs: ["patch", "delete"]
+  # The drain of a retired node finds its pods and evicts them, as kubectl drain does.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests"]
+    verbs: ["list", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -36,6 +47,39 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: fleet-controller-cordon
+subjects:
+  - kind: ServiceAccount
+    name: fleet-controller-cordon
+    namespace: kube-system
+---
+# A bootstrap token is a Secret in kube-system. RBAC cannot narrow a create by type or name, and a
+# Secret of another type, such as a service-account token, would mint a credential for another
+# account, so the policy fleet-controller-join-tokens admits only fleetd's bootstrap tokens.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: fleet-controller-join-tokens
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "update", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: fleet-controller-join-tokens
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: fleet-controller-join-tokens
 subjects:
   - kind: ServiceAccount
     name: fleet-controller-cordon
@@ -106,5 +150,123 @@ metadata:
     app.kubernetes.io/part-of: fleetd
 spec:
   policyName: fleet-controller-cordon
+  validationActions: [Deny]
+  matchResources: {}
+---
+# The account deletes only a node it cordoned, and never a control plane.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fleet-controller-node-delete
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["DELETE"]
+        resources: ["nodes"]
+  matchConditions:
+    - name: fleet-controller-cordon
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:kube-system:fleet-controller-cordon"
+  validations:
+    - expression: >-
+        has(oldObject.spec.unschedulable) && oldObject.spec.unschedulable == true
+      reason: Forbidden
+      message: fleet-controller-cordon may delete only a cordoned node.
+    - expression: >-
+        !has(oldObject.metadata.labels) ||
+        !('node-role.kubernetes.io/control-plane' in oldObject.metadata.labels)
+      reason: Forbidden
+      message: fleet-controller-cordon may not delete a control plane.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fleet-controller-node-delete
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  policyName: fleet-controller-node-delete
+  validationActions: [Deny]
+  matchResources: {}
+---
+# The account's Secrets are bootstrap tokens for one node each, made and labelled by fleetd:
+# named bootstrap-token-<id>, expiring, for authentication only, and in the one group Talos's
+# bootstrap manifests bind for a kubelet's TLS bootstrap, system:bootstrappers:nodes. It replaces
+# or deletes only such a token, and a replacement keeps its node. CEL sees a Secret's data as
+# base64 strings and has no decoder here, so the policy compares the encoded values: dHJ1ZQ== is
+# "true", c3lzdGVtOmJvb3RzdHJhcHBlcnM6bm9kZXM= is "system:bootstrappers:nodes", and six bytes of
+# token ID and sixteen of secret encode to 8 and 24 characters.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fleet-controller-join-tokens
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["secrets"]
+  matchConditions:
+    - name: fleet-controller-cordon
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:kube-system:fleet-controller-cordon"
+  variables:
+    - name: secret
+      expression: >-
+        request.operation == "DELETE" ? oldObject : object
+    - name: node
+      expression: >-
+        has(variables.secret.metadata.labels) &&
+        variables.secret.metadata.labels[?'lolwtf.ca/managed-by'].orValue('') == 'fleet-controller'
+        ? variables.secret.metadata.labels[?'lolwtf.ca/node'].orValue('') : ''
+  validations:
+    - expression: >-
+        variables.secret.type == 'bootstrap.kubernetes.io/token' && variables.node != ''
+      reason: Forbidden
+      message: fleet-controller-cordon may write only the bootstrap tokens fleetd labels with their node.
+    - expression: >-
+        request.operation != "UPDATE" ||
+        (has(oldObject.metadata.labels) &&
+        oldObject.metadata.labels[?'lolwtf.ca/managed-by'].orValue('') == 'fleet-controller' &&
+        oldObject.metadata.labels[?'lolwtf.ca/node'].orValue('') == variables.node &&
+        oldObject.type == 'bootstrap.kubernetes.io/token')
+      reason: Forbidden
+      message: fleet-controller-cordon may replace only the bootstrap token it made for the same node.
+    - expression: >-
+        request.operation == "DELETE" ||
+        (has(object.data) &&
+        object.metadata.name.matches('^bootstrap-token-[a-z0-9]{6}$') &&
+        size(object.data[?'token-id'].orValue('')) == 8 &&
+        size(object.data[?'token-secret'].orValue('')) == 24 &&
+        object.data[?'usage-bootstrap-authentication'].orValue('') == 'dHJ1ZQ==' &&
+        object.data[?'auth-extra-groups'].orValue('') == 'c3lzdGVtOmJvb3RzdHJhcHBlcnM6bm9kZXM=' &&
+        !('usage-bootstrap-signing' in object.data) &&
+        'expiration' in object.data)
+      reason: Forbidden
+      message: >-
+        A fleetd bootstrap token is a bootstrap-token-<id> Secret that expires, authenticates only,
+        and is in the group system:bootstrappers:nodes alone.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fleet-controller-join-tokens
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  policyName: fleet-controller-join-tokens
   validationActions: [Deny]
   matchResources: {}
