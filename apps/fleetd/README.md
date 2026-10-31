@@ -363,7 +363,7 @@ left alone: decommissioning asks for it again at once, and moving the device out
 decommissioning abandons it.
 
 When the retire Workflow succeeds, fleetd marks the verifier's record of the device's serial
-`retired` in process, with the time, and then sets the device `offline`. The record and its files
+`retired` in process, with the time, before it takes the node out of folly and sets the device `offline`. The record and its files
 stay for audit. A retired record serves nothing: `/devid`, its files and a renewal answer 404 and
 a refusal whatever NetBox says, including during a NetBox outage, and the LDevID expiry, check and
 PCR 0 metrics leave it out. `talos_attest_machine_status` reports it as `retired`. A device planned
