@@ -19,6 +19,10 @@ const (
 // global timeout, so that Tinkerbell's controller reconciles it.
 const OverdueAnnotation = "lolwtf.ca/overdue-at"
 
+// EndedJournaledAnnotation marks a finished Workflow whose failure fleetd has
+// journaled, so that a restart does not journal it again.
+const EndedJournaledAnnotation = "lolwtf.ca/ended-journaled"
+
 // TemplateGlobalTimeout is the provision Template's global_timeout, for a
 // Workflow whose status does not carry one yet.
 const TemplateGlobalTimeout = 1800 * time.Second

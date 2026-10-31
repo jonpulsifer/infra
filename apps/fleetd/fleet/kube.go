@@ -157,6 +157,18 @@ func (o Object) Labels() map[string]string {
 	return out
 }
 
+// Annotations is metadata.annotations.
+func (o Object) Annotations() map[string]string {
+	out := map[string]string{}
+	a, _ := o.metadata()["annotations"].(map[string]any)
+	for k, v := range a {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
 // State is status.state, a Workflow's overall state.
 func (o Object) State() string {
 	st, _ := o["status"].(map[string]any)

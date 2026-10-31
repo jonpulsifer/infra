@@ -376,35 +376,45 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 	return kept, nil
 }
 
-// reportEnded journals, once, a provision or wipe Workflow that ended FAILED
-// or TIMEOUT. The Workflow's own message says only that the action completed,
-// and the reason is on the machine's console and in spore's tinkerbell journal.
-// A retirement journals its own failure.
+// reportEnded journals a provision, wipe or retirement Workflow that ended
+// FAILED or TIMEOUT, and marks the Workflow with EndedJournaledAnnotation once
+// the journal write succeeds, so a restart does not journal it again. A crash
+// between the two journals it twice at most. The Workflow's own message says
+// only that the action completed, and the reason is on the machine's console
+// and in spore's tinkerbell journal.
 func (r *Reconciler) reportEnded(ctx context.Context, d Device, wf Object) error {
 	state := strings.TrimPrefix(wf.State(), "STATE_")
-	if (state != "FAILED" && state != "TIMEOUT") || wf.Labels()[ActionLabel] == ActionRetire {
+	if state != "FAILED" && state != "TIMEOUT" {
 		return nil
 	}
-	key := "ended/" + wf.Name()
-	r.mu.Lock()
-	seen := r.reported[key]
-	r.mu.Unlock()
-	if seen {
+	if _, done := wf.Annotations()[EndedJournaledAnnotation]; done {
 		return nil
 	}
 	action, actionState, message := wf.FailedAction()
 	if action == "" {
 		action, actionState = wf.CurrentAction(), state
 	}
-	why := fmt.Sprintf("fleetd: Workflow %s ended %s; action %q ended %s", wf.Name(), state, action, actionState)
+	detail := fmt.Sprintf("action %q ended %s", action, actionState)
 	if message != "" {
-		why += fmt.Sprintf(" with the message %q", message)
+		detail += fmt.Sprintf(" with the message %q", message)
 	}
-	why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s. Set desired_action to run it again", d.Address)
-	if err := r.journalOnce(ctx, key, d, "warning", why); err != nil {
+	kind := "warning"
+	var why string
+	if wf.Labels()[ActionLabel] == ActionRetire {
+		kind = "danger"
+		why = fmt.Sprintf("fleetd: the retirement Workflow %s ended %s; %s. The retirement did not complete: the disk may not be wiped, so the node may still hold its data and its identity, and the device stays decommissioning", wf.Name(), state, detail)
+	} else {
+		why = fmt.Sprintf("fleetd: Workflow %s ended %s; %s. Set desired_action to run it again", wf.Name(), state, detail)
+	}
+	why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s", d.Address)
+	if err := r.journalOnce(ctx, "ended/"+wf.Name(), d, kind, why); err != nil {
 		return err
 	}
 	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended "+state+" at "+action)
+	err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{EndedJournaledAnnotation: r.Now().UTC().Format(time.RFC3339)})
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("annotate ended %s: %w", wf.Name(), err)
+	}
 	return nil
 }
 
@@ -557,11 +567,6 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 		}
 		r.Metrics.Retired.Add(1)
 		Audit("fleet.retire", r.Config.Site, d, d.LastWorkflow, "wiped")
-	case Finished(state):
-		comment := fmt.Sprintf("fleetd: the retirement Workflow %s ended %s; the device stays decommissioning", d.LastWorkflow, state)
-		if err := r.journalOnce(ctx, "retire-failed/"+d.LastWorkflow, d, "danger", comment); err != nil {
-			return err
-		}
 	}
 	return nil
 }

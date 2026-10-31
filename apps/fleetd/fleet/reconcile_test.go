@@ -1470,7 +1470,9 @@ func TestFailedRunIsJournaledOnce(t *testing.T) {
 		wfBase + "good":    endedWorkflow("good", "provision", "STATE_SUCCESS", "", "", ""),
 		wfBase + "running": endedWorkflow("running", "provision", "STATE_RUNNING", "", "", ""),
 		wfBase + "retired": endedWorkflow("retired", "retire", "STATE_FAILED", "install", "STATE_FAILED", "x"),
+		wfBase + "marked":  endedWorkflow("marked", "provision", "STATE_FAILED", "install", "STATE_FAILED", "x"),
 	}}
+	kube.objects[wfBase+"marked"].metadata()["annotations"] = map[string]any{EndedJournaledAnnotation: testNow.UTC().Format(time.RFC3339)}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	for range 2 {
@@ -1478,10 +1480,27 @@ func TestFailedRunIsJournaledOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(nb.journals) != 2 {
+	if len(nb.journals) != 3 {
 		t.Fatalf("journals %v", nb.journals)
 	}
-	var bad, slow string
+	for _, name := range []string{"bad", "slow", "retired", "marked"} {
+		if _, ok := kube.get(wfBase + name).Annotations()[EndedJournaledAnnotation]; !ok {
+			t.Errorf("%s is not marked", name)
+		}
+	}
+	for _, name := range []string{"good", "running"} {
+		if _, ok := kube.get(wfBase + name).Annotations()[EndedJournaledAnnotation]; ok {
+			t.Errorf("%s is marked", name)
+		}
+	}
+	restarted := &Reconciler{Config: r.Config, NetBox: r.NetBox, Kube: r.Kube, Metrics: NewMetrics(), Now: r.Now}
+	if err := restarted.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(nb.journals) != 3 {
+		t.Fatalf("a restart journaled again: %v", nb.journals)
+	}
+	var bad, slow, retired string
 	for _, j := range nb.journals {
 		c := j["comments"].(string)
 		switch {
@@ -1489,6 +1508,13 @@ func TestFailedRunIsJournaledOnce(t *testing.T) {
 			bad = c
 		case strings.Contains(c, "Workflow slow "):
 			slow = c
+		case strings.Contains(c, "retirement Workflow retired "):
+			retired = c
+		}
+	}
+	for _, want := range []string{"did not complete", "may still hold its data and its identity"} {
+		if !strings.Contains(retired, want) {
+			t.Errorf("journal %q lacks %q", retired, want)
 		}
 	}
 	for _, want := range []string{"ended FAILED", `action "install" ended FAILED`, `"disk is busy"`, "journalctl -u tinkerbell | grep 10.3.0.12"} {
