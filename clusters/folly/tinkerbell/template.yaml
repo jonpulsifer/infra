@@ -22,9 +22,12 @@
 #
 # A run that installs fetches the installer image in wipe-disk, before it wipes, and refuses to wipe
 # when the pull fails: HookOS's image cache is RAM, so every provision pulls it, and a registry
-# fault after the wipe would leave a blank disk. install then runs it with --pull never. The pull's
-# time is wipe-disk's: wipe-disk 900 s, install 600 s, next-boot and reboot 120 s each, 1,740 s in
-# all under the global_timeout of 1,800 s.
+# fault after the wipe would leave a blank disk. install then runs it with --pull never, and only in
+# the boot whose wipe-disk wiped. A run that resumes at install in a new boot, as after a power loss,
+# fails with that reason: the new boot's cache lacks the installer, and the installer refuses the
+# partly written disk, so the recovery is a new provision. The pull's time is wipe-disk's: wipe-disk
+# 900 s, install 600 s, next-boot and reboot 120 s each, 1,740 s in all under the global_timeout of
+# 1,800 s.
 #
 # The actions run images/tink-reprovision-tools, which the containers workflow's delivery pins by
 # digest. An all-zero digest means the image has not been delivered yet and the run cannot pull it.
@@ -64,6 +67,7 @@ spec:
           DISK_SERIAL: '{{ or (index . "install_disk_serial") "" }}'
           INSTALL_CODE_FILE: /tmp/fleet/install_code
           ATTESTED_FILE: /tmp/fleet/attested
+          WIPED_FILE: /tmp/fleet/wiped
         actions:
           - name: wipe-disk
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:7db8a1b20e091ce11cd860da64daaaa4dd96c784e99980874ded11e20a184af0
@@ -315,6 +319,7 @@ spec:
                 fi
                 blockdev --rereadpt "$DISK" || true
                 if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
+                touch "$WIPED_FILE"
                 log "wiped $DISK"
           # The installer writes the signed UKI, sd-boot and META to the disk, with the code in META
           # key 0x0b; the UKI's talos.config URL carries it, and the node's first boot fetches its
@@ -367,6 +372,12 @@ spec:
                 if [ "$INSTALL" != true ]; then
                   log "nothing installed this run"
                   exit 0
+                fi
+                # wipe-disk marks its wipe in /worker/fleet, which is RAM and empty on every boot, so a run
+                # without the mark resumed in a new boot.
+                if [ ! -e "$WIPED_FILE" ]; then
+                  log "this run resumed in a new boot after wipe-disk; nothing installed; set desired_action to provision"
+                  exit 1
                 fi
                 if [ ! -s "$INSTALL_CODE_FILE" ]; then
                   log "no install code: the boot's attestation got none (no intake pass, or fleetd refused the render)"
