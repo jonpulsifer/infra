@@ -1382,6 +1382,8 @@ ubuntu_installer() {
   read -ra pkgs <<<"$(sed -n 's/^RUN apk add --no-cache //p' "$src/Dockerfile")"
   [ ${#pkgs[@]} -gt 0 ] || die "the Dockerfile adds no packages"
   img=$("$src/fetch-image" "$dir/downloads/ubuntu" | tail -n 1)
+  # fetch-image's gpg leaves its agent and dirmngr running on the throwaway keyring.
+  GNUPGHOME=$dir/downloads/ubuntu/gnupg gpgconf --kill all 2>/dev/null || true
   sha=$(sed -n 's/^sha256=//p' "$src/fetch-image")
   [ "$(sha256sum "$img" | cut -d' ' -f1)" = "$sha" ] || die "$img does not match the pin $sha"
   c=$dir/images/$(cache_name "${base#docker.io/}")
