@@ -74,7 +74,8 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
-| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. fleetd records the request against the running `Workflow` |
+| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. fleetd records the request against the running `Workflow`. A run that never reports its first action ends after its global timeout with a journal line that says `never reported its first action`; then set `desired_action` again |
+| The power fails during a run | The run stops where the power cut it | Find the symptom in [Provision a node](provision-a-node.md#if-something-goes-wrong): `never reported its first action`, `is not empty, skipping install`, `passed its global timeout`, or a 404 for the config |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry | Boot `IPV4 Network` from the F9 menu |
 | `install: no install code` | The boot's attestation got no code | Read the `attest.install` audit line in `journalctl -u fleetd` on spore, then set `desired_action` again |
 | The node polls its config URL and gets 404 | A STATE wipe on an installed node, because a served code is spent | Set `desired_action` to `provision`, which renders a new code |
