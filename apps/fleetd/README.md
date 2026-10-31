@@ -54,7 +54,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
-| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the cordon account's token; all three or none |
+| `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, and a quarantine is journaled for the owner to cordon |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line each Hardware's iPXE script passes |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt` | The Secret per `bmc_type` a Machine names |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
@@ -151,6 +151,20 @@ code is never logged. `tink-attest` unwraps it and writes it to `-install-code`,
 run starts only after the render's device gates pass (`Installer.Ready`), and the Template wipes a
 provision's disk only after the boot's pass and with the code. `Admit` waits for a reconcile pass
 and gives up when its context ends.
+
+## Bootstrap token
+
+A worker's config carries a Kubernetes bootstrap token of its own as `cluster.token`, never the
+cluster's. Each render creates it in the cluster's `kube-system` as the Secret
+`bootstrap-token-<id>`, where `<id>` is six characters of a hash of the node's name
+(`fleet/jointoken.go`), so a node has one token and a new render replaces the last one's, across
+passes and restarts. The token authenticates in `system:bootstrappers:nodes` alone, which Talos's
+bootstrap manifests bind to a kubelet's first client-certificate request, and expires
+`FLEET_CONFIG_TTL` plus four hours after the render. The kubelet uses it once, for its TLS
+bootstrap; it then authenticates and renews with its own client certificate, so the expiry stops
+nothing that runs, and a config left on a disk cannot join again. A render that cannot create the
+token, as while the cluster's API does not answer, is a 503 and answers no install code. A control
+plane renders from the full bundle and carries the cluster's token.
 
 ## Config
 

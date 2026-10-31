@@ -187,6 +187,9 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cluster != nil {
+		installer.Tokens = cluster
+	}
 	var links *fleet.TFTPLinks
 	if dir := os.Getenv("FLEET_TFTP_DIR"); dir != "" {
 		target := os.Getenv("FLEET_TFTP_LINK_TARGET")

@@ -17,15 +17,34 @@ import (
 )
 
 type fakeRenderer struct {
-	types map[string]string
-	calls int
+	types  map[string]string
+	calls  int
+	tokens []string
 }
 
 func (f *fakeRenderer) Classes() []string               { return nil }
 func (f *fakeRenderer) MachineType(class string) string { return f.types[class] }
 func (f *fakeRenderer) Render(_ context.Context, n Node) ([]byte, error) {
 	f.calls++
+	f.tokens = append(f.tokens, n.BootstrapToken)
 	return []byte("machine:\n  type: worker\n# " + n.Name + " " + n.Disk + " " + n.TPM + "\n"), nil
+}
+
+// fakeTokens mints a token per render and records each with its expiry.
+type fakeTokens struct {
+	mu     sync.Mutex
+	minted []string
+	fail   error
+}
+
+func (f *fakeTokens) Mint(_ context.Context, node string, expires time.Time) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return "", f.fail
+	}
+	f.minted = append(f.minted, node+" "+expires.UTC().Format(time.RFC3339))
+	return JoinTokenID(node) + "." + strings.Repeat(strconv.Itoa(len(f.minted)%10), 16), nil
 }
 
 const (
@@ -37,11 +56,12 @@ const (
 )
 
 type installTest struct {
-	in   *Installer
-	nb   *fakeNetBox
-	kube *fakeKube
-	rend *fakeRenderer
-	now  time.Time
+	in     *Installer
+	nb     *fakeNetBox
+	kube   *fakeKube
+	rend   *fakeRenderer
+	tokens *fakeTokens
+	now    time.Time
 }
 
 func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest {
@@ -62,7 +82,9 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 	t.Cleanup(func() { nbs.Close(); ks.Close() })
 	it := &installTest{nb: nb, kube: kube, now: testNow}
 	it.rend = &fakeRenderer{types: map[string]string{"worker-g5": "worker", "controlplane": "controlplane"}}
+	it.tokens = &fakeTokens{}
 	it.in = &Installer{
+		Tokens:   it.tokens,
 		Site:     "folly",
 		NetBox:   &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
 		Kube:     &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},

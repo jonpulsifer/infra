@@ -7,7 +7,9 @@
 #   3. fleetd's class render (apps/fleetd/fleet: class inputs
 #      plus the node document it writes from the node's facts), which writes
 #      the config an install fetches, through its TestRenderParity, which also
-#      proves the throwaway-bundle worker render.
+#      proves the throwaway-bundle worker render. A worker's config there
+#      carries the bootstrap token fleetd makes for that install, so the test
+#      checks that token sits once at cluster.token and compares the rest.
 # It also fails when the committed class-inputs.json is stale against the
 # root. A node whose inputs tofu console cannot know without state is skipped.
 #

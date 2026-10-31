@@ -198,12 +198,17 @@ func TestTalosctlRender(t *testing.T) {
 	if err := withDecoy.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := withDecoy.Render(ctx, node); err == nil || !strings.Contains(err.Error(), "bootstrap token") {
+		t.Fatalf("a worker without its own token rendered: %v", err)
+	}
+	// With the bundle's own token as the node's, the throwaway render must
+	// be the plain one: the same renderer with the real bundle as its
+	// throwaway, whose substitution is the identity.
+	node.BootstrapToken = worker.Secrets.BootstrapToken
 	got, err := withDecoy.Render(ctx, node)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The same renderer with the real bundle as its throwaway: the
-	// substitution is then the identity, so this is the plain render.
 	plain := &Talosctl{Bin: bin, Worker: worker, Inputs: inputs}
 	plain.decoy, _ = os.ReadFile(bundle)
 	plain.decoyValues, _ = worker.values()
@@ -213,6 +218,20 @@ func TestTalosctlRender(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("the throwaway render differs from the full-bundle render:\n%s\n---\n%s", got, want)
+	}
+	// The node's own token replaces the cluster's at cluster.token, and is
+	// the only difference.
+	own := JoinTokenID(node.Name) + ".0123456789abcdef"
+	node.BootstrapToken = own
+	mine, err := withDecoy.Render(ctx, node)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(mine, []byte(worker.Secrets.BootstrapToken)) || !bytes.Contains(mine, []byte("    token: "+own+"\n")) {
+		t.Fatalf("the node's token is not the config's cluster.token:\n%s", mine)
+	}
+	if !bytes.Equal(bytes.ReplaceAll(mine, []byte(own), []byte(worker.Secrets.BootstrapToken)), want) {
+		t.Fatal("the node's token changed more than cluster.token")
 	}
 	for _, s := range []string{"type: worker", "hostname: riptide", `disk.dev_path == "/dev/nvme0n1"`, "example.test/tpm", "kexec_load_disabled", "maxSize: 80GiB", "kubelet:v1.36.3"} {
 		if !strings.Contains(string(got), s) {
@@ -260,7 +279,7 @@ func TestTalosctlRender(t *testing.T) {
 	if _, err := withDecoy.Render(ctx, Node{Name: "x", Class: "worker-g2", Disk: "/dev/sda"}); !errors.Is(err, ErrNoClass) {
 		t.Fatalf("an unknown class: %v", err)
 	}
-	if _, err := withDecoy.Render(ctx, Node{Name: "x", Class: "worker-g5", Disk: "sda; rm"}); err == nil {
+	if _, err := withDecoy.Render(ctx, Node{Name: "x", Class: "worker-g5", Disk: "sda; rm", BootstrapToken: own}); err == nil {
 		t.Fatal("a bad disk rendered")
 	}
 }
@@ -335,7 +354,11 @@ func TestRenderParity(t *testing.T) {
 			t.Errorf("%s: the inventory has no facts for it", name)
 			continue
 		}
-		got, err := controller.Render(ctx, Node{Name: name, Class: fact.Class, Disk: fact.Disk, TPM: fact.TPM, Address: fact.Address})
+		var token string
+		if in.MachineType == "worker" {
+			token = JoinTokenID(name) + ".0123456789abcdef"
+		}
+		got, err := controller.Render(ctx, Node{Name: name, Class: fact.Class, Disk: fact.Disk, TPM: fact.TPM, Address: fact.Address, BootstrapToken: token})
 		if err != nil {
 			t.Errorf("%s: fleetd's render: %v", name, err)
 			continue
@@ -344,6 +367,17 @@ func TestRenderParity(t *testing.T) {
 		if err != nil {
 			t.Errorf("%s: the module's render: %v", name, err)
 			continue
+		}
+		// A worker's config carries the bootstrap token fleetd made for its
+		// install where the module's carries the cluster's. That one value
+		// differs by design, once, at cluster.token; every other byte must
+		// match.
+		if token != "" {
+			if n := bytes.Count(got, []byte(token)); n != 1 || !bytes.Contains(got, []byte("    token: "+token+"\n")) {
+				t.Errorf("%s: fleetd's render carries its own token %d times, or not as cluster.token", name, n)
+				continue
+			}
+			got = bytes.ReplaceAll(got, []byte(token), []byte(worker.Secrets.BootstrapToken))
 		}
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s: fleetd's render differs from the module's:\n--- controller\n%s\n--- module\n%s", name, got, want)
