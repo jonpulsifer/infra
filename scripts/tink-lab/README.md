@@ -131,9 +131,9 @@ Logs are in `$TINK_LAB_DIR/logs`:
 
 ## fleetd in the loop
 
-`fleetd start NAME` runs fleetd's reconcile loop and webhook, from `apps/fleetd/fleet` at
+`fleetd start NAME...` runs fleetd's reconcile loop and webhook, from `apps/fleetd/fleet` at
 `TINK_LAB_FLEETD_REF` (default `origin/main`), against the environment's API and `netbox.py`, a
-stand-in NetBox that serves NAME as its only device. It is `fleetd/main.go` built in an export of
+stand-in NetBox whose only devices are the machines named. It is `fleetd/main.go` built in an export of
 `apps/fleetd` at that ref: the wiring of `apps/fleetd/main.go`'s `newFleet`, without the verifier,
 the renderer, the cluster client, the TFTP links and the SPIRE file. So `Admit` and renders do not
 run, and a device stays `planned` after a provision. Its `Installer` has no renderer: `config NAME
@@ -152,6 +152,7 @@ tink-lab.sh fleetd start n1 --template pmain     # --interval DUR (FLEET_INTERVA
                                                  # --config-ttl DUR (FLEET_CONFIG_TTL; here 1h)
 tink-lab.sh netbox n1 set desired_action=provision --webhooks 20   # the owner's edit, then 20 webhooks
 tink-lab.sh netbox n1 set status=decommissioning
+tink-lab.sh netbox n1,n2,n3 set desired_action=provision   # one edit of three devices, one webhook
 tink-lab.sh webhook 5                            # five signed webhooks at once
 tink-lab.sh netbox n1 show                       # status, desired_action, last_workflow
 tink-lab.sh netbox writes                        # fleetd's PATCHes and journal entries, with times
@@ -166,11 +167,14 @@ tink-lab.sh bmc n1 fail-power on|off             # the BMC answers 500 to every 
 tink-lab.sh fleetd stop
 ```
 
-- The device is a `worker-g5` with a TPM 2.0, `attested`, the machine's declared disk and serial,
-  `bmc_type: redfish` and `oob_ip` `127.0.0.1`. Its classes are `clusters/folly/fleet/classes.json`
+- Each device is a `worker-g5` with a TPM 2.0, `attested`, the machine's declared disk and serial,
+  `bmc_type: redfish` and `oob_ip` `127.0.0.1`, with the machine's index as its NetBox ID. The patch
+  gives each machine's Machine its own BMC's port. Its classes are `clusters/folly/fleet/classes.json`
   with every Template named `--template`'s.
-- fleetd deletes the Hardware and Machine of every machine that is not its device, as it does for a
-  device NetBox no longer lists. Run it with one machine, or expect to re-create the others.
+- fleetd deletes the Hardware and Machine of every machine that is not one of its devices, as it
+  does for a device NetBox no longer lists. Name every machine the test runs.
+- `netbox A,B,C set ...` edits every named device in one write, as a bulk edit does, and rings the
+  webhook once.
 - A NetBox edit rings the webhook once by default, as NetBox's event rule does for every device
   update. fleetd's own writes do not ring it here, so the passes that follow them come from the
   timer.
@@ -373,8 +377,16 @@ The test numbers are those in the test plan.
 - **HookOS's image cache lives in RAM for one boot.** A power cycle empties it, so each Workflow
   with a boot mode pulls every image again. To take an image out of it mid-run, run `docker rmi`
   through `hookos-docker`.
-- **Memory.** Each VM takes 3 GiB, so this machine runs about three at once. Test 4's concurrency
-  runs need more memory, or smaller VMs (`TINK_LAB_VM_MEM`).
+- **Memory.** HookOS lives in RAM: its 523 MB initramfs unpacks into a tmpfs that the kernel caps
+  at half the RAM, and the installer image (296 MB) is pulled into the same tmpfs. With 1 vCPU, a
+  VM below 1,024 MiB never starts HookOS (iPXE cannot load the 200 MB UKI), 1,024 and 1,280 MiB
+  start it without its services (the unpack runs out of room), 1,536 to 2,560 MiB boot it but
+  fail the installer pull for lack of space, and 2,816 MiB (`TINK_LAB_VM_MEM=2816`) installs. A
+  run that does not install (`wipe`, `attest`) works from 1,536 MiB. QEMU ends up touching all of
+  a VM's memory, so each VM costs its full size on this machine.
+- **Some first boots stall in the firmware.** About one fresh VM in four spends 130-160 s at
+  100 % of its vCPU in OVMF before it prints anything or reaches PXE, whatever the number of VMs.
+  The cause is not found. Count a machine's times from its first PXE line, not from power-on.
 
 ## Files
 
@@ -389,6 +401,6 @@ The test numbers are those in the test plan.
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
-| `netbox.py` | The stand-in NetBox for fleetd in the loop: one device, its interface, and a record of fleetd's writes. |
+| `netbox.py` | The stand-in NetBox for fleetd in the loop: the devices, their interfaces, and a record of fleetd's writes. |
 | `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref, with a config stand-in, the boot listener for `/talos/config`, and request holds. |
-| `fleetd/redfish-machine.patch` | Lets `Config.Machine` write a Redfish Machine for the VMs' BMCs. |
+| `fleetd/redfish-machine.patch` | Lets `Config.Machine` write a Redfish Machine for the VMs' BMCs, each at its own port. |

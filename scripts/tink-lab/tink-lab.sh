@@ -31,11 +31,13 @@
 #   observe NAME [--no-console]
 #   hookos-docker NAME ARGS...          hook-docker's docker on the machine's HookOS, such as
 #                                       restart tink-worker
-#   fleetd start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE] | stop
-#                                       fleetd's reconcile loop against a stand-in NetBox
+#   fleetd start NAME... [--template T] [--interval DUR] [--status S] [--installer IMAGE] | stop
+#                                       fleetd's reconcile loop against a stand-in NetBox whose
+#                                       devices are the machines named
 #   fleetd hold REGEX | release         keep fleetd's matching NetBox requests unsent, or let them go
 #   fleetd run                          start the fleetd process alone again, after a kill
-#   netbox NAME set KEY=VALUE|status=S... [--webhooks N] | NAME show | writes | fail-patch on|off
+#   netbox NAME[,NAME...] set KEY=VALUE|status=S... [--webhooks N] | NAME show | writes
+#             | fail-patch on|off   one edit sets every named device in one write
 #   webhook [N]                         N signed NetBox webhooks to fleetd at once
 #   config NAME put [--file F] [--meta-code] | fetch
 #                                       put a config for the machine in fleetd's Installer, or fetch
@@ -671,7 +673,7 @@ vm_create() {
       mac: ("52:54:00:7e:00:" + ($index | tostring | if length == 1 then "0" + . else . end)),
       ip: ($net + "." + (100 + $index | tostring)), tap: ("tap" + ($index | tostring)),
       uuid: ("7e1ab000-0000-4000-8000-" + ($index | tostring | "000000000000"[length:] + .)),
-      bmc_port: (8440 + $index), install_disk: $install,
+      bmc_port: (9440 + $index), install_disk: $install,
       install_disk_serial: $install_serial, attest: $verdict, drive_opts: $opts, disks: $disks}' >"$d/vm.json"
   echo "$(vmjson "$name" .mac),$(vmjson "$name" .ip),$name" >"$dir/dhcp-hosts/$name"
   start_bmc "$name"
@@ -690,6 +692,9 @@ vm_delete() {
   KUBE -n "$NS" delete hardware,machine.bmc.tinkerbell.org "$name" --ignore-not-found >/dev/null
   inns ip link del "$(vmjson "$name" .tap)" 2>/dev/null || true
   rm -rf "$(vmdir "$name")" "${run:?}/$name" "$dir/dhcp-hosts/$name"
+  # dnsmasq keeps a deleted hosts file's entry until a SIGHUP, and a new machine takes the freed
+  # index's MAC, so it would get the old name.
+  if alive dnsmasq; then kill -HUP "$(pidof_ dnsmasq)"; fi
   event event=vm-delete vm="$name"
 }
 
@@ -1519,32 +1524,41 @@ fleetd_build() {
   event event=fleetd-build ref="$FLEETD_REF" rev="$rev" >/dev/null
 }
 
-# fleetd_device writes the machine's NetBox device and interface in the shape fleetd reads
-# (parseDevice in apps/fleetd/fleet/netbox.go): a worker-g5 with a TPM 2.0, attested, its declared
-# disk and serial, and bmc_type redfish at oob_ip 127.0.0.1, where its BMC listens.
+# fleetd_device writes the machines' NetBox devices and interfaces in the shape fleetd reads
+# (parseDevice in apps/fleetd/fleet/netbox.go), each with the machine's index as its ID: a worker-g5
+# with a TPM 2.0, attested, its declared disk and serial, and bmc_type redfish at oob_ip 127.0.0.1,
+# where its BMC listens on its own port.
 fleetd_device() {
-  local name=$1 status=$2
-  jq -n --arg name "$name" --arg status "$status" --arg ip "$(vmjson "$name" .ip)" \
-    --arg mac "$(vmjson "$name" .mac)" --arg disk "$(vmjson "$name" .install_disk)" \
-    --arg serial "$(vmjson "$name" '.install_disk_serial // ""')" --arg uuid "$(vmjson "$name" .uuid)" '{
-    devices: [{id: 1, name: $name, serial: ("TL-" + $name), status: {value: $status},
-      primary_ip4: {address: ($ip + "/24")}, oob_ip: {address: "127.0.0.1/32"},
-      device_type: {model: "tink-lab VM"}, description: "",
-      custom_fields: {install_disk: $disk, install_disk_serial: $serial, talos_class: "worker-g5",
-        tpm_version: "2.0", bmc_type: "redfish", amt: false, secure_boot_expected: false,
-        desired_action: "none", last_workflow: "", expected_port: null, smbios_uuid: $uuid,
-        attest_verdict: "attested"}}],
-    interfaces: [{id: 1, name: "eth0", type: {value: "1000base-t"}, device: {id: 1},
-      primary_mac_address: {mac_address: $mac}}]}' >"$dir/fleetd/netbox/devices.json"
+  local status=$1 name devs='[]' ifs='[]' dev
+  shift
+  for name in "$@"; do
+    dev=$(jq -c --arg status "$status" '{name, index, ip, mac, install_disk, uuid,
+      serial: (.install_disk_serial // "")} as $m | {
+      devices: [{id: $m.index, name: $m.name, serial: ("TL-" + $m.name), status: {value: $status},
+        primary_ip4: {address: ($m.ip + "/24")}, oob_ip: {address: "127.0.0.1/32"},
+        device_type: {model: "tink-lab VM"}, description: "",
+        custom_fields: {install_disk: $m.install_disk, install_disk_serial: $m.serial, talos_class: "worker-g5",
+          tpm_version: "2.0", bmc_type: "redfish", amt: false, secure_boot_expected: false,
+          desired_action: "none", last_workflow: "", expected_port: null, smbios_uuid: $m.uuid,
+          attest_verdict: "attested"}}],
+      interfaces: [{id: $m.index, name: "eth0", type: {value: "1000base-t"}, device: {id: $m.index},
+        primary_mac_address: {mac_address: $m.mac}}]}' "$(vmdir "$name")/vm.json")
+    devs=$(jq -c --argjson d "$dev" '. + $d.devices' <<<"$devs")
+    ifs=$(jq -c --argjson d "$dev" '. + $d.interfaces' <<<"$ifs")
+  done
+  jq -n --argjson d "$devs" --argjson i "$ifs" '{devices: $d, interfaces: $i}' >"$dir/fleetd/netbox/devices.json"
 }
 
-# fleetd_start runs netbox.py and the fleetd build for one machine, which is NetBox's only device:
-# fleetd deletes the Hardware and Machine of every other machine, as it does for a device NetBox no
-# longer lists. The classes are clusters/folly/fleet/classes.json with each Template named TEMPLATE.
+# fleetd_start runs netbox.py and the fleetd build for the machines named, which are NetBox's only
+# devices: fleetd deletes the Hardware and Machine of every other machine, as it does for a device
+# NetBox no longer lists. The classes are clusters/folly/fleet/classes.json with each Template named TEMPLATE.
 fleetd_start() {
-  local name=${1:?fleetd start needs a machine} tmpl=provision interval=2m status=active installer="" installs ttl=1h
-  shift
-  need_vm "$name"
+  local name=${1:?fleetd start needs a machine} names=() tmpl=provision interval=2m status=active installer="" installs ttl=1h ports
+  while [ $# -gt 0 ] && [[ $1 != --* ]]; do
+    need_vm "$1"
+    names+=("$1")
+    shift
+  done
   while [ $# -gt 0 ]; do
     case $1 in
       --template) tmpl=$2 && shift 2 ;;
@@ -1559,8 +1573,9 @@ fleetd_start() {
   fleetd_build
   mkdir -p "$dir/fleetd/netbox"
   : >"$dir/fleetd/netbox/writes.jsonl"
-  rm -f "$dir/fleetd/hold" "$dir/fleetd/config.json"
-  fleetd_device "$name" "$status"
+  rm -f "$dir/fleetd/hold" "$dir/fleetd"/config*.json
+  fleetd_device "$status" "${names[@]}"
+  ports=$(for n in "${names[@]}"; do printf '%s=%s,' "$n" "$(vmjson "$n" .bmc_port)"; done)
   jq --arg t "$tmpl" 'map_values(.template = $t)' "$repo/clusters/folly/fleet/classes.json" >"$dir/fleetd/classes.json"
   (umask 077 && echo tink-lab >"$dir/fleetd/netbox-token" && openssl rand -hex 32 >"$dir/fleetd/webhook-secret")
   installs=$(jq -r --arg i "$installer" 'to_entries | map("\(.key)=\(if $i != "" then $i else .value.installer_image end)")
@@ -1579,10 +1594,16 @@ fleetd_start() {
     FLEET_KUBE_SERVER=https://127.0.0.1:6443 FLEET_KUBE_CA_FILE="$dir/pki/ca.crt" \
     FLEET_KUBE_CERT_FILE="$dir/pki/admin.crt" FLEET_KUBE_KEY_FILE="$dir/pki/admin.key" \
     FLEET_WEBHOOK_SECRET_FILE="$dir/fleetd/webhook-secret" FLEET_WEBHOOK_ADDR="127.0.0.1:$FLEETD_PORT" \
-    TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" TINK_LAB_HOLD_FILE="$dir/fleetd/hold" \
+    TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" TINK_LAB_BMC_PORTS="${ports%,}" TINK_LAB_HOLD_FILE="$dir/fleetd/hold" \
     TINK_LAB_INSTALLS="$installs" TINK_LAB_BOOT_ADDR="$BOOT:$CONFIG_PORT" TINK_LAB_CONFIG_TTL="$ttl" >"$dir/fleetd/env"
   fleetd_run
-  event event=fleetd-start vm="$name" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
+  end=$((SECONDS + 15))
+  until inns curl -sf -o /dev/null "http://127.0.0.1:$FLEETD_PORT/metrics" && alive fleetd; do
+    alive fleetd || die "fleetd exited; see $dir/logs/fleetd.log"
+    [ "$SECONDS" -lt "$end" ] || die "fleetd did not answer; see $dir/logs/fleetd.log"
+    sleep 0.2
+  done
+  event event=fleetd-start vm="${names[*]}" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
     installs="$installs" config_ttl="$ttl"
 }
 
@@ -1705,17 +1726,17 @@ config_cmd() {
       if [ -n "$file" ]; then base64 -w0 "$file"; fi >"$dir/fleetd/config.b64"
       jq -n --arg u "$uuid" --arg c "$code" --arg n "$name" --arg w "$wf" --rawfile b "$dir/fleetd/config.b64" \
         '{UUID: $u, Code: $c, Serial: ("TL-" + $n), Node: $n, Class: "worker-g5", Workflow: $w}
-          + (if $b != "" then {Config: $b} else {} end)' >"$dir/fleetd/config.json"
+          + (if $b != "" then {Config: $b} else {} end)' >"$dir/fleetd/config-$name.json"
       rm -f "$dir/fleetd/config.b64"
-      rc=$(inns curl -s -o /dev/null -w '%{http_code}' -X POST -d @"$dir/fleetd/config.json" "http://127.0.0.1:$FLEETD_PORT/lab/config")
+      rc=$(inns curl -s -o /dev/null -w '%{http_code}' -X POST -d @"$dir/fleetd/config-$name.json" "http://127.0.0.1:$FLEETD_PORT/lab/config")
       event event=config vm="$name" action=put workflow="$wf" code="${code:0:4}" http="$rc" \
         bytes="$(if [ -n "$file" ]; then wc -c <"$file"; else echo 0; fi)" meta_code="$meta"
       ;;
     fetch)
-      [ -f "$dir/fleetd/config.json" ] || die "config: no config put for $name"
-      code=$(jq -r .Code "$dir/fleetd/config.json")
-      rc=$(inns curl -s -o "$dir/fleetd/config.out" -w '%{http_code}' "http://127.0.0.1:$FLEETD_PORT/talos/config?uuid=$uuid&code=$code")
-      event event=config vm="$name" action=fetch code="${code:0:4}" http="$rc" "body=$(head -c 200 "$dir/fleetd/config.out")"
+      [ -f "$dir/fleetd/config-$name.json" ] || die "config: no config put for $name"
+      code=$(jq -r .Code "$dir/fleetd/config-$name.json")
+      rc=$(inns curl -s -o "$dir/fleetd/config-$name.out" -w '%{http_code}' "http://127.0.0.1:$FLEETD_PORT/talos/config?uuid=$uuid&code=$code")
+      event event=config vm="$name" action=fetch code="${code:0:4}" http="$rc" "body=$(head -c 200 "$dir/fleetd/config-$name.out")"
       ;;
     *) die "config: NAME put or NAME fetch" ;;
   esac
@@ -2011,8 +2032,13 @@ case $cmd in
     case ${1:-} in
       start) fleetd_start "${@:2}" ;;
       stop)
-        stop_proc fleetd || true
-        stop_proc netbox || true
+        # A start right after must find the ports free.
+        for p in fleetd netbox; do
+          pid=$(pidof_ "$p")
+          stop_proc "$p" || true
+          end=$((SECONDS + 15))
+          while [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+        done
         ;;
       restart)
         parse_when "${@:2}"
@@ -2026,7 +2052,7 @@ case $cmd in
         fleetd_run
         event event=start proc=fleetd pid="$(pidof_ fleetd)"
         ;;
-      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], restart [--when C] [--down S] [--kill], hold REGEX|release, run, stop or build" ;;
+      *) die "fleetd: start NAME... [--template T] [--interval DUR] [--status S] [--installer IMAGE], restart [--when C] [--down S] [--kill], hold REGEX|release, run, stop or build" ;;
     esac
     ;;
   host-restart)

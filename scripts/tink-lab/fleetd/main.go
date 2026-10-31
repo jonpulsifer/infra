@@ -35,6 +35,14 @@ func main() {
 	if cfg.AMTPort, err = strconv.Atoi(os.Getenv("TINK_LAB_BMC_PORT")); err != nil {
 		log.Fatalf("TINK_LAB_BMC_PORT: %v", err)
 	}
+	// TINK_LAB_BMC_PORTS gives each machine its own BMC port: NAME=PORT,...
+	for _, pair := range strings.Split(os.Getenv("TINK_LAB_BMC_PORTS"), ",") {
+		if name, port, ok := strings.Cut(pair, "="); ok {
+			if fleet.LabBMCPorts[name], err = strconv.Atoi(port); err != nil {
+				log.Fatalf("TINK_LAB_BMC_PORTS: %v", err)
+			}
+		}
+	}
 	// LoadInstaller fills Installs from the class inputs; this binary has no installer.
 	cfg.Installs = map[string]string{}
 	for _, pair := range strings.Split(os.Getenv("TINK_LAB_INSTALLS"), ",") {

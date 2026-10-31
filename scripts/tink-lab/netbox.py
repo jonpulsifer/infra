@@ -10,7 +10,8 @@ GET /api/dcim/devices/ (filters: role, status, serial, cf_smbios_uuid, name, id)
 query answers no switches.
 
 The harness's own calls, under /lab/:
-  PATCH /lab/devices/NAME   an owner's edit: {"status": S, "custom_fields": {...}}
+  PATCH /lab/devices/NAME[,NAME...]   an owner's edit: {"status": S, "custom_fields": {...}}, to
+                            every named device in one write
   PUT   /lab/fail-patch     {"on": true} makes every fleetd device PATCH answer 500
 
 Every PATCH and journal entry from fleetd is appended to STATE_DIR/writes.jsonl, with a time.
@@ -106,14 +107,16 @@ class Handler(BaseHTTPRequestHandler):
         with lock:
             db = load()
             if self.path.startswith("/lab/devices/"):
-                name = self.path.rstrip("/").rsplit("/", 1)[1]
-                devs = [d for d in db["devices"] if d["name"] == name]
-                if not devs:
+                names = self.path.rstrip("/").rsplit("/", 1)[1].split(",")
+                devs = [d for d in db["devices"] if d["name"] in names]
+                if len(devs) != len(set(names)):
                     return self.reply(404, {"detail": "no device"})
-                merge(devs[0], p)
+                for d in devs:
+                    merge(d, p)
                 save(db)
-                record("owner", device=name, patch=p)
-                return self.reply(200, devs[0])
+                for d in devs:
+                    record("owner", device=d["name"], patch=p)
+                return self.reply(200, devs[0] if len(devs) == 1 else devs)
             parts = self.path.strip("/").split("/")
             if parts[:3] == ["api", "dcim", "devices"] and len(parts) == 4:
                 devs = [d for d in db["devices"] if str(d["id"]) == parts[3]]
