@@ -102,9 +102,9 @@ The running node sends daily LAK-signed boot evidence to fleetd. Renewal also re
 
 A cordon prevents new scheduling. It does not stop existing pods or isolate the network. Transport failure is not evidence of an unacceptable boot, so it does not trigger the same quarantine decision.
 
-fleetd exports eligible devices for the SPIRE registration service. That service removes its registrations when a node leaves the export. Static `git-*` entries and EK paths need separate review. Removing an entry does not invalidate every credential that a consumer already holds.
+fleetd exports eligible devices, and the retired ones it holds records of, for the SPIRE registration service. That service removes a node's registrations and bans its agent when the node leaves the export, and bans a retired node's agents on sight. Static `git-*` entries and EK paths need separate review. A ban stops a new attestation and a renewal, but it does not invalidate an SVID that a consumer already holds before that SVID expires.
 
-An empty NetBox device list preserves the export. A malformed export preserves SPIRE entries. These safeguards avoid accidental mass withdrawal, but they can retain stale access during a fault.
+An empty NetBox device list preserves the export. A malformed export preserves SPIRE entries. An export that would withdraw or ban more than one node at once changes nothing until the owner allows it. These safeguards avoid accidental mass withdrawal, but they can retain stale access during a fault.
 
 ## 5. Design choices and tradeoffs
 
