@@ -5,7 +5,8 @@
 # lab's entry.sh, whose attest step skips itself because fleet_attest_url is empty.
 #
 # tinklab_attest= on the kernel command line picks the verdict: pass (the default) writes the
-# marker and a fresh 43-character code, nocode writes the marker only, fail writes neither.
+# marker, a fresh 43-character code and the lab's Ubuntu payload (/tinklab/payload.tar.gz, from
+# agent/user-data), nocode writes the marker only, fail writes none of them.
 B=/autoid/busybox
 
 cmdline() {
@@ -30,13 +31,14 @@ if [ -n "$(cmdline fleet_attest_url)" ]; then
 fi
 
 $B mkdir -p /worker/fleet && $B chmod 0700 /worker/fleet
-$B rm -f /worker/fleet/attested /worker/fleet/install_code
+$B rm -f /worker/fleet/attested /worker/fleet/install_code /worker/fleet/payload.tar.gz
 verdict=$(cmdline tinklab_attest)
 case "${verdict:-pass}" in
   pass)
     (umask 077 && $B head -c 32 /dev/urandom | $B base64 | $B tr '+/' '-_' | $B tr -d '=\n' >/worker/fleet/install_code)
+    (umask 077 && $B cp /tinklab/payload.tar.gz /worker/fleet/payload.tar.gz)
     : >/worker/fleet/attested
-    log "PASSED (stand-in); install code written"
+    log "PASSED (stand-in); install code and payload written"
     ;;
   nocode)
     : >/worker/fleet/attested

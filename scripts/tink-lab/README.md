@@ -21,7 +21,7 @@ real scheduling, real acknowledgements and real Rufio jobs.
 | DHCP | dnsmasq leases and serves DNS. It hands out the boot option (`talos/lab/ipxe-amd64.efi`), as UniFi does on folly's Kubernetes network, and serves that file over TFTP, as spore does. | Smee proxies on spore's bootstrap VLAN, which no node's port carries. Here it proxies on an empty interface, so the VMs never hear it. OVMF also declines a lease when Smee's proxy answers its REQUEST. |
 | iPXE | `ipxe.nix`: the embedded script of `nix/images/ipxe-folly.nix`, chaining Smee's script for the MAC and falling back to the HookOS menu item. | Built locally and unsigned, with tink-lab's addresses and command line. |
 | HookOS | The signed UKI from the `talos-folly` release in `HOOKOS_RELEASE`, checked against GitHub's asset digest. | Secure Boot is off, so systemd-stub takes iPXE's command line instead of the signed one. See below. |
-| Agent | `tink_agent_image` from `clusters/folly/talos/netboot.json` (tink-agent-autoid), by digest, with `agent/entry.sh` layered in front of its entrypoint. | Attestation is a stand-in. The wrapper writes `/worker/fleet/attested` and a fresh 43-character install code, then runs the lab's `entry.sh`, whose own attestation skips itself. `--attest nocode` or `--attest fail` on `vm create` changes the verdict. |
+| Agent | `tink_agent_image` from `clusters/folly/talos/netboot.json` (tink-agent-autoid), by digest, with `agent/entry.sh` layered in front of its entrypoint. | Attestation is a stand-in. The wrapper writes `/worker/fleet/attested`, a fresh 43-character install code and an Ubuntu payload (`agent/user-data` as `payload.tar.gz`), then runs the lab's `entry.sh`, whose own attestation skips itself. `--attest nocode` or `--attest fail` on `vm create` changes the verdict. |
 | Images | The Template's tools image, the agent and each class's installer, from `class-inputs.json`. They are copied from GHCR into a local registry. DNS answers `ghcr.io` with the registry, and HookOS's `insecure_registries=ghcr.io` lets it pull over HTTP. | Same references and digests. The installer is a tag, as in `class-inputs.json`. |
 | Install | `ghcr.io/jonpulsifer/talos-installer-folly:v1.14.5` writes the disk and META. Talos boots from the disk, syncs time from `ntp.py` (chrony's part on spore) and asks for its config at the `talos.config` URL. | The config host does not resolve in the namespace, so Talos retries forever, unless `talos-boot NAME http` points it at fleetd's boot listener over HTTP (fleetd in the loop). |
 | Firmware | OVMF 202602 with a swtpm TPM 2.0, q35, KVM, 2 vCPU and 3 GiB. | No Secure Boot keys are enrolled, so Secure Boot is off. The VM's own PXE and HTTP boot entries exist, and IPv6 PXE is off. |
@@ -99,17 +99,20 @@ Other commands:
   run.
 - `--template NAME` runs a copy of the Template that `template` applied. A test that does this
   must say so.
-- `template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]` applies a copy of
-  the committed Template as NAME, with those action timeouts or that `global_timeout`. `--from`
-  copies another Template file instead, such as a proposed fix from another branch. The `template`
-  event records the source and a hash of the applied `spec.data`. The committed Template stays as
-  it is.
+- `template NAME [--from FILE] [--os ubuntu] [--timeout ACTION=SECONDS]... [--global SECONDS]`
+  applies a copy of the committed Template as NAME, with those action timeouts or that
+  `global_timeout`. `--from` copies another Template file instead, such as a proposed fix from
+  another branch, and `--os ubuntu` turns it into the Ubuntu Template (see Ubuntu). The `template`
+  event records the source, the OS and a hash of the applied `spec.data`. The committed Template
+  stays as it is.
 - `tools-image TAG [--apk PKG]... [--overlay DIR]` pushes `ghcr.io/tink-lab/tools:TAG` and prints
   it by digest: the Template's tools image, with Alpine packages added by the image's own `apk`
   (run outside the namespace, in a user namespace of its own, since the namespace has no route to
   Alpine's mirrors) and DIR's files laid over it, such as a wrapper in `/usr/local/bin` that makes
   one tool fail. Run it from a copy of the Template whose image references are replaced with it
   (`template --from`). A test that does this must say so.
+- `vm create --mem MIB` gives the machine MIB of memory instead of `TINK_LAB_VM_MEM`, from its next
+  power-on.
 - `slow-installer SECONDS` pushes `ghcr.io/tink-lab/slow-installer:SECONDS`, the class's installer
   behind `slow-installer.sh`. It writes a tick to the install disk every second for SECONDS, 1 MiB
   from its end, and echoes it to the console. Then it runs the real installer. Use it with
@@ -128,6 +131,31 @@ Logs are in `$TINK_LAB_DIR/logs`:
 - `dnsmasq.log` holds DHCP and every DNS query.
 - `bmc-NAME.log` holds every Redfish request.
 - Each VM's serial console is `vms/NAME/serial.log`.
+
+## Ubuntu
+
+`ubuntu-installer` builds `scripts/tink-vm/ubuntu-installer`'s image without Docker and pushes it
+as `ghcr.io/tink-lab/ubuntu-installer`, printed by digest. `fetch-image` checks the cloud image
+against Ubuntu's signed `SHA256SUMS` and the pin, outside the namespace; the Dockerfile's base, by
+digest, gets the Dockerfile's packages from its own `apk`, then the image and `install-ubuntu` as
+its entrypoint. `template NAME --os ubuntu` applies the committed Template with spike 06's deltas
+(`ubuntu-template.py`): the install action runs the installer with `DISK`, `PAYLOAD` and
+`NODE_HOSTNAME` and needs the payload, and next-boot finds the ESP by its type and treats other
+`Ubuntu` entries as stale. Each delta must match the Template exactly once, so a Template that has
+moved on fails there. The serial check, the pull before the wipe, the EFI probe and the erase stay
+as committed.
+
+```sh
+tink-lab.sh vm create n1 --disk sys:8G:nvme --disk keep:4G --mem 4096
+image=$(tink-lab.sh ubuntu-installer)
+tink-lab.sh template ubuntu --os ubuntu
+tink-lab.sh provision n1 --template ubuntu --set installer_image="$image"
+```
+
+The installed Ubuntu prints its command line, disks, mounts, signatures, boot entries and seed to
+the serial console, between `tink-lab ubuntu: up` and `tink-lab ubuntu: done`. A machine needs
+4 GiB: HookOS's Docker keeps images in half the RAM, and the installer image (about 640 MB, the
+cloud image inside) does not fit at 3 GiB, so wipe-disk refuses the run with nothing wiped.
 
 ## fleetd in the loop
 
@@ -383,7 +411,8 @@ The test numbers are those in the test plan.
   start it without its services (the unpack runs out of room), 1,536 to 2,560 MiB boot it but
   fail the installer pull for lack of space, and 2,816 MiB (`TINK_LAB_VM_MEM=2816`) installs. A
   run that does not install (`wipe`, `attest`) works from 1,536 MiB. QEMU ends up touching all of
-  a VM's memory, so each VM costs its full size on this machine.
+  a VM's memory, so each VM costs its full size on this machine. An Ubuntu install needs 4,096 MiB;
+  see Ubuntu.
 - **Some first boots stall in the firmware.** About one fresh VM in four spends 130-160 s at
   100 % of its vCPU in OVMF before it prints anything or reaches PXE, whatever the number of VMs.
   The cause is not found. Count a machine's times from its first PXE line, not from power-on.
@@ -399,6 +428,8 @@ The test numbers are those in the test plan.
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
 | `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, the whole install code and a UKI's command line for `config` and `talos-boot`, watches for `disk=` boundaries, and fills and scans a disk for `disk data` and `disk scan`. |
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
+| `agent/user-data` | The stand-in Ubuntu payload's cloud-config, which reports the installed Ubuntu's disks and boot entries on its console. |
+| `ubuntu-template.py` | Turns the committed Template into the Ubuntu Template, for `template --os ubuntu`. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
 | `netbox.py` | The stand-in NetBox for fleetd in the loop: the devices, their interfaces, and a record of fleetd's writes. |

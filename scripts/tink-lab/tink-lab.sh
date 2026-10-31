@@ -10,13 +10,15 @@
 #   kubectl ARGS... | sh                kubectl against the local API, or a shell in the namespace
 #   selftest [NAME]                     provision a machine end to end and print the times
 #   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--install-disk-serial S]
-#             [--attest VERDICT] [--drive-opts OPTS]   OPTS go on every disk's QEMU -drive, such
-#                                       as discard=unmap so a discard reaches the image
+#             [--attest VERDICT] [--drive-opts OPTS] [--mem MIB]   OPTS go on every disk's QEMU -drive,
+#                                       such as discard=unmap so a discard reaches the image; MIB is
+#                                       the machine's memory (default TINK_LAB_VM_MEM)
 #   vm delete NAME | vm console NAME TIMEOUT CMD... | vm screen NAME FILE.png
 #   provision NAME [--action A] [--set KEY=VALUE]... [--unset KEY]... [--again] [--template NAME]
 #             [--no-boot]
-#   template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the
-#                                       provision Template, or of FILE, with other timeouts
+#   template NAME [--from FILE] [--os ubuntu] [--timeout ACTION=SECONDS]... [--global SECONDS]
+#                                       a copy of the provision Template, or of FILE, with other
+#                                       timeouts, or turned into the Ubuntu Template (ubuntu-template.py)
 #   slow-installer SECONDS              the class's installer, writing ticks to its disk first
 #   reconcile NAME [--interval S] [--rv RV] [--list FILE] | wait NAME TIMEOUT [STATE]
 #   power NAME on|off|soft|cycle|status
@@ -26,6 +28,8 @@
 #   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK|data DISK [STEP]|scan DISK
 #   tools-image TAG [--apk PKG]... [--overlay DIR]   the Template's tools image with Alpine packages
 #                                       and DIR's files added, as ghcr.io/tink-lab/tools:TAG
+#   ubuntu-installer                    scripts/tink-vm/ubuntu-installer's image, built without Docker,
+#                                       as ghcr.io/tink-lab/ubuntu-installer:latest
 #   efi NAME show|next ENTRY|order ENTRY,...|entry N DESC PARTUUID FILE|delete N|fill [FREE]|unfill
 #   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow [--when COND] [--delay S]
 #   observe NAME [--no-console]
@@ -476,7 +480,12 @@ agent() {
   local base layer
   base=$(push_ref "$(jq -r .tink_agent_image "$repo/clusters/folly/talos/netboot.json")")
   layer=$dir/agent-layer.tar
-  tar --owner=0 --group=0 --mtime=@0 --mode=0755 -C "$here/agent" --transform 's|^|tinklab/|' -cf "$layer" entry.sh
+  rm -rf "$dir/build/agent" && mkdir -p "$dir/build/agent/tinklab/seed/var/lib/cloud/seed/nocloud"
+  install -m 0755 "$here/agent/entry.sh" "$dir/build/agent/tinklab/entry.sh"
+  install -m 0600 "$here/agent/user-data" "$dir/build/agent/tinklab/seed/var/lib/cloud/seed/nocloud/user-data"
+  tar --owner=0 --group=0 --mtime=@0 -C "$dir/build/agent/tinklab/seed" -czf "$dir/build/agent/tinklab/payload.tar.gz" var
+  rm -rf "$dir/build/agent/tinklab/seed"
+  tar --owner=0 --group=0 --mtime=@0 -C "$dir/build/agent" -cf "$layer" tinklab
   {
     inns crane append --insecure --platform linux/amd64 -b "$base" -f "$layer" -t "$REG/tink-lab/agent:layer"
     inns crane mutate --insecure "$REG/tink-lab/agent:layer" -t "$REG/tink-lab/agent:latest" \
@@ -633,7 +642,7 @@ read_sentinels() {
 }
 
 vm_create() {
-  local name=$1 idx d spec dname size bus serial install="" install_serial="" verdict=pass json='[]' n=0 disks=() opts=""
+  local name=$1 idx d spec dname size bus serial install="" install_serial="" verdict=pass json='[]' n=0 disks=() opts="" mem=$VM_MEM
   shift
   [[ "$name" =~ ^[a-z][a-z0-9-]{0,15}$ ]] || die "a machine's name is a short DNS label"
   [ -f "$(vmdir "$name")/vm.json" ] && die "machine $name exists"
@@ -644,11 +653,13 @@ vm_create() {
       --install-disk-serial) install_serial=$2 && shift 2 ;;
       --attest) verdict=$2 && shift 2 ;;
       --drive-opts) opts=$2 && shift 2 ;;
+      --mem) mem=$2 && shift 2 ;;
       *) die "vm create: unknown $1" ;;
     esac
   done
   [ ${#disks[@]} -gt 0 ] || disks=(disk0:8G)
   [[ $opts =~ ^[a-z0-9_.=,-]*$ ]] || die "--drive-opts takes QEMU drive options, such as discard=unmap"
+  [[ $mem =~ ^[0-9]+$ ]] || die "--mem takes MiB"
   idx=1
   while grep -qs "\"index\": $idx," "$dir"/vms/*/vm.json; do idx=$((idx + 1)); done
   d=$(vmdir "$name")
@@ -669,7 +680,7 @@ vm_create() {
     elif .bus == "nvme" then "/dev/nvme0n1" else "/dev/sda" end' <<<"$json")
   [ -n "$install_serial" ] || install_serial=$(jq -r '.[0].serial' <<<"$json")
   jq -n --arg name "$name" --argjson index "$idx" --argjson disks "$json" --arg install "$install" \
-    --arg install_serial "$install_serial" --arg verdict "$verdict" --arg net "$NET" --arg opts "$opts" '{name: $name, index: $index,
+    --arg install_serial "$install_serial" --arg verdict "$verdict" --arg net "$NET" --arg opts "$opts" --argjson mem "$mem" '{name: $name, index: $index, mem: $mem,
       mac: ("52:54:00:7e:00:" + ($index | tostring | if length == 1 then "0" + . else . end)),
       ip: ($net + "." + (100 + $index | tostring)), tap: ("tap" + ($index | tostring)),
       uuid: ("7e1ab000-0000-4000-8000-" + ($index | tostring | "000000000000"[length:] + .)),
@@ -1026,7 +1037,7 @@ qemu() {
     i=$((i + 1))
   done < <(jq -c '.disks | map(select(.detached != true)) | sort_by(.slot) | .[]' "$d/vm.json")
   printf '\n==== tink-lab: power on %s ====\n' "$(date -u +%FT%TZ)" >>"$d/serial.log"
-  exec qemu-system-x86_64 -name "$name" -machine q35,smm=on,accel=kvm -cpu host -m "$VM_MEM" -smp "$VM_CPUS" \
+  exec qemu-system-x86_64 -name "$name" -machine q35,smm=on,accel=kvm -cpu host -m "$(vmjson "$name" ".mem // $VM_MEM")" -smp "$VM_CPUS" \
     -global driver=cfi.pflash01,property=secure,value=on \
     -drive "if=pflash,format=raw,unit=0,readonly=on,file=$OVMF/OVMF_CODE.fd" \
     -drive "if=pflash,format=raw,unit=1,file=$d/vars.fd" \
@@ -1244,8 +1255,17 @@ template_cmd() {
   fi
   data=$(yq -r '.spec.data' "$from")
   [ -n "$data" ] && [ "$data" != null ] || die "$from has no spec.data"
+  local os=talos
   while [ $# -gt 0 ]; do
     case $1 in
+      --os)
+        os=$2 && shift 2
+        case $os in
+          talos) ;;
+          ubuntu) data=$(python3 -I "$here/ubuntu-template.py" <<<"$data") || die "the Ubuntu deltas do not apply to $from" ;;
+          *) die "--os is talos or ubuntu" ;;
+        esac
+        ;;
       --timeout)
         t=$2 && shift 2
         [[ ${t#*=} =~ ^[0-9]+$ ]] || die "--timeout is ACTION=SECONDS"
@@ -1262,7 +1282,7 @@ template_cmd() {
   done
   jq -n --arg name "$name" --arg ns "$NS" --arg data "$data" '{apiVersion: "tinkerbell.org/v1alpha1",
     kind: "Template", metadata: {name: $name, namespace: $ns}, spec: {data: $data}}' | KUBE apply -f - >/dev/null
-  event event=template name="$name" from="$from" sha256="$(sha256sum <<<"$data" | cut -c1-16)" \
+  event event=template name="$name" from="$from" os="$os" sha256="$(sha256sum <<<"$data" | cut -c1-16)" \
     "timeouts=$(yq -o json .tasks <<<"$data" | jq -c '[.[].actions[] | {(.name): .timeout}] | add')" \
     global_timeout="$(yq .global_timeout <<<"$data")"
 }
@@ -1290,6 +1310,30 @@ slow_installer() {
   event event=slow-installer seconds="$secs" image="ghcr.io/tink-lab/slow-installer:$secs" digest="$digest"
 }
 
+# apk_layer writes STAGE/apk.tar: the files the Alpine image BASE's own apk adds for PKGS (outside
+# the namespace, which has no route to Alpine's mirrors) and apk's database.
+apk_layer() {
+  local base=$1 stage=$2
+  shift 2
+  mkdir -p "$stage/root"
+  inns crane export --insecure --platform linux/amd64 "$base" - | tar -xf - -C "$stage/root"
+  cp -L /etc/resolv.conf "$stage/root/etc/resolv.conf"
+  # The image's apk, as root in a user namespace of its own, adds the packages and lists what each
+  # new one installed; those files and apk's database are the layer. The namespace maps root only,
+  # so apk cannot give a file another owner and counts that as an error; the layer is root's anyway,
+  # and every package must be installed.
+  # shellcheck disable=SC2016
+  unshare -rm sh -ec 'r=$1; shift
+    mount --rbind /dev "$r/dev"; mount --rbind /proc "$r/proc"
+    chroot "$r" /sbin/apk info | sort >"$r/../before"
+    chroot "$r" /sbin/apk add -q --no-cache "$@" || chroot "$r" /sbin/apk info -e "$@" >/dev/null
+    chroot "$r" /sbin/apk info | sort | comm -13 "$r/../before" - | while read -r p; do
+      chroot "$r" /sbin/apk info -qL "$p"; done | sed "/^$/d" >"$r/../files"
+    echo lib/apk/db/installed >>"$r/../files"' sh "$stage/root" "$@" >>"$dir/logs/agent.log" 2>&1 \
+    || die "apk add failed; see $dir/logs/agent.log"
+  tar --owner=0 --group=0 -C "$stage/root" -cf "$stage/apk.tar" -T "$stage/files"
+}
+
 # tools_image pushes ghcr.io/tink-lab/tools:TAG and prints it by digest: the Template's tools image,
 # with Alpine packages that the image's own apk adds (outside the namespace, which has no route to
 # Alpine's mirrors) and DIR's files laid over it. A copy of a Template that pins another tools
@@ -1307,22 +1351,9 @@ tools_image() {
   done
   base=$(push_ref "$(images | grep -F /tink-reprovision-tools@ | head -n 1)")
   stage=$dir/build/tools-$tag
-  rm -rf "$stage" && mkdir -p "$stage/root"
+  rm -rf "$stage" && mkdir -p "$stage"
   if [ ${#pkgs[@]} -gt 0 ]; then
-    inns crane export --insecure --platform linux/amd64 "$base" - | tar -xf - -C "$stage/root"
-    cp -L /etc/resolv.conf "$stage/root/etc/resolv.conf"
-    # The image's apk, as root in a user namespace of its own, adds the packages and lists what each
-    # new one installed; those files and apk's database are the layer.
-    # shellcheck disable=SC2016
-    unshare -rm sh -ec 'r=$1; shift
-      mount --rbind /dev "$r/dev"; mount --rbind /proc "$r/proc"
-      chroot "$r" /sbin/apk info | sort >"$r/../before"
-      chroot "$r" /sbin/apk add -q --no-cache "$@"
-      chroot "$r" /sbin/apk info | sort | comm -13 "$r/../before" - | while read -r p; do
-        chroot "$r" /sbin/apk info -qL "$p"; done | sed "/^$/d" >"$r/../files"
-      echo lib/apk/db/installed >>"$r/../files"' sh "$stage/root" "${pkgs[@]}" >>"$dir/logs/agent.log" 2>&1 \
-      || die "apk add failed; see $dir/logs/agent.log"
-    tar --owner=0 --group=0 -C "$stage/root" -cf "$stage/apk.tar" -T "$stage/files"
+    apk_layer "$base" "$stage" "${pkgs[@]}"
     layers+=(-f "$stage/apk.tar")
   fi
   if [ -n "$overlay" ]; then
@@ -1336,6 +1367,46 @@ tools_image() {
   rm -rf "$stage"
   event event=tools-image tag="$tag" image="ghcr.io/tink-lab/tools@$digest" "apk=${pkgs[*]}" overlay="$overlay" >&2
   echo "ghcr.io/tink-lab/tools@$digest"
+}
+
+# ubuntu_installer pushes ghcr.io/tink-lab/ubuntu-installer:latest and prints it by digest: the image
+# scripts/tink-vm/ubuntu-installer/Dockerfile describes, built without Docker. fetch-image checks the
+# cloud image against Ubuntu's signed SHA256SUMS and the pin; the Dockerfile's base, by digest, gets
+# the Dockerfile's packages from its own apk (apk_layer), the image and install-ubuntu, and
+# install-ubuntu as its entrypoint. The Ubuntu Template (template NAME --os ubuntu) runs it, with
+# provision --set installer_image=IMAGE.
+ubuntu_installer() {
+  local src=$repo/scripts/tink-vm/ubuntu-installer base pkgs img sha stage digest c
+  base=$(sed -n 's/^FROM //p' "$src/Dockerfile")
+  [[ $base == docker.io/library/alpine:*@sha256:* ]] || die "the Dockerfile's base is not an Alpine image by digest"
+  read -ra pkgs <<<"$(sed -n 's/^RUN apk add --no-cache //p' "$src/Dockerfile")"
+  [ ${#pkgs[@]} -gt 0 ] || die "the Dockerfile adds no packages"
+  img=$("$src/fetch-image" "$dir/downloads/ubuntu" | tail -n 1)
+  sha=$(sed -n 's/^sha256=//p' "$src/fetch-image")
+  [ "$(sha256sum "$img" | cut -d' ' -f1)" = "$sha" ] || die "$img does not match the pin $sha"
+  c=$dir/images/$(cache_name "${base#docker.io/}")
+  if [ ! -f "$c/index.json" ]; then
+    skopeo_ skopeo copy -q --all --preserve-digests "docker://${base%%:*}@${base#*@}" "oci:$c"
+  fi
+  skopeo_ inns skopeo copy -q --all --preserve-digests --dest-tls-verify=false "oci:$c" \
+    "docker://$REG/tink-lab/alpine:sha256-${base#*@sha256:}"
+  stage=$dir/build/ubuntu-installer
+  rm -rf "$stage" && mkdir -p "$stage/overlay/usr/local/bin"
+  apk_layer "$REG/tink-lab/alpine:sha256-${base#*@sha256:}" "$stage" "${pkgs[@]}"
+  ln "$img" "$stage/overlay/ubuntu-cloudimg.img" 2>/dev/null || cp "$img" "$stage/overlay/ubuntu-cloudimg.img"
+  install -m 0755 "$src/install-ubuntu" "$stage/overlay/usr/local/bin/install-ubuntu"
+  tar --owner=0 --group=0 --mtime=@0 -C "$stage/overlay" -cf "$stage/overlay.tar" ubuntu-cloudimg.img usr
+  {
+    inns crane append --insecure --platform linux/amd64 -b "$REG/tink-lab/alpine:sha256-${base#*@sha256:}" \
+      -f "$stage/apk.tar" -f "$stage/overlay.tar" -t "$REG/tink-lab/ubuntu-installer:layers"
+    inns crane mutate --insecure "$REG/tink-lab/ubuntu-installer:layers" -t "$REG/tink-lab/ubuntu-installer:latest" \
+      --entrypoint /usr/local/bin/install-ubuntu
+  } >>"$dir/logs/agent.log" 2>&1 || die "the build failed; see $dir/logs/agent.log"
+  digest=$(inns crane digest --insecure "$REG/tink-lab/ubuntu-installer:latest")
+  rm -rf "$stage"
+  event event=ubuntu-installer image="ghcr.io/tink-lab/ubuntu-installer@$digest" cloud_image_sha256="$sha" \
+    "apk=${pkgs[*]}" >&2
+  echo "ghcr.io/tink-lab/ubuntu-installer@$digest"
 }
 
 # monitor runs each line of stdin as a monitor command, through QMP, which answers before the
@@ -2027,6 +2098,10 @@ case $cmd in
     tools
     tools_image "$@"
     ;;
+  ubuntu-installer)
+    tools
+    ubuntu_installer
+    ;;
   fleetd)
     tools
     case ${1:-} in
@@ -2103,7 +2178,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,56p' "$0" >&2
+    sed -n '2,60p' "$0" >&2
     exit 2
     ;;
 esac
