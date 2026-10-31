@@ -1357,6 +1357,7 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 		}
 	}
 	ended := map[string]bool{"nodeadln": true, "garbled": true, "pending": true, "short": true}
+	const failedJournal = "ended FAILED"
 	for _, name := range []string{"late", "recent", "done", "slowboot", "nodeadln", "garbled", "pending", "fresh", "failed", "short", "long"} {
 		wf := kube.get(wfBase + name)
 		if gone := wf == nil; gone != ended[name] {
@@ -1372,12 +1373,16 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 			t.Errorf("%s annotated = %v, want %v", name, got, want)
 		}
 	}
-	if len(nb.journals) != 1+len(ended) {
+	if len(nb.journals) != 2+len(ended) {
 		t.Fatalf("journals %v", nb.journals)
 	}
 	for _, j := range nb.journals {
 		c := j["comments"].(string)
 		switch {
+		case strings.Contains(c, failedJournal):
+			if !strings.Contains(c, "Workflow failed ") {
+				t.Errorf("journal %q", c)
+			}
 		case strings.Contains(c, "Workflow late "):
 			if !strings.Contains(c, "reboot's report was lost") {
 				t.Errorf("journal %q", c)
@@ -1440,6 +1445,61 @@ func TestWorkflowWithoutDeadlineEndsAndANewRunStarts(t *testing.T) {
 	cf := nb.patches[len(nb.patches)-1]["custom_fields"].(map[string]any)
 	if cf["last_workflow"] != names[0] {
 		t.Errorf("last_workflow %v, want %s", cf["last_workflow"], names[0])
+	}
+}
+
+func endedWorkflow(name, action, state, failed, failedState, message string) Object {
+	wf := workflowObject(name, "riptide", action, testNow.Add(-5*time.Minute).UTC().Format(time.RFC3339), state)
+	wf.metadata()["resourceVersion"] = "1"
+	acts := []any{map[string]any{"name": "wipe-disk", "state": "STATE_SUCCESS", "message": "action completed"}}
+	if failed != "" {
+		acts = append(acts, map[string]any{"name": failed, "state": failedState, "message": message})
+	}
+	wf["status"].(map[string]any)["tasks"] = []any{map[string]any{"actions": acts}}
+	return wf
+}
+
+// A provision or wipe that ends FAILED or TIMEOUT is journaled once, naming
+// the action and the Workflow's message. A run that succeeded, a run still
+// going and a retirement (which journals its own failure) are not.
+func TestFailedRunIsJournaledOnce(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{
+		wfBase + "bad":     endedWorkflow("bad", "provision", "STATE_FAILED", "install", "STATE_FAILED", "disk is busy"),
+		wfBase + "slow":    endedWorkflow("slow", "wipe", "STATE_TIMEOUT", "install", "STATE_TIMEOUT", "action completed"),
+		wfBase + "good":    endedWorkflow("good", "provision", "STATE_SUCCESS", "", "", ""),
+		wfBase + "running": endedWorkflow("running", "provision", "STATE_RUNNING", "", "", ""),
+		wfBase + "retired": endedWorkflow("retired", "retire", "STATE_FAILED", "install", "STATE_FAILED", "x"),
+	}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	for range 2 {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(nb.journals) != 2 {
+		t.Fatalf("journals %v", nb.journals)
+	}
+	var bad, slow string
+	for _, j := range nb.journals {
+		c := j["comments"].(string)
+		switch {
+		case strings.Contains(c, "Workflow bad "):
+			bad = c
+		case strings.Contains(c, "Workflow slow "):
+			slow = c
+		}
+	}
+	for _, want := range []string{"ended FAILED", `action "install" ended FAILED`, `"disk is busy"`, "journalctl -u tinkerbell | grep 10.3.0.12"} {
+		if !strings.Contains(bad, want) {
+			t.Errorf("journal %q lacks %q", bad, want)
+		}
+	}
+	for _, want := range []string{"ended TIMEOUT", `action "install" ended TIMEOUT`} {
+		if !strings.Contains(slow, want) {
+			t.Errorf("journal %q lacks %q", slow, want)
+		}
 	}
 }
 

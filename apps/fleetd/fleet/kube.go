@@ -191,6 +191,28 @@ func (o Object) CurrentAction() string {
 	return s
 }
 
+// FailedAction is the first action in status.tasks that ended FAILED or
+// TIMEOUT, with its state and message. The name is empty when no action did.
+func (o Object) FailedAction() (name, state, message string) {
+	st, _ := o["status"].(map[string]any)
+	tasks, _ := st["tasks"].([]any)
+	for _, t := range tasks {
+		task, _ := t.(map[string]any)
+		actions, _ := task["actions"].([]any)
+		for _, a := range actions {
+			act, _ := a.(map[string]any)
+			s, _ := act["state"].(string)
+			s = strings.TrimPrefix(s, "STATE_")
+			if s == "FAILED" || s == "TIMEOUT" {
+				name, _ := act["name"].(string)
+				message, _ := act["message"].(string)
+				return name, s, message
+			}
+		}
+	}
+	return "", "", ""
+}
+
 // Annotate sets annotations on an existing object with a merge patch that
 // carries metadata.annotations alone, so no other field and no other
 // writer's annotation is touched. A missing object is ErrNotFound.

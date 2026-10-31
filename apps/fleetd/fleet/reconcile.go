@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -350,6 +351,9 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 	for _, wf := range workflows {
 		if Finished(wf.State()) {
 			kept = append(kept, wf)
+			if err := r.reportEnded(ctx, d, wf); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		if stop, ok := wf.GlobalExecutionStop(); ok {
@@ -370,6 +374,38 @@ func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Obj
 		}
 	}
 	return kept, nil
+}
+
+// reportEnded journals, once, a provision or wipe Workflow that ended FAILED
+// or TIMEOUT. The Workflow's own message says only that the action completed,
+// and the reason is on the machine's console and in spore's tinkerbell journal.
+// A retirement journals its own failure.
+func (r *Reconciler) reportEnded(ctx context.Context, d Device, wf Object) error {
+	state := strings.TrimPrefix(wf.State(), "STATE_")
+	if (state != "FAILED" && state != "TIMEOUT") || wf.Labels()[ActionLabel] == ActionRetire {
+		return nil
+	}
+	key := "ended/" + wf.Name()
+	r.mu.Lock()
+	seen := r.reported[key]
+	r.mu.Unlock()
+	if seen {
+		return nil
+	}
+	action, actionState, message := wf.FailedAction()
+	if action == "" {
+		action, actionState = wf.CurrentAction(), state
+	}
+	why := fmt.Sprintf("fleetd: Workflow %s ended %s; action %q ended %s", wf.Name(), state, action, actionState)
+	if message != "" {
+		why += fmt.Sprintf(" with the message %q", message)
+	}
+	why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s. Set desired_action to run it again", d.Address)
+	if err := r.journalOnce(ctx, key, d, "warning", why); err != nil {
+		return err
+	}
+	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended "+state+" at "+action)
+	return nil
 }
 
 func (r *Reconciler) annotateOverdue(ctx context.Context, d Device, wf Object, stop, now time.Time) error {
