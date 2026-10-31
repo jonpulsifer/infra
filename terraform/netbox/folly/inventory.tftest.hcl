@@ -260,6 +260,10 @@ run "rack_elevations_fit_and_record_the_current_stack" {
 
 run "oldschool_cables_trace_through_the_panel" {
   command = plan
+  assert {
+    condition     = alltrue([for m in restapi_object.oldschool_panel_mapping : keys(jsondecode(m.data)) == ["rear_ports"] && one(jsondecode(m.data).rear_ports).position == 1 && one(jsondecode(m.data).rear_ports).rear_port_position == 1])
+    error_message = "Panel pass-through mappings must use NetBox's rear_ports array and one-to-one positions."
+  }
   plan_options { target = [netbox_cable.oldschool_node, netbox_cable.oldschool_patch_switch, netbox_cable.oldschool_uplink_switch, netbox_cable.oldschool_uplink_gateway] }
   variables { nodes_file = "testdata/valid.yaml" }
   assert {

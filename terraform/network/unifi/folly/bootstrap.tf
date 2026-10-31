@@ -97,10 +97,8 @@ resource "unifi_device" "usw_24_poe" {
   forget_on_destroy = false
   allow_adoption    = false
 
-  # Each anchor keeps the Anchor network untagged and its PoE. spore gains the
-  # bootstrap VLAN tagged for TFTP, HTTP, HTTPS, DNS, NTP and Smee's proxy
-  # DHCP; capsule and forge serve nothing there. The provider cannot write
-  # tagged_networkconf_ids, so the custom list names what to leave off.
+  # Only spore carries tagged bootstrap traffic. UniFi stores a port with
+  # every tagged VLAN blocked as native/block_all, without an exclusion list.
   dynamic "port_override" {
     for_each = local.anchor_ports
     content {
@@ -110,18 +108,15 @@ resource "unifi_device" "usw_24_poe" {
       dot1x = {
         ctrl = "force_authorized"
       }
-      forward               = "customize"
+      forward               = port_override.key == "spore" ? "customize" : "native"
       native_networkconf_id = unifi_network.lab.id
-      tagged_vlan_mgmt      = "custom"
-      excluded_networkconf_ids = concat(
-        [
-          unifi_network.fml.id,
-          unifi_network.k8s.id,
-          unifi_network.future.id,
-          unifi_network.iot.id,
-        ],
-        port_override.key == "spore" ? [] : [unifi_network.bootstrap.id],
-      )
+      tagged_vlan_mgmt      = port_override.key == "spore" ? "custom" : "block_all"
+      excluded_networkconf_ids = port_override.key == "spore" ? [
+        unifi_network.fml.id,
+        unifi_network.k8s.id,
+        unifi_network.future.id,
+        unifi_network.iot.id,
+      ] : []
     }
   }
 

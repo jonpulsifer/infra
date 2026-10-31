@@ -29,7 +29,8 @@ resource "unifi_wlan" "goggly" {
   no2ghz_oui           = false
 
   lifecycle {
-    ignore_changes = [passphrase]
+    # Network 10 moves band steering to APs; the WLAN attribute is inert.
+    ignore_changes = [passphrase, bandsteering_mode]
   }
 }
 
@@ -55,6 +56,7 @@ resource "unifi_wlan" "nest" {
   no2ghz_oui           = true
 
   lifecycle {
-    ignore_changes = [passphrase]
+    # Network 10 moves band steering to APs; the WLAN attribute is inert.
+    ignore_changes = [passphrase, bandsteering_mode]
   }
 }
