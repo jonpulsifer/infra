@@ -26,7 +26,7 @@ tests:
               instance: spore
             exp_annotations:
               message: A rendered Talos config has waited 30 minutes for its node
-              description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the provision Workflow and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+              description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the device's journal in NetBox, then `journalctl -u tinkerbell | grep <node address>` on spore for the installer's output, and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
       - eval_time: 55m
         alertname: FleetInstallPending
         exp_alerts: []

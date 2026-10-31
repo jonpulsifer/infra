@@ -157,6 +157,18 @@ func (o Object) Labels() map[string]string {
 	return out
 }
 
+// Annotations is metadata.annotations.
+func (o Object) Annotations() map[string]string {
+	out := map[string]string{}
+	a, _ := o.metadata()["annotations"].(map[string]any)
+	for k, v := range a {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
 // State is status.state, a Workflow's overall state.
 func (o Object) State() string {
 	st, _ := o["status"].(map[string]any)
@@ -189,6 +201,28 @@ func (o Object) CurrentAction() string {
 	cs, _ := st["currentState"].(map[string]any)
 	s, _ := cs["actionName"].(string)
 	return s
+}
+
+// FailedAction is the first action in status.tasks that ended FAILED or
+// TIMEOUT, with its state and message. The name is empty when no action did.
+func (o Object) FailedAction() (name, state, message string) {
+	st, _ := o["status"].(map[string]any)
+	tasks, _ := st["tasks"].([]any)
+	for _, t := range tasks {
+		task, _ := t.(map[string]any)
+		actions, _ := task["actions"].([]any)
+		for _, a := range actions {
+			act, _ := a.(map[string]any)
+			s, _ := act["state"].(string)
+			s = strings.TrimPrefix(s, "STATE_")
+			if s == "FAILED" || s == "TIMEOUT" {
+				name, _ := act["name"].(string)
+				message, _ := act["message"].(string)
+				return name, s, message
+			}
+		}
+	}
+	return "", "", ""
 }
 
 // Annotate sets annotations on an existing object with a merge patch that
