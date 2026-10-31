@@ -14,7 +14,7 @@ real scheduling, real acknowledgements and real Rufio jobs.
 | Piece | In tink-lab | Differs from the lab |
 | --- | --- | --- |
 | Tinkerbell | The v0.25.0 embedded binary, amd64, pinned by SHA-256 and checked against the release's `checksums-embedded.txt`. Flags from `nix/services/tinkerbell.nix`. | Namespace addresses. The apiserver listens on loopback (spore: every address behind its firewall) and needs `--advertise-address`, because the namespace has no default route. Smee's proxy DHCP listens on an empty interface; see DHCP. |
-| Restarts | A supervisor restarts a Tinkerbell process that fails after 15 s, as the unit's `Restart=on-failure` does. | `TINK_LAB_SPLIT=1` runs etcd, the apiserver, the Tink server, the Tink controller, Smee and Rufio as separate processes of the same binary, so each can be killed alone. spore runs one process. |
+| Restarts | A supervisor restarts a Tinkerbell process that fails after 15 s, as the unit's `Restart=on-failure` does. | `TINK_LAB_SPLIT=1` runs etcd, the apiserver, the Tink server, the Tink controller, Smee and Rufio as separate processes of the same binary, so each can be killed alone. The binary creates the CRDs only in a process that runs a service, so the Tink controller's process creates them; the others exit until they exist, and the supervisor restarts them. spore runs one process. |
 | Template | `clusters/folly/tinkerbell/template.yaml` as committed, rendered by the controller. | None. |
 | Hardware, Workflow | `provision` and `reconcile` write the objects in fleetd's shapes (`Config.Hardware` and `Config.Workflow` in `apps/fleetd/fleet/objects.go`). They also follow `Reconciler.start`: finished Workflows are deleted, a running one is adopted, and netboot goes on before the Workflow exists. The hardwareMap's `install_disk_serial` is the machine's declared serial, as fleetd copies it from NetBox. | By default fleetd does not run: there is no NetBox, no webhook and no reconcile loop, and `reconcile` is one pass, run by hand. `fleetd start` runs fleetd's own loop instead; see fleetd in the loop. fleetd starts no wiping run without a well-formed serial (`Device.Unidentified`); `provision` does, so the Template's own check can be tested. The HookOS URL and command line are tink-lab's. |
 | Rufio | The embedded Rufio, with a Machine for each VM. | The Machine uses the Redfish provider against `bmc.py`, not Intel AMT. One-time PXE sets the VM's BootNext while it is off. |
@@ -141,6 +141,7 @@ tink-lab.sh webhook 5                            # five signed webhooks at once
 tink-lab.sh netbox n1 show                       # status, desired_action, last_workflow
 tink-lab.sh netbox writes                        # fleetd's PATCHes and journal entries, with times
 tink-lab.sh netbox fail-patch on|off             # fleetd's device PATCHes answer 500
+tink-lab.sh fleetd restart --kill --down 5                # a crash and the unit's RestartSec
 tink-lab.sh fleetd stop
 ```
 
@@ -152,6 +153,10 @@ tink-lab.sh fleetd stop
 - A NetBox edit rings the webhook once by default, as NetBox's event rule does for every device
   update. fleetd's own writes do not ring it here, so the passes that follow them come from the
   timer.
+- `fleetd restart [--when C] [--delay S] [--down S] [--kill]` stops the fleetd process alone and
+  starts it again after `--down` seconds (default 5, the unit's `RestartSec`), with the
+  environment `fleetd start` wrote. netbox.py, its device and the webhook secret stay, as NetBox
+  stays when spore's unit restarts. `--kill` sends SIGKILL, so a pass can stop between its writes.
 - fleetd's log, with its `fleet.*` audit lines, is `logs/fleetd.log`; netbox.py's requests are in
   `logs/netbox.log`. `reset` clears the stand-in's state; the build stays in `fleetd/` until the
   ref moves.
@@ -184,7 +189,8 @@ wait after the boundary. A COND is one of:
 | `power NAME on\|off\|soft\|cycle\|status` | Redfish `ComputerSystem.Reset` (On, ForceOff, GracefulShutdown, PowerCycle) on the VM's BMC, the call Rufio makes. | `power` `{vm, reset}`; `status` prints `{vm, power, boot}` |
 | `agent-net NAME cut\|restore [--when C] [--reject]` | nft drops (or with `--reject`, resets) the VM's TCP to the Tink server's port 42113 only, both ways. DHCP, HTTP and the registry still work. | `agent-net` `{vm, action, verdict}` |
 | `kill PROC [--signal SIG] [--when C]` | Signals a process (default KILL). For `--when`, set `TINK_LAB_VM` to the machine to watch. Tinkerbell processes restart after 15 s, unless they die of TERM, INT, HUP or PIPE. | `kill` `{proc, signal, pid}` |
-| `stop PROC`, `start PROC` | Stops a process for good, or starts it. PROC is `tinkerbell` (or, with split, `etcd`, `apiserver`, `tink-server`, `tink-controller`, `smee`, `rufio`), `dnsmasq`, `registry`, `http`, `ntp` or `bmc-NAME`. `down` and `up` stand in for losing spore. | `stop`, `start` `{proc, pid}` |
+| `host-restart [DOWN] [--when C] [--delay S]` | Stands in for a reboot of spore: Tinkerbell (every part with split), fleetd, the registry, the HTTP server and NTP stop, and start again DOWN seconds later (default 0) in `up`'s order. The machines, their BMCs, netbox.py (NetBox runs on capsule) and dnsmasq (DHCP and DNS are UniFi's) keep running. etcd's directory stays, as spore's `/var/lib/tinkerbell` does on its NVMe root. For `--when`, set `TINK_LAB_VM`. | `stop` and `start` for each, then `host-restart` `{down, procs, fleetd}` |
+| `stop PROC`, `start PROC` | Stops a process for good, or starts it. PROC is `tinkerbell` (or, with split, `etcd`, `apiserver`, `tink-server`, `tink-controller`, `smee`, `rufio`), `dnsmasq`, `registry`, `http`, `ntp` or `bmc-NAME`. `down` and `up` stop and start everything, the machines too; `host-restart` keeps them running. | `stop`, `start` `{proc, pid}` |
 | `disk NAME sentinel` | Rewrites each disk's sentinels: a GPT with one partition named `sentinel-VM-DISK`, and a record at 1 MiB, 17 MiB, the middle, and 2 MiB from the end. `vm create` writes them too. | `disk` |
 | `disk NAME shuffle` | Reverses the order in which the disks take PCI slots and SATA ports, from the next power-on. Virtio names follow slot order, so `/dev/vda` becomes another disk. | `disk` `{order}` |
 | `disk NAME usb-attach DISK SIZE` | A USB disk with sentinels, hotplugged when the VM runs and kept for later boots. | `disk` `{disk, serial, hotplug}` |

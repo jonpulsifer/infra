@@ -286,7 +286,10 @@ component_flags() {
   echo "--http-port=$port"
   case $on in
     etcd) printf '%s\n' --enable-embedded-etcd=true --enable-embedded-kube-apiserver=false --enable-crd-migrations=false ;;
-    apiserver) printf '%s\n' --enable-embedded-etcd=false --enable-embedded-kube-apiserver=true ;;
+    apiserver) printf '%s\n' --enable-embedded-etcd=false --enable-embedded-kube-apiserver=true --enable-crd-migrations=false ;;
+    # The binary creates the CRDs only in a process that runs a service, so the Tink controller,
+    # which needs them first, makes them.
+    tink-controller) printf '%s\n' --enable-embedded-etcd=false --enable-embedded-kube-apiserver=false --enable-crd-migrations=true ;;
     *) printf '%s\n' --enable-embedded-etcd=false --enable-embedded-kube-apiserver=false --enable-crd-migrations=false ;;
   esac
 }
@@ -512,15 +515,14 @@ up() {
   start_http
   start_ntp
   if split; then
-    # The other parts exit when the API or its CRDs are missing; they start once both are there.
+    # The other parts exit when the API or its CRDs are missing, and the supervisor restarts
+    # them; the Tink controller creates the CRDs.
     start_tink etcd
     start_tink apiserver
-  else
-    start_tink
   fi
+  start_tink
   api_ready 180
   apply_base
-  if split; then start_tink; fi
   load_images
   digest=$(agent)
   echo "$digest" >"$dir/agent.digest"
@@ -1483,7 +1485,7 @@ fleetd_start() {
     [ "$SECONDS" -lt "$end" ] || die "netbox.py did not answer; see $dir/logs/netbox.log"
     sleep 0.2
   done
-  daemon fleetd env FLEET_SITE="$SITE" FLEET_NAMESPACE="$NS" FLEET_INTERVAL="$interval" \
+  printf '%s\0' FLEET_SITE="$SITE" FLEET_NAMESPACE="$NS" FLEET_INTERVAL="$interval" \
     FLEET_HOOKOS_URL="http://$BOOT/talos/$SITE/$UKI" \
     FLEET_HOOKOS_CMDLINE="$(cmdline "$(cat "$dir/agent.digest")" "$(vmjson "$name" .attest)")" \
     FLEET_CLASSES="$dir/fleetd/classes.json" FLEET_BMC_SECRETS=redfish=bmc-redfish \
@@ -1492,10 +1494,71 @@ fleetd_start() {
     FLEET_KUBE_CERT_FILE="$dir/pki/admin.crt" FLEET_KUBE_KEY_FILE="$dir/pki/admin.key" \
     FLEET_WEBHOOK_SECRET_FILE="$dir/fleetd/webhook-secret" FLEET_WEBHOOK_ADDR="127.0.0.1:$FLEETD_PORT" \
     TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" \
-    TINK_LAB_INSTALLS="$installs" \
-    "$dir/fleetd/tink-lab-fleetd"
+    TINK_LAB_INSTALLS="$installs" >"$dir/fleetd/env"
+  fleetd_run
   event event=fleetd-start vm="$name" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
     installs="$installs"
+}
+
+# fleetd_run starts the fleetd process with the environment fleetd_start wrote, so a restart keeps
+# netbox.py, its device and the webhook secret, as a restart of spore's unit keeps NetBox.
+fleetd_run() {
+  local vars
+  [ -f "$dir/fleetd/env" ] || die "no fleetd environment; run fleetd start first"
+  mapfile -d '' -t vars <"$dir/fleetd/env"
+  daemon fleetd env "${vars[@]}" "$dir/fleetd/tink-lab-fleetd"
+}
+
+# fleetd_restart stops the fleetd process alone and starts it again after DOWN seconds (default
+# 5, the unit's RestartSec), as systemd does after a crash or a deploy. --kill sends SIGKILL, so no
+# pass finishes; the default SIGTERM lets the process shut down.
+fleetd_restart() {
+  local down=5 sig=TERM pid
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --down) down=$2 && shift 2 ;;
+      --kill) sig=KILL && shift ;;
+      *) die "fleetd restart: unknown $1" ;;
+    esac
+  done
+  pid=$(pidof_ fleetd)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then die "fleetd is not running"; fi
+  kill -s "$sig" "$pid"
+  while kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
+  rm -f "$dir/pids/fleetd"
+  event event=stop proc=fleetd pid="$pid" signal="$sig"
+  sleep "$down"
+  fleetd_run
+  event event=start proc=fleetd pid="$(pidof_ fleetd)"
+}
+
+# host_restart stands in for a reboot of spore: Tinkerbell (every part, with split), fleetd, the
+# registry, the HTTP server and NTP stop, and after DOWN seconds start again in up's order. The
+# machines, their BMCs (AMT is on the node), netbox.py (NetBox runs on capsule) and dnsmasq (DHCP
+# and DNS are UniFi's) keep running. etcd's directory survives, as spore's /var/lib/tinkerbell
+# does on its NVMe root.
+host_restart() {
+  local down=${1:-0} p pid procs_=(fleetd registry http ntp) fleetd_was=false
+  alive fleetd && fleetd_was=true
+  if split; then procs_+=("${COMPONENTS[@]}"); else procs_+=(tinkerbell); fi
+  for p in "${procs_[@]}"; do
+    pid=$(pidof_ "$p.child")
+    [ -n "$pid" ] || pid=$(pidof_ "$p")
+    stop_proc "$p" || true
+    while [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; do sleep 0.1; done
+  done
+  sleep "$down"
+  if split; then
+    start_tink etcd
+    start_tink apiserver
+  fi
+  start_tink
+  start_registry
+  start_http
+  start_ntp
+  api_ready 180
+  if [ "$fleetd_was" = true ]; then fleetd_run; fi
+  event event=host-restart down="$down" procs="${procs_[*]}" fleetd="$fleetd_was"
 }
 
 # webhook posts N signed copies of a NetBox device webhook to fleetd at once, as NetBox's event
@@ -1711,9 +1774,20 @@ case $cmd in
         stop_proc fleetd || true
         stop_proc netbox || true
         ;;
+      restart)
+        parse_when "${@:2}"
+        [ -n "$when" ] && at_boundary "${TINK_LAB_VM:?a fleetd restart --when needs TINK_LAB_VM, the machine to watch}"
+        fleetd_restart "${rest[@]}"
+        ;;
       build) fleetd_build ;;
-      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], stop or build" ;;
+      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], restart [--when C] [--down S] [--kill], stop or build" ;;
     esac
+    ;;
+  host-restart)
+    tools
+    parse_when "$@"
+    [ -n "$when" ] && at_boundary "${TINK_LAB_VM:?a host-restart --when needs TINK_LAB_VM, the machine to watch}"
+    host_restart "${rest[0]:-0}"
     ;;
   netbox)
     tools
