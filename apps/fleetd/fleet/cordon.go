@@ -23,12 +23,16 @@ const QuarantinedVerdict = "quarantined"
 
 // Cluster is a client for the site's own Kubernetes API, as the account in
 // clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml: it cordons a
-// quarantined node, creates each worker install's bootstrap token, and takes
-// a retired node out of the cluster.
+// quarantined node, creates each worker install's bootstrap token, approves
+// the kubelet client certificate that token asks for, and takes a retired
+// node out of the cluster.
 type Cluster struct {
 	Server string
 	Token  string
 	Client *http.Client
+	// Ledger holds the bootstrap tokens Mint made, which the approval of a
+	// kubelet's first client certificate checks. A nil ledger approves none.
+	Ledger *JoinLedger
 }
 
 // NewCluster reads the cluster's CA and the ServiceAccount's token.
@@ -55,6 +59,7 @@ func NewCluster(server, caFile, tokenFile string) (*Cluster, error) {
 			Timeout:   15 * time.Second,
 			Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}},
 		},
+		Ledger: &JoinLedger{},
 	}, nil
 }
 

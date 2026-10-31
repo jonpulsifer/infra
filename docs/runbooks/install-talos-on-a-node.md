@@ -12,6 +12,7 @@ Use this runbook to boot a NixOS node into the Talos Linux installer without a U
 
 - You need SSH access to the node as `jawn`, with `sudo`, and `talosctl` on your machine.
 - You need a path to the node's port 50000 that does not depend on the node's own cluster.
+- On folly, you need `kubectl` access, as [Get cluster admin access](get-cluster-admin-access.md) describes, and `openssl`.
 - Get the schematic ID from `tofu -chdir=clusters/<site>/talos output -raw schematic_id`, and the version from `talos_version` in `clusters/<site>/talos/talos.tf`.
 
 `<node>` is the host name, and `<addr>` is its address: on folly its `address` in `clusters/folly/inventory/nodes.yaml`, the [nodes file](../reference/inventory.md), and on offsite its entry in `NODE_ADDRESSES` in `clusters/offsite/config/cluster-topology.json`.
@@ -132,6 +133,37 @@ The `clusters/<site>/talos/` apply installs Talos and reboots the node. Then do 
    talosctl --context <site> -n <addr> reboot --mode powercycle
    ```
 
+## Approve the node's first certificate
+
+On folly, the controller manager approves no kubelet certificate that a bootstrap token asks for: `clusters/folly/tinkerbell-access/node-client-approval.yaml` takes the bootstrappers out of its approval. [fleetd](../apps/fleetd.md) approves only a worker that it installs. A node that joins with the cluster's token, such as shale or a control plane, waits for you. A cluster that Talos bootstrapped approves its first nodes itself until Flux applies that file. offsite approves its nodes itself.
+
+1. Find the node's request.
+
+   ```bash
+   kubectl --context folly get csr --field-selector spec.signerName=kubernetes.io/kube-apiserver-client-kubelet
+   ```
+
+   Result: A `Pending` request whose requestor is `system:bootstrap:<id>`, the ID of the cluster's token. fleetd also journals it on the node's NetBox device.
+
+2. Make sure that the request names the node you install, and nothing more.
+
+   ```bash
+   kubectl --context folly get csr <csr> -o jsonpath='{.spec.request}' | base64 -d | openssl req -noout -subject -text | grep -E 'subject=|Alternative'
+   ```
+
+   Result: `subject=O=system:nodes, CN=system:node:<node>`, and no `Alternative` line.
+
+> [!WARNING]
+> A certificate for a node's name gets the service-account tokens of the pods on that node. Approve only a request for a join that you started.
+
+3. Approve the request.
+
+   ```bash
+   kubectl --context folly certificate approve <csr>
+   ```
+
+   Result: The node registers within a minute. The kubelet waits an hour for an approval, then asks again with a new request.
+
 ## If something goes wrong
 
 | Symptom | Cause | Action |
@@ -140,6 +172,7 @@ The `clusters/<site>/talos/` apply installs Talos and reboots the node. Then do 
 | `systemctl kexec` reboots into NixOS. | Nothing was loaded, so NixOS loaded itself. | Do step 4 again, and check `kexec_loaded`. |
 | Talos does not answer on `<addr>`. | The node hangs, or DHCP gave another address. | Find the node's lease by MAC, as [Inspect the UniFi network](inspect-the-unifi-network.md) describes. If the node hangs, power-cycle it. The disk is untouched. |
 | A volume is missing or not `ready`. | The disk layout did not provision. | Boot the node from `https://factory.talos.dev/image/<schematic>/<version>/metal-amd64.iso` on a USB drive, then apply the root again. |
+| A folly node stays `NotReady` or does not register, and its kubelet's request is `Pending`. | The request waits for the owner's approval. | Do [Approve the node's first certificate](#approve-the-nodes-first-certificate). |
 
 ## Related
 
@@ -147,3 +180,4 @@ The `clusters/<site>/talos/` apply installs Talos and reboots the node. Then do 
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md)
 - [Verify a Talos cluster](verify-a-talos-cluster.md)
 - [Issue a talosconfig](issue-a-talosconfig.md)
+- [Rotate the cluster bootstrap token](rotate-the-cluster-bootstrap-token.md)

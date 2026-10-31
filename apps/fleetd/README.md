@@ -63,7 +63,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them nothing renders |
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
 | `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's. With a renderer, `FLEET_CONFIG_TTL` is at most `4h`, so a worker's token fits the cluster's 8-hour cap |
-| `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
+| `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state, and the ledger of bootstrap tokens, across a restart; without it they live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
 | `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker that never ran a Workflow starts its provision |
 | `FLEET_TFTP_DIR`, `FLEET_TFTP_LINK_TARGET` | none | The TFTP root and the file each `<mac>/netboot-not-allowed` link points at. Each pass makes the link for every MAC NetBox holds and removes a MAC directory that holds only a stale link; without them fleetd makes none |
@@ -159,7 +159,7 @@ cluster's. Each render creates it in the cluster's `kube-system` as the Secret
 `bootstrap-token-<id>`, where `<id>` is six characters of a hash of the node's name
 (`fleet/jointoken.go`), so a node has one token and a new render replaces the last one's, across
 passes and restarts. The token authenticates in `system:bootstrappers:nodes` alone, which Talos's
-bootstrap manifests bind to a kubelet's first client-certificate request, and expires
+bootstrap manifests let request a kubelet's first client certificate, and expires
 `FLEET_CONFIG_TTL` plus four hours after the render. fleetd replaces a token by deleting it and
 creating it again, since the account's admission policy admits no update and no expiration past
 eight hours from the token's creation; fleetd refuses to start with a `FLEET_CONFIG_TTL` past four
@@ -168,6 +168,35 @@ bootstrap; it then authenticates and renews with its own client certificate, so 
 nothing that runs, and a config left on a disk cannot join again. A render that cannot create the
 token, as while the cluster's API does not answer, is a 503 and answers no install code. A control
 plane renders from the full bundle and carries the cluster's token.
+
+The controller manager approves no certificate a bootstrap token asks for:
+`clusters/folly/tinkerbell-access/node-client-approval.yaml` takes over Talos's binding of
+`system:bootstrappers:nodes` to that approval, with no subjects. Each pass approves a pending
+`kubernetes.io/kube-apiserver-client-kubelet` CSR only when it is bound to the token that asked
+(`fleet/joincsr.go`):
+
+- its requester is `system:bootstrap:<id>` in `system:bootstrappers:nodes`, and `<id>` is
+  `JoinTokenID(X)`;
+- its request is one PEM CSR whose signature holds, whose subject is exactly `CN=system:node:X`
+  and `O=system:nodes`, with no alternative name, for `client auth` with at most `digital
+  signature` and `key encipherment`;
+- X is a worker NetBox holds `planned` or `active`;
+- fleetd's ledger holds that token for X, unexpired, created by the API server no later than the
+  CSR.
+
+The ledger is how fleetd knows its tokens, since the account cannot read a Secret: each mint
+records the ID, the creation time the API server answered and the expiration, kept in
+`join-tokens.json` in `FLEET_CONFIG_DIR` across a restart. The first pass at least
+`JoinTokenLinger`, a minute, after the approval, once the certificate is issued, deletes the token,
+so each token joins one node once; the kubelet reads its certificate with the token within
+seconds. A request bound to nothing stays pending, and fleetd journals it once on the device its
+CN names, with `kubectl certificate approve <csr>` for the owner: a join with the cluster's token,
+as shale's or a control plane's, is the owner's to approve. The kubelet waits an hour for its
+certificate and then asks again, so a pass every `FLEET_INTERVAL` is in time. A node renews with
+its own certificate, which Talos's `system-bootstrap-node-renewal` leaves to the controller
+manager. The policy `fleet-controller-csr-approval` lets the account only approve, never deny, a
+pending kubelet client request that a node bootstrap token made; CEL cannot read the request's
+subject, so the name check is fleetd's.
 
 ## Config
 
@@ -373,8 +402,8 @@ again with an approved binding attests from HookOS and gets a fresh record.
 
 Every decision is one JSON line on stdout: `attest.verdict`, `attest.issue`, `attest.renew`,
 `attest.check`, `attest.pcr0`, `attest.install`, `attest.intake`, `fleet.workflow`, `fleet.bind`,
-`fleet.autoprovision`, `fleet.render`, `fleet.release`, `fleet.expire`, `fleet.retire` and
-`fleet.cordon`.
+`fleet.autoprovision`, `fleet.render`, `fleet.release`, `fleet.expire`, `fleet.retire`,
+`fleet.cordon` and `fleet.join`.
 
 ## Test
 

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -145,6 +146,9 @@ func LoadCluster() (*Cluster, error) {
 	c, err := NewCluster(server, ca, token)
 	if err != nil {
 		return nil, fmt.Errorf("cluster API client: %w", err)
+	}
+	if dir := os.Getenv("FLEET_CONFIG_DIR"); dir != "" {
+		c.Ledger.File = filepath.Join(dir, joinLedgerFile)
 	}
 	return c, nil
 }

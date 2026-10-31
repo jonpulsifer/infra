@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - external-secret.yaml
   - fleet-controller-cordon.yaml
+  - node-client-approval.yaml

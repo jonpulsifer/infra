@@ -215,6 +215,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			}
 		}
 	}
+	if r.Cluster != nil && len(devices) > 0 {
+		if err := r.approveJoins(ctx, devices); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if err := r.syncLinks(devices); err != nil {
 		errs = append(errs, err)
 	}

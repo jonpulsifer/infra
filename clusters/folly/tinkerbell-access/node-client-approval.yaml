@@ -1,0 +1,21 @@
+---
+# Talos's bootstrap manifests bind system:bootstrappers:nodes to the controller manager's approval
+# of a kubelet's first client certificate, and the controller manager approves one for any node
+# name a bootstrap token asks for. Flux takes that binding over with no subjects, so the controller
+# manager approves no bootstrap request: fleetd approves one only for the node whose token asked
+# (apps/fleetd/fleet/joincsr.go), and the owner approves a join with the cluster's token, such as
+# shale's or a control plane's, by hand. Talos creates each of its bootstrap manifests once and
+# never applies it again, so this copy stands. A running node's renewal stays approved through
+# Talos's system-bootstrap-node-renewal, which binds system:nodes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system-bootstrap-approve-node-client-csr
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:certificates.k8s.io:certificatesigningrequests:nodeclient
+subjects: []

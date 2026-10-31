@@ -136,14 +136,14 @@ func csrSubject(request []byte) string {
 	return req.Subject.CommonName
 }
 
-// RevokeJoinToken deletes the node's bootstrap token. A token already gone
-// is no error.
+// RevokeJoinToken deletes the node's bootstrap token and the ledger's
+// record of it. A token already gone is no error.
 func (c *Cluster) RevokeJoinToken(ctx context.Context, node string) error {
 	err := c.do(ctx, http.MethodDelete, "/api/v1/namespaces/"+joinTokenNamespace+"/secrets/"+joinTokenSecretName(node), "", nil, nil)
-	if errors.Is(err, ErrNotFound) {
-		return nil
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
 	}
-	return err
+	return c.Ledger.Drop(node)
 }
 
 // removeNode takes a node whose retirement wiped it out of the cluster:

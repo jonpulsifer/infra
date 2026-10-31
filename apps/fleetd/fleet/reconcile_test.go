@@ -694,6 +694,10 @@ func (f *fakeCluster) server(t *testing.T) *Cluster {
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if r.Method == http.MethodGet && r.URL.Path == csrPath {
+			w.Write([]byte(`{"items":[]}`))
+			return
+		}
 		node, ok := strings.CutPrefix(r.URL.Path, "/api/v1/nodes/")
 		if r.Method != http.MethodPatch || !ok || r.Header.Get("Content-Type") != "application/merge-patch+json" {
 			http.Error(w, "unexpected", http.StatusBadRequest)
