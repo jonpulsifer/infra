@@ -98,7 +98,8 @@ plan=$(jq -n --argjson shown "$shown" --argjson agents "$agents" --slurpfile f "
   | ([$entries[] | select(.id | IN($gone[].id) | not) | sels[]] + [$created[].selectors[]] | unique) as $carried
   | [$entries[] | select((.id | startswith("fleet-")) and (.parent_id | sid) == $server)
       | .spiffe_id | sid | ltrimstr($node)] as $registered
-  | [$gone[] | select((.parent_id | sid) == $server) | sels[] | select(IN($carried[]) | not)] as $loose
+  | [$gone[] | select((.parent_id | sid) == $server) | (.spiffe_id | sid | ltrimstr($node)) as $n
+      | sels[] | select(IN($carried[]) | not) | {sel: ., node: $n}] as $loose
   | [$nodes[] | "tpm_devid:subject:cn:\(.name)", "tpm:pub_hash:\(.ek_hashes[])"] as $listed
   | def revokes($a): first($revoked[] as $r | select(
         any($a.sels[]; IN("tpm_devid:subject:cn:\($r.name)", "tpm:pub_hash:\($r.ek_hashes[])"))
@@ -106,20 +107,21 @@ plan=$(jq -n --argjson shown "$shown" --argjson agents "$agents" --slurpfile f "
       | $r.name);
     [$agents[] | select(.banned | not)
       | (revokes(.) // null) as $r
-      | select($r != null or any(.sels[]; IN($loose[])))
-      | {id, revoked: $r}] as $ban
+      | . as $a | [$loose[] | select(.sel | IN($a.sels[])) | .node] as $from
+      | select($r != null or $from != [])
+      | {id, nodes: ([$r | values] + $from)}] as $ban
   | {
       delete: [$gone[].id],
       withdrawn: (($registered | unique) - [$nodes[].name]),
       ban: [$ban[].id] | unique,
-      revoked: [$ban[].revoked | select(. != null)] | unique,
+      banned: [$ban[].nodes[]] | unique,
       unban: [$agents[] | select(.banned and any(.sels[]; IN($listed[])) and ((revokes(.) // null) == null)) | .id] | unique
     }')
 
-# At most MAX_WITHDRAWALS nodes are withdrawn or revoked in one run, so a bulk edit in NetBox cannot
-# take out the fleet. A run over the cap changes nothing and fails, unless the owner's override file
-# names all but MAX_WITHDRAWALS of those nodes; the run then removes the file.
-mapfile -t taken < <(jq -r '.withdrawn + .revoked | unique | .[]' <<<"$plan")
+# At most MAX_WITHDRAWALS nodes are withdrawn, or have an agent banned, in one run, so a bulk edit in
+# NetBox cannot take out the fleet. A run over the cap changes nothing and fails, unless the owner's
+# override file names all but MAX_WITHDRAWALS of those nodes; the run then removes the file.
+mapfile -t taken < <(jq -r '.withdrawn + .banned | unique | .[]' <<<"$plan")
 override=false
 if [ "${#taken[@]}" -gt "$MAX_WITHDRAWALS" ]; then
   allowed=""
@@ -142,12 +144,14 @@ for line in "${create[@]}"; do
     -parentID "$(jq -r .parent <<<"$line")" "${args[@]}"
 done
 
-for id in $(jq -r '.delete[]' <<<"$plan"); do
-  srv entry delete -entryID "$id"
-done
-
+# Bans go before the deletes: a run that fails between them leaves the entries, and the next run
+# plans the same bans again.
 for agent in $(jq -r '.ban[]' <<<"$plan"); do
   srv agent ban -spiffeID "$agent"
+done
+
+for id in $(jq -r '.delete[]' <<<"$plan"); do
+  srv entry delete -entryID "$id"
 done
 
 for agent in $(jq -r '.unban[]' <<<"$plan"); do

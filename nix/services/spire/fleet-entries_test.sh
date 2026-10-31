@@ -48,6 +48,7 @@ case "$1 $2" in
     echo "evict $4" >>"$LOG"
     ;;
   "agent ban")
+    [ -z "${FAIL_BAN:-}" ] || exit 1
     mutate --arg p "${4#spiffe://lolwtf.ca}" '.agents |= map(if .id.path == $p then .banned = true else . end)'
     echo "ban $4" >>"$LOG"
     ;;
@@ -176,6 +177,23 @@ nodes '[]' '[{"name":"riptide","ek_hashes":[],"ldevids":[]},{"name":"surge","ek_
 apply
 check "revoking two nodes with live agents in one run is refused" \
   '[ "$rc" = 1 ] && grep -q "refusing to withdraw or ban 2 nodes" "$tmp/out" && [ ! -s "$LOG" ]'
+
+state '[]' '[["/spire/agent/tpm/'"$hashA"'","tpm:pub_hash:'"$hashA"'"],["/spire/agent/tpm/'"$hashB"'","tpm:pub_hash:'"$hashB"'"]]'
+nodes "[$riptide,$surge]"
+apply
+nodes '[{"name":"riptide","ek_hashes":[]},{"name":"surge","ek_hashes":[]}]'
+apply
+check "clearing the EK hashes of two listed nodes, whose agents attest by EK, is over the cap" \
+  '[ "$rc" = 1 ] && grep -q "refusing to withdraw or ban 2 nodes" "$tmp/out" && [ ! -s "$LOG" ]'
+
+state '[]' "$agents"
+nodes "[$riptide,$surge]"
+apply
+nodes "[$riptide]"
+FAIL_BAN=1 apply
+check "a ban that fails leaves the withdrawn node's entries" '[ "$rc" != 0 ] && [ "$(issued /node/surge /spire/server)" = 2 ]'
+apply
+check "the next run bans and deletes them" '[ "$rc" = 0 ] && [ "$(agent "$s1")" = banned ] && [ "$(issued /node/surge /spire/server)" = 0 ]'
 
 state '[]' "$agents"
 printf '{"nodes":[%s]}' "$riptide" >"$NODES_FILE"
