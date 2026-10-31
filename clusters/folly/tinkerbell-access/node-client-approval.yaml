@@ -1,0 +1,71 @@
+---
+# Talos's bootstrap manifests bind system:bootstrappers:nodes to the controller manager's approval
+# of a kubelet's first client certificate, and the controller manager approves one for any node
+# name a bootstrap token asks for. On folly fleetd approves a bootstrap request only for the node
+# whose token asked (apps/fleetd/fleet/joincsr.go), and the owner approves a join with the
+# cluster's token, such as shale's or a control plane's, by hand. Two things keep the controller
+# manager out of it.
+#
+# The policy below refuses its account the approval of any request a bootstrap token made. It
+# holds whatever the binding says. Renewals, which a node asks for as system:node:<name>, pass.
+#
+# The binding is taken over with no subjects, so the controller manager does not try. Talos
+# creates each of its bootstrap manifests once, but the Talos root's talos_cluster runs Talos's
+# Kubernetes upgrade when kubernetes_version changes, and that syncs the bootstrap manifests with
+# forced ownership: the subject is back until Flux reconciles tinkerbell-access, up to an hour.
+# fleetd exports the subjects it reads as fleet_node_client_approval_subjects, and
+# NodeClientApprovalBindingRestored fires when they are not none.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: system-bootstrap-approve-node-client-csr
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:certificates.k8s.io:certificatesigningrequests:nodeclient
+subjects: []
+---
+# The controller manager runs with --use-service-account-credentials, so its CSR approver is
+# certificate-controller; without that flag it is system:kube-controller-manager.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: node-client-bootstrap-approval
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["certificates.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["certificatesigningrequests/approval"]
+  matchConditions:
+    - name: controller-manager
+      expression: >-
+        request.userInfo.username in ["system:serviceaccount:kube-system:certificate-controller",
+        "system:kube-controller-manager"]
+  validations:
+    - expression: >-
+        !object.spec.username.startsWith("system:bootstrap:")
+      reason: Forbidden
+      message: >-
+        On folly the controller manager approves no request a bootstrap token made: fleetd approves
+        a node's own, and the owner a join with the cluster's token.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: node-client-bootstrap-approval
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  policyName: node-client-bootstrap-approval
+  validationActions: [Deny]
+  matchResources: {}

@@ -369,3 +369,55 @@ tests:
             exp_annotations:
               message: "Control-plane node optiplex failed attestation and is not quarantined"
               description: "optiplex's TPM quoted a boot that misses fleetd's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u fleetd on spore, then reinstall or fix the node; the next passing check clears this."
+
+  # A kubelet asks at minute 0 and nobody approves; a renewal asked at the same time is approved.
+  - interval: 1m
+    input_series:
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="approved"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="denied"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-renew",signer_name="kubernetes.io/kube-apiserver-client-kubelet"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-renew",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="approved"}'
+        values: 1x80
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-serving",signer_name="kubernetes.io/kubelet-serving"}'
+        values: 0x80
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: KubeletCSRPending
+        exp_alerts: []
+      - eval_time: 67m
+        alertname: KubeletCSRPending
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              certificatesigningrequest: csr-join
+            exp_annotations:
+              message: "Kubelet certificate request csr-join has waited an hour"
+              description: "A node's kubelet asked for its client certificate an hour ago and nobody approved it, so the node does not register. fleetd approves a worker it installs within a pass; read the device's NetBox journal for why it did not, and journalctl -u fleetd on spore. A join with the cluster's bootstrap token, such as shale's or a control plane's, is the owner's to approve. https://wiki.lolwtf.ca/runbooks/install-talos-on-a-node/"
+
+  # A Kubernetes upgrade puts the subject back at minute 10, and Flux empties it at minute 40.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_node_client_approval_subjects{job="node-exporter",instance="spore"}'
+        values: 0x9 1x30 0x20
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: The controller manager's approval of a kubelet's first certificate binds subjects again
+              description: "system-bootstrap-approve-node-client-csr binds 1 subjects, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access empties it again. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
+      - eval_time: 45m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts: []
+

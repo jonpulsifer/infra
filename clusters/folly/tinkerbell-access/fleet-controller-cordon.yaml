@@ -1,9 +1,10 @@
 ---
 # fleetd on spore reaches folly's API as this account, whose name is the one its sealed token
 # names: `fleetd/folly-cordon-token` in nix/secrets/spore.sops.yaml. It cordons a node it
-# quarantined, creates the bootstrap token each worker's install config carries, and takes a
-# retired node out of the cluster: cordon, evict its pods, delete its Node, its CSRs and its
-# token. The admission policies below narrow each write.
+# quarantined, creates the bootstrap token each worker's install config carries, approves the
+# kubelet client certificate that token asks for, and takes a retired node out of the cluster:
+# cordon, evict its pods, delete its Node, its CSRs and its token. The admission policies below
+# narrow each write.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -35,6 +36,21 @@ rules:
   - apiGroups: ["certificates.k8s.io"]
     resources: ["certificatesigningrequests"]
     verbs: ["list", "delete"]
+  # A worker's first kubelet client certificate, which fleetd approves only for the node whose
+  # bootstrap token asked for it (apps/fleetd/fleet/joincsr.go). fleet-controller-csr-approval
+  # narrows the approval.
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["certificatesigningrequests/approval"]
+    verbs: ["update"]
+  - apiGroups: ["certificates.k8s.io"]
+    resources: ["signers"]
+    resourceNames: ["kubernetes.io/kube-apiserver-client-kubelet"]
+    verbs: ["approve"]
+  # fleetd exports whether the controller manager's approval binding regained subjects.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    resourceNames: ["system-bootstrap-approve-node-client-csr"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -300,5 +316,68 @@ metadata:
     app.kubernetes.io/part-of: fleetd
 spec:
   policyName: fleet-controller-join-tokens
+  validationActions: [Deny]
+  matchResources: {}
+---
+# The account approves only what a fleetd join needs: a pending kubelet client CSR that a
+# bootstrap token in system:bootstrappers:nodes asked for, for client authentication, with the one
+# Approved condition and no denial. CEL cannot read the request's subject, so the check that the
+# CSR names the node the token was minted for, and no other, is fleetd's (apps/fleetd/fleet/
+# joincsr.go). This policy keeps a stolen account token to bootstrap requests: no other requester,
+# signer or usage, no denial, and no change but the approval.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: fleet-controller-csr-approval
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["certificates.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["UPDATE"]
+        resources: ["certificatesigningrequests", "certificatesigningrequests/approval", "certificatesigningrequests/status"]
+  matchConditions:
+    - name: fleet-controller-cordon
+      expression: >-
+        request.userInfo.username == "system:serviceaccount:kube-system:fleet-controller-cordon"
+  validations:
+    - expression: >-
+        request.subResource == "approval"
+      reason: Forbidden
+      message: fleet-controller-cordon changes a CSR only through its approval.
+    - expression: >-
+        object.spec.signerName == "kubernetes.io/kube-apiserver-client-kubelet"
+      reason: Forbidden
+      message: fleet-controller-cordon approves only a kubelet client certificate.
+    - expression: >-
+        object.spec.username.matches('^system:bootstrap:[a-z0-9]{6}$') &&
+        'system:bootstrappers:nodes' in object.spec.?groups.orValue([])
+      reason: Forbidden
+      message: fleet-controller-cordon approves only a request a node bootstrap token made.
+    - expression: >-
+        'client auth' in object.spec.?usages.orValue([]) &&
+        object.spec.usages.all(u, u in ['client auth', 'digital signature', 'key encipherment'])
+      reason: Forbidden
+      message: fleet-controller-cordon approves only a certificate for client authentication.
+    - expression: >-
+        size(oldObject.status.?conditions.orValue([])) == 0 &&
+        size(object.status.?conditions.orValue([])) == 1 &&
+        object.status.conditions[0].type == 'Approved' && object.status.conditions[0].status == 'True'
+      reason: Forbidden
+      message: fleet-controller-cordon only approves a pending request, and never denies one.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: fleet-controller-csr-approval
+  labels:
+    app.kubernetes.io/name: fleet-controller-cordon
+    app.kubernetes.io/part-of: fleetd
+spec:
+  policyName: fleet-controller-csr-approval
   validationActions: [Deny]
   matchResources: {}

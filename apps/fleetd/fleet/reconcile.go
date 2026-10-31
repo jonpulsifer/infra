@@ -156,9 +156,14 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if r.Installer != nil {
 		defer r.Installer.Tick(ctx)
 	}
+	var csrs []kubeletCSR
+	var csrErr error
+	if r.Cluster != nil {
+		csrs, csrErr = r.watchJoins(ctx)
+	}
 	devices, err := r.NetBox.Devices(ctx, r.Config.Site)
 	if err != nil {
-		return fmt.Errorf("NetBox: %w", err)
+		return errors.Join(fmt.Errorf("NetBox: %w", err), csrErr)
 	}
 	counts := map[string]int{}
 	for _, d := range devices {
@@ -166,7 +171,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	r.Metrics.SetDevices(counts)
 
-	var errs []error
+	errs := []error{csrErr}
 	keep := map[string]bool{}
 	for _, d := range devices {
 		keep[d.Name] = true
@@ -213,6 +218,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 					}
 				}
 			}
+		}
+	}
+	if r.Cluster != nil && csrErr == nil && len(devices) > 0 {
+		if err := r.approveJoins(ctx, csrs, devices); err != nil {
+			errs = append(errs, err)
 		}
 	}
 	if err := r.syncLinks(devices); err != nil {

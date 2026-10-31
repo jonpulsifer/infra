@@ -21,6 +21,8 @@ type fakeAPI struct {
 	secrets map[string]map[string]any
 	calls   []string
 	down    bool
+	// created is the creation time a new token gets, or testNow.
+	created time.Time
 }
 
 func (f *fakeAPI) server(t *testing.T) *Cluster {
@@ -59,6 +61,12 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.secrets[n] = body
+		created := f.created
+		if created.IsZero() {
+			created = testNow
+		}
+		json.NewEncoder(w).Encode(map[string]any{"metadata": map[string]any{"name": n, "creationTimestamp": created.UTC().Format(time.RFC3339)}})
+		return
 	case r.Method == http.MethodDelete && named:
 		if _, ok := f.secrets[name]; !ok {
 			http.NotFound(w, r)
