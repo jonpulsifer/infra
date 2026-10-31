@@ -1,0 +1,16 @@
+--- a/apps/fleetd/fleet/objects.go
++++ b/apps/fleetd/fleet/objects.go
+@@ -154,6 +154,13 @@
+ 			"preferredOrder": []any{"IntelAMT"},
+ 			"intelAMT":       map[string]any{"hostScheme": "http", "port": c.AMTPort},
+ 		}
++	case "redfish":
++		conn["port"] = c.AMTPort
++		conn["insecureTLS"] = true
++		conn["providerOptions"] = map[string]any{
++			"preferredOrder": []any{"gofish"},
++			"redfish":        map[string]any{"port": c.AMTPort},
++		}
+ 	default:
+ 		return nil, fmt.Errorf("bmc_type %q has no Rufio provider here", d.BMCType)
+ 	}

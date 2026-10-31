@@ -28,6 +28,10 @@
 #   observe NAME [--no-console]
 #   hookos-docker NAME ARGS...          hook-docker's docker on the machine's HookOS, such as
 #                                       restart tink-worker
+#   fleetd start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE] | stop
+#                                       fleetd's reconcile loop against a stand-in NetBox
+#   netbox NAME set KEY=VALUE|status=S... [--webhooks N] | NAME show | writes | fail-patch on|off
+#   webhook [N]                         N signed NetBox webhooks to fleetd at once
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
 # workflow=STATE (or FINISHED), console=TEXT (serial output after the hook started),
@@ -1407,6 +1411,145 @@ at_boundary() {
   [ "$delay" = 0 ] || sleep "$delay"
 }
 
+# ---- fleetd in the loop ----
+
+# fleetd_build builds fleet/main.go against apps/fleetd at FLEETD_REF (default origin/main), with
+# fleet/redfish-machine.patch, which lets Config.Machine write the Redfish Machine the VMs' BMCs
+# answer where the lab has AMT. The build is kept until the ref moves.
+FLEETD_REF=${TINK_LAB_FLEETD_REF:-origin/main}
+NETBOX_PORT=8000
+FLEETD_PORT=8446
+fleetd_build() {
+  local rev src=$dir/fleetd/src
+  rev=$(git -C "$repo" rev-parse "$FLEETD_REF")
+  if [ "$(cat "$dir/fleetd/rev" 2>/dev/null)" = "$rev" ] && [ -x "$dir/fleetd/tink-lab-fleetd" ]; then return; fi
+  rm -rf "$src" && mkdir -p "$src"
+  git -C "$repo" archive "$rev" apps/fleetd | tar -x -C "$src"
+  patch -s -d "$src" -p1 <"$here/fleetd/redfish-machine.patch"
+  mkdir -p "$src/apps/fleetd/cmd/tink-lab-fleetd"
+  cp "$here/fleetd/main.go" "$src/apps/fleetd/cmd/tink-lab-fleetd/main.go"
+  (cd "$src/apps/fleetd" && go build -o "$dir/fleetd/tink-lab-fleetd" ./cmd/tink-lab-fleetd) || die "the fleetd build failed"
+  echo "$rev" >"$dir/fleetd/rev"
+  event event=fleetd-build ref="$FLEETD_REF" rev="$rev" >/dev/null
+}
+
+# fleetd_device writes the machine's NetBox device and interface in the shape fleetd reads
+# (parseDevice in apps/fleetd/fleet/netbox.go): a worker-g5 with a TPM 2.0, attested, its declared
+# disk and serial, and bmc_type redfish at oob_ip 127.0.0.1, where its BMC listens.
+fleetd_device() {
+  local name=$1 status=$2
+  jq -n --arg name "$name" --arg status "$status" --arg ip "$(vmjson "$name" .ip)" \
+    --arg mac "$(vmjson "$name" .mac)" --arg disk "$(vmjson "$name" .install_disk)" \
+    --arg serial "$(vmjson "$name" '.install_disk_serial // ""')" --arg uuid "$(vmjson "$name" .uuid)" '{
+    devices: [{id: 1, name: $name, serial: ("TL-" + $name), status: {value: $status},
+      primary_ip4: {address: ($ip + "/24")}, oob_ip: {address: "127.0.0.1/32"},
+      device_type: {model: "tink-lab VM"}, description: "",
+      custom_fields: {install_disk: $disk, install_disk_serial: $serial, talos_class: "worker-g5",
+        tpm_version: "2.0", bmc_type: "redfish", amt: false, secure_boot_expected: false,
+        desired_action: "none", last_workflow: "", expected_port: null, smbios_uuid: $uuid,
+        attest_verdict: "attested"}}],
+    interfaces: [{id: 1, name: "eth0", type: {value: "1000base-t"}, device: {id: 1},
+      primary_mac_address: {mac_address: $mac}}]}' >"$dir/fleetd/netbox/devices.json"
+}
+
+# fleetd_start runs netbox.py and the fleetd build for one machine, which is NetBox's only device:
+# fleetd deletes the Hardware and Machine of every other machine, as it does for a device NetBox no
+# longer lists. The classes are clusters/folly/fleet/classes.json with each Template named TEMPLATE.
+fleetd_start() {
+  local name=${1:?fleetd start needs a machine} tmpl=provision interval=2m status=active installer="" installs
+  shift
+  need_vm "$name"
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --template) tmpl=$2 && shift 2 ;;
+      --interval) interval=$2 && shift 2 ;;
+      --status) status=$2 && shift 2 ;;
+      --installer) installer=$2 && shift 2 ;;
+      *) die "fleetd start: unknown $1" ;;
+    esac
+  done
+  alive fleetd && die "fleetd runs; fleetd stop first"
+  fleetd_build
+  mkdir -p "$dir/fleetd/netbox"
+  : >"$dir/fleetd/netbox/writes.jsonl"
+  fleetd_device "$name" "$status"
+  jq --arg t "$tmpl" 'map_values(.template = $t)' "$repo/clusters/folly/fleet/classes.json" >"$dir/fleetd/classes.json"
+  (umask 077 && echo tink-lab >"$dir/fleetd/netbox-token" && openssl rand -hex 32 >"$dir/fleetd/webhook-secret")
+  installs=$(jq -r --arg i "$installer" 'to_entries | map("\(.key)=\(if $i != "" then $i else .value.installer_image end)")
+    | join(",")' "$repo/clusters/folly/fleet/class-inputs.json")
+  daemon netbox python3 -I "$here/netbox.py" "$NETBOX_PORT" "$dir/fleetd/netbox"
+  local end=$((SECONDS + 10))
+  until inns curl -sf -o /dev/null "http://127.0.0.1:$NETBOX_PORT/api/dcim/interfaces/"; do
+    [ "$SECONDS" -lt "$end" ] || die "netbox.py did not answer; see $dir/logs/netbox.log"
+    sleep 0.2
+  done
+  daemon fleetd env FLEET_SITE="$SITE" FLEET_NAMESPACE="$NS" FLEET_INTERVAL="$interval" \
+    FLEET_HOOKOS_URL="http://$BOOT/talos/$SITE/$UKI" \
+    FLEET_HOOKOS_CMDLINE="$(cmdline "$(cat "$dir/agent.digest")" "$(vmjson "$name" .attest)")" \
+    FLEET_CLASSES="$dir/fleetd/classes.json" FLEET_BMC_SECRETS=redfish=bmc-redfish \
+    FLEET_NETBOX_URL="http://127.0.0.1:$NETBOX_PORT" FLEET_NETBOX_TOKEN_FILE="$dir/fleetd/netbox-token" \
+    FLEET_KUBE_SERVER=https://127.0.0.1:6443 FLEET_KUBE_CA_FILE="$dir/pki/ca.crt" \
+    FLEET_KUBE_CERT_FILE="$dir/pki/admin.crt" FLEET_KUBE_KEY_FILE="$dir/pki/admin.key" \
+    FLEET_WEBHOOK_SECRET_FILE="$dir/fleetd/webhook-secret" FLEET_WEBHOOK_ADDR="127.0.0.1:$FLEETD_PORT" \
+    TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" \
+    TINK_LAB_INSTALLS="$installs" \
+    "$dir/fleetd/tink-lab-fleetd"
+  event event=fleetd-start vm="$name" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
+    installs="$installs"
+}
+
+# webhook posts N signed copies of a NetBox device webhook to fleetd at once, as NetBox's event
+# rule does on each device update.
+webhook() {
+  local n=${1:-1} body sig i codes
+  body='{"event": "updated", "model": "device", "data": {"id": 1}}'
+  sig=$(printf '%s' "$body" | openssl dgst -sha512 -hmac "$(cat "$dir/fleetd/webhook-secret")" -hex | sed 's/^.*= //')
+  codes=$(for i in $(seq "$n"); do
+    inns curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "X-Hook-Signature: $sig" \
+      -H 'Content-Type: application/json' -d "$body" "http://127.0.0.1:$FLEETD_PORT/webhook" &
+  done | sort | uniq -c | awk '{ printf "{\"%s\": %s}\n", $2, $1 }' | jq -sc add)
+  event event=webhook count="$n" "http=$codes"
+}
+
+# netbox_cmd edits the machine's device as the owner does, then rings the webhook --webhooks N
+# times (default 1), or shows the device, fleetd's writes, or makes fleetd's PATCHes fail.
+netbox_cmd() {
+  local name=${1:?netbox needs a machine, writes or fail-patch} hooks=1 kv patch='{"custom_fields": {}}'
+  shift
+  case $name in
+    writes)
+      cat "$dir/fleetd/netbox/writes.jsonl"
+      return
+      ;;
+    fail-patch)
+      inns curl -s -X PUT -d "{\"on\": $([ "${1:-}" = on ] && echo true || echo false)}" \
+        "http://127.0.0.1:$NETBOX_PORT/lab/fail-patch" >/dev/null
+      event event=netbox fail_patch="${1:-off}"
+      return
+      ;;
+  esac
+  [ "${1:-}" = show ] && {
+    jq -c --arg n "$name" '.devices[] | select(.name == $n) | {status: .status.value,
+      desired_action: .custom_fields.desired_action, last_workflow: .custom_fields.last_workflow}' \
+      "$dir/fleetd/netbox/devices.json"
+    return
+  }
+  [ "${1:-}" = set ] && shift
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --webhooks) hooks=$2 && shift 2 && continue ;;
+      status=*) patch=$(jq -c --arg v "${1#status=}" '.status = $v' <<<"$patch") ;;
+      *=*) kv=$1 && patch=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '.custom_fields[$k] = $v' <<<"$patch") ;;
+      *) die "netbox: KEY=VALUE, status=S or --webhooks N" ;;
+    esac
+    shift
+  done
+  inns curl -sf -X PATCH -H 'Content-Type: application/json' -d "$patch" \
+    "http://127.0.0.1:$NETBOX_PORT/lab/devices/$name" >/dev/null || die "netbox: the edit failed"
+  event event=netbox vm="$name" "patch=$patch"
+  [ "$hooks" = 0 ] || webhook "$hooks"
+}
+
 cmd=${1:-}
 [ $# -gt 0 ] && shift
 case $cmd in
@@ -1428,7 +1571,7 @@ case $cmd in
   reset)
     down
     rm -rf "${dir:?}/state" "$dir/registry" "$dir/vms" "$dir/pki" "$dir/logs" "$dir/pids" \
-      "$dir/dhcp-hosts" "$dir/events.jsonl" "$dir/split" "$dir/agent.digest" "${run:?}"
+      "$dir/dhcp-hosts" "$dir/events.jsonl" "$dir/split" "$dir/agent.digest" "$dir/fleetd/netbox" "${run:?}"
     ;;
   status)
     tools
@@ -1560,6 +1703,26 @@ case $cmd in
     tools
     slow_installer "$@"
     ;;
+  fleetd)
+    tools
+    case ${1:-} in
+      start) fleetd_start "${@:2}" ;;
+      stop)
+        stop_proc fleetd || true
+        stop_proc netbox || true
+        ;;
+      build) fleetd_build ;;
+      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], stop or build" ;;
+    esac
+    ;;
+  netbox)
+    tools
+    netbox_cmd "$@"
+    ;;
+  webhook)
+    tools
+    webhook "$@"
+    ;;
   hookos-docker)
     tools
     name=${1:?hookos-docker needs a machine}
@@ -1577,7 +1740,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,35p' "$0" >&2
+    sed -n '2,43p' "$0" >&2
     exit 2
     ;;
 esac

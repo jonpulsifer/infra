@@ -16,7 +16,7 @@ real scheduling, real acknowledgements and real Rufio jobs.
 | Tinkerbell | The v0.25.0 embedded binary, amd64, pinned by SHA-256 and checked against the release's `checksums-embedded.txt`. Flags from `nix/services/tinkerbell.nix`. | Namespace addresses. The apiserver listens on loopback (spore: every address behind its firewall) and needs `--advertise-address`, because the namespace has no default route. Smee's proxy DHCP listens on an empty interface; see DHCP. |
 | Restarts | A supervisor restarts a Tinkerbell process that fails after 15 s, as the unit's `Restart=on-failure` does. | `TINK_LAB_SPLIT=1` runs etcd, the apiserver, the Tink server, the Tink controller, Smee and Rufio as separate processes of the same binary, so each can be killed alone. spore runs one process. |
 | Template | `clusters/folly/tinkerbell/template.yaml` as committed, rendered by the controller. | None. |
-| Hardware, Workflow | `provision` and `reconcile` write the objects in fleetd's shapes (`Config.Hardware` and `Config.Workflow` in `apps/fleetd/fleet/objects.go`). They also follow `Reconciler.start`: finished Workflows are deleted, a running one is adopted, and netboot goes on before the Workflow exists. The hardwareMap's `install_disk_serial` is the machine's declared serial, as fleetd copies it from NetBox. | fleetd does not run: there is no NetBox, no webhook and no reconcile loop. `reconcile` is one pass, run by hand. fleetd starts no wiping run without a well-formed serial (`Device.Unidentified`); `provision` does, so the Template's own check can be tested. The HookOS URL and command line are tink-lab's. |
+| Hardware, Workflow | `provision` and `reconcile` write the objects in fleetd's shapes (`Config.Hardware` and `Config.Workflow` in `apps/fleetd/fleet/objects.go`). They also follow `Reconciler.start`: finished Workflows are deleted, a running one is adopted, and netboot goes on before the Workflow exists. The hardwareMap's `install_disk_serial` is the machine's declared serial, as fleetd copies it from NetBox. | By default fleetd does not run: there is no NetBox, no webhook and no reconcile loop, and `reconcile` is one pass, run by hand. `fleetd start` runs fleetd's own loop instead; see fleetd in the loop. fleetd starts no wiping run without a well-formed serial (`Device.Unidentified`); `provision` does, so the Template's own check can be tested. The HookOS URL and command line are tink-lab's. |
 | Rufio | The embedded Rufio, with a Machine for each VM. | The Machine uses the Redfish provider against `bmc.py`, not Intel AMT. One-time PXE sets the VM's BootNext while it is off. |
 | DHCP | dnsmasq leases and serves DNS. It hands out the boot option (`talos/lab/ipxe-amd64.efi`), as UniFi does on folly's Kubernetes network, and serves that file over TFTP, as spore does. | Smee proxies on spore's bootstrap VLAN, which no node's port carries. Here it proxies on an empty interface, so the VMs never hear it. OVMF also declines a lease when Smee's proxy answers its REQUEST. |
 | iPXE | `ipxe.nix`: the embedded script of `nix/images/ipxe-folly.nix`, chaining Smee's script for the MAC and falling back to the HookOS menu item. | Built locally and unsigned, with tink-lab's addresses and command line. |
@@ -120,6 +120,42 @@ Logs are in `$TINK_LAB_DIR/logs`:
 - `bmc-NAME.log` holds every Redfish request.
 - Each VM's serial console is `vms/NAME/serial.log`.
 
+## fleetd in the loop
+
+`fleetd start NAME` runs fleetd's reconcile loop and webhook, from `apps/fleetd/fleet` at
+`TINK_LAB_FLEETD_REF` (default `origin/main`), against the environment's API and `netbox.py`, a
+stand-in NetBox that serves NAME as its only device. It is `fleetd/main.go` built in an export of
+`apps/fleetd` at that ref: the wiring of `apps/fleetd/main.go`'s `newFleet`, without the verifier,
+the installer and renderer, the cluster client, the TFTP links and the SPIRE file. So `Admit`, config
+renders, fetches and releases do not run, and a device stays `planned` after a provision.
+`fleetd/redfish-machine.patch` adds a `redfish` case to `Config.Machine`, so the Machine fleetd
+applies drives the VM's Redfish BMC where the lab has AMT.
+
+```sh
+tink-lab.sh template pmain --from <(git show origin/main:clusters/folly/tinkerbell/template.yaml)
+tink-lab.sh fleetd start n1 --template pmain     # --interval DUR (FLEET_INTERVAL, 2m), --status S,
+                                                 # --installer IMAGE (every class's installer)
+tink-lab.sh netbox n1 set desired_action=provision --webhooks 20   # the owner's edit, then 20 webhooks
+tink-lab.sh netbox n1 set status=decommissioning
+tink-lab.sh webhook 5                            # five signed webhooks at once
+tink-lab.sh netbox n1 show                       # status, desired_action, last_workflow
+tink-lab.sh netbox writes                        # fleetd's PATCHes and journal entries, with times
+tink-lab.sh netbox fail-patch on|off             # fleetd's device PATCHes answer 500
+tink-lab.sh fleetd stop
+```
+
+- The device is a `worker-g5` with a TPM 2.0, `attested`, the machine's declared disk and serial,
+  `bmc_type: redfish` and `oob_ip` `127.0.0.1`. Its classes are `clusters/folly/fleet/classes.json`
+  with every Template named `--template`'s.
+- fleetd deletes the Hardware and Machine of every machine that is not its device, as it does for a
+  device NetBox no longer lists. Run it with one machine, or expect to re-create the others.
+- A NetBox edit rings the webhook once by default, as NetBox's event rule does for every device
+  update. fleetd's own writes do not ring it here, so the passes that follow them come from the
+  timer.
+- fleetd's log, with its `fleet.*` audit lines, is `logs/fleetd.log`; netbox.py's requests are in
+  `logs/netbox.log`. `reset` clears the stand-in's state; the build stays in `fleetd/` until the
+  ref moves.
+
 ## Hooks
 
 Each hook prints one JSON object per event and appends it to `$TINK_LAB_DIR/events.jsonl`. Each
@@ -220,11 +256,10 @@ the Workflow took 179 s. The cause is unknown.
 
 The test numbers are those in the test plan.
 
-- **No fleetd, NetBox, SPIRE or attestation.** Tests 4, 6 and 10 can exercise only Tinkerbell's
-  side:
-  - Duplicate webhooks and fleetd's adopt-or-create cannot run. `provision --again` makes a second
-    Workflow directly.
-  - A fleetd restart cannot be tested.
+- **No real NetBox, SPIRE or attestation, and fleetd only in part.** `fleetd start` runs fleetd's
+  reconcile loop and webhook against a stand-in NetBox (fleetd in the loop). The verifier, `Admit`,
+  the installer's renders and config fetches, and a fleetd restart with them, do not run.
+  `provision --again` makes a second Workflow directly, which fleetd never does.
   - The stand-in issues no LDevID and no SPIRE registration, so the credential questions of test 10
     need the real attest path.
 - **No config server.** The installed Talos reaches its first config fetch and stops there. Test 8
@@ -279,3 +314,6 @@ The test numbers are those in the test plan.
 | `agent/entry.sh` | The stand-in attestation, layered on the lab's agent image. |
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
+| `netbox.py` | The stand-in NetBox for fleetd in the loop: one device, its interface, and a record of fleetd's writes. |
+| `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref. |
+| `fleetd/redfish-machine.patch` | Lets `Config.Machine` write a Redfish Machine for the VMs' BMCs. |
