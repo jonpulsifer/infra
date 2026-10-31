@@ -13,30 +13,15 @@ let
     optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
-  # With tpm_devid on, a node attests by the LDevID that fleetd issues it, whose subject
-  # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
-  # its OU (the class) or O (the site), so each node in the nodes file with a TPM 2.0 gets its own
-  # alias, and a new node needs a spore deploy. A failed or retired node keeps its alias until its
-  # entry goes, and fleetd refuses it an LDevID.
-  devidNodes = lib.attrNames (
-    lib.filterAttrs (_: n: n.tpm or null == "2.0") (import ../lib/inventory.nix { inherit lib; })
-  );
-  tpmNodes = lib.sort lib.lessThan (lib.unique (lib.attrNames ekHashes ++ devidNodes));
+  # A node's alias by the LDevID that fleetd issues it, whose subject CN is the node's name, comes
+  # from fleetd's spire-nodes.json alone, as a fleet- entry, so a node fleetd withdraws loses it.
+  tpmNodes = lib.sort lib.lessThan (lib.attrNames ekHashes);
   trustDomain = config.homelab.spire.trustDomain;
   nodeID = name: "spiffe://${trustDomain}/node/${name}";
-  # One alias per node and attestor: an agent matches a node entry only when it has every selector.
-  nodeAliases =
-    lib.mapAttrsToList (name: hash: {
-      spiffeID = nodeID name;
-      selectors = [ "tpm:pub_hash:${hash}" ];
-    }) ekHashes
-    ++ lib.optionals config.homelab.spire.devid.enable (
-      map (name: {
-        spiffeID = nodeID name;
-        key = "tpm_devid";
-        selectors = [ "tpm_devid:subject:cn:${name}" ];
-      }) devidNodes
-    );
+  nodeAliases = lib.mapAttrsToList (name: hash: {
+    spiffeID = nodeID name;
+    selectors = [ "tpm:pub_hash:${hash}" ];
+  }) ekHashes;
   # Kubernetes service accounts that get an SVID on every TPM node.
   workloads = [
     {

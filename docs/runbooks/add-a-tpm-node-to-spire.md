@@ -20,7 +20,7 @@ A node that passed attestation has an LDevID from the attest service, and its ag
 
 ## Admit the node
 
-spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and the LDevID aliases from `clusters/folly/inventory/nodes.yaml`. It registers the entries in `workloads` under each alias.
+spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and registers the entries in `workloads` under each alias. The LDevID aliases come from fleetd alone.
 
 fleetd registers the node by itself once its device is `active` with the verdict `attested`: it writes the node and its `ek_hash` pins to `/var/lib/fleetd/spire-nodes.json`, and `spire-server-fleet-entries` on spore creates the `fleet-*` entries. [Identity](../platform/identity.md#fleetd-entries) has the boundary. Check the result on spore with `spire-server entry show -socketPath /run/spire/server/private/api.sock`. A node that fleetd drops loses those entries and its agent is banned. When fleetd registers it again, the applier evicts the banned agent so it attests afresh.
 
@@ -183,7 +183,7 @@ Do this once, before the first agent attests. spore's `k8sbundle` notifier then 
 | The agent logs `tpm2.Load failed` | The attest service wrapped the LDevID key under another parent than the TCG H-1 or H-2 storage root key | Attest the node again after the attest service creates the key under that parent. |
 | The server logs `cannot verify EK signature` | The CA that signed the node's EK certificate is not in `nix/services/spire/roots/` | Add the CA from the EK certificate's AIA URL, and deploy spore. |
 | The agent logs `unable to get endorsement certificate` | The TPM has no RSA EK certificate in NV, which `tpm_devid` reads | Admit the node by EK hash. |
-| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN | Make sure that `nodes.yaml` lists `<name>` with `tpm` `2.0`, that `devid.enable` is on, and that spore runs that commit. |
+| The agent attests by LDevID, and workloads get no SVID | No alias selects the LDevID's subject CN, because fleetd does not list the node in `/var/lib/fleetd/spire-nodes.json` | Make sure that the node's device is `active` with the verdict `attested`, and that `spire-server-fleet-entries` on spore did not fail. |
 | `TalosAttestLDevIDExpiring` fires | `tpm-reattest` on the node cannot renew the LDevID | Read `kubectl --context folly -n spire logs daemonset/tpm-reattest`, or the pod on `<name>`. A `404` refusal means the service has no LDevID on file for the serial, and a `403` means the machine's status forbids a renewal. Otherwise, attest the node again. |
 | `TalosAttestNotChecked` fires | No passing quote from the node in 26 hours | Read the `tpm-reattest` pod on `<name>`. A pod stuck in `ContainerCreating`, or `NO TPM` in its log, is a TPM that is off: turn it on in the firmware. `RENEWAL FAILED` gives the transport error or the refusal; a `403` with the verdict `quarantine` is a quarantine, which `TalosAttestQuarantined` reports. |
 | The debug pod prints a TPM open error | The TPM is off in the firmware | Turn on the TPM, and boot the node. |

@@ -30,9 +30,9 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The `git-*` LDevID aliases follow `clusters/folly/inventory/nodes.yaml`. Each node with `tpm` `2.0`, its own or its model's, gets one. `nix/lib/inventory.nix` reads the nodes file at evaluation, so a `git-*` alias needs a spore deploy. A node fleetd lists in `spire-nodes.json` gets its `fleet-*` alias with no deploy. It fails the evaluation on any line outside the file's shape.
+- Each LDevID alias is a `fleet-*` entry for a node fleetd lists in `spire-nodes.json`, so a node gets it with no deploy and loses it when fleetd withdraws it. spore declares none.
 - Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
-- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
+- An agent matches a node entry only when it has every selector, so a node has one alias for each attestor: by EK hash, and by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
 - `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
@@ -44,7 +44,7 @@ Two owners write registration entries, and the entry ID says which.
 
 | Owner | IDs | Holds |
 | --- | --- | --- |
-| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`: the alias for each node in `ekHashes` and each node of `nodes.yaml` with a TPM 2.0, and the `workloads` under them |
+| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`: the alias for each node in `ekHashes`, and the `workloads` under them |
 | fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the bans of withdrawn and revoked nodes' agents |
 
 fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]`, EK hashes of 64 lowercase hex characters and LDevID fingerprints of 40, and leaves every entry as it is when the file is malformed or names a node or an EK hash as both registered and revoked. A node is in `nodes` while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and bans each agent whose node selector no entry carries any longer.
@@ -153,7 +153,7 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 ## Live state
 
-riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptide's agent attests by its LDevID, and optiplex's by EK hash. The allow list holds the EK hashes of both. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
+riptide, surge, swell and optiplex carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. optiplex's agent does not start, since its node has no `/dev/tpmrm0`, and fleetd does not list optiplex, whose verdict does not pass. swell is down. The allow list holds the EK hashes of riptide and optiplex. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 
@@ -161,7 +161,6 @@ riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptid
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
 - `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
 - `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
-- `nix/lib/inventory.nix`: the nodes file as Nix, for the LDevID aliases and talos-attest's inventory
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
