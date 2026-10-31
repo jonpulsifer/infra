@@ -109,6 +109,9 @@ func main() {
 		boot.HandleFunc("/", http.NotFound)
 		bs := &http.Server{Addr: addr, Handler: boot, ReadHeaderTimeout: 10 * time.Second,
 			ReadTimeout: 30 * time.Second, WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute}
+		bs.ConnContext = fleet.ConnContext
+		bs.Protocols = new(http.Protocols)
+		bs.Protocols.SetHTTP1(true)
 		go func() {
 			<-ctx.Done()
 			_ = bs.Shutdown(context.Background())
