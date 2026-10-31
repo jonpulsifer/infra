@@ -283,7 +283,8 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		}
 		workflows = kept
 	}
-	if err := r.nudgeOverdue(ctx, d, workflows); err != nil {
+	workflows, err = r.nudgeOverdue(ctx, d, workflows)
+	if err != nil {
 		return err
 	}
 	hardware := d.MAC != "" && d.Disk != ""
@@ -325,36 +326,91 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 	return err
 }
 
-// nudgeOverdue annotates each unfinished Workflow that is more than one pass
-// past its global timeout. Tinkerbell's controller checks the timeout only
-// when it reconciles a Workflow, and a silent agent writes nothing, so the
-// Workflow stays RUNNING, keeps netboot on and takes every new request. The
-// annotation is the write that makes the controller reconcile and set
-// TIMEOUT. A Workflow with no parseable deadline is left alone.
-func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Object) error {
+// nudgeOverdue ends each unfinished Workflow that is more than one pass past
+// its global timeout, and returns the Workflows it leaves. Tinkerbell's
+// controller checks the timeout only when it reconciles a Workflow, and a
+// silent agent writes nothing, so the Workflow stays RUNNING, keeps netboot on
+// and takes every new request. For a Workflow with a deadline, an annotation
+// is the write that makes the controller reconcile and set TIMEOUT.
+//
+// The controller sets the deadline only once the first action reports a start
+// time, which tink-agent sends only with that action's result. A run cut off
+// before then has no deadline, so the controller never ends it, and the next
+// netboot resumes it and wipes the disk. fleetd deletes such a Workflow once
+// its creation plus its global timeout is more than a pass past: a deleted
+// Workflow is no order to wipe, and Admit renders no code for it. A retirement
+// is left alone: decommissioning asks for it again at once, and the owner ends
+// it by moving the device out of decommissioning.
+func (r *Reconciler) nudgeOverdue(ctx context.Context, d Device, workflows []Object) ([]Object, error) {
 	now := r.Now()
+	var kept []Object
 	for _, wf := range workflows {
-		stop, ok := wf.GlobalExecutionStop()
-		if Finished(wf.State()) || !ok || now.Sub(stop) <= r.Config.Interval {
+		if Finished(wf.State()) {
+			kept = append(kept, wf)
 			continue
 		}
-		err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{OverdueAnnotation: now.UTC().Format(time.RFC3339)})
-		if errors.Is(err, ErrNotFound) {
+		if stop, ok := wf.GlobalExecutionStop(); ok {
+			kept = append(kept, wf)
+			if now.Sub(stop) > r.Config.Interval {
+				if err := r.annotateOverdue(ctx, d, wf, stop, now); err != nil {
+					return nil, err
+				}
+			}
 			continue
 		}
+		ended, err := r.endWithoutDeadline(ctx, d, wf, now)
 		if err != nil {
-			return fmt.Errorf("annotate overdue %s: %w", wf.Name(), err)
+			return nil, err
 		}
-		action := wf.CurrentAction()
-		why := fmt.Sprintf("fleetd: Workflow %s passed its global timeout at %s while %q was current, and fleetd asked Tinkerbell to end it", wf.Name(), stop.UTC().Format(time.RFC3339), action)
-		if action == "reboot" {
-			why += "; the install and next-boot reported success and the reboot's report was lost, so the disk holds the install"
-		}
-		if err := r.journalOnce(ctx, "overdue/"+wf.Name(), d, "warning", why); err != nil {
-			return err
+		if !ended {
+			kept = append(kept, wf)
 		}
 	}
-	return nil
+	return kept, nil
+}
+
+func (r *Reconciler) annotateOverdue(ctx context.Context, d Device, wf Object, stop, now time.Time) error {
+	err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{OverdueAnnotation: now.UTC().Format(time.RFC3339)})
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("annotate overdue %s: %w", wf.Name(), err)
+	}
+	action := wf.CurrentAction()
+	why := fmt.Sprintf("fleetd: Workflow %s passed its global timeout at %s while %q was current, and fleetd asked Tinkerbell to end it", wf.Name(), stop.UTC().Format(time.RFC3339), action)
+	if action == "reboot" {
+		why += "; the install and next-boot reported success and the reboot's report was lost, so the disk holds the install"
+	}
+	return r.journalOnce(ctx, "overdue/"+wf.Name(), d, "warning", why)
+}
+
+// endWithoutDeadline deletes a Workflow that has no deadline once its
+// creation plus its global timeout is more than a pass past, and says whether
+// it did. The delete holds only while the Workflow is as it was listed, so a
+// first report that lands in between keeps the run.
+func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object, now time.Time) (bool, error) {
+	created := wf.Created()
+	if created.IsZero() || wf.Labels()[ActionLabel] == ActionRetire {
+		return false, nil
+	}
+	timeout, ok := wf.GlobalTimeout()
+	if !ok {
+		timeout = TemplateGlobalTimeout
+	}
+	if now.Sub(created.Add(timeout)) <= r.Config.Interval {
+		return false, nil
+	}
+	err := r.Kube.DeleteUnchanged(ctx, WorkflowResource, wf.Name(), wf.ResourceVersion())
+	if errors.Is(err, ErrConflict) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("end %s: %w", wf.Name(), err)
+	}
+	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended: no first report within its global timeout")
+	why := fmt.Sprintf("fleetd: Workflow %s never reported its first action within its global timeout of %s from its creation at %s, so Tinkerbell set it no deadline, and fleetd deleted it. A power loss, a machine that never reached HookOS, or an agent that died before wipe-disk reported stops a run there. The disk may be partly wiped or may still hold the old install, and no later boot resumes the run; set desired_action to run it again", wf.Name(), timeout, created.UTC().Format(time.RFC3339))
+	return true, r.journalOnce(ctx, "overdue/"+wf.Name(), d, "warning", why)
 }
 
 // start makes sure one Workflow runs for the device and that NetBox names it,

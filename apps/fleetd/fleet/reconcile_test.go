@@ -237,7 +237,10 @@ func (f *fakeNetBox) handler() http.Handler {
 type fakeKube struct {
 	mu      sync.Mutex
 	objects map[string]Object
-	log     []string
+	// racing replaces an object just before its delete, as a write that lands
+	// between fleetd's read and its delete.
+	racing map[string]Object
+	log    []string
 }
 
 func matches(o Object, selector string) bool {
@@ -335,8 +338,23 @@ func (f *fakeKube) handler() http.Handler {
 			}
 			json.NewEncoder(w).Encode(map[string]any{"items": items})
 		case http.MethodDelete:
-			if _, ok := f.objects[r.URL.Path]; !ok {
+			if o, ok := f.racing[r.URL.Path]; ok {
+				f.objects[r.URL.Path] = o
+				delete(f.racing, r.URL.Path)
+			}
+			o, ok := f.objects[r.URL.Path]
+			if !ok {
 				http.NotFound(w, r)
+				return
+			}
+			var opts struct {
+				Preconditions *struct {
+					ResourceVersion string `json:"resourceVersion"`
+				} `json:"preconditions"`
+			}
+			json.Unmarshal(body, &opts)
+			if opts.Preconditions != nil && opts.Preconditions.ResourceVersion != o.ResourceVersion() {
+				http.Error(w, "the object has been modified", http.StatusConflict)
 				return
 			}
 			delete(f.objects, r.URL.Path)
@@ -1234,7 +1252,14 @@ func TestInstallingTakesEveryAttestedVerdict(t *testing.T) {
 }
 
 func overdueWorkflow(name, stop, state, action string) Object {
-	wf := workflowObject(name, "riptide", "provision", testNow.UTC().Format(time.RFC3339), state)
+	return agedWorkflow(name, 0, stop, state, action)
+}
+
+// agedWorkflow is a provision Workflow created age before testNow, at
+// resourceVersion 1.
+func agedWorkflow(name string, age time.Duration, stop, state, action string) Object {
+	wf := workflowObject(name, "riptide", "provision", testNow.Add(-age).UTC().Format(time.RFC3339), state)
+	wf.metadata()["resourceVersion"] = "1"
 	st, _ := wf["status"].(map[string]any)
 	if st == nil {
 		st = map[string]any{}
@@ -1249,18 +1274,31 @@ func overdueWorkflow(name, stop, state, action string) Object {
 	return wf
 }
 
-// A Workflow more than a pass past its global timeout is annotated so that
-// Tinkerbell's controller ends it, and journaled once. One inside the pass,
-// a finished one and one with no usable deadline are left alone.
+// A Workflow more than a pass past its deadline is annotated so that
+// Tinkerbell's controller ends it. One with no usable deadline is deleted once
+// its creation plus its global timeout is more than a pass past. Each is
+// journaled once. A run inside its window, a finished one, a run whose
+// deadline is still ahead however old it is, are left alone.
 func TestOverdueWorkflowsAreNudged(t *testing.T) {
 	at := func(d time.Duration) string { return testNow.Add(d).UTC().Format(time.RFC3339) }
+	past := TemplateGlobalTimeout + 2*time.Minute
+	short := agedWorkflow("short", 3*time.Minute, "", "STATE_RUNNING", "wipe-disk")
+	short["status"].(map[string]any)["globalTimeout"] = 60
+	long := agedWorkflow("long", past, "", "STATE_RUNNING", "wipe-disk")
+	long["status"].(map[string]any)["globalTimeout"] = 7200
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		wfBase + "late":     overdueWorkflow("late", at(-10*time.Minute), "STATE_RUNNING", "reboot"),
 		wfBase + "recent":   overdueWorkflow("recent", at(-30*time.Second), "STATE_RUNNING", "install"),
 		wfBase + "done":     overdueWorkflow("done", at(-10*time.Minute), "STATE_SUCCESS", "reboot"),
-		wfBase + "nodeadln": overdueWorkflow("nodeadln", "", "STATE_RUNNING", "install"),
-		wfBase + "garbled":  overdueWorkflow("garbled", "soon", "STATE_RUNNING", "install"),
+		wfBase + "slowboot": agedWorkflow("slowboot", past, at(5*time.Minute), "STATE_RUNNING", "install"),
+		wfBase + "nodeadln": agedWorkflow("nodeadln", past, "", "STATE_RUNNING", "wipe-disk"),
+		wfBase + "garbled":  agedWorkflow("garbled", past, "soon", "STATE_RUNNING", "wipe-disk"),
+		wfBase + "pending":  agedWorkflow("pending", past, "", "STATE_PENDING", ""),
+		wfBase + "fresh":    agedWorkflow("fresh", TemplateGlobalTimeout, "", "STATE_PENDING", ""),
+		wfBase + "failed":   agedWorkflow("failed", past, "", "STATE_FAILED", "install"),
+		wfBase + "short":    short,
+		wfBase + "long":     long,
 	}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -1269,10 +1307,15 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"late", "recent", "done", "nodeadln", "garbled"} {
+	ended := map[string]bool{"nodeadln": true, "garbled": true, "pending": true, "short": true}
+	for _, name := range []string{"late", "recent", "done", "slowboot", "nodeadln", "garbled", "pending", "fresh", "failed", "short", "long"} {
 		wf := kube.get(wfBase + name)
+		if gone := wf == nil; gone != ended[name] {
+			t.Errorf("%s deleted = %v, want %v", name, gone, ended[name])
+			continue
+		}
 		if wf == nil {
-			t.Fatalf("%s was deleted", name)
+			continue
 		}
 		a, _ := wf.metadata()["annotations"].(map[string]any)
 		_, got := a[OverdueAnnotation]
@@ -1280,15 +1323,122 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 			t.Errorf("%s annotated = %v, want %v", name, got, want)
 		}
 	}
-	if len(nb.journals) != 1 {
+	if len(nb.journals) != 1+len(ended) {
 		t.Fatalf("journals %v", nb.journals)
 	}
-	c := nb.journals[0]["comments"].(string)
-	if !strings.Contains(c, "late") || !strings.Contains(c, "reboot's report was lost") {
-		t.Errorf("journal %q", c)
+	for _, j := range nb.journals {
+		c := j["comments"].(string)
+		switch {
+		case strings.Contains(c, "Workflow late "):
+			if !strings.Contains(c, "reboot's report was lost") {
+				t.Errorf("journal %q", c)
+			}
+		case strings.Contains(c, "never reported its first action"):
+			if !strings.Contains(c, "fleetd deleted it") || !strings.Contains(c, "set desired_action") {
+				t.Errorf("journal %q", c)
+			}
+		default:
+			t.Errorf("journal %q", c)
+		}
 	}
 	late := kube.get(wfBase + "late")
 	if _, ok := late["spec"]; ok || late.State() != "STATE_RUNNING" {
 		t.Errorf("the patch touched more than metadata: %v", late)
+	}
+}
+
+// A run cut off before its first report is ended once, netboot goes off, no
+// code is rendered for it, and the owner's next request starts a new run
+// instead of adopting the old one.
+func TestWorkflowWithoutDeadlineEndsAndANewRunStarts(t *testing.T) {
+	const old = "provision-riptide-1"
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": old})}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{
+		wfBase + old: agedWorkflow(old, TemplateGlobalTimeout+2*time.Minute, "", "STATE_PENDING", ""),
+	}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	pass := func() {
+		t.Helper()
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pass()
+	if kube.get(wfBase+old) != nil {
+		t.Fatal("the Workflow without a deadline survived")
+	}
+	assertNetboot(t, kube, false, "the run ended")
+	d, err := r.NetBox.BySerial(context.Background(), "folly", "MXL0172Q6L")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.provisionRunning(context.Background(), d) {
+		t.Error("Admit would render a code for the ended run")
+	}
+	pass()
+	if len(nb.journals) != 1 {
+		t.Fatalf("journals %v", nb.journals)
+	}
+
+	nb.set("desired_action", "provision")
+	pass()
+	names := kube.workflows()
+	if len(names) != 1 || names[0] == old {
+		t.Fatalf("workflows %v", names)
+	}
+	assertNetboot(t, kube, true, "the new run")
+	cf := nb.patches[len(nb.patches)-1]["custom_fields"].(map[string]any)
+	if cf["last_workflow"] != names[0] {
+		t.Errorf("last_workflow %v, want %s", cf["last_workflow"], names[0])
+	}
+}
+
+// A retirement without a deadline is left to decommissioning: deleting it
+// would only start another at once.
+func TestRetirementWithoutDeadlineIsLeftAlone(t *testing.T) {
+	const name = "retire-riptide-1"
+	wf := agedWorkflow(name, TemplateGlobalTimeout+2*time.Minute, "", "STATE_PENDING", "")
+	wf.metadata()["labels"].(map[string]any)[ActionLabel] = ActionRetire
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": name})}, ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{wfBase + name: wf}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if names := kube.workflows(); len(names) != 1 || names[0] != name {
+		t.Fatalf("workflows %v", names)
+	}
+	if len(nb.journals) != 0 {
+		t.Errorf("journals %v", nb.journals)
+	}
+}
+
+// A first report that lands between fleetd's read and its delete gives the
+// Workflow its deadline and a new resourceVersion, so the delete's
+// precondition fails and the run goes on.
+func TestEndingSparesAWorkflowThatJustReported(t *testing.T) {
+	past := TemplateGlobalTimeout + 2*time.Minute
+	reported := agedWorkflow("racing", past, testNow.Add(20*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING", "install")
+	reported.metadata()["resourceVersion"] = "2"
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", nil)}, ifaces: riptideIfaces()}
+	kube := &fakeKube{
+		objects: map[string]Object{wfBase + "racing": agedWorkflow("racing", past, "", "STATE_RUNNING", "wipe-disk")},
+		racing:  map[string]Object{wfBase + "racing": reported},
+	}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	for range 2 {
+		if err := r.Reconcile(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if wf := kube.get(wfBase + "racing"); wf == nil || wf.ResourceVersion() != "2" {
+		t.Fatalf("the run that reported was deleted: %v", wf)
+	}
+	assertNetboot(t, kube, true, "the run goes on")
+	if len(nb.journals) != 0 {
+		t.Errorf("journals %v", nb.journals)
 	}
 }
