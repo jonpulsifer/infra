@@ -31,6 +31,28 @@ tests:
         alertname: FleetInstallPending
         exp_alerts: []
 
+  # A node asks for a config fleetd does not hold at minutes 10 and 20, then is provisioned again.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_install_config_missing_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1x9 2x40
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetInstallConfigMissing
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FleetInstallConfigMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: An installed node asks for a Talos config fleetd does not hold
+              description: "A planned device's node asked for its first config after its provision, and fleetd holds none for it: a reboot of spore since the render drops every config that waits, as does the TTL. The node asks in vain and the device stays planned. Read the device's journal in NetBox, then set desired_action to provision. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 55m
+        alertname: FleetInstallConfigMissing
+        exp_alerts: []
+
   # spore's boot files and enrollment name serve until minute 10, then both checks fail.
   - interval: 1m
     input_series:

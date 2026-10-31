@@ -343,12 +343,14 @@ func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
 	it := newInstallTest(t, "planned", nil)
 	other := "00000000-0000-0000-0000-000000000000"
 	wrong := strings.Repeat("W", 43)
-	// Nothing is held: a 404 reaches neither NetBox nor the journal.
+	// A UUID NetBox does not hold is looked up once a window and never
+	// journaled; a malformed one is not looked up.
 	pages := it.nb.pages
-	it.fetch(http.MethodGet, testUUID, wrong, nil)
+	it.fetch(http.MethodGet, other, wrong, nil)
+	it.fetch(http.MethodGet, other, wrong, nil)
 	it.fetch(http.MethodGet, "-", "-", nil)
-	if it.nb.pages != pages || journalCount(it.nb, "warning") != 0 {
-		t.Fatal("a 404 for a machine with no config reached NetBox")
+	if it.nb.pages != pages+1 || journalCount(it.nb, "warning") != 0 {
+		t.Fatalf("a 404 for a machine NetBox does not hold: %d lookups, %d journal entries", it.nb.pages-pages, journalCount(it.nb, "warning"))
 	}
 	if code, _ := it.render(goodRequest()); code != 201 {
 		t.Fatal(code)
@@ -371,6 +373,79 @@ func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
 	}
 	if !it.held(testCode) {
 		t.Fatal("a wrong code burned the config")
+	}
+}
+
+// A node whose config is gone, as after a reboot of spore, asks for it in
+// vain: the first ask of a planned device after its provision is journaled
+// once and counted, later asks in the window reach neither NetBox nor the
+// journal, and each later window counts again without a second entry.
+func TestAFetchForAConfigFleetdDoesNotHoldIsJournaledOnce(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	pages := it.nb.pages
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+		t.Fatalf("answered %d", w.Code)
+	}
+	got := it.nb.journalWith("the node asked for its Talos config, and fleetd holds none for it")
+	if len(got) != 1 || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
+		t.Fatalf("journals %v, missing %d", it.nb.journals, it.in.Metrics.ConfigMissing.Load())
+	}
+	for _, want := range []string{"a reboot of spore since the render of " + provWF + " drops it", "Set desired_action to provision"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("journal %q lacks %q", got[0], want)
+		}
+	}
+	if p := lastPatch(it.nb); p != nil {
+		t.Fatalf("the 404 changed the device: %v", p)
+	}
+	lookups := it.nb.pages - pages
+	it.now = it.now.Add(notFoundEvery - time.Second)
+	it.fetch(http.MethodGet, testUUID, testCode, nil)
+	if it.nb.pages-pages != lookups || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
+		t.Fatal("a second ask within the window reached NetBox")
+	}
+	it.now = it.now.Add(time.Second)
+	it.fetch(http.MethodGet, testUUID, testCode, nil)
+	if journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 2 {
+		t.Fatalf("after the window: %d entries, missing %d", journalCount(it.nb, "warning"), it.in.Metrics.ConfigMissing.Load())
+	}
+}
+
+// Only a planned device after its provision counts as a lost config, and
+// fetches for unknown UUIDs reach NetBox at most once a second in all.
+func TestAMissingConfigIsJournaledOnlyForAPlannedProvision(t *testing.T) {
+	for name, tc := range map[string]struct {
+		status string
+		cf     map[string]any
+	}{
+		"active":            {"active", nil},
+		"after a wipe":      {"planned", map[string]any{"last_workflow": "wipe-riptide-1700000000"}},
+		"another's run":     {"planned", map[string]any{"last_workflow": "provision-swell-1700000000"}},
+		"no smbios on file": {"planned", nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			it := newInstallTest(t, tc.status, tc.cf)
+			if name == "no smbios on file" {
+				it.nb.set("smbios_uuid", nil)
+			}
+			it.fetch(http.MethodGet, testUUID, testCode, nil)
+			if len(it.nb.journals) != 0 || it.in.Metrics.ConfigMissing.Load() != 0 {
+				t.Fatalf("journals %v", it.nb.journals)
+			}
+		})
+	}
+	it := newInstallTest(t, "active", nil)
+	pages := it.nb.pages
+	for _, uuid := range []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000003"} {
+		it.fetch(http.MethodGet, uuid, testCode, nil)
+	}
+	if it.nb.pages-pages != 1 {
+		t.Fatalf("three unknown UUIDs in one second made %d lookups", it.nb.pages-pages)
+	}
+	it.now = it.now.Add(missingLookupEvery)
+	it.fetch(http.MethodGet, "00000000-0000-0000-0000-000000000002", testCode, nil)
+	if it.nb.pages-pages != 2 {
+		t.Fatalf("a UUID refused by the global limit was not looked up a second later: %d lookups", it.nb.pages-pages)
 	}
 }
 

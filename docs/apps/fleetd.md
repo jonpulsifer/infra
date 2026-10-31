@@ -34,7 +34,7 @@ fleetd keeps at most one unfinished Workflow per device, because Tinkerbell hand
 ## Limits
 
 - An approved EK binding is only as true as its evidence. fleetd admits the TPM the nodes file names, so the receiving scan or the supplier's record that ties the chassis serial to its EKs is the trust source. A serial that SMBIOS or Redfish reports, a pending claim and the console of a box nobody checked prove nothing.
-- Rendered configs live in a tmpfs, `/run/fleetd/configs`, which a restart of fleetd keeps and a reboot of spore drops; that node's provision then runs again.
+- Rendered configs live in a tmpfs, `/run/fleetd/configs`, which a restart of fleetd keeps and a reboot of spore drops, with the record of a served config NetBox has no release for. Nothing runs the provision again: a run goes on through the outage, so a node installed under a dropped config asks for it in vain and its device stays `planned`. fleetd journals the first ask, `FleetInstallConfigMissing` fires while the node asks, and the owner sets `desired_action` to `provision`. The configs stay off disk because each carries the cluster's secrets.
 - One issuer signs every LDevID. The bundle `terraform/pki/certs/folly-devid-ca.pem` keeps capsule's, forge's software and spore's CAs, so an LDevID another CA issued verifies until its node renews it from spore's.
 - A TPM 1.2 node, or class `worker-g2`, cannot attest, so it never installs from here.
 - The disk check trusts the serial a disk reports. Two disks that report one serial, such as clones or some USB bridges, are refused rather than told apart, and a disk that reports none through sysfs cannot be wiped or installed from here.
@@ -58,6 +58,7 @@ Each pass also writes `/var/lib/fleetd/spire-nodes.json`, the nodes that spore's
 | `TalosAttestUnattendedBootFailed` | A node booted HookOS unprompted and failed attestation; nothing was recorded | Read the device's NetBox journal |
 | `BootFilesNotServed` | dnsmasq or nginx on spore does not serve iPXE or HookOS | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `FleetInstallPending` | A rendered config has waited 30 minutes for its node | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
+| `FleetInstallConfigMissing` | A planned device's node asks for a config fleetd does not hold, as after a reboot of spore | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestQuarantined` | A node's newest verdict is a quarantine | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestWaitingForApproval` | An intake waits for an approved EK binding | [Provision a node](../runbooks/provision-a-node.md#approve-a-machines-eks) |
 | `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's daily quote or renewal fails | [Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |

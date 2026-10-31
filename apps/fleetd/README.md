@@ -169,6 +169,17 @@ config stays for the node's next try. Each reconcile pass also drops the unread 
 that is not `planned`, or that NetBox no longer lists as live. With `FLEET_CONFIG_DIR`, configs survive a restart with their TTL and
 burn state.
 
+`FLEET_CONFIG_DIR` is a tmpfs, so a reboot of spore drops every config that waits, and the record
+of a served one whose release NetBox has not taken. A run goes on through the outage, so its node
+boots its install and asks for a config fleetd no longer holds. fleetd keeps the configs off disk on
+purpose: each carries the cluster's secrets, a control plane's its CA keys, and a file deleted from
+flash is not gone. A fetch for a UUID with no config is looked up in NetBox by `smbios_uuid`, at most
+once every ten minutes per machine and once a second in all, since the endpoint is
+unauthenticated. When it is a `planned` device whose `last_workflow` is its provision, fleetd counts
+`fleet_install_config_missing_total` on each lookup and journals once per run that the node asks
+for a config fleetd does not hold; the owner sets `desired_action` to `provision`. A UUID NetBox
+does not hold is only logged.
+
 ## NetBox contract
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
