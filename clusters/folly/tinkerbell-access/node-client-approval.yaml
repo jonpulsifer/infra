@@ -9,12 +9,14 @@
 # The policy below refuses its account the approval of any request a bootstrap token made. It
 # holds whatever the binding says. Renewals, which a node asks for as system:node:<name>, pass.
 #
-# The binding is taken over with no subjects, so the controller manager does not try. Talos
+# The binding is taken over with one subject, a group no one is in, so the controller manager
+# does not try. The subject list is atomic: Flux's forced apply owns it only when the manifest
+# sends one, and an empty list is never sent. Talos
 # creates each of its bootstrap manifests once, but the Talos root's talos_cluster runs Talos's
 # Kubernetes upgrade when kubernetes_version changes, and that syncs the bootstrap manifests with
 # forced ownership: the subject is back until Flux reconciles tinkerbell-access, up to an hour.
 # fleetd exports the subjects it reads as fleet_node_client_approval_subjects, and
-# NodeClientApprovalBindingRestored fires when they are not none.
+# NodeClientApprovalBindingRestored fires when any besides the placeholder is bound.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -26,7 +28,10 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
   name: system:certificates.k8s.io:certificatesigningrequests:nodeclient
-subjects: []
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: Group
+    name: fleetd:no-node-client-approval
 ---
 # The controller manager runs with --use-service-account-credentials, so its CSR approver is
 # certificate-controller; without that flag it is system:kube-controller-manager.
