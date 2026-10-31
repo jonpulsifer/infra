@@ -140,10 +140,11 @@ against Ubuntu's signed `SHA256SUMS` and the pin, outside the namespace; the Doc
 digest, gets the Dockerfile's packages from its own `apk`, then the image and `install-ubuntu` as
 its entrypoint. `template NAME --os ubuntu` applies the committed Template with spike 06's deltas
 (`ubuntu-template.py`): the install action runs the installer with `DISK`, `PAYLOAD` and
-`NODE_HOSTNAME` and needs the payload, and next-boot finds the ESP by its type and treats other
-`Ubuntu` entries as stale. Each delta must match the Template exactly once, so a Template that has
-moved on fails there. The serial check, the pull before the wipe, the EFI probe and the erase stay
-as committed.
+`NODE_HOSTNAME` and needs the payload. A Template whose next-boot finds the ESP by the name `EFI`
+also gets next-boot deltas: it finds the ESP by its type and treats other `Ubuntu` entries as
+stale. A Template whose `FLEET_OS_ENTRIES` names Ubuntu has one next-boot for every OS and keeps
+it. Each delta must match the Template exactly once, so a Template that has moved on fails there.
+The serial check, the pull before the wipe, the EFI probe and the erase stay as committed.
 
 ```sh
 tink-lab.sh vm create n1 --disk sys:8G:nvme --disk keep:4G --mem 4096

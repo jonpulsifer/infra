@@ -2,11 +2,13 @@
 
 The deltas are spike 06's, applied to the Template as it stands rather than to a copy of it:
 the install action runs the Ubuntu installer image with DISK, PAYLOAD and NODE_HOSTNAME and
-needs the payload the attest step leaves, and next-boot finds the ESP by its type, since
-Ubuntu's has no name, and treats other entries named Ubuntu as stale. Everything else, the
-serial check, the pull before the wipe, the EFI probe and the erase, stays as it is. Each
-replaced text must occur exactly once, so a Template that has moved on fails here instead of
-running half changed.
+needs the payload the attest step leaves. A Template whose next-boot finds the ESP by the name
+EFI and deletes only Talos entries also gets next-boot deltas: it finds the ESP by its type,
+since Ubuntu's has no name, and treats other entries named Ubuntu as stale. A Template whose
+next-boot serves every fleet OS (FLEET_OS_ENTRIES names Ubuntu) needs none of them, and they
+are skipped. Everything else, the serial check, the pull before the wipe, the EFI probe and the
+erase, stays as it is. Each replaced text must occur exactly once, and a skipped delta's mark
+too, so a Template that has moved on fails here instead of running half changed.
 """
 
 import sys
@@ -39,9 +41,14 @@ DELTAS = [
     (
         """esp=$(sgdisk -p "$DISK" | awk '$NF == "EFI" { print $1; exit }')""",
         """esp=$(sgdisk -p "$DISK" | awk '$6 == "EF00" { print $1; exit }')""",
+        "grep -qi '^Partition GUID code: C12A7328-F81F-11D2-BA4B-00A0C93EC93B'",
     ),
-    ('fail "$DISK has no partition named EFI"', 'fail "$DISK has no EFI system partition"'),
-    ("grep -F 'Talos Linux UKI' | grep -iv", "grep -E '^Boot[0-9A-Fa-f]{4}\\*? Ubuntu' | grep -iv"),
+    ('fail "$DISK has no partition named EFI"', 'fail "$DISK has no EFI system partition"', 'fail "$DISK has no EFI system partition"'),
+    (
+        "grep -F 'Talos Linux UKI' | grep -iv",
+        "grep -E '^Boot[0-9A-Fa-f]{4}\\*? Ubuntu' | grep -iv",
+        'FLEET_OS_ENTRIES: "Talos Linux UKI|Ubuntu"',
+    ),
 ]
 
 
@@ -51,8 +58,12 @@ def indented(block: str, indent: str) -> str:
 
 def main() -> None:
     data = "\n" + sys.stdin.read()
-    for old, new in DELTAS:
+    for old, new, *done in DELTAS:
         old, new = textwrap.dedent(old), textwrap.dedent(new)
+        if done and old not in data:
+            if data.count(done[0]) != 1:
+                sys.exit(f"ubuntu-template: the Template has neither {old.strip()[:50]!r} nor {done[0][:50]!r}")
+            continue
         if "\n" not in old:
             found = [("", data.count(old))]
         else:
