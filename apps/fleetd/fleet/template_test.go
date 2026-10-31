@@ -433,3 +433,62 @@ func TestTheDiskCheckFindsTheDeclaredDisk(t *testing.T) {
 		t.Errorf("a partition: %v %q", err, out)
 	}
 }
+
+func TestInstallRunsTheInstallerWithoutPulling(t *testing.T) {
+	scripts := actionScripts(t)
+	if !strings.Contains(scripts["install"], "docker run --rm --pull never --name provision-install") {
+		t.Error("install can pull the installer after the wipe")
+	}
+	if strings.Contains(scripts["install"], "docker pull") {
+		t.Error("install pulls the installer")
+	}
+	if !strings.Contains(scripts["wipe-disk"], `docker pull -q "$INSTALLER_IMAGE"`) {
+		t.Error("wipe-disk does not pull the installer")
+	}
+}
+
+// TestWipeFetchesTheInstallerFirst runs wipe-disk against a docker whose pull
+// fails: a run that installs refuses to wipe, and a run that does not install
+// pulls nothing.
+func TestWipeFetchesTheInstallerFirst(t *testing.T) {
+	wf := renderTemplate(t, provisionMap(t))
+	script := actionScripts(t)["wipe-disk"]
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
+	script, dev := withFakeDisks(t, script, dir,
+		fakeDisk{name: "nvme0n1", file: "device/serial", serial: "30DF7020FGKL        \n"})
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stub := "#!/bin/sh\nif [ \"$1\" = image ]; then exit 1; fi\nif [ \"$1\" = pull ]; then echo 'manifest unknown'; exit 1; fi\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	attested, code := filepath.Join(dir, "attested"), filepath.Join(dir, "install_code")
+	os.WriteFile(attested, nil, 0o600)
+	os.WriteFile(code, []byte(testCode), 0o600)
+	run := func(install, image string) string {
+		cmd := exec.Command(sh, "-c", script)
+		cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH")}
+		for k, v := range wf.Tasks[0].Environment {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+		cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL="+install, "INSTALLER_IMAGE="+image, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dev, "nvme0n1"))
+		out, _ := cmd.CombinedOutput()
+		return string(out)
+	}
+	if out := run("true", "ghcr.io/x/y:v1"); !strings.Contains(out, "cannot be pulled (manifest unknown); nothing wiped") || strings.Contains(out, "wiping every partition") {
+		t.Errorf("an unpullable installer did not stop the wipe: %q", out)
+	}
+	if out := run("true", ""); !strings.Contains(out, "no installer image is declared; nothing wiped") {
+		t.Errorf("an empty installer image did not stop the wipe: %q", out)
+	}
+	if out := run("false", "ghcr.io/x/y:v1"); strings.Contains(out, "pulling") || !strings.Contains(out, "wiping every partition") {
+		t.Errorf("a run without install fetched an installer: %q", out)
+	}
+}
