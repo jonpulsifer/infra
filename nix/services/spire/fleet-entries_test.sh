@@ -72,7 +72,8 @@ state() {
     {entries: [$e[] | {id: .[0], spiffe_id: (.[1] | sp), parent_id: (.[2] | sp), selectors: [.[3:][] | sel]}],
      agents: [$a[] | {id: (.[0] | sp), selectors: [.[1:][] | sel], banned: false}]}' >"$STATE"
 }
-nodes() { jq -n --argjson n "$1" '{nodes: $n}' >"$NODES_FILE"; }
+# nodes <nodes> [<revoked>]
+nodes() { jq -n --argjson n "$1" --argjson r "${2:-[]}" '{nodes: $n, revoked: $r}' >"$NODES_FILE"; }
 apply() {
   : >"$LOG"
   rc=0
@@ -90,10 +91,13 @@ check() {
 # issued <spiffe path> <parent path>: how many entries issue it.
 issued() { jq --arg s "$1" --arg p "$2" '[.entries[] | select(.spiffe_id.path == $s and .parent_id.path == $p)] | length' "$STATE"; }
 agent() { jq -r --arg p "$1" '.agents[] | select(.id.path == $p) | if .banned then "banned" else "live" end' "$STATE"; }
+fpS=$(printf '5%.0s' {1..40})
+fpOld=$(printf '6%.0s' {1..40})
 
-riptide='{"name":"riptide","ek_hashes":["'$hashA'"]}'
-surge='{"name":"surge","ek_hashes":["'$hashB'"]}'
-agents='[["/spire/agent/tpm_devid/r1","tpm_devid:subject:cn:riptide"],["/spire/agent/tpm_devid/s1","tpm_devid:subject:cn:surge"]]'
+riptide='{"name":"riptide","ek_hashes":["'"$hashA"'"]}'
+surge='{"name":"surge","ek_hashes":["'"$hashB"'"]}'
+agents='[["/spire/agent/tpm_devid/r1","tpm_devid:subject:cn:riptide"],["/spire/agent/tpm_devid/'"$fpS"'","tpm_devid:subject:cn:surge"]]'
+s1=/spire/agent/tpm_devid/$fpS
 
 state '[]' "$agents"
 nodes "[$riptide,$surge]"
@@ -105,8 +109,15 @@ check "a second run changes nothing" '[ "$rc" = 0 ] && [ ! -s "$LOG" ]'
 
 nodes "[$riptide]"
 apply
-check "a withdrawn node loses its entries and its agent" \
-  '[ "$rc" = 0 ] && [ "$(issued /node/surge /spire/server)" = 0 ] && [ "$(issued /ns/spire-test/sa/uploader /node/surge)" = 0 ] && [ -z "$(agent /spire/agent/tpm_devid/s1)" ] && [ "$(agent /spire/agent/tpm_devid/r1)" = live ]'
+check "a withdrawn node loses its entries, and its agent is banned" \
+  '[ "$rc" = 0 ] && [ "$(issued /node/surge /spire/server)" = 0 ] && [ "$(issued /ns/spire-test/sa/uploader /node/surge)" = 0 ] && [ "$(agent "$s1")" = banned ] && [ "$(agent /spire/agent/tpm_devid/r1)" = live ]'
+apply
+check "a banned agent is not banned again" '[ "$rc" = 0 ] && [ ! -s "$LOG" ]'
+
+nodes "[$riptide,$surge]"
+apply
+check "a node registered again has its banned agent evicted, so it attests again" \
+  '[ "$rc" = 0 ] && [ "$(issued /node/surge /spire/server)" = 2 ] && [ -z "$(agent "$s1")" ] && grep -qx "evict spiffe://lolwtf.ca$s1" "$LOG"'
 
 state '[]' "$agents"
 nodes "[$riptide,$surge]"
@@ -115,7 +126,7 @@ nodes '[]'
 cp "$STATE" "$tmp/before"
 apply
 check "withdrawing two nodes in one run is refused and changes nothing" \
-  '[ "$rc" = 1 ] && grep -q "refusing to withdraw 2 nodes" "$tmp/out" && [ ! -s "$LOG" ] && cmp -s "$STATE" "$tmp/before"'
+  '[ "$rc" = 1 ] && grep -q "refusing to withdraw or ban 2 nodes" "$tmp/out" && [ ! -s "$LOG" ] && cmp -s "$STATE" "$tmp/before"'
 
 printf 'riptide\n' >"$WITHDRAW_OVERRIDE"
 apply
@@ -140,10 +151,46 @@ check "an entry a git- entry issues is not made again" \
   '[ "$(issued /node/surge /spire/server)" = 2 ] && [ "$(jq "[.entries[] | select(.id | startswith(\"fleet-\")) | select(.spiffe_id.path == \"/node/surge\" and .selectors[0].type == \"tpm_devid\")] | length" "$STATE")" = 0 ]'
 nodes "[$riptide]"
 apply
-check "an agent whose selector a git- entry still carries stays" \
-  '[ "$rc" = 0 ] && [ "$(issued /node/surge /spire/server)" = 1 ] && [ "$(agent /spire/agent/tpm_devid/s1)" = live ]'
+check "an agent whose selector a git- entry still carries is not banned" \
+  '[ "$rc" = 0 ] && [ "$(issued /node/surge /spire/server)" = 1 ] && [ "$(agent "$s1")" = live ]'
+nodes "[$riptide]" '[{"name":"surge","ek_hashes":["'"$hashB"'"],"ldevids":["'"$fpS"'"]}]'
+apply
+check "a revoked node's agent is banned even while a git- entry carries its selector" \
+  '[ "$rc" = 0 ] && [ "$(agent "$s1")" = banned ] && [ "$(issued /node/surge /spire/server)" = 1 ]'
 
-for bad in '{"nodes":[{"name":"Bad Name","ek_hashes":[]}]}' '{"nodes":[],"extra":1}' '{"nodes":[{"name":"a","ek_hashes":["xyz"]}]}'; do
+state '[]' "$agents"
+jq '.agents += [
+  {id: {trust_domain: "lolwtf.ca", path: "/spire/agent/tpm_devid/'"$fpOld"'"}, selectors: [{type: "tpm_devid", value: "subject:cn:surge"}], banned: false},
+  {id: {trust_domain: "lolwtf.ca", path: "/spire/agent/tpm/'"$hashB"'"}, selectors: [{type: "tpm", value: "pub_hash:'"$hashB"'"}], banned: false}]' \
+  "$STATE" >"$tmp/s" && mv "$tmp/s" "$STATE"
+nodes "[$riptide]" '[{"name":"surge","ek_hashes":["'"$hashB"'"],"ldevids":[]}]'
+apply
+check "a revoked node's agents are banned by its CN and its EK hash, whatever LDevID they hold" \
+  '[ "$rc" = 0 ] && [ "$(agent "$s1")" = banned ] && [ "$(agent /spire/agent/tpm_devid/$fpOld)" = banned ] && [ "$(agent /spire/agent/tpm/$hashB)" = banned ] && [ "$(agent /spire/agent/tpm_devid/r1)" = live ]'
+nodes "[$riptide]" '[{"name":"surge","ek_hashes":[],"ldevids":[]}]'
+apply
+check "a revoked node's banned agent stays banned" '[ "$rc" = 0 ] && [ "$(agent "$s1")" = banned ] && [ ! -s "$LOG" ]'
+
+state '[]' "$agents"
+nodes '[]' '[{"name":"riptide","ek_hashes":[],"ldevids":[]},{"name":"surge","ek_hashes":[],"ldevids":[]}]'
+apply
+check "revoking two nodes with live agents in one run is refused" \
+  '[ "$rc" = 1 ] && grep -q "refusing to withdraw or ban 2 nodes" "$tmp/out" && [ ! -s "$LOG" ]'
+
+state '[]' "$agents"
+printf '{"nodes":[%s]}' "$riptide" >"$NODES_FILE"
+apply
+check "a file with no revoked list is read" '[ "$rc" = 0 ] && [ "$(issued /node/riptide /spire/server)" = 2 ]'
+
+for bad in \
+  '{"nodes":[{"name":"Bad Name","ek_hashes":[]}]}' \
+  '{"nodes":[],"extra":1}' \
+  '{"nodes":[],"revoked":null}' \
+  '{"nodes":[{"name":"a","ek_hashes":["xyz"]}]}' \
+  '{"nodes":[],"revoked":[{"name":"a","ek_hashes":[],"ldevids":["XYZ"]}]}' \
+  '{"nodes":[],"revoked":[{"name":"a","ek_hashes":[]}]}' \
+  '{"nodes":[{"name":"a","ek_hashes":[]}],"revoked":[{"name":"a","ek_hashes":[],"ldevids":[]}]}' \
+  '{"nodes":[{"name":"a","ek_hashes":["'"$hashA"'"]}],"revoked":[{"name":"b","ek_hashes":["'"$hashA"'"],"ldevids":[]}]}'; do
   state '[]' "$agents"
   nodes "[$riptide]"
   apply

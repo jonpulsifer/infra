@@ -22,7 +22,7 @@ A node that passed attestation has an LDevID from the attest service, and its ag
 
 spore builds the EK hash allow list and the EK aliases from `ekHashes` in `nix/hosts/spore.nix`, and the LDevID aliases from `clusters/folly/inventory/nodes.yaml`. It registers the entries in `workloads` under each alias.
 
-fleetd registers the node by itself once its device is `active` with the verdict `attested`: it writes the node and its `ek_hash` pins to `/var/lib/fleetd/spire-nodes.json`, and `spire-server-fleet-entries` on spore creates the `fleet-*` entries. [Identity](../platform/identity.md#fleetd-entries) has the boundary. Check the result on spore with `spire-server entry show -socketPath /run/spire/server/private/api.sock`. A node that fleetd drops loses those entries and its agent is evicted.
+fleetd registers the node by itself once its device is `active` with the verdict `attested`: it writes the node and its `ek_hash` pins to `/var/lib/fleetd/spire-nodes.json`, and `spire-server-fleet-entries` on spore creates the `fleet-*` entries. [Identity](../platform/identity.md#fleetd-entries) has the boundary. Check the result on spore with `spire-server entry show -socketPath /run/spire/server/private/api.sock`. A node that fleetd drops loses those entries and its agent is banned. When fleetd registers it again, the applier evicts the banned agent so it attests afresh.
 
 1. Make sure that `nodes.yaml` on `main` lists the node, and that its `tpm`, its own or its model's, is `2.0`.
 2. If the node has no LDevID, read its EK hash, and on a branch add `<name> = "<hash>";` to `ekHashes`.

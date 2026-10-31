@@ -31,7 +31,10 @@ type Reconciler struct {
 	// SpireNodesFile is where each pass writes the nodes SPIRE registers,
 	// or empty to write none.
 	SpireNodesFile string
-	Now            func() time.Time
+	// Identities lists the identities fleetd issued, for the file's revoked
+	// nodes, or is nil to revoke none.
+	Identities func() ([]Identity, error)
+	Now        func() time.Time
 
 	// pass keeps a reconcile pass and an Admit apart, so one Workflow starts
 	// for a device; an Admit gives up waiting when its context ends.
@@ -213,7 +216,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		errs = append(errs, err)
 	}
 	if r.SpireNodesFile != "" && len(devices) > 0 {
-		if err := writeSpireNodes(r.SpireNodesFile, SpireNodesOf(devices)); err != nil {
+		if err := r.writeSpireNodes(devices); err != nil {
 			errs = append(errs, fmt.Errorf("SPIRE nodes: %w", err))
 		}
 	}

@@ -53,6 +53,17 @@ func run(log *slog.Logger) error {
 		return r.Admit(ctx, fleet.RenderRequest{Serial: req.Serial, UUID: req.UUID, Node: req.Node, Class: req.Class, Code: req.Code})
 	})
 	srv.V.Expected = r.Expected
+	r.Identities = func() ([]fleet.Identity, error) {
+		ids, err := srv.V.Store.Identities()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]fleet.Identity, len(ids))
+		for i, id := range ids {
+			out[i] = fleet.Identity(id)
+		}
+		return out, nil
+	}
 
 	var secret []byte
 	if f := os.Getenv("FLEET_WEBHOOK_SECRET_FILE"); f != "" {

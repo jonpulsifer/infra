@@ -168,21 +168,26 @@ in
     fleetEntries = {
       enable = lib.mkEnableOption ''
         the fleetd entry applier. It registers the nodes in `nodesFile`, which fleetd writes from
-        NetBox, under the entry IDs `fleet-*`, and withdraws a node that leaves the file by deleting
-        its entries and evicting its agent. It skips an entry that a `git-` entry or one made by hand
-        already issues, so the entries in `entries` win and both can stand during a move
+        NetBox, under the entry IDs `fleet-*`, withdraws a node that leaves the file by deleting its
+        entries and banning its agent, and bans the agents of each node the file revokes. It skips an
+        entry that a `git-` entry or one made by hand already issues, so the entries in `entries` win
+        and both can stand during a move
       '';
       nodesFile = lib.mkOption {
         type = lib.types.path;
         default = "/var/lib/fleetd/spire-nodes.json";
-        description = "The file fleetd writes: a `nodes` list of objects with a `name` and an `ek_hashes` list.";
+        description = ''
+          The file fleetd writes: a `nodes` list of objects with a `name` and an `ek_hashes` list,
+          and a `revoked` list of objects with a `name`, an `ek_hashes` list and an `ldevids` list of
+          LDevID SHA-1 fingerprints.
+        '';
       };
       maxWithdrawals = lib.mkOption {
         type = lib.types.ints.positive;
         default = 1;
         description = ''
-          The most nodes one run withdraws. A run that would withdraw more changes nothing and fails,
-          so a bulk edit in NetBox cannot withdraw the fleet at once.
+          The most nodes one run withdraws or bans as revoked. A run that would take more changes
+          nothing and fails, so a bulk edit in NetBox cannot withdraw the fleet at once.
         '';
       };
       withdrawOverride = lib.mkOption {
