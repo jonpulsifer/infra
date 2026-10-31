@@ -40,14 +40,14 @@ resource "restapi_object" "mounted_type" {
   destroy_data            = jsonencode({})
   ignore_server_additions = true
   data                    = jsonencode({ u_height = 1 })
-  depends_on              = [netbox_permission.terraform_manage]
+  depends_on              = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 resource "netbox_device_role" "rack_component" {
   name       = "rack-component"
   slug       = "rack-component"
   color_hex  = "607d8b"
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 resource "netbox_device_type" "rack_component" {
@@ -58,7 +58,7 @@ resource "netbox_device_type" "rack_component" {
   u_height        = each.value.height
   is_full_depth   = false
   tags            = [local.managed_tag]
-  depends_on      = [netbox_permission.terraform_manage]
+  depends_on      = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 resource "netbox_device" "rack_component" {

@@ -5,7 +5,7 @@ resource "netbox_site" "oldschool" {
   status      = "active"
   tags        = [local.managed_tag]
 
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 locals {
@@ -43,5 +43,5 @@ resource "netbox_rack" "lab" {
   status      = "active"
   tags        = [local.managed_tag]
 
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }

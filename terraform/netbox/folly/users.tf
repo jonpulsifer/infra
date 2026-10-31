@@ -70,6 +70,7 @@ resource "netbox_permission" "terraform_read" {
     "dcim.manufacturer",
     "dcim.platform",
     "dcim.site",
+    "extras.tag",
   ]
   users = [tonumber(netbox_user.terraform.id)]
 }

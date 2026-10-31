@@ -94,7 +94,7 @@ run "grants_fleetd_no_delete" {
   command = plan
 
   plan_options {
-    target = [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add]
+    target = [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add, netbox_permission.terraform_read]
   }
 
   variables {
@@ -104,6 +104,10 @@ run "grants_fleetd_no_delete" {
   assert {
     condition     = alltrue([for p in [netbox_permission.fleetd_read, netbox_permission.fleetd_change, netbox_permission.fleetd_add] : !contains(p.actions, "delete")])
     error_message = "fleetd deletes nothing in NetBox, so it must hold no delete permission."
+  }
+  assert {
+    condition     = contains(netbox_permission.terraform_read.object_types, "extras.tag") && netbox_permission.terraform_read.actions == toset(["view"])
+    error_message = "Terraform must be able to look up existing tags without managing them."
   }
 }
 

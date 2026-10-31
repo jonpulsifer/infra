@@ -40,7 +40,7 @@ resource "netbox_manufacturer" "lab" {
   for_each   = { asus = "ASUS", cisco = "Cisco", unknown = "Unknown", jetkvm = "JetKVM", philips-hue = "Philips Hue", cable-matters = "Cable Matters", iwillink = "iWillink", cyberpower = "CyberPower" }
   name       = each.value
   slug       = each.key
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 data "netbox_device_type" "lab" {
@@ -56,7 +56,7 @@ resource "netbox_device_type" "lab" {
   u_height        = 0
   is_full_depth   = false
   tags            = [local.managed_tag]
-  depends_on      = [netbox_permission.terraform_manage]
+  depends_on      = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 resource "netbox_device_role" "lab" {
@@ -64,7 +64,7 @@ resource "netbox_device_role" "lab" {
   name       = each.key
   slug       = each.key
   color_hex  = each.value
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 data "netbox_device_role" "gateway" {
@@ -80,7 +80,7 @@ resource "netbox_platform" "lab" {
   for_each   = { Windows = "windows", "Raspberry Pi OS" = "raspberry-pi-os" }
   name       = each.key
   slug       = each.value
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 # The owner's lifecycle and custom fields survive subsequent inventory updates.
@@ -98,7 +98,7 @@ resource "netbox_device" "lab" {
   lifecycle {
     ignore_changes = all
   }
-  depends_on = [netbox_permission.terraform_manage]
+  depends_on = [netbox_permission.terraform_manage, netbox_permission.terraform_read]
 }
 
 resource "restapi_object" "lab_declared" {
