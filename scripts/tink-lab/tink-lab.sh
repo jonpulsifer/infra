@@ -23,7 +23,7 @@
 #   agent-net NAME cut|restore [--when COND] [--reject]
 #   kill PROC [--signal SIG] [--when COND] | stop PROC | start PROC
 #   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK
-#   efi NAME show|next ENTRY|order ENTRY,...
+#   efi NAME show|next ENTRY|order ENTRY,...|entry N DESC PARTUUID FILE|delete N|fill [FREE]|unfill
 #   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow [--when COND] [--delay S]
 #   observe NAME [--no-console]
 #   hookos-docker NAME ARGS...          hook-docker's docker on the machine's HookOS, such as
@@ -1803,15 +1803,20 @@ case $cmd in
     need_vm "${1:?efi needs a machine}"
     case ${2:-show} in
       show) efi "$1" ;;
-      next | order)
+      next | order | entry | delete | fill | unfill)
         # The variable store is QEMU's while it runs; a write needs the machine off.
         running_vm "$1" && die "power $1 off before changing its EFI variables"
-        flag=--boot-next
-        [ "$2" = order ] && flag=--boot-order
-        out=$(efi "$1" "$flag" "${3:?efi $2 needs a value}")
+        case $2 in
+          next) out=$(efi "$1" --boot-next "${3:?efi next needs an entry}") ;;
+          order) out=$(efi "$1" --boot-order "${3:?efi order needs entries}") ;;
+          entry) out=$(efi "$1" --entry "${3:?efi entry needs N DESC PARTUUID FILE}" "${4:?}" "${5:?}" "${6:?}") ;;
+          delete) out=$(efi "$1" --delete "${3:?efi delete needs an entry}") ;;
+          fill) out=$(efi "$1" --fill "${3:-4096}") ;;
+          unfill) out=$(efi "$1" --unfill) ;;
+        esac
         event event=efi vm="$1" action="$2" "result=$out"
         ;;
-      *) die "efi: show, next ENTRY|Pxe|Hdd or order ENTRY,..." ;;
+      *) die "efi: show, next ENTRY|Pxe|Hdd, order ENTRY,..., entry N DESC PARTUUID FILE, delete N, fill [FREE] or unfill" ;;
     esac
     ;;
   registry)

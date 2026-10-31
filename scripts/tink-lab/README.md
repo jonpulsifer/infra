@@ -214,6 +214,8 @@ wait after the boundary. A COND is one of:
 | `disk NAME usb-attach DISK SIZE` | A USB disk with sentinels, hotplugged when the VM runs and kept for later boots. | `disk` `{disk, serial, hotplug}` |
 | `disk NAME detach DISK`, `attach DISK` | Takes a disk out of the VM, or puts it back, from the next power-on; a USB disk also unplugs or plugs in at once. The image stays, and `observe` still reads its sentinels. | `disk` `{disk, attached}` |
 | `efi NAME show\|next ENTRY\|order A,B,...` | Reads the VM's EFI boot variables from its OVMF store. A write needs the VM off. `next Pxe` or `next Hdd` picks the first such entry in BootOrder. | `efi` `{result}` |
+| `efi NAME entry N DESC PARTUUID FILE`, `delete N` | Writes `Boot####` N as an installer does, `HD(1,GPT,PARTUUID,...)/FILE`, or deletes it and leaves BootOrder as it is. A PARTUUID no disk has makes a stale entry; `Talos Linux UKI` with one is a stale Talos entry. | `efi` `{result}` |
+| `efi NAME fill [FREE]`, `unfill` | Adds `TinkLabFill####` variables until fewer than FREE bytes (default 4096) of the store are left, or deletes them. The firmware still boots, and a write from HookOS fails with `No space left on device`. | `efi` `{result}` |
 | `registry delete IMAGE`, `restore IMAGE` | Deletes a lab image's manifest (IMAGE is any part of its reference, such as `talos-installer`), so a pull fails with "manifest unknown". `restore` pushes it back from the cache. | `registry` `{action, image, digest}` |
 | `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. Every `registry` hook takes `--when` and `--delay`; set `TINK_LAB_VM` to the machine to watch, as for `kill`. | `registry` `{action, verdict}` |
 | `registry throttle KBPS` | The registry's packets to the VMs over KBPS kilobytes a second are dropped, so a pull crawls instead of failing. `allow` lifts it. | `registry` `{action, kbytes_per_second}` |
@@ -290,16 +292,18 @@ The test numbers are those in the test plan.
   there. fleetd in the loop serves `/talos/config` to `config fetch` on the host, not to the node.
   Test 8 needs a name and certificate the installed Talos trusts.
 - **Secure Boot is off.** No PCR 7 policy, no signed command line and no db or dbx is exercised.
-  Test 9 covers BootNext, BootOrder, stale entries and PXE first (`efi`), but not refused images or
-  full variable stores.
+  Test 9 covers BootNext, BootOrder, stale entries, PXE first and a full variable store (`efi`),
+  but not refused images.
 - **OVMF is not HP firmware.**
   - OVMF puts a disk entry before PXE in a fresh BootOrder, and it adds `UEFI Misc Device` entries
     for blank disks.
-  - The Talos installer's `Talos Linux UKI` entry was created but not added to BootOrder. The disk
-    booted through `UEFI Misc Device`.
-  - In HookOS, efivarfs is mounted read-only. next-boot logged `BootNext refused (Could not set
-    BootNext: Read-only file system)` on every run. Check this on hardware before treating it as a
-    finding (test 9).
+  - The Talos installer (v1.14.5) writes its `Talos Linux UKI` entry and leaves BootOrder alone,
+    so with OVMF's order the disk boots through `UEFI Misc Device`. It reuses the lowest-numbered
+    `Talos Linux UKI` entry and deletes the others.
+  - HookOS mounts efivarfs read-write. The installer remounts efivarfs read-write and then
+    read-only, and efivarfs has one superblock, so after an install every mount of it in that
+    HookOS boot is read-only. That is Linux's and the installer's behaviour, the same on
+    hardware.
 - **Power cuts are SIGKILL of QEMU.** Writes that QEMU had already passed to the host survive, as
   a disk's own cache might not. Raw disk images, no cache mode set. Writes still in the guest's
   page cache are lost, as on hardware. In four cuts during the Talos installer, the disk held a
@@ -331,7 +335,7 @@ The test numbers are those in the test plan.
 | --- | --- |
 | `tink-lab.sh` | The entry point and every hook. |
 | `bmc.py` | The Redfish BMC for one VM, which owns its QEMU process, and refuses its power actions on `bmc NAME fail-power on`. |
-| `efivars.py` | Reads and writes BootNext and BootOrder in an OVMF variable store, through `virt-fw-vars`. |
+| `efivars.py` | Reads and writes BootNext, BootOrder and `Boot####` entries in an OVMF variable store, and fills it, through `virt-fw-vars`. |
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
 | `diskstate.py` | Reads a disk image's partitions, filesystems and META keys for `observe`, and watches for `disk=` boundaries. |
