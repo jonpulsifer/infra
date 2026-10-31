@@ -3,6 +3,7 @@ package fleet
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -43,40 +44,64 @@ func ackDeadline(r *http.Request, start time.Time) time.Time {
 // Only HTTP/1 is confirmed: HTTP/2 shares the connection among streams and
 // writes a stream's data on its own schedule, so the send queue says nothing
 // about one answer.
-//
-// When it gives up, it resets the connection: the kernel would otherwise go
-// on retransmitting the answer, and a node whose network comes back would
-// get a config fleetd holds unburned. Only an acknowledged retry delivers it.
 func awaitAck(r *http.Request, deadline time.Time) error {
 	c, ok := r.Context().Value(connKey{}).(net.Conn)
 	if !ok {
 		return nil
 	}
-	err := waitAck(r, c, deadline)
-	if err == nil {
-		return nil
-	}
-	if aerr := abort(c); aerr != nil {
-		return fmt.Errorf("%w; reset the connection: %v", err, aerr)
-	}
-	return fmt.Errorf("%w; fleetd reset the connection", err)
+	return waitAck(r, c, deadline)
 }
 
-// abort closes the connection's socket with a zero linger, so the kernel
-// drops what it has not delivered and sends a reset. Under TLS it closes the
-// socket below, and net/http's next read or write on the conn fails, so the
+// armReset makes any close of the request's connection a reset, or with
+// armed false a graceful close again. A fetch arms it before it writes the
+// config and disarms it once the node acknowledged the answer: a write that
+// fails can close the connection inside net/http, and a graceful close
+// would leave the kernel retransmitting what it holds, so a node whose
+// network comes back would get a config fleetd holds unburned.
+func armReset(r *http.Request, armed bool) error {
+	c, ok := tcpConn(r)
+	if !ok {
+		return nil
+	}
+	if armed {
+		return c.SetLinger(0)
+	}
+	return c.SetLinger(-1)
+}
+
+// resetConn resets the request's connection after an answer that did not
+// reach the node whole, and annotates why. Only an acknowledged retry then
+// delivers the config. A connection net/http already closed was reset by
+// that close, since the fetch armed it; a request without a connection is
+// left as it is.
+func resetConn(r *http.Request, why error) error {
+	c, ok := tcpConn(r)
+	if !ok {
+		return why
+	}
+	err := c.SetLinger(0)
+	if err == nil {
+		err = c.Close()
+	}
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		return fmt.Errorf("%w; reset the connection: %v", why, err)
+	}
+	return fmt.Errorf("%w; fleetd reset the connection", why)
+}
+
+// tcpConn is the request's TCP socket, under TLS the one below the records.
+// Closing it makes net/http's next read or write on the conn fail, so the
 // connection is never reused.
-func abort(c net.Conn) error {
+func tcpConn(r *http.Request) (*net.TCPConn, bool) {
+	c, ok := r.Context().Value(connKey{}).(net.Conn)
+	if !ok {
+		return nil, false
+	}
 	if t, ok := c.(*tls.Conn); ok {
 		c = t.NetConn()
 	}
-	if tc, ok := c.(*net.TCPConn); ok {
-		if err := tc.SetLinger(0); err != nil {
-			c.Close()
-			return err
-		}
-	}
-	return c.Close()
+	tc, ok := c.(*net.TCPConn)
+	return tc, ok
 }
 
 func waitAck(r *http.Request, c net.Conn, deadline time.Time) error {

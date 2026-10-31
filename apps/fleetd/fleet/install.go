@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -300,22 +301,35 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.Set("Content-Type", "text/yaml")
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Length", strconv.Itoa(len(cfg)))
+	if err := armReset(r, true); err != nil {
+		log.Printf("talos-config: %s's fetch: make a close a reset: %v", p.Node, err)
+	}
 	w.WriteHeader(http.StatusOK)
 	n, err := w.Write(cfg)
 	if err == nil {
 		err = http.NewResponseController(w).Flush()
 	}
-	if err != nil || n != len(cfg) {
-		log.Printf("talos-config: %s's fetch ended after %d of %d bytes; %s", p.Node, n, len(cfg), stays())
-		return
+	if err == nil && n != len(cfg) {
+		err = io.ErrShortWrite
 	}
-	// Write and Flush return once fleetd's kernel takes the bytes, whether
-	// the node gets any of them or not.
-	if err := awaitAck(r, ackDeadline(r, start)); err != nil {
+	if err != nil {
+		err = fmt.Errorf("the write ended after %d of %d bytes: %w", n, len(cfg), err)
+	} else {
+		// Write and Flush return once fleetd's kernel takes the bytes,
+		// whether the node gets any of them or not.
+		err = awaitAck(r, ackDeadline(r, start))
+	}
+	// A partial write and an unacknowledged answer end alike, whichever
+	// comes first on a given network and socket buffer.
+	if err != nil {
+		err = resetConn(r, err)
 		left := stays()
 		log.Printf("talos-config: %s at %s did not acknowledge its config: %v; %s", p.Node, r.RemoteAddr, err, left)
 		i.async(func(ctx context.Context) { i.unacked(ctx, p, r.RemoteAddr, now, err, left) })
 		return
+	}
+	if err := armReset(r, false); err != nil {
+		log.Printf("talos-config: %s's fetch: make a close graceful again: %v", p.Node, err)
 	}
 	served, ok := i.Configs.Burn(uuid, code, now)
 	if !ok {

@@ -17,10 +17,11 @@ import (
 	"time"
 )
 
-// bigConfig is larger than a stalled reader's receive window and smaller
-// than the server's send buffer, so the server's write returns while the
-// reader holds back its acknowledgements.
-var bigConfig = bytes.Repeat([]byte("# padding of a large Talos config\n"), 2000)
+// bigConfig is larger than a stalled reader's receive window and, on most
+// hosts, smaller than the server's send buffer, so the server's write
+// returns while the reader holds back its acknowledgements. Where the buffer
+// is smaller the write fails instead, which ends the same way.
+var bigConfig = bytes.Repeat([]byte("# padding of a large Talos config\n"), 720)
 
 func (it *installTest) putConfig(t *testing.T, cfg []byte) {
 	t.Helper()
@@ -80,7 +81,7 @@ func (s *bootServer) get() (int, []byte, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	if err := s.wait(5 * time.Second); err != nil {
+	if err := s.wait(handlerWait); err != nil {
 		return 0, nil, err
 	}
 	return resp.StatusCode, body, nil
@@ -94,6 +95,11 @@ func (s *bootServer) mustGet(t *testing.T) (int, []byte) {
 	}
 	return code, body
 }
+
+// handlerWait bounds a handler's return. A write that times out under TLS
+// closes the conn, and crypto/tls gives its close_notify five seconds more
+// to a peer that reads nothing.
+const handlerWait = 20 * time.Second
 
 // wait waits for a handler to return, then for the NetBox writes it started.
 func (s *bootServer) wait(within time.Duration) error {
@@ -180,7 +186,7 @@ func TestAnAnswerCutMidBodyDoesNotBurn(t *testing.T) {
 	s := it.serve(t, 30*time.Second, false)
 	c := stalledGet(t, s.Listener.Addr().String())
 	c.Close()
-	if err := s.wait(5 * time.Second); err != nil {
+	if err := s.wait(handlerWait); err != nil {
 		t.Fatal(err)
 	}
 	if !it.held(testCode) || it.in.Configs.Spent(testUUID, testCode) {
@@ -212,13 +218,13 @@ func TestAnAnswerUnacknowledgedAtTheDeadlineDoesNotBurn(t *testing.T) {
 				c = stalledGet(t, s.Listener.Addr().String())
 			}
 			defer c.Close()
-			if err := s.wait(5 * time.Second); err != nil {
+			if err := s.wait(handlerWait); err != nil {
 				t.Fatal(err)
 			}
 			if !it.held(testCode) {
 				t.Fatal("an unacknowledged answer burned the config")
 			}
-			if got := it.nb.journalWith("at the write deadline; fleetd reset the connection"); len(got) != 1 {
+			if got := it.nb.journalWith("fleetd reset the connection"); len(got) != 1 {
 				t.Fatalf("journals %v", it.nb.journals)
 			}
 			// The reader comes back after the deadline.
@@ -285,7 +291,7 @@ func TestAWithdrawalDuringAFetchIsJournaledTruthfully(t *testing.T) {
 			} else {
 				c.Close()
 			}
-			if err := s.wait(5 * time.Second); err != nil {
+			if err := s.wait(handlerWait); err != nil {
 				t.Fatal(err)
 			}
 			if _, held := it.in.Configs.Holds(testUUID); held || !it.in.Configs.Spent(testUUID, testCode) {
