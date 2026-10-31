@@ -25,6 +25,9 @@ type Reconciler struct {
 	// nil without a renderer.
 	Installer *Installer
 	Metrics   *Metrics
+	// Retired marks the verifier's record of a retired device's serial
+	// retired, or is nil without a verifier in process.
+	Retired func(serial string) error
 	// Links keeps the TFTP netboot-not-allowed links of the devices' MACs,
 	// or is nil without a directory.
 	Links *TFTPLinks
@@ -686,6 +689,11 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 	state := wf.State()
 	switch {
 	case Succeeded(state):
+		if r.Retired != nil {
+			if err := r.Retired(d.Serial); err != nil {
+				return fmt.Errorf("retire the attest record of %s: %w", d.Name, err)
+			}
+		}
 		removed, done, err := r.removeNode(ctx, d, wf)
 		if err != nil {
 			why := fmt.Sprintf("fleetd: Workflow %s wiped the disk and powered the node off, and fleetd could not take %s out of the cluster: %v. The device stays decommissioning, and each pass tries again", d.LastWorkflow, d.Name, err)

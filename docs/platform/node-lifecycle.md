@@ -15,7 +15,7 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 6. On its first boot, Talos fetches its config by UUID and code from `/talos/config`, and takes the node's address statically from it. fleetd drops the config once it is served whole, and sets the device `active`.
 7. When spore has the node's alias, its SPIRE agent attests by the LDevID and serves SVIDs.
 
-An installed node reinstalls when the owner sets `desired_action` to `provision`: fleetd starts the run, Rufio powers the node into HookOS through AMT at its own address, and HookOS's attestation takes the code. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` netboots HookOS, which attests. `wipe` erases the disk. The status `decommissioning` starts a `retire` run, which wipes the disk and powers the node off, leaving it `offline`.
+An installed node reinstalls when the owner sets `desired_action` to `provision`: fleetd starts the run, Rufio powers the node into HookOS through AMT at its own address, and HookOS's attestation takes the code. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` netboots HookOS, which attests. `wipe` erases the disk. The status `decommissioning` starts a `retire` run, which wipes and erases the whole disk and powers the node off, leaving it `offline`.
 
 ## Who owns what
 

@@ -187,3 +187,34 @@ func TestStoreIdentities(t *testing.T) {
 		t.Errorf("identities:\n got %+v\nwant %+v", ids, want)
 	}
 }
+
+func TestStoreRetireKeepsTheRecordAndFiles(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	files := map[string][]byte{fileLDevIDCert: []byte("cert")}
+	if err := s.Save(Record{Machine: "riptide", Serial: "MXL1", Status: StatusAttested, LDevIDSerial: "ab"}, files); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Record{Machine: "swell", Serial: "MXL2", Status: StatusAttested}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.Retire("mxl1", first); err != nil || n != 1 {
+		t.Fatalf("Retire: %d %v", n, err)
+	}
+	if n, err := s.Retire("MXL1", first.Add(time.Hour)); err != nil || n != 0 {
+		t.Fatalf("a second Retire: %d %v", n, err)
+	}
+	rec, _, _ := s.Record("riptide")
+	if rec.Status != StatusRetired || !rec.RetiredAt.Equal(first) || rec.LDevIDSerial != "ab" || rec.Issued() {
+		t.Fatalf("retired record: %+v", rec)
+	}
+	if b, err := s.File("riptide", fileLDevIDCert); err != nil || string(b) != "cert" {
+		t.Fatalf("file after Retire: %q %v", b, err)
+	}
+	if other, _, _ := s.Record("swell"); other.Status != StatusAttested {
+		t.Fatalf("another serial's record changed: %+v", other)
+	}
+}
