@@ -19,8 +19,9 @@ import (
 // the machine its install code. The installer checks the device's state in
 // NetBox and Tinkerbell, renders the config with the class inputs and the
 // worker secrets, or the full bundle for a joining control plane, and keeps
-// it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first
-// complete GET burns it and sets the device active; a GET with another code
+// it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first GET
+// whose every byte the node acknowledged burns it and sets the device
+// active; a GET with another code
 // is journaled once per machine and code window; a config nobody fetched
 // goes after its TTL.
 type Installer struct {
@@ -250,10 +251,11 @@ func (i *Installer) Warm(ctx context.Context) {
 }
 
 // ServeHTTP answers GET /talos/config?uuid=<uuid>&code=<code> with the
-// config whole, and burns it once all of it is written. A HEAD, a
-// conditional request or another method serves nothing; a Range is ignored,
-// so the answer is always the whole file.
+// config whole, and burns it once the node has acknowledged every byte of
+// the answer. A HEAD, a conditional request or another method serves
+// nothing; a Range is ignored, so the answer is always the whole file.
 func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", http.MethodGet)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -294,6 +296,14 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		log.Printf("talos-config: %s's fetch ended after %d of %d bytes; the config stays", p.Node, n, len(cfg))
 		return
 	}
+	// Write and Flush return once fleetd's kernel takes the bytes, whether
+	// the node gets any of them or not.
+	if err := awaitAck(r, ackDeadline(r, start)); err != nil {
+		i.Configs.Unclaim(uuid, code)
+		log.Printf("talos-config: %s did not acknowledge its config: %v; the config stays", p.Node, err)
+		i.async(func(ctx context.Context) { i.unacked(ctx, p, r.RemoteAddr, now, err) })
+		return
+	}
 	served, ok := i.Configs.Burn(uuid, code, now)
 	if !ok {
 		return
@@ -302,14 +312,35 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// The answer is complete, so the release runs after the handler: a slow
 	// NetBox never holds the node's fetch, and a release that fails is
 	// retried by the next pass.
+	i.async(func(ctx context.Context) {
+		i.releaseOnce(ctx, served)
+		i.pending()
+	})
+}
+
+// async runs a NetBox write after the handler; Drain waits for it.
+func (i *Installer) async(f func(context.Context)) {
 	i.inflight.Add(1)
 	go func() {
 		defer i.inflight.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		i.releaseOnce(ctx, served)
-		i.pending()
+		f(ctx)
 	}()
+}
+
+// unacked journals a fetch whose answer the node did not acknowledge: the
+// config stays for the node's next try, and the owner sees that a peer with
+// the code got some of it.
+func (i *Installer) unacked(ctx context.Context, p Pending, peer string, at time.Time, why error) {
+	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if err == nil {
+		comment := fmt.Sprintf("fleetd: at %s fleetd wrote the Talos config to %s, and the peer did not acknowledge all of it: %v. The config stays for the node's next fetch", timestamp(at), peer, why)
+		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	}
+	if err != nil {
+		log.Printf("journal %s's unacknowledged fetch: %v", p.Node, err)
+	}
 }
 
 // stillPlanned reads the config's device from NetBox at fetch time and

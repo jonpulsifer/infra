@@ -155,9 +155,15 @@ and gives up when its context ends.
 ## Config
 
 `GET /talos/config?uuid=<uuid>&code=<code>` answers the config whole with `Cache-Control: no-store`.
-The first response whose bytes are all written burns it; after the answer, fleetd sets the device
-`active` and writes `attest_consumed_at`, and a release NetBox refuses is retried each pass and
-journaled once. One fetch claims a config at a time. HEAD and
+The first response whose every byte the node acknowledged burns it. A written answer is in
+fleetd's socket buffer, not on the node, so after the flush the fetch polls the socket's send queue
+(`SIOCOUTQ`, under TLS the socket below the records) every 10 ms until it is empty. When the
+connection closes first, or the server's `WriteTimeout` ends, the config stays for the node's next
+fetch, and fleetd journals that the peer did not acknowledge it. The boot listener speaks HTTP/1.1
+alone, since an HTTP/2 connection carries many streams and its send queue describes none of them.
+After the burn, fleetd sets the device `active` and writes `attest_consumed_at`, and a release
+NetBox refuses is retried each pass and journaled once. One fetch claims a config at a time,
+including while it waits for the acknowledgement. HEAD and
 other methods are 405, `If-None-Match` and `If-Modified-Since` are 400, and a Range is ignored. A
 machine has one config at a time: a new render burns the old code. A spent code stays refused for
 a day. A fetch with another code is journaled at most every ten minutes per machine. Before it
