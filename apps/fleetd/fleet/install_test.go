@@ -876,3 +876,73 @@ func TestConfigsSurviveARestart(t *testing.T) {
 		t.Fatal("a config past its TTL survived the restart")
 	}
 }
+
+// A node that asks again with a code fleetd served did not keep its config:
+// each ask is counted, the first of a run is journaled whatever the device's
+// status, and a restart keeps the record. Nothing is served twice.
+func TestAServedConfigAskedForAgainIsJournaledOncePerRun(t *testing.T) {
+	dir := t.TempDir()
+	it := newInstallTest(t, "planned", nil)
+	it.in.Configs = &Configs{Dir: dir}
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
+		t.Fatalf("the release: %v", p)
+	}
+	served := it.now
+	it.in.Configs = &Configs{Dir: dir}
+	if err := it.in.Configs.Load(); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		it.now = it.now.Add(time.Minute)
+		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || strings.Contains(w.Body.String(), "riptide") {
+			t.Fatalf("a re-fetch answered %d", w.Code)
+		}
+	}
+	got := it.nb.journalWith("the node asked again for the Talos config fleetd served it at " + timestamp(served) + " for Workflow " + provWF)
+	if len(got) != 1 || it.in.Metrics.ConfigRefetched.Load() != 3 || it.in.Metrics.ConfigMissing.Load() != 0 {
+		t.Fatalf("journals %v, refetched %d, missing %d", it.nb.journals, it.in.Metrics.ConfigRefetched.Load(), it.in.Metrics.ConfigMissing.Load())
+	}
+	for _, want := range []string{"a power loss or a reset before Talos wrote it to STATE", "Set desired_action to provision"} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("journal %q lacks %q", got[0], want)
+		}
+	}
+	// Past the lookup window, the run is still journaled once.
+	it.now = it.now.Add(notFoundEvery)
+	it.fetch(http.MethodGet, testUUID, testCode, nil)
+	if len(it.nb.journalWith("asked again")) != 1 || it.in.Metrics.ConfigRefetched.Load() != 4 {
+		t.Fatal("a second journal entry for one run")
+	}
+}
+
+// While NetBox refuses the release the device stays planned, and a re-fetch
+// names the served config, not a reboot of spore or the TTL; so does an ask
+// with another code.
+func TestAReFetchBeforeTheReleaseNamesTheServedConfig(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != 201 {
+		t.Fatal(code)
+	}
+	it.nb.failPatch = true
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
+		t.Fatal(w.Code)
+	}
+	it.now = it.now.Add(2 * time.Second)
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+		t.Fatal(w.Code)
+	}
+	if len(it.nb.journalWith("asked again for the Talos config fleetd served it")) != 1 || len(it.nb.journalWith("a reboot of spore")) != 0 {
+		t.Fatalf("journals %v", it.nb.journals)
+	}
+	it.fetch(http.MethodGet, testUUID, strings.Repeat("Z", 43), nil)
+	got := it.nb.journalWith("fleetd holds none for it")
+	if len(got) != 1 || !strings.Contains(got[0], "fleetd served the config of "+provWF+" at "+timestamp(testNow)) || strings.Contains(got[0], "a reboot of spore") {
+		t.Fatalf("the missing-config journal: %v", got)
+	}
+}

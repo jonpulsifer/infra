@@ -47,6 +47,16 @@ type Pending struct {
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
 
+// Served is a config fleetd served: when, and for which node and run. It is
+// kept for burnFor under a hash of the machine's UUID and the code, so a node
+// that asks again with a spent code is told from one that guesses.
+type Served struct {
+	At       time.Time
+	Node     string
+	Serial   string
+	Workflow string
+}
+
 // Configs holds the rendered configs, one per machine. With Dir set, each
 // record and its bytes are also kept as <uuid>.json in Dir, a tmpfs, with
 // the burned codes in burned.json, so a restart of the service, such as a
@@ -54,7 +64,8 @@ func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TT
 // them. Without Dir they live in memory alone.
 //
 // A code whose config is gone, served, expired or replaced, is burned: a
-// hash of it is kept for burnFor, and Put refuses it.
+// hash of it is kept for burnFor, and Put refuses it. A served code's record
+// is kept as long, in served.json.
 type Configs struct {
 	Dir string
 
@@ -62,6 +73,7 @@ type Configs struct {
 	pending map[string]Pending
 	bytes   map[string][]byte
 	burned  map[string]time.Time
+	served  map[string]Served
 }
 
 // configFile is one machine's record in Dir.
@@ -70,7 +82,10 @@ type configFile struct {
 	Config  []byte  `json:"config,omitempty"`
 }
 
-const burnedFile = "burned.json"
+const (
+	burnedFile = "burned.json"
+	servedFile = "served.json"
+)
 
 // writeAtomic writes a file whole under a temporary name, mode 0600, and
 // renames it into place.
@@ -110,7 +125,11 @@ func (c *Configs) persist(uuid string) error {
 	if merr == nil {
 		merr = writeAtomic(filepath.Join(c.Dir, burnedFile), b)
 	}
-	return errors.Join(err, merr)
+	s, serr := json.Marshal(c.served)
+	if serr == nil {
+		serr = writeAtomic(filepath.Join(c.Dir, servedFile), s)
+	}
+	return errors.Join(err, merr, serr)
 }
 
 // keep is persist for a change that already stands in memory: a failure is
@@ -133,12 +152,14 @@ func (c *Configs) Load() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
-	if b, err := os.ReadFile(filepath.Join(c.Dir, burnedFile)); err == nil {
-		if err := json.Unmarshal(b, &c.burned); err != nil {
-			return fmt.Errorf("%s: %w", burnedFile, err)
+	for name, into := range map[string]any{burnedFile: &c.burned, servedFile: &c.served} {
+		if b, err := os.ReadFile(filepath.Join(c.Dir, name)); err == nil {
+			if err := json.Unmarshal(b, into); err != nil {
+				return fmt.Errorf("%s: %w", name, err)
+			}
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
 		}
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
 	}
 	entries, err := os.ReadDir(c.Dir)
 	if err != nil {
@@ -147,7 +168,7 @@ func (c *Configs) Load() error {
 	for _, e := range entries {
 		name := e.Name()
 		uuid, ok := strings.CutSuffix(name, ".json")
-		if !ok || name == burnedFile || !uuidPattern.MatchString(uuid) {
+		if !ok || !uuidPattern.MatchString(uuid) {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(c.Dir, name))
@@ -179,14 +200,23 @@ func (c *Configs) init() {
 	if c.pending == nil {
 		c.pending, c.bytes, c.burned = map[string]Pending{}, map[string][]byte{}, map[string]time.Time{}
 	}
+	if c.served == nil {
+		c.served = map[string]Served{}
+	}
 }
 
-// burn records a spent code and forgets the ones older than burnFor.
+// burn records a spent code and forgets the spent and served ones older
+// than burnFor.
 func (c *Configs) burn(uuid, code string, at time.Time) {
 	c.burned[burnKey(uuid, code)] = at
 	for k, t := range c.burned {
 		if at.Sub(t) > burnFor {
 			delete(c.burned, k)
+		}
+	}
+	for k, s := range c.served {
+		if at.Sub(s.At) > burnFor {
+			delete(c.served, k)
 		}
 	}
 }
@@ -290,9 +320,20 @@ func (c *Configs) Burn(uuid, code string, at time.Time) (Pending, bool) {
 	p.Fetched, p.claimed = at, false
 	c.pending[uuid] = p
 	delete(c.bytes, uuid)
+	c.served[burnKey(uuid, code)] = Served{At: at, Node: p.Node, Serial: p.Serial, Workflow: p.Workflow}
 	c.burn(uuid, code, at)
 	c.keep(uuid)
 	return p, true
+}
+
+// Served returns the record of the config served under the machine's code
+// within burnFor.
+func (c *Configs) Served(uuid, code string) (Served, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.init()
+	s, ok := c.served[burnKey(uuid, code)]
+	return s, ok
 }
 
 // Released drops a served config's record once NetBox has its release.

@@ -183,8 +183,18 @@ flash is not gone. A fetch for a UUID with no config is looked up in NetBox by `
 once every ten minutes per machine and once a second in all, since the endpoint is
 unauthenticated. When it is a `planned` device whose `last_workflow` is its provision, fleetd counts
 `fleet_install_config_missing_total` on each lookup and journals once per run that the node asks
-for a config fleetd does not hold; the owner sets `desired_action` to `provision`. A UUID NetBox
-does not hold is only logged.
+for a config fleetd does not hold; the owner sets `desired_action` to `provision`. When fleetd
+served that run's config and NetBox has not taken its release, the journal names the served config
+instead of a reboot or the TTL. A UUID NetBox does not hold is only logged.
+
+Each served config leaves a record for a day, under a hash of the UUID and code, in `served.json`
+beside `burned.json`. A fetch whose UUID and code match one comes from a node that acknowledged its
+config and did not keep it, as after a power loss before Talos wrote it to STATE. fleetd counts
+`fleet_install_config_refetched_total` on every such ask, whatever the device's status, and
+journals once per run that the node asks again, with the serve time and the action: set
+`desired_action` to `provision`. Its NetBox lookup is limited to one per machine every ten minutes,
+and only a holder of the code can cause it. fleetd never serves the config again: the code is a
+bearer credential for the cluster's join secrets, in the clear in META and on the node's console.
 
 A node that boots HookOS after its provision succeeded attests again as a `planned` device whose
 `desired_action` is `none`, whose `last_workflow` is that provision and whose config is unread.

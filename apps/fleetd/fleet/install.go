@@ -55,6 +55,9 @@ type Installer struct {
 	// missingTold names the machine and run pairs whose missing config is
 	// journaled.
 	missingTold map[string]bool
+	// refetchTold names the machine and run pairs whose ask for a served
+	// config is journaled.
+	refetchTold map[string]bool
 	unreleased  map[string]bool
 	// releasing names the codes whose release runs now, so a pass's retry
 	// and a fetch's release never write it twice.
@@ -439,8 +442,14 @@ const missingLookupEvery = time.Second
 // A machine causes at most one NetBox lookup per notFoundEvery, and all of
 // them together one per missingLookupEvery, so a flood of guesses reaches
 // NetBox at a bounded rate and the journal not at all. A fetch with the held
-// code of a config past its TTL is the expiry's to journal.
+// code of a config past its TTL is the expiry's to journal. A fetch with a
+// code fleetd served comes first: only a node that held the code can send
+// it, and it is refetched's.
 func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Time) {
+	if s, ok := i.Configs.Served(uuid, code); ok {
+		i.refetched(ctx, uuid, s, now)
+		return
+	}
 	p, held := i.Configs.Holds(uuid)
 	if held && p.Code == code {
 		log.Printf("talos-config: 404 for uuid %q", uuid)
@@ -462,6 +471,41 @@ func (i *Installer) notFound(ctx context.Context, uuid, code string, now time.Ti
 		delete(i.journaled, uuid)
 		i.mu.Unlock()
 	}
+}
+
+// refetched counts a fetch with a code whose config fleetd served, on every
+// ask so the alert lasts while the node asks, and journals it once per run
+// whatever the device's status. The node acknowledged the whole config and
+// did not keep it, so it asks with a spent code until the owner provisions it
+// again: fleetd never serves a config twice, since the code is a bearer
+// credential that sits in META and on the node's console.
+func (i *Installer) refetched(ctx context.Context, uuid string, s Served, now time.Time) {
+	i.Metrics.ConfigRefetched.Add(1)
+	key := uuid + "/" + s.Workflow
+	i.mu.Lock()
+	told := i.refetchTold[key]
+	i.mu.Unlock()
+	if told || !i.lookupAllowed("served/"+uuid, true, now) {
+		log.Printf("talos-config: %s asked again for the config fleetd served it at %s", s.Node, timestamp(s.At))
+		return
+	}
+	d, err := i.NetBox.BySerial(ctx, i.Site, s.Serial)
+	if err == nil {
+		Audit("fleet.refetch", i.Site, d, s.Workflow, "the node asked again for the config fleetd served it")
+		comment := fmt.Sprintf("fleetd: at %s the node asked again for the Talos config fleetd served it at %s for Workflow %s. Its kernel acknowledged every byte, and the node did not keep it: a power loss or a reset before Talos wrote it to STATE. Its code is spent and fleetd serves no config twice, so the node asks in vain. Set desired_action to provision; the disk holds no STATE to lose", timestamp(now), timestamp(s.At), s.Workflow)
+		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	if err != nil {
+		log.Printf("talos-config: journal %s's ask for its served config: %v", s.Node, err)
+		delete(i.journaled, "served/"+uuid)
+		return
+	}
+	if i.refetchTold == nil {
+		i.refetchTold = map[string]bool{}
+	}
+	i.refetchTold[key] = true
 }
 
 // lookupAllowed marks the machine's lookup unless one was made within
@@ -526,7 +570,13 @@ func (i *Installer) missing(ctx context.Context, uuid string, now time.Time) err
 		return nil
 	}
 	Audit("fleet.expire", i.Site, d, d.LastWorkflow, "config missing: the node asked for one fleetd does not hold")
-	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: a reboot of spore since the render of %s drops it, as does the TTL. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), d.LastWorkflow)
+	cause := fmt.Sprintf("a reboot of spore since the render of %s drops it, as does the TTL", d.LastWorkflow)
+	for _, p := range i.Configs.Unreleased() {
+		if p.UUID == uuid && p.Workflow == d.LastWorkflow {
+			cause = fmt.Sprintf("fleetd served the config of %s at %s, NetBox has not taken its release, and the node did not keep it", p.Workflow, timestamp(p.Fetched))
+		}
+	}
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: %s. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), cause)
 	if err := i.NetBox.Update(ctx, d, "", nil, "warning", comment); err != nil {
 		return err
 	}
