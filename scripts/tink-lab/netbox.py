@@ -4,7 +4,7 @@ Usage: netbox.py PORT STATE_DIR
 
 STATE_DIR/devices.json holds the devices and their interfaces, as tink-lab.sh writes them:
 {"devices": [<a NetBox device>...], "interfaces": [<a NetBox interface>...]}. The server serves
-GET /api/dcim/devices/ (filters: role, status, serial, cf_smbios_uuid, name), GET
+GET /api/dcim/devices/ (filters: role, status, serial, cf_smbios_uuid, name, id), GET
 /api/dcim/interfaces/ (device_id), PATCH /api/dcim/devices/ID/ and POST
 /api/extras/journal-entries/, which is what apps/fleetd/fleet/netbox.go calls. A role=switch
 query answers no switches.
@@ -87,6 +87,8 @@ class Handler(BaseHTTPRequestHandler):
                 if "serial" in q and d["serial"] not in q["serial"]:
                     continue
                 if "name" in q and d["name"] not in q["name"]:
+                    continue
+                if "id" in q and str(d["id"]) not in q["id"]:
                     continue
                 if "cf_smbios_uuid" in q and d["custom_fields"].get("smbios_uuid") not in q["cf_smbios_uuid"]:
                     continue

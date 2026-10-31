@@ -126,8 +126,11 @@ Logs are in `$TINK_LAB_DIR/logs`:
 `TINK_LAB_FLEETD_REF` (default `origin/main`), against the environment's API and `netbox.py`, a
 stand-in NetBox that serves NAME as its only device. It is `fleetd/main.go` built in an export of
 `apps/fleetd` at that ref: the wiring of `apps/fleetd/main.go`'s `newFleet`, without the verifier,
-the installer and renderer, the cluster client, the TFTP links and the SPIRE file. So `Admit`, config
-renders, fetches and releases do not run, and a device stays `planned` after a provision.
+the renderer, the cluster client, the TFTP links and the SPIRE file. So `Admit` and renders do not
+run, and a device stays `planned` after a provision. Its `Installer` has no renderer: `config NAME
+put` puts a config as a render at intake does, and `config NAME fetch` asks fleetd's own
+`/talos/config` handler for it, as the installed node's first boot does. The node itself cannot
+fetch it: the config host does not resolve in the namespace.
 `fleetd/redfish-machine.patch` adds a `redfish` case to `Config.Machine`, so the Machine fleetd
 applies drives the VM's Redfish BMC where the lab has AMT.
 
@@ -142,6 +145,11 @@ tink-lab.sh netbox n1 show                       # status, desired_action, last_
 tink-lab.sh netbox writes                        # fleetd's PATCHes and journal entries, with times
 tink-lab.sh netbox fail-patch on|off             # fleetd's device PATCHes answer 500
 tink-lab.sh fleetd restart --kill --down 5                # a crash and the unit's RestartSec
+tink-lab.sh fleetd hold '^PATCH /api/dcim/devices/'      # fleetd's matching NetBox calls wait unsent
+tink-lab.sh fleetd hold release
+tink-lab.sh config n1 put                        # a config for the machine, under a fresh code
+tink-lab.sh config n1 fetch                      # GET /talos/config with that code; records the status
+tink-lab.sh bmc n1 fail-power on|off             # the BMC answers 500 to every power action
 tink-lab.sh fleetd stop
 ```
 
@@ -157,9 +165,19 @@ tink-lab.sh fleetd stop
   starts it again after `--down` seconds (default 5, the unit's `RestartSec`), with the
   environment `fleetd start` wrote. netbox.py, its device and the webhook secret stay, as NetBox
   stays when spore's unit restarts. `--kill` sends SIGKILL, so a pass can stop between its writes.
+- `fleetd hold REGEX` keeps each of fleetd's NetBox requests whose `METHOD PATH?QUERY` matches REGEX
+  unsent, and fleetd logs `tink-lab: holding ...`, until `fleetd hold release`. It stops a pass at
+  a known point: `fleetd restart --kill --when 'log=fleetd:tink-lab: holding PATCH'` kills fleetd
+  after it creates a Workflow and before NetBox records it, and a hold on the record's read
+  (`'^GET /api/dcim/devices/\?id='`) leaves time for an owner's edit in between. A request held past
+  the client's 30 s timeout fails as a NetBox that does not answer does.
+- `fleetd run` starts the fleetd process alone with the environment `fleetd start` wrote, after a
+  `kill -9` of the PID in `pids/fleetd`, for an outage longer than a test can predict.
+- `bmc NAME fail-power on` makes the machine's BMC answer every `ComputerSystem.Reset` with a 500
+  and leave the power as it is, so Rufio's netboot job fails.
 - fleetd's log, with its `fleet.*` audit lines, is `logs/fleetd.log`; netbox.py's requests are in
   `logs/netbox.log`. `reset` clears the stand-in's state; the build stays in `fleetd/` until the
-  ref moves.
+  ref, `fleetd/main.go` or the patch changes.
 
 ## Hooks
 
@@ -263,14 +281,14 @@ the Workflow took 179 s. The cause is unknown.
 The test numbers are those in the test plan.
 
 - **No real NetBox, SPIRE or attestation, and fleetd only in part.** `fleetd start` runs fleetd's
-  reconcile loop and webhook against a stand-in NetBox (fleetd in the loop). The verifier, `Admit`,
-  the installer's renders and config fetches, and a fleetd restart with them, do not run.
+  reconcile loop and webhook against a stand-in NetBox (fleetd in the loop). The verifier, `Admit`
+  and the renderer do not run; a config is put and fetched by hand (`config`).
   `provision --again` makes a second Workflow directly, which fleetd never does.
   - The stand-in issues no LDevID and no SPIRE registration, so the credential questions of test 10
     need the real attest path.
-- **No config server.** The installed Talos reaches its first config fetch and stops there. Test 8
-  needs a stand-in for fleetd's `/talos/config`, and a name and certificate the installed Talos
-  trusts.
+- **No config server for the node.** The installed Talos reaches its first config fetch and stops
+  there. fleetd in the loop serves `/talos/config` to `config fetch` on the host, not to the node.
+  Test 8 needs a name and certificate the installed Talos trusts.
 - **Secure Boot is off.** No PCR 7 policy, no signed command line and no db or dbx is exercised.
   Test 9 covers BootNext, BootOrder, stale entries and PXE first (`efi`), but not refused images or
   full variable stores.
@@ -312,7 +330,7 @@ The test numbers are those in the test plan.
 | File | What it is |
 | --- | --- |
 | `tink-lab.sh` | The entry point and every hook. |
-| `bmc.py` | The Redfish BMC for one VM, which owns its QEMU process. |
+| `bmc.py` | The Redfish BMC for one VM, which owns its QEMU process, and refuses its power actions on `bmc NAME fail-power on`. |
 | `efivars.py` | Reads and writes BootNext and BootOrder in an OVMF variable store, through `virt-fw-vars`. |
 | `ntp.py` | An SNTP server on the boot server's address. |
 | `hookos-observe.py` | Parses what `observe` reads from HookOS's console. |
@@ -321,5 +339,5 @@ The test numbers are those in the test plan.
 | `slow-installer.sh` | The slow installer's entrypoint, in front of the class's installer. |
 | `ipxe.nix` | The netboot iPXE with tink-lab's addresses. |
 | `netbox.py` | The stand-in NetBox for fleetd in the loop: one device, its interface, and a record of fleetd's writes. |
-| `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref. |
+| `fleetd/main.go` | fleetd's reconcile loop and webhook, built against `apps/fleetd` at a ref, with a config stand-in and request holds. |
 | `fleetd/redfish-machine.patch` | Lets `Config.Machine` write a Redfish Machine for the VMs' BMCs. |

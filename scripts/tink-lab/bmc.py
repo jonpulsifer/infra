@@ -8,7 +8,9 @@ asks the guest through ACPI on the QMP socket in TINK_LAB_QMP. A one-time boot o
 with Pxe or Hdd, Once) runs `tink-lab.sh _bootnext NAME TARGET`, which sets BootNext in the stopped
 machine's EFI variables just before the next On, as a real BMC's one-time boot sets the firmware's
 next boot. VMDIR/boot.json keeps a pending override across BMC restarts and VMDIR/qemu.pid the
-QEMU process. Every request is logged as one JSON line on stdout.
+QEMU process. While VMDIR/fault holds `power`, every ComputerSystem.Reset answers 500 and leaves
+the power as it is, as a BMC that refuses its power actions does. Every request is logged as one
+JSON line on stdout.
 """
 
 import base64
@@ -28,6 +30,7 @@ USER, PASSWORD = "tink-lab", "tink-lab"
 NAME, PORT, CERT, KEY, VMDIR = sys.argv[1:6]
 LAB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tink-lab.sh")
 STATE = os.path.join(VMDIR, "boot.json")
+FAULT = os.path.join(VMDIR, "fault")
 PIDFILE = os.path.join(VMDIR, "qemu.pid")
 SYSTEM = f"/redfish/v1/Systems/{NAME}"
 lock = threading.Lock()
@@ -54,6 +57,14 @@ def save(boot):
     with open(STATE + ".new", "w") as f:
         json.dump(boot, f)
     os.replace(STATE + ".new", STATE)
+
+
+def fault():
+    try:
+        with open(FAULT) as f:
+            return f.read().split()
+    except OSError:
+        return []
 
 
 def running():
@@ -280,6 +291,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == SYSTEM + "/Actions/ComputerSystem.Reset":
             kind = self.body().get("ResetType", "")
+            if "power" in fault():
+                log(event="reset-refused", type=kind)
+                return self.reply(500, {"error": {"message": "tink-lab: the BMC refuses power actions"}})
             log(event="reset", type=kind)
             with lock:
                 if kind in ("On", "ForceOn"):

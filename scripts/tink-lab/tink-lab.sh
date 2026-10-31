@@ -30,8 +30,13 @@
 #                                       restart tink-worker
 #   fleetd start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE] | stop
 #                                       fleetd's reconcile loop against a stand-in NetBox
+#   fleetd hold REGEX | release         keep fleetd's matching NetBox requests unsent, or let them go
+#   fleetd run                          start the fleetd process alone again, after a kill
 #   netbox NAME set KEY=VALUE|status=S... [--webhooks N] | NAME show | writes | fail-patch on|off
 #   webhook [N]                         N signed NetBox webhooks to fleetd at once
+#   config NAME put | fetch             put a config for the machine in fleetd's Installer, or fetch
+#                                       it as the installed node does
+#   bmc NAME fail-power on|off          the machine's BMC refuses (500) or performs power actions
 #
 # COND is action=NAME:STATE (an action of the machine's latest Workflow; RUNNING, SUCCESS, ...),
 # workflow=STATE (or FINISHED), console=TEXT (serial output after the hook started),
@@ -1417,21 +1422,22 @@ at_boundary() {
 
 # fleetd_build builds fleet/main.go against apps/fleetd at FLEETD_REF (default origin/main), with
 # fleet/redfish-machine.patch, which lets Config.Machine write the Redfish Machine the VMs' BMCs
-# answer where the lab has AMT. The build is kept until the ref moves.
+# answer where the lab has AMT. The build is kept until the ref, main.go or the patch changes.
 FLEETD_REF=${TINK_LAB_FLEETD_REF:-origin/main}
 NETBOX_PORT=8000
 FLEETD_PORT=8446
 fleetd_build() {
-  local rev src=$dir/fleetd/src
+  local rev key src=$dir/fleetd/src
   rev=$(git -C "$repo" rev-parse "$FLEETD_REF")
-  if [ "$(cat "$dir/fleetd/rev" 2>/dev/null)" = "$rev" ] && [ -x "$dir/fleetd/tink-lab-fleetd" ]; then return; fi
+  key="$rev $(cat "$here/fleetd/main.go" "$here/fleetd/redfish-machine.patch" | sha256sum | cut -c1-16)"
+  if [ "$(cat "$dir/fleetd/rev" 2>/dev/null)" = "$key" ] && [ -x "$dir/fleetd/tink-lab-fleetd" ]; then return; fi
   rm -rf "$src" && mkdir -p "$src"
   git -C "$repo" archive "$rev" apps/fleetd | tar -x -C "$src"
   patch -s -d "$src" -p1 <"$here/fleetd/redfish-machine.patch"
   mkdir -p "$src/apps/fleetd/cmd/tink-lab-fleetd"
   cp "$here/fleetd/main.go" "$src/apps/fleetd/cmd/tink-lab-fleetd/main.go"
   (cd "$src/apps/fleetd" && go build -o "$dir/fleetd/tink-lab-fleetd" ./cmd/tink-lab-fleetd) || die "the fleetd build failed"
-  echo "$rev" >"$dir/fleetd/rev"
+  echo "$key" >"$dir/fleetd/rev"
   event event=fleetd-build ref="$FLEETD_REF" rev="$rev" >/dev/null
 }
 
@@ -1474,6 +1480,7 @@ fleetd_start() {
   fleetd_build
   mkdir -p "$dir/fleetd/netbox"
   : >"$dir/fleetd/netbox/writes.jsonl"
+  rm -f "$dir/fleetd/hold" "$dir/fleetd/config.json"
   fleetd_device "$name" "$status"
   jq --arg t "$tmpl" 'map_values(.template = $t)' "$repo/clusters/folly/fleet/classes.json" >"$dir/fleetd/classes.json"
   (umask 077 && echo tink-lab >"$dir/fleetd/netbox-token" && openssl rand -hex 32 >"$dir/fleetd/webhook-secret")
@@ -1493,7 +1500,7 @@ fleetd_start() {
     FLEET_KUBE_SERVER=https://127.0.0.1:6443 FLEET_KUBE_CA_FILE="$dir/pki/ca.crt" \
     FLEET_KUBE_CERT_FILE="$dir/pki/admin.crt" FLEET_KUBE_KEY_FILE="$dir/pki/admin.key" \
     FLEET_WEBHOOK_SECRET_FILE="$dir/fleetd/webhook-secret" FLEET_WEBHOOK_ADDR="127.0.0.1:$FLEETD_PORT" \
-    TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" \
+    TINK_LAB_BMC_PORT="$(vmjson "$name" .bmc_port)" TINK_LAB_HOLD_FILE="$dir/fleetd/hold" \
     TINK_LAB_INSTALLS="$installs" >"$dir/fleetd/env"
   fleetd_run
   event event=fleetd-start vm="$name" rev="$(cat "$dir/fleetd/rev")" template="$tmpl" interval="$interval" status="$status" \
@@ -1572,6 +1579,61 @@ webhook() {
       -H 'Content-Type: application/json' -d "$body" "http://127.0.0.1:$FLEETD_PORT/webhook" &
   done | sort | uniq -c | awk '{ printf "{\"%s\": %s}\n", $2, $1 }' | jq -sc add)
   event event=webhook count="$n" "http=$codes"
+}
+
+# fleetd_hold keeps fleetd's NetBox requests whose "METHOD PATH?QUERY" matches REGEX unsent until
+# fleetd release, so a test can act, or kill fleetd, between two of its NetBox calls. fleetd logs
+# "tink-lab: holding" when a request starts to wait. A request held past the client's 30 s timeout
+# fails as a NetBox that does not answer does.
+fleetd_hold() {
+  case ${1:?fleetd hold needs a REGEX, or release} in
+    release)
+      rm -f "$dir/fleetd/hold"
+      event event=fleetd-hold action=release
+      ;;
+    *)
+      printf '%s\n' "$1" >"$dir/fleetd/hold"
+      event event=fleetd-hold action=hold "pattern=$1"
+      ;;
+  esac
+}
+
+# config_cmd puts a config for the machine in fleetd's Installer, as a render at intake does, with a
+# fresh code and the Workflow NetBox names, or fetches it as the installed node's first boot does
+# (GET /talos/config), and records the HTTP status.
+config_cmd() {
+  local name=${1:?config needs a machine} code uuid wf rc
+  need_vm "$name"
+  uuid=$(vmjson "$name" .uuid)
+  case ${2:-} in
+    put)
+      code=$(openssl rand 32 | basenc --base64url | tr -d '=\n')
+      wf=$(jq -r --arg n "$name" '.devices[] | select(.name == $n) | .custom_fields.last_workflow' "$dir/fleetd/netbox/devices.json")
+      jq -n --arg u "$uuid" --arg c "$code" --arg n "$name" --arg w "$wf" \
+        '{UUID: $u, Code: $c, Serial: ("TL-" + $n), Node: $n, Class: "worker-g5", Workflow: $w}' >"$dir/fleetd/config.json"
+      rc=$(inns curl -s -o /dev/null -w '%{http_code}' -X POST -d @"$dir/fleetd/config.json" "http://127.0.0.1:$FLEETD_PORT/lab/config")
+      event event=config vm="$name" action=put workflow="$wf" code="${code:0:4}" http="$rc"
+      ;;
+    fetch)
+      [ -f "$dir/fleetd/config.json" ] || die "config: no config put for $name"
+      code=$(jq -r .Code "$dir/fleetd/config.json")
+      rc=$(inns curl -s -o "$dir/fleetd/config.out" -w '%{http_code}' "http://127.0.0.1:$FLEETD_PORT/talos/config?uuid=$uuid&code=$code")
+      event event=config vm="$name" action=fetch code="${code:0:4}" http="$rc" "body=$(head -c 200 "$dir/fleetd/config.out")"
+      ;;
+    *) die "config: NAME put or NAME fetch" ;;
+  esac
+}
+
+# bmc_cmd makes the machine's BMC refuse its power actions with a 500, or perform them again.
+bmc_cmd() {
+  local name=${1:?bmc needs a machine}
+  need_vm "$name"
+  case ${2:-}:${3:-} in
+    fail-power:on) echo power >"$(vmdir "$name")/fault" ;;
+    fail-power:off) rm -f "$(vmdir "$name")/fault" ;;
+    *) die "bmc: NAME fail-power on|off" ;;
+  esac
+  event event=bmc vm="$name" fail_power="$3"
 }
 
 # netbox_cmd edits the machine's device as the owner does, then rings the webhook --webhooks N
@@ -1780,7 +1842,13 @@ case $cmd in
         fleetd_restart "${rest[@]}"
         ;;
       build) fleetd_build ;;
-      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], restart [--when C] [--down S] [--kill], stop or build" ;;
+      hold) fleetd_hold "${@:2}" ;;
+      run)
+        alive fleetd && die "fleetd runs"
+        fleetd_run
+        event event=start proc=fleetd pid="$(pidof_ fleetd)"
+        ;;
+      *) die "fleetd: start NAME [--template T] [--interval DUR] [--status S] [--installer IMAGE], restart [--when C] [--down S] [--kill], hold REGEX|release, run, stop or build" ;;
     esac
     ;;
   host-restart)
@@ -1796,6 +1864,13 @@ case $cmd in
   webhook)
     tools
     webhook "$@"
+    ;;
+  config)
+    tools
+    config_cmd "$@"
+    ;;
+  bmc)
+    bmc_cmd "$@"
     ;;
   hookos-docker)
     tools
@@ -1814,7 +1889,7 @@ case $cmd in
     observe "${1:?observe needs a machine}" "$with"
     ;;
   *)
-    sed -n '2,43p' "$0" >&2
+    sed -n '2,48p' "$0" >&2
     exit 2
     ;;
 esac
