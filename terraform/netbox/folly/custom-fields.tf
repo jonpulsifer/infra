@@ -11,13 +11,15 @@ resource "netbox_custom_field_choice_set" "fleet" {
 
 locals {
   # Every custom field on dcim.device. Git declares talos_class, bmc_type,
-  # install_disk, tpm_version, amt, secure_boot_expected and the approved EK
-  # binding (devices.tf); the owner sets desired_action; talos-attest and
+  # install_disk, install_disk_serial, tpm_version, amt, secure_boot_expected,
+  # expected_port and the approved EK binding (devices.tf); the owner sets
+  # desired_action; talos-attest and
   # fleet-controller write the rest.
   custom_fields = {
     bios_version         = { type = "text", label = "BIOS version", group = "Hardware", weight = 100, description = "SMBIOS BIOS version the node reports" }
     sku                  = { type = "text", label = "SKU", group = "Hardware", weight = 110, description = "SMBIOS SKU number" }
     install_disk         = { type = "text", label = "Install disk", group = "Hardware", weight = 120, regex = "^/dev/", description = "The disk Talos installs to" }
+    install_disk_serial  = { type = "text", label = "Install disk serial", group = "Hardware", weight = 125, regex = "^[A-Za-z0-9._-]{1,64}$", description = "The serial the install disk reports. The provision Template wipes and installs only the disk at install_disk that reports it; without one, fleetd starts no run that wipes" }
     amt                  = { type = "boolean", label = "Intel AMT", group = "Hardware", weight = 130, description = "The node has Intel AMT" }
     secure_boot_expected = { type = "boolean", label = "Secure Boot expected", group = "Hardware", weight = 140, description = "The firmware state the node is expected to boot in" }
     smbios_uuid          = { type = "text", label = "SMBIOS UUID", group = "Hardware", weight = 150, description = "SMBIOS UUID of the node, written by talos-attest on an intake pass; the Talos config URL names it" }

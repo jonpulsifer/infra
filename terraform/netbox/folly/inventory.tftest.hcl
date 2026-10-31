@@ -137,3 +137,68 @@ run "rejects_an_unknown_binding_key" {
 
   expect_failures = [data.netbox_site.folly]
 }
+
+run "declares_each_install_disk_serial" {
+  command = plan
+
+  plan_options {
+    target = [restapi_object.declared]
+  }
+
+  variables {
+    nodes_file = "testdata/valid.yaml"
+  }
+
+  assert {
+    condition     = jsondecode(restapi_object.declared["one"].data).custom_fields.install_disk_serial == "DISK-1"
+    error_message = "A node's disk_serial must reach NetBox's install_disk_serial."
+  }
+  assert {
+    condition     = jsondecode(restapi_object.declared["two"].data).custom_fields.install_disk_serial == "0123456789"
+    error_message = "A quoted serial of digits must reach NetBox as the same string."
+  }
+  assert {
+    condition     = jsondecode(restapi_object.declared["three"].data).custom_fields.install_disk_serial == null
+    error_message = "A node without a disk_serial must plan, and clear install_disk_serial."
+  }
+}
+
+run "rejects_a_disk_serial_two_nodes_share" {
+  command = plan
+
+  variables {
+    nodes_file = "testdata/duplicate-disk-serial.yaml"
+  }
+
+  expect_failures = [data.netbox_site.folly]
+}
+
+run "rejects_a_malformed_disk_serial" {
+  command = plan
+
+  variables {
+    nodes_file = "testdata/malformed-disk-serial.yaml"
+  }
+
+  expect_failures = [data.netbox_site.folly]
+}
+
+run "rejects_an_unquoted_disk_serial" {
+  command = plan
+
+  variables {
+    nodes_file = "testdata/unquoted-disk-serial.yaml"
+  }
+
+  expect_failures = [data.netbox_site.folly]
+}
+
+run "rejects_a_disk_serial_on_a_model" {
+  command = plan
+
+  variables {
+    nodes_file = "testdata/model-disk-serial.yaml"
+  }
+
+  expect_failures = [data.netbox_site.folly]
+}

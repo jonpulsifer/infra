@@ -92,8 +92,9 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| No `retire-` `Workflow` | The device has no primary MAC or `install_disk`, or fleetd is down | Read the device's journal, and `journalctl -u fleetd` on spore |
+| No `retire-` `Workflow` | The device has no primary MAC, `install_disk` or `install_disk_serial`, or fleetd is down | Read the device's journal, and `journalctl -u fleetd` on spore |
 | The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, and fix the BMC |
+| `wipe: no disk reports the serial`, or `<disk> is <name>, but the disk that reports <serial> is <other>` | The disk at `install_disk` is not the declared disk. Nothing was wiped | Read the machine's disks, and correct `disk` or `disk_serial` in the nodes file, or wipe the disk at the machine |
 | The device stays `decommissioning` after a failed run | fleetd journals a failed retirement once and stops | Read the `Workflow`'s message. Wipe the disk at the machine, then set the status to `offline` |
 
 ## Related

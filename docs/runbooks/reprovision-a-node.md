@@ -83,6 +83,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | `attest: FAILED` with `ek-hash-mismatch` | The approved binding or a pin names another TPM, such as after a board swap | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence and with `approved_ek_hash` and `ek_hash`. A replaced TPM needs a binding change in the nodes file |
 | `attest: FAILED` with `pending-approval` | A `planned` device whose entry approves no EK | [Approve its EKs](provision-a-node.md#approve-a-machines-eks) |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
+| The journal says the run waits for `install_disk_serial` | The node's entry has no `disk_serial`, so fleetd starts no run that wipes | Add the serial that `talosctl --nodes <addr> get disks` shows for the install disk, as [Hardware inventory](../reference/inventory.md#nodes-file) says, and apply `terraform/netbox/folly` |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |
 
 ## Related

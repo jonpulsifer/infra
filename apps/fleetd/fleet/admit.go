@@ -171,6 +171,7 @@ func (d Device) missing() []string {
 	}{
 		{"talos_class", d.Class != ""},
 		{"install_disk", d.Disk != ""},
+		{"install_disk_serial", d.DiskSerial != ""},
 		{"bmc_type", d.BMCType != ""},
 		{"tpm_version", d.TPM != ""},
 		{"amt", d.AMT != nil},

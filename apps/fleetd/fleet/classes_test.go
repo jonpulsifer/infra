@@ -37,13 +37,13 @@ func TestWorkflowFollowsTheClass(t *testing.T) {
 		{"worker-g5", "provision", talos},
 		{"ubuntu", "provision-ubuntu", ubuntuImage},
 	} {
-		spec := mustWorkflow(t, cfg, Device{Name: "n", Class: tc.class, TPM: "2.0"}, "provision")["spec"].(map[string]any)
+		spec := mustWorkflow(t, cfg, Device{Name: "n", Class: tc.class, TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "provision")["spec"].(map[string]any)
 		hm := spec["hardwareMap"].(map[string]any)
 		if spec["templateRef"] != tc.template || hm["installer_image"] != tc.image || hm["install"] != "true" {
 			t.Errorf("%s: template %v, hardwareMap %v", tc.class, spec["templateRef"], hm)
 		}
 	}
-	spec := mustWorkflow(t, cfg, Device{Name: "n", Class: "ubuntu", TPM: "2.0"}, "wipe")["spec"].(map[string]any)
+	spec := mustWorkflow(t, cfg, Device{Name: "n", Class: "ubuntu", TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "wipe")["spec"].(map[string]any)
 	if spec["templateRef"] != "provision-ubuntu" {
 		t.Errorf("a wipe runs %v, not the class's Template", spec["templateRef"])
 	}
@@ -54,6 +54,37 @@ func TestWorkflowRefusesAnUnknownClass(t *testing.T) {
 	for _, class := range []string{"", "worker-g9"} {
 		if _, err := cfg.Workflow(Device{Name: "n", Class: class}, "provision", testNow, false); err == nil || !strings.Contains(err.Error(), "class table") {
 			t.Errorf("class %q: %v", class, err)
+		}
+	}
+}
+
+// The Hardware's disk carries only the kernel name, so the Workflow carries
+// the serial the Template checks, and refuses a run that wipes without one.
+func TestWorkflowCarriesTheDiskSerial(t *testing.T) {
+	cfg := Config{Classes: testClasses}
+	d := Device{Name: "n", Class: "worker-g5", TPM: "2.0", DiskSerial: "30DF7020FGKL"}
+	for action := range Actions {
+		hm := mustWorkflow(t, cfg, d, action)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
+		if hm["install_disk_serial"] != "30DF7020FGKL" {
+			t.Errorf("%s: hardwareMap %v", action, hm)
+		}
+	}
+	for _, serial := range []string{"", "30DF 7020", "a'b", "a/b", strings.Repeat("A", 65)} {
+		d.DiskSerial = serial
+		for action, a := range Actions {
+			wf, err := cfg.Workflow(d, action, testNow, false)
+			if a.Wipe {
+				if err == nil || !strings.Contains(err.Error(), "install_disk_serial") {
+					t.Errorf("%s with serial %q: %v", action, serial, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Fatalf("%s, which wipes nothing, with serial %q: %v", action, serial, err)
+			}
+			if hm := wf["spec"].(map[string]any)["hardwareMap"].(map[string]any); hm["install_disk_serial"] != "" {
+				t.Errorf("%s carries the malformed serial %q: %v", action, serial, hm)
+			}
 		}
 	}
 }

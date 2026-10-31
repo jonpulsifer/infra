@@ -19,6 +19,10 @@ locals {
   approved_ek_keys = ["approved_ek_rsa2048", "approved_ek_eccp256"]
   approved_eks     = flatten([for n in values(local.nodes) : [for k in local.approved_ek_keys : n[k] if lookup(n, k, null) != null]])
 
+  # Each declared install disk serial. It is per disk, so it is the node's own
+  # and never its model's; a node without one gets no Workflow that wipes.
+  disk_serials = [for n in values(local.nodes) : n.disk_serial if lookup(n, "disk_serial", null) != null]
+
   node_prefix_length = split("/", local.topology.K8S_NODE_CIDR)[1]
   classes            = ["controlplane", "worker-g5", "worker-g2"]
   bmc_types          = ["amt", "none"]

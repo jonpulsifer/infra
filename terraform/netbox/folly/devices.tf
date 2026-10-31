@@ -109,10 +109,11 @@ resource "netbox_cable" "node" {
 }
 
 # What git declares of a device after it exists: its serial, model, primary
-# IPv4 and declared custom fields, the approved EK binding among them, which
-# a node without one sends as null. A PATCH sends only these keys, so the fields
-# the services write are never part of a request. Terraform writes them when a
-# node is created or its entry changes, and does not read them back.
+# IPv4 and declared custom fields, the install disk serial and the approved EK
+# binding among them, which a node without one sends as null. A PATCH sends
+# only these keys, so the fields the services write are never part of a
+# request. Terraform writes them when a node is created or its entry changes,
+# and does not read them back.
 resource "restapi_object" "declared" {
   for_each = local.nodes
 
@@ -135,6 +136,7 @@ resource "restapi_object" "declared" {
       talos_class          = each.value.class
       bmc_type             = each.value.bmc
       install_disk         = each.value.disk
+      install_disk_serial  = lookup(each.value, "disk_serial", null)
       tpm_version          = each.value.tpm
       amt                  = each.value.amt
       secure_boot_expected = each.value.secure_boot

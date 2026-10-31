@@ -420,6 +420,7 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 	cfg := Config{Classes: testClasses,
 		Installs: map[string]string{"worker-g5": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"}}
 	hm := func(d Device, action string) map[string]any {
+		d.DiskSerial = "30DF7020FGKL"
 		return mustWorkflow(t, cfg, d, action)["spec"].(map[string]any)["hardwareMap"].(map[string]any)
 	}
 	g5 := Device{Name: "riptide", Class: "worker-g5", TPM: "2.0", Status: "planned", BMCType: "none"}
