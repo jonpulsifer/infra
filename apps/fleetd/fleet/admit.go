@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -74,6 +75,9 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 	if !r.provisionRunning(ctx, d) {
 		if why := r.provisionWhy(d); why != "" {
 			Audit("fleet.autoprovision", r.Config.Site, d, d.LastWorkflow, "skipped: "+why)
+			if err := r.hookosAfterSuccess(ctx, d, req.UUID); err != nil {
+				log.Printf("fleet.hookos-after-success: %s: %v", d.Name, err)
+			}
 			return conflict("no provision: %s", why)
 		}
 		if d.MAC == "" || d.Disk == "" {
@@ -101,6 +105,45 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		}
 	}
 	return r.Installer.Render(ctx, req)
+}
+
+// hookosAfterSuccess journals once per run that a planned device attested
+// from HookOS after its provision Workflow succeeded and before its node read
+// its config: the firmware did not boot the installed disk. A device with a
+// desired_action set is on its way to a run that netboots on purpose, and is
+// no failure. The Workflow's annotation keeps the journal once across a
+// restart.
+func (r *Reconciler) hookosAfterSuccess(ctx context.Context, d Device, uuid string) error {
+	if d.DesiredAction != "none" || !strings.HasPrefix(d.LastWorkflow, "provision-"+d.Name+"-") {
+		return nil
+	}
+	if _, unread := r.Installer.Configs.Holds(uuid); !unread {
+		return nil
+	}
+	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimPrefix(wf.State(), "STATE_") != "SUCCESS" {
+		return nil
+	}
+	if _, done := wf.Annotations()[HookOSAfterAnnotation]; done {
+		return nil
+	}
+	why := fmt.Sprintf("fleetd: the node booted HookOS and attested after Workflow %s succeeded, so its firmware did not boot the installed disk. Check its boot order (PXE first sends it back to HookOS) and its console, then fix the order or set desired_action to provision to run it again", wf.Name())
+	if err := r.journalOnce(ctx, "hookos-after/"+wf.Name(), d, "warning", why); err != nil {
+		return err
+	}
+	err = r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{HookOSAfterAnnotation: r.Now().UTC().Format(time.RFC3339)})
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("annotate %s: %w", wf.Name(), err)
+	}
+	r.Metrics.HookOSAfter.Add(1)
+	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "node booted HookOS after SUCCESS")
+	return nil
 }
 
 // Expected says whether fleetd expects the machine with the serial in

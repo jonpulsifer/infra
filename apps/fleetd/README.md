@@ -180,6 +180,13 @@ unauthenticated. When it is a `planned` device whose `last_workflow` is its prov
 for a config fleetd does not hold; the owner sets `desired_action` to `provision`. A UUID NetBox
 does not hold is only logged.
 
+A node that boots HookOS after its provision succeeded attests again as a `planned` device whose
+`desired_action` is `none`, whose `last_workflow` is that provision and whose config is unread.
+`Admit` journals once per run that the node booted HookOS after the Workflow succeeded, marks the
+Workflow with `lolwtf.ca/hookos-after-journaled` so a restart does not repeat it, and counts
+`fleet_hookos_after_success_total`. A reprovision or wipe netboots on purpose and sets
+`desired_action`, so it is no failure.
+
 ## NetBox contract
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
