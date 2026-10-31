@@ -24,7 +24,7 @@
 #   kill PROC [--signal SIG] [--when COND] | stop PROC | start PROC
 #   disk NAME sentinel|shuffle|usb-attach DISK SIZE|detach DISK|attach DISK
 #   efi NAME show|next ENTRY|order ENTRY,...
-#   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow
+#   registry ls|delete IMAGE|restore IMAGE|deny [--drop]|throttle KBPS|allow [--when COND] [--delay S]
 #   observe NAME [--no-console]
 #   hookos-docker NAME ARGS...          hook-docker's docker on the machine's HookOS, such as
 #                                       restart tink-worker
@@ -1548,7 +1548,9 @@ case $cmd in
     ;;
   registry)
     tools
-    registry_cmd "$@"
+    parse_when "$@"
+    [ -n "$when" ] && at_boundary "${TINK_LAB_VM:?a registry --when needs TINK_LAB_VM, the machine to watch}"
+    registry_cmd "${rest[@]}"
     ;;
   template)
     tools

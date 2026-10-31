@@ -155,7 +155,7 @@ wait after the boundary. A COND is one of:
 | `disk NAME detach DISK`, `attach DISK` | Takes a disk out of the VM, or puts it back, from the next power-on; a USB disk also unplugs or plugs in at once. The image stays, and `observe` still reads its sentinels. | `disk` `{disk, attached}` |
 | `efi NAME show\|next ENTRY\|order A,B,...` | Reads the VM's EFI boot variables from its OVMF store. A write needs the VM off. `next Pxe` or `next Hdd` picks the first such entry in BootOrder. | `efi` `{result}` |
 | `registry delete IMAGE`, `restore IMAGE` | Deletes a lab image's manifest (IMAGE is any part of its reference, such as `talos-installer`), so a pull fails with "manifest unknown". `restore` pushes it back from the cache. | `registry` `{action, image, digest}` |
-| `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. | `registry` `{action, verdict}` |
+| `registry deny [--drop]`, `allow` | The VMs' connections to the registry are reset, or with `--drop` hang. Every `registry` hook takes `--when` and `--delay`; set `TINK_LAB_VM` to the machine to watch, as for `kill`. | `registry` `{action, verdict}` |
 | `registry throttle KBPS` | The registry's packets to the VMs over KBPS kilobytes a second are dropped, so a pull crawls instead of failing. `allow` lifts it. | `registry` `{action, kbytes_per_second}` |
 | `hookos-docker NAME ARGS...` | Runs hook-docker's `docker ARGS...` on HookOS through the serial console, such as `restart tink-worker` to restart the agent. hook-bootkit starts `tink-worker` with restart policy `no`, so nothing else restarts it in one boot. A restart re-runs the stand-in attestation, which writes a new install code. | `hookos-docker` `{vm, args, status, output}` |
 | `observe NAME [--no-console]` | A snapshot. See below. | `observe` |
@@ -260,8 +260,9 @@ The test numbers are those in the test plan.
   Each varies the inputs, and the finding must say so.
 - **One flat network.** The VMs, the boot server and the registry share one bridge. The lab routes
   between the Kubernetes network and spore's bootstrap VLAN.
-- **HookOS's image cache lives in RAM for one boot.** To take an image out of it mid-run (test 7),
-  run `docker rmi` through `vm console`.
+- **HookOS's image cache lives in RAM for one boot.** A power cycle empties it, so each Workflow
+  with a boot mode pulls every image again. To take an image out of it mid-run, run `docker rmi`
+  through `hookos-docker`.
 - **Memory.** Each VM takes 3 GiB, so this machine runs about three at once. Test 4's concurrency
   runs need more memory, or smaller VMs (`TINK_LAB_VM_MEM`).
 
