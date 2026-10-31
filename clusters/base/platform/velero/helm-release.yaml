@@ -26,6 +26,20 @@ spec:
     cleanupOnFail: true
     remediation:
       retries: 5
+  # The chart runs the node agent as the server's cluster-admin account and has
+  # no value for another one, so the DaemonSet is pointed at
+  # velero-node-agent, declared in node-agent-rbac.yaml.
+  postRenderers:
+    - kustomize:
+        patches:
+          - target:
+              version: v1
+              kind: DaemonSet
+              name: node-agent
+            patch: |-
+              - op: replace
+                path: /spec/template/spec/serviceAccountName
+                value: velero-node-agent
   values:
     image:
       repository: docker.io/velero/velero
