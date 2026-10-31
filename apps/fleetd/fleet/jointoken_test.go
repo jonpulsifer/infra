@@ -14,7 +14,7 @@ import (
 )
 
 // fakeAPI is the cluster's API as the account sees it: Secrets in
-// kube-system, which it may create, replace and delete, as the API server
+// kube-system, which it may create and delete but not update, as the API server
 // stores them, keyed by name.
 type fakeAPI struct {
 	mu      sync.Mutex
@@ -59,12 +59,6 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.secrets[n] = body
-	case r.Method == http.MethodPut && named:
-		if _, ok := f.secrets[name]; !ok {
-			http.NotFound(w, r)
-			return
-		}
-		f.secrets[name] = body
 	case r.Method == http.MethodDelete && named:
 		if _, ok := f.secrets[name]; !ok {
 			http.NotFound(w, r)
@@ -159,7 +153,10 @@ func TestMintKeepsOneTokenPerNode(t *testing.T) {
 	if _, err := c.Mint(t.Context(), "swell", expires); err != nil || len(api.secrets) != 2 {
 		t.Fatalf("another node's token: %v, %d secrets", err, len(api.secrets))
 	}
-	wantCalls := []string{"POST", "POST", "PUT", "POST"}
+	wantCalls := []string{"POST", "POST", "DELETE", "POST", "POST"}
+	if len(api.calls) != len(wantCalls) {
+		t.Fatalf("calls %v", api.calls)
+	}
 	for i, call := range api.calls {
 		if !strings.HasPrefix(call, wantCalls[i]+" ") {
 			t.Fatalf("calls %v", api.calls)

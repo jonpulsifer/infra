@@ -181,6 +181,9 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	if classes == "" || workers == "" || bin == "" {
 		return nil, fmt.Errorf("FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL go together")
 	}
+	if in.TTL+JoinTokenGrace > JoinTokenMaxLifetime {
+		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be at most %s: a worker's bootstrap token lives for it plus %s, and the cluster admits none for more than %s", JoinTokenMaxLifetime-JoinTokenGrace, JoinTokenGrace, JoinTokenMaxLifetime)
+	}
 	inputs, err := LoadClassInputs(classes)
 	if err != nil {
 		return nil, err

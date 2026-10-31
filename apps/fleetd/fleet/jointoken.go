@@ -25,6 +25,11 @@ const JoinGroup = "system:bootstrappers:nodes"
 // with that certificate, so the expired token stops nothing that runs.
 const JoinTokenGrace = 4 * time.Hour
 
+// JoinTokenMaxLifetime is the longest expiration the account's admission
+// policy, fleet-controller-join-tokens, admits for a token: 8 hours from its
+// creation. A config TTL plus JoinTokenGrace must fit in it.
+const JoinTokenMaxLifetime = 8 * time.Hour
+
 const joinTokenNamespace = "kube-system"
 
 var joinTokenPattern = regexp.MustCompile(`^[a-z0-9]{6}\.[a-z0-9]{16}$`)
@@ -53,10 +58,13 @@ func JoinTokenID(node string) string {
 func joinTokenSecretName(node string) string { return "bootstrap-token-" + JoinTokenID(node) }
 
 // Mint creates the node's bootstrap token Secret in kube-system, or replaces
-// the one an earlier render made, so the node has one live token and an
-// older config's token stops working. The account's admission policy admits
-// only this shape: named for its ID, labelled with fleetd and the node,
-// authentication only, the one group, and an expiration.
+// the one an earlier render made by deleting it and creating it again, so the
+// node has one live token and an older config's token stops working. The
+// account's admission policy admits only this shape: named for its ID,
+// labelled with fleetd and the node, authentication only, the one group, and
+// an expiration within JoinTokenMaxLifetime of its creation. It admits no
+// update, so it judges every token's expiration against the time the API
+// server created it.
 func (c *Cluster) Mint(ctx context.Context, node string, expires time.Time) (string, error) {
 	id := JoinTokenID(node)
 	secret := strings.ToLower(rand.Text())[:16]
@@ -82,7 +90,9 @@ func (c *Cluster) Mint(ctx context.Context, node string, expires time.Time) (str
 	base := "/api/v1/namespaces/" + joinTokenNamespace + "/secrets"
 	err := c.do(ctx, http.MethodPost, base, "application/json", s, nil)
 	if errors.Is(err, ErrConflict) {
-		err = c.do(ctx, http.MethodPut, base+"/"+name, "application/json", s, nil)
+		if err = c.do(ctx, http.MethodDelete, base+"/"+name, "", nil, nil); err == nil || errors.Is(err, ErrNotFound) {
+			err = c.do(ctx, http.MethodPost, base, "application/json", s, nil)
+		}
 	}
 	if err != nil {
 		return "", fmt.Errorf("bootstrap token %s: %w", name, err)

@@ -717,6 +717,14 @@ func TestLoadInstallerGatesControlPlanes(t *testing.T) {
 	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", "")
 	t.Setenv("FLEET_BOOTSTRAP_ADDRESS", "")
 
+	// A worker's token lives for the TTL plus the grace, which the cluster
+	// caps at JoinTokenMaxLifetime.
+	t.Setenv("FLEET_CONFIG_TTL", "4h1m")
+	if _, err := LoadInstaller(&Config{}, nil, nil, NewMetrics()); err == nil || !strings.Contains(err.Error(), "at most 4h0m0s") {
+		t.Fatalf("a TTL past the token cap: %v", err)
+	}
+	t.Setenv("FLEET_CONFIG_TTL", "4h")
+
 	cfg := Config{}
 	in, err := LoadInstaller(&cfg, nil, nil, NewMetrics())
 	if err != nil || in.ControlPlanes || cfg.Installs["controlplane"] != "" || cfg.Installs["worker-g5"] == "" || cfg.Bootstrap != "" {

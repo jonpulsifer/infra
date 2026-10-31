@@ -62,7 +62,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them nothing renders |
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
-| `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's |
+| `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's. With a renderer, `FLEET_CONFIG_TTL` is at most `4h`, so a worker's token fits the cluster's 8-hour cap |
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state across a restart; without it configs live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
 | `FLEET_AUTO_PROVISION` | `false` | Whether an admitted worker that never ran a Workflow starts its provision |
@@ -160,7 +160,10 @@ cluster's. Each render creates it in the cluster's `kube-system` as the Secret
 (`fleet/jointoken.go`), so a node has one token and a new render replaces the last one's, across
 passes and restarts. The token authenticates in `system:bootstrappers:nodes` alone, which Talos's
 bootstrap manifests bind to a kubelet's first client-certificate request, and expires
-`FLEET_CONFIG_TTL` plus four hours after the render. The kubelet uses it once, for its TLS
+`FLEET_CONFIG_TTL` plus four hours after the render. fleetd replaces a token by deleting it and
+creating it again, since the account's admission policy admits no update and no expiration past
+eight hours from the token's creation; fleetd refuses to start with a `FLEET_CONFIG_TTL` past four
+hours. The kubelet uses it once, for its TLS
 bootstrap; it then authenticates and renews with its own client certificate, so the expiry stops
 nothing that runs, and a config left on a disk cannot join again. A render that cannot create the
 token, as while the cluster's API does not answer, is a 503 and answers no install code. A control
