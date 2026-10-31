@@ -1,8 +1,13 @@
 package attest
 
 import (
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +152,38 @@ func TestStoreKeepsOneRecordPerSerial(t *testing.T) {
 	}
 	if rec, _, _ := s.RecordBySerial("MXL9"); rec.Machine != "shoal" {
 		t.Fatalf("by serial with an older twin: %+v", rec)
+	}
+}
+
+// A machine's identity is the SHA-1 of its LDevID, the agent ID SPIRE's
+// tpm_devid gives it, and its EK hashes; one with no LDevID has only hashes.
+func TestStoreIdentities(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := newTestCA(t, "surge", nil, 0).cert
+	ca := newTestCA(t, "FML DevID test CA", nil, 0).cert
+	var chain []byte
+	for _, c := range []*x509.Certificate{leaf, ca} {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})...)
+	}
+	if err := s.Save(Record{Machine: "surge", Serial: "S1", EKHashes: map[string]string{"rsa": "bb", "ecc": "aa"}}, map[string][]byte{fileLDevIDCert: chain}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Record{Machine: "swell", Serial: "S2", EKHashes: map[string]string{"rsa": "cc"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.Identities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha1.Sum(leaf.Raw)
+	want := []Identity{
+		{Machine: "surge", Fingerprint: hex.EncodeToString(sum[:]), NotAfter: leaf.NotAfter, EKHashes: []string{"aa", "bb"}},
+		{Machine: "swell", EKHashes: []string{"cc"}},
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("identities:\n got %+v\nwant %+v", ids, want)
 	}
 }

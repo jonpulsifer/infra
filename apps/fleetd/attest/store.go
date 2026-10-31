@@ -1,7 +1,11 @@
 package attest
 
 import (
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -437,6 +441,59 @@ func (s *Store) records() ([]Record, error) {
 		if ok {
 			out = append(out, r)
 		}
+	}
+	return out, nil
+}
+
+// Identity is what SPIRE knows a machine's agent by: the SHA-1 fingerprint
+// of the LDevID on file, which tpm_devid names the agent after, and the EK
+// hashes, which the EK attestor names it after.
+type Identity struct {
+	Machine     string
+	Fingerprint string
+	NotAfter    time.Time
+	EKHashes    []string
+}
+
+// Identities lists each machine's identity, with no fingerprint for a
+// machine that holds no LDevID.
+func (s *Store) Identities() ([]Identity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Identity, 0, len(recs))
+	for _, r := range recs {
+		id := Identity{Machine: r.Machine}
+		for _, h := range r.EKHashes {
+			id.EKHashes = append(id.EKHashes, h)
+		}
+		sort.Strings(id.EKHashes)
+		dir, err := s.machineDir(r.Machine)
+		if err != nil {
+			return nil, err
+		}
+		b, err := os.ReadFile(filepath.Join(dir, fileLDevIDCert))
+		if errors.Is(err, fs.ErrNotExist) {
+			out = append(out, id)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		block, _ := pem.Decode(b)
+		if block == nil {
+			return nil, fmt.Errorf("%s's LDevID holds no PEM block", r.Machine)
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s's LDevID: %w", r.Machine, err)
+		}
+		sum := sha1.Sum(cert.Raw)
+		id.Fingerprint, id.NotAfter = hex.EncodeToString(sum[:]), cert.NotAfter
+		out = append(out, id)
 	}
 	return out, nil
 }

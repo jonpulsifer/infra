@@ -14,6 +14,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 - You can sign in to NetBox at `https://capsule.<tailnet>`.
 - The node is a worker with a BMC. optiplex is folly's only control-plane node, and this runbook does not retire it.
 - `<node>` is the host name.
+- Retire one node at a time. spore's SPIRE applier withdraws at most one node a run and refuses a run that would withdraw more. To retire several at once, first name each one in `/var/lib/spire-fleet-entries/withdraw` on spore, as [Identity](../platform/identity.md#fleetd-entries) describes.
 
 ## Back up and drain
 
@@ -83,7 +84,7 @@ Use this runbook to take a worker out of folly for good. You drain the node and 
 | System | What happens to the node |
 | --- | --- |
 | UniFi | The apply deletes its DNS record, and its switch port keeps its Kubernetes override |
-| SPIRE | spore drops its LDevID alias at the deploy, so no workload entry names it. fleetd renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
+| SPIRE | At `decommissioning`, fleetd lists the node as revoked, and the applier on spore bans its agents, by LDevID or EK hash, within minutes. A banned agent cannot attest again, and SPIRE has no other revocation of an LDevID. The applier deletes the node's `fleet-*` aliases, so no workload entry names it. fleetd renews no LDevID for a `decommissioning` or `offline` device, so the LDevID lapses at its expiry |
 | Talos | The Talos root stops managing the node |
 | Tinkerbell | fleetd deletes its `Hardware` and `Machine` |
 | NetBox | The apply deletes the device with its history. To use the machine again, follow [Provision a node](provision-a-node.md) |

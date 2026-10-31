@@ -206,9 +206,9 @@ in
       (lib.attrNames anchors == [ "spore" ] && broken == [ ])
       "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
-  # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. Both
-  # on is the transition; each node then has one alias per attestor, since an agent matches a node
-  # entry only when it has every selector.
+  # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. The
+  # node aliases are fleetd's, so spore declares none. An agent matches a node entry only when it
+  # has every selector, so a node with two attestors needs two aliases, which a key tells apart.
   spire-devid =
     let
       extend = module: (nixosConfigurations.spore.extendModules { modules = [ module ]; }).config;
@@ -230,13 +230,24 @@ in
           };
         };
       };
+      keyed = extend {
+        homelab.spire.entries = lib.mkForce [
+          {
+            spiffeID = "spiffe://lolwtf.ca/node/riptide";
+            selectors = [ "tpm:pub_hash:test" ];
+          }
+          {
+            spiffeID = "spiffe://lolwtf.ca/node/riptide";
+            key = "tpm_devid";
+            selectors = [ "tpm_devid:subject:cn:riptide" ];
+          }
+        ];
+      };
       attestors =
         c:
         lib.attrNames (
           lib.filterAttrs (_: v: v != null) c.services.spire.server.settings.plugins.NodeAttestor
         );
-      aliases =
-        c: name: lib.filter (e: e.spiffeID == "spiffe://lolwtf.ca/node/${name}") c.homelab.spire.entries;
       sync = c: c.systemd.services.spire-server-entries.script;
       devidData = both.services.spire.server.settings.plugins.NodeAttestor.tpm_devid.plugin_data;
       failures = lib.filter (failure: failure != null) [
@@ -267,32 +278,16 @@ in
           else
             "tpm_devid does not read the DevID and endorsement CA files"
         )
+        # fleetd's spire-nodes.json holds every node alias, so the applier withdraws it.
         (
-          if
-            lib.all
-              (
-                name:
-                let
-                  selectors = c: map (e: e.selectors) (aliases c name);
-                in
-                lib.length (selectors ekOnly) == 1
-                && lib.hasPrefix "tpm:pub_hash:" (lib.head (lib.head (selectors ekOnly)))
-                && selectors both == selectors ekOnly ++ [ [ "tpm_devid:subject:cn:${name}" ] ]
-              )
-              [
-                "optiplex"
-                "riptide"
-              ]
-          then
-            null
+          if lib.any (e: e.parentID == null) (ekOnly.homelab.spire.entries ++ both.homelab.spire.entries) then
+            "spore declares a node alias, which fleetd's file holds"
           else
-            "a node does not have one alias by EK hash and one by LDevID subject CN"
+            null
         )
-        # The LDevID aliases follow the nodes file, and shale's TPM 1.2 attests nothing.
-        (if aliases both "shale" == [ ] then null else "shale, with a TPM 1.2, has a SPIRE node alias")
         (
           let
-            lines = lib.splitString "\n" (lib.replaceStrings [ "'" ] [ "" ] (sync both));
+            lines = lib.splitString "\n" (lib.replaceStrings [ "'" ] [ "" ] (sync keyed));
             ids = map (line: lib.elemAt (lib.splitString " " line) 1) (
               lib.filter (
                 line: lib.hasPrefix "apply " line && lib.hasInfix " -spiffeID spiffe://lolwtf.ca/node/riptide " line
@@ -302,7 +297,7 @@ in
           if lib.length ids == 2 && lib.unique ids == ids then
             null
           else
-            "the entry sync does not give riptide's two aliases distinct IDs"
+            "the entry sync does not give two keyed aliases of one node distinct IDs"
         )
       ];
     in

@@ -200,6 +200,14 @@ spec:
           annotations:
             message: SPIRE registration entry sync failed on spore
             description: "spire-server-entries.service failed. The server's registration entries may not match nix/hosts/spore.nix; read the unit's journal."
+        - alert: SporeSpireFleetEntriesFailed
+          expr: node_systemd_unit_state{instance="spore", name="spire-server-fleet-entries.service", state="failed"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: SPIRE fleet entry applier failed on spore
+            description: "spire-server-fleet-entries.service failed, so the fleet-* entries stand as they were and no node is registered or withdrawn. A journal line `refusing to withdraw` means fleetd's file drops more nodes than the cap allows in one run; otherwise the file is malformed or the server does not answer. docs/platform/identity.md#fleetd-entries has the override."
         - alert: SpireNoAttestedAgents
           expr: (spire_server_attested_agents{instance="spore"} < 1) or absent(spire_server_attested_agents{instance="spore"})
           for: 15m

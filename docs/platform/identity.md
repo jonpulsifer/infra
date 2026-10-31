@@ -14,7 +14,7 @@ SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs 
 | `tpm_devid` node attestor | Checks the LDevID's chain against the DevID CA, the EK certificate's chain against the manufacturer CAs in `nix/services/spire/roots/`, and that the LDevID key and the EK are in one TPM. It runs when `homelab.spire.devid.enable` is true. | spore, built into SPIRE |
 | `k8sbundle` notifier | Writes the server's bundle into folly's `spire/spire-bundle` at startup and on every CA rotation, as the ServiceAccount `spire-bundle-writer` | spore, in the server, when `homelab.spire.bundleNotifier.enable` is true |
 | `spire-server-entries` | Creates, updates and prunes the registration entries to match git | spore, a oneshot after the server is healthy |
-| `spire-server-fleet-entries` | Registers the nodes fleetd lists, and withdraws the ones it drops | spore, a oneshot that a path unit starts when fleetd rewrites `/var/lib/fleetd/spire-nodes.json`, and a timer every 10 minutes |
+| `spire-server-fleet-entries` | Registers the nodes fleetd lists, withdraws the ones it drops, and bans the agents of the ones it revokes | spore, a oneshot that a path unit starts when fleetd rewrites `/var/lib/fleetd/spire-nodes.json`, and a timer every 10 minutes |
 | `spire-server-agent-count` | Writes `spire_server_attested_agents` for the node exporter every minute | spore, a timer |
 
 The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
@@ -30,9 +30,9 @@ The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The 
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The `git-*` LDevID aliases follow `clusters/folly/inventory/nodes.yaml`. Each node with `tpm` `2.0`, its own or its model's, gets one. `nix/lib/inventory.nix` reads the nodes file at evaluation, so a `git-*` alias needs a spore deploy. A node fleetd lists in `spire-nodes.json` gets its `fleet-*` alias with no deploy. It fails the evaluation on any line outside the file's shape.
-- Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
-- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
+- Each node alias, by LDevID CN or EK hash, is a `fleet-*` entry for a node fleetd lists in `spire-nodes.json`, so a node gets it with no deploy and loses it when fleetd withdraws it. spore declares none.
+- Change the EK allow list in `ekHashes` and the workload entries in `workloads` of `nix/hosts/spore.nix`. The allow list admits an agent; its alias by EK hash comes from fleetd's file, as the LDevID alias does. spore declares no entry, and the sync deletes any entry whose ID starts with `git-` and leaves entries made by hand.
+- An agent matches a node entry only when it has every selector, so a node has one alias for each attestor: by EK hash, and by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
 - `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
@@ -44,10 +44,18 @@ Two owners write registration entries, and the entry ID says which.
 
 | Owner | IDs | Holds |
 | --- | --- | --- |
-| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`: the alias for each node in `ekHashes` and each node of `nodes.yaml` with a TPM 2.0, and the `workloads` under them |
-| fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the eviction of a withdrawn node's agent |
+| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`, which declares none, so the sync prunes every `git-*` entry |
+| fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the bans of withdrawn and revoked nodes' agents |
 
-fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]` and EK hashes of 64 lowercase hex characters, and leaves every entry as it is when the file is malformed. A node is in the file while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and evicts each agent whose node selector no entry carries any longer. An evicted agent attests again while its LDevID is valid, and gets no workload entries without an alias.
+fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]`, EK hashes of 64 lowercase hex characters and LDevID fingerprints of 40, and leaves every entry as it is when the file is malformed or names a node or an EK hash as both registered and revoked. A node is in `nodes` while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and bans each agent whose node selector no entry carries any longer.
+
+A node is in `revoked` while fleetd holds its record and its device is `decommissioning`, `offline` or gone from NetBox. The entry names the node, its EK hashes, and the SHA-1 fingerprint of the LDevID on file until that LDevID's `notAfter`. The applier bans each agent that matches any of them: by its agent ID, by `tpm:pub_hash:<hash>`, or by `tpm_devid:subject:cn:<name>`, which covers every LDevID the node holds, renewed or not. It bans a revoked node's agent even while a `git-*` entry carries its selector. An EK hash that a registered node carries is never revoked, so a TPM that moves to a new name keeps its identity.
+
+A banned agent cannot attest again with the same agent ID, so neither an unexpired LDevID nor an EK on the allow list admits it. SPIRE has no unban. When a node is registered again, after a quarantine is lifted or a re-provision, the applier evicts each banned agent that carries one of the node's selectors and that nothing revokes; the record goes, and the agent attests afresh. A re-provisioned node's new LDevID is a new agent ID and needs no eviction, but an EK agent's ID is its EK hash and does. The applier owns these bans: it lifts a ban made by hand on a registered node's agent, so set the device `failed` to keep a node out.
+
+SPIRE checks no LDevID revocation beyond the ban. Between the owner setting `decommissioning` and the ban, the node's agent keeps its SVIDs: until fleetd's next pass rewrites the file, which starts the applier through the path unit, or the 10-minute timer when the path unit misses it. `BanAgent` needs an attested-node record, so an agent that first attests after a run is banned at the next one. A banned agent's workload SVIDs last until their TTL, an hour by SPIRE's default.
+
+One run withdraws, or bans an agent of, at most `homelab.spire.fleetEntries.maxWithdrawals` nodes, 1 by default. A withdrawn node is one that holds a `fleet-*` alias and is absent from `nodes`. A node also counts when the run bans an agent of it: a revoked node, or a listed node whose EK hash alias goes, as when a bulk edit clears the `ek_hash` pins. The run bans before it deletes entries, so a run that fails between the two plans the same bans again. A retirement or a quarantine takes out one node, so a file that drops two at once reads as a bulk edit in NetBox or a filter gone wrong. A run over the cap changes nothing, exits non-zero, and `SporeSpireFleetEntriesFailed` fires after 15 minutes. The applier, which is in `nix/services/spire/fleet-entries.sh`, then refuses every run until the file is back under the cap or the owner allows it. To allow it, the owner names each node in `/var/lib/spire-fleet-entries/withdraw` on spore, one name a line, as root. The next run withdraws or bans them and removes the file. `mise run spire:test` runs the applier against a stub server.
 
 SPIRE rejects an entry that repeats another's parent, SPIFFE ID and selectors. The applier skips an entry that a `git-*` entry, or one made by hand, already issues, and the Nix sync deletes a `fleet-*` entry that an entry it declares repeats. The declared entry wins in both orders, and no alias is missing while a node moves from one owner to the other.
 
@@ -145,15 +153,14 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 
 ## Live state
 
-riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptide's agent attests by its LDevID, and optiplex's by EK hash. The allow list holds the EK hashes of both. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
+riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
 - `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
-- `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
-- `nix/lib/inventory.nix`: the nodes file as Nix, for the LDevID aliases and talos-attest's inventory
+- `nix/hosts/spore.nix`: the EK allow list `ekHashes` and the `workloads`
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`

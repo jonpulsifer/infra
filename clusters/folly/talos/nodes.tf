@@ -4,9 +4,15 @@
 # device fails the plan instead (data.netbox_devices.nodes).
 locals {
   inventory = yamldecode(file("${path.module}/../inventory/nodes.yaml"))
+  # Nodes whose TPM 2.0 the running node does not expose (no /dev/tpmrm0). The
+  # root treats them as having no TPM: no lolwtf.ca/tpm label, so spire-agent
+  # and tpm-reattest skip them, and no TPM patches. NetBox keeps the hardware's
+  # tpm_version. Drop a node from here when its TPM is back.
+  tpm_off = ["optiplex"]
   declared = { for name, n in local.inventory.nodes : name => merge(
     { for k, v in local.inventory.models[n.model] : k => v if contains(["disk", "tpm", "amt", "secure_boot"], k) },
     n,
+    contains(local.tpm_off, name) ? { tpm = "off" } : {},
   ) }
   node_status = { for d in data.netbox_devices.nodes.devices : d.name => d.status }
   machines = { for name, m in local.declared : name => merge(m, {
