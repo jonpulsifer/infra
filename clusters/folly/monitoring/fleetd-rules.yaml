@@ -163,3 +163,33 @@ spec:
           annotations:
             message: "{{ $labels.machine }}'s PCR 0 changed at the same BIOS version"
             description: "{{ $labels.machine }}'s firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+        # On folly a kubelet's first certificate waits for fleetd's or the owner's approval
+        # (clusters/folly/tinkerbell-access/node-client-approval.yaml), and a renewal is approved in
+        # seconds. kube-state-metrics reads the CSRs from folly's API, so this holds while spore or
+        # NetBox is down. The kubelet asks again every hour, and the controller manager deletes a
+        # pending CSR after a day.
+        - alert: KubeletCSRPending
+          expr: |-
+            (time() - max by (certificatesigningrequest) (kube_certificatesigningrequest_created{signer_name="kubernetes.io/kube-apiserver-client-kubelet"}) > 3600)
+            unless on (certificatesigningrequest)
+            (max by (certificatesigningrequest) (kube_certificatesigningrequest_condition{signer_name="kubernetes.io/kube-apiserver-client-kubelet"}) > 0)
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: "Kubelet certificate request {{ $labels.certificatesigningrequest }} has waited an hour"
+            description: "A node's kubelet asked for its client certificate an hour ago and nobody approved it, so the node does not register. fleetd approves a worker it installs within a pass; read the device's NetBox journal for why it did not, and journalctl -u fleetd on spore. A join with the cluster's bootstrap token, such as shale's or a control plane's, is the owner's to approve. https://wiki.lolwtf.ca/runbooks/install-talos-on-a-node/"
+        # node-client-approval.yaml empties the controller manager's approval binding, and a Talos
+        # Kubernetes upgrade puts the subject back until Flux reconciles tinkerbell-access. The
+        # policy node-client-bootstrap-approval still refuses the controller manager the approval;
+        # this watches the second wall. -1 is a binding fleetd cannot read. While fleetd is down the
+        # series is absent, and EnrollmentNameNotServed and FleetdDevIDNotServing fire.
+        - alert: NodeClientApprovalBindingRestored
+          expr: max by (instance) (fleet_node_client_approval_subjects{job="node-exporter"}) != 0
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: The controller manager's approval of a kubelet's first certificate binds subjects again
+            description: "system-bootstrap-approve-node-client-csr binds {{ $value }} subjects, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access empties it again. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
+

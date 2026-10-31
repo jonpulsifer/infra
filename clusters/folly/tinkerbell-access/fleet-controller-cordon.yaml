@@ -46,6 +46,11 @@ rules:
     resources: ["signers"]
     resourceNames: ["kubernetes.io/kube-apiserver-client-kubelet"]
     verbs: ["approve"]
+  # fleetd exports whether the controller manager's approval binding regained subjects.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterrolebindings"]
+    resourceNames: ["system-bootstrap-approve-node-client-csr"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

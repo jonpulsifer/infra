@@ -698,6 +698,10 @@ func (f *fakeCluster) server(t *testing.T) *Cluster {
 			w.Write([]byte(`{"items":[]}`))
 			return
 		}
+		if r.Method == http.MethodGet && r.URL.Path == approvalBindingPath {
+			w.Write([]byte(`{}`))
+			return
+		}
 		node, ok := strings.CutPrefix(r.URL.Path, "/api/v1/nodes/")
 		if r.Method != http.MethodPatch || !ok || r.Header.Get("Content-Type") != "application/merge-patch+json" {
 			http.Error(w, "unexpected", http.StatusBadRequest)

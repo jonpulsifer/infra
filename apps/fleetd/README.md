@@ -169,9 +169,15 @@ nothing that runs, and a config left on a disk cannot join again. A render that 
 token, as while the cluster's API does not answer, is a 503 and answers no install code. A control
 plane renders from the full bundle and carries the cluster's token.
 
-The controller manager approves no certificate a bootstrap token asks for:
-`clusters/folly/tinkerbell-access/node-client-approval.yaml` takes over Talos's binding of
-`system:bootstrappers:nodes` to that approval, with no subjects. Each pass approves a pending
+The controller manager approves no certificate a bootstrap token asks for.
+`clusters/folly/tinkerbell-access/node-client-approval.yaml` holds the policy
+`node-client-bootstrap-approval`, which refuses its account, `certificate-controller`, the approval
+of any request whose requester is `system:bootstrap:*`, and takes over Talos's binding of
+`system:bootstrappers:nodes` to that approval with no subjects. The Talos root's Kubernetes upgrade
+syncs Talos's bootstrap manifests with forced ownership and puts the subject back until Flux
+reconciles; the policy holds meanwhile, and each pass, NetBox or not, exports the subjects as
+`fleet_node_client_approval_subjects` (-1 when unread) for `NodeClientApprovalBindingRestored`.
+Each pass approves a pending
 `kubernetes.io/kube-apiserver-client-kubelet` CSR only when it is bound to the token that asked
 (`fleet/joincsr.go`):
 
@@ -182,7 +188,8 @@ The controller manager approves no certificate a bootstrap token asks for:
   signature` and `key encipherment`;
 - X is a worker NetBox holds `planned` or `active`;
 - fleetd's ledger holds that token for X, unexpired, created by the API server no later than the
-  CSR.
+  CSR, and not spent: the ledger records the CSR before fleetd approves it, and refuses any other
+  CSR of the token.
 
 The ledger is how fleetd knows its tokens, since the account cannot read a Secret: each mint
 records the ID, the creation time the API server answered and the expiration, kept in
@@ -190,9 +197,13 @@ records the ID, the creation time the API server answered and the expiration, ke
 `JoinTokenLinger`, a minute, after the approval, once the certificate is issued, deletes the token,
 so each token joins one node once; the kubelet reads its certificate with the token within
 seconds. A request bound to nothing stays pending, and fleetd journals it once on the device its
-CN names, with `kubectl certificate approve <csr>` for the owner: a join with the cluster's token,
-as shale's or a control plane's, is the owner's to approve. The kubelet waits an hour for its
-certificate and then asks again, so a pass every `FLEET_INTERVAL` is in time. A node renews with
+CN names. Only a request from a token fleetd does not mint, such as the cluster's for shale's or a
+control plane's join, gets `kubectl certificate approve <csr>` for the owner. A fleetd token that
+asks for another node's name is a `danger` line on both devices, and one refused for another
+reason says to provision again. The keys that journal a CSR once go when the CSR does. The kubelet
+waits an hour for its certificate and then asks again, so a pass every `FLEET_INTERVAL` is in time;
+`KubeletCSRPending`, from kube-state-metrics, fires on a kubelet client request an hour old,
+whatever spore and NetBox do. A node renews with
 its own certificate, which Talos's `system-bootstrap-node-renewal` leaves to the controller
 manager. The policy `fleet-controller-csr-approval` lets the account only approve, never deny, a
 pending kubelet client request that a node bootstrap token made; CEL cannot read the request's

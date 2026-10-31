@@ -78,6 +78,7 @@ func TestKubeletClientNode(t *testing.T) {
 
 type joinCSR struct {
 	username string
+	groups   []string
 	request  []byte
 	created  time.Time
 	usages   []string
@@ -94,6 +95,9 @@ type fakeJoinAPI struct {
 	mu        sync.Mutex
 	csrs      map[string]*joinCSR
 	approvals []string
+	// subjects are ApprovalBinding's subjects; down fails its read.
+	subjects    int
+	bindingDown bool
 }
 
 func (f *fakeJoinAPI) server(t *testing.T) *Cluster {
@@ -112,6 +116,16 @@ func (f *fakeJoinAPI) serve(w http.ResponseWriter, r *http.Request) {
 	defer f.mu.Unlock()
 	name, approval := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, csrPath+"/"), "/approval")
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == approvalBindingPath:
+		if f.bindingDown {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		subjects := []any{}
+		for range f.subjects {
+			subjects = append(subjects, map[string]any{"kind": "Group", "name": JoinGroup})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"subjects": subjects})
 	case r.Method == http.MethodGet && r.URL.Path == csrPath:
 		if r.URL.Query().Get("fieldSelector") != "spec.signerName="+KubeletClientSigner {
 			http.Error(w, "unexpected selector", http.StatusBadRequest)
@@ -119,11 +133,13 @@ func (f *fakeJoinAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		items := []any{}
 		for name, c := range f.csrs {
-			groups := []string{"system:authenticated"}
-			if strings.HasPrefix(c.username, "system:bootstrap:") {
-				groups = append(groups, "system:bootstrappers", JoinGroup)
-			} else {
-				groups = append(groups, "system:nodes")
+			groups := c.groups
+			switch {
+			case groups != nil:
+			case strings.HasPrefix(c.username, "system:bootstrap:"):
+				groups = []string{"system:authenticated", "system:bootstrappers", JoinGroup}
+			default:
+				groups = []string{"system:authenticated", "system:nodes"}
 			}
 			usages := c.usages
 			if usages == nil {
@@ -216,8 +232,9 @@ func journalFor(nb *fakeNetBox, part string) []string {
 
 // fleetd approves only the request a node's own token makes for that node,
 // and deletes the token once the kubelet has its certificate. Every other
-// bootstrap request waits, journaled on the device it names, and a renewal
-// is the controller manager's.
+// bootstrap request waits, journaled on the devices it concerns; only one
+// from a token fleetd does not mint gets the command that approves it. A
+// renewal is the controller manager's.
 func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 	r, nb, api, clock := newJoinTest(t)
 	riptide := "system:bootstrap:" + JoinTokenID("riptide")
@@ -228,6 +245,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		"cluster-wide": {username: "system:bootstrap:b3qcf7", request: kubeletRequest(t, "system:node:shale", nil), created: at},
 		"older-token":  {username: riptide, request: kubeletRequest(t, "system:node:riptide", nil), created: testNow.Add(-time.Minute)},
 		"server-auth":  {username: riptide, request: kubeletRequest(t, "system:node:riptide", nil), created: at, usages: []string{"client auth", "server auth"}},
+		"no-group":     {username: riptide, groups: []string{"system:authenticated", "system:bootstrappers"}, request: kubeletRequest(t, "system:node:riptide", nil), created: at},
 		"retiring":     {username: "system:bootstrap:" + JoinTokenID("swell"), request: kubeletRequest(t, "system:node:swell", nil), created: at},
 		"renewal":      {username: "system:node:shale", request: kubeletRequest(t, "system:node:shale", nil), created: at},
 	}
@@ -240,20 +258,32 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 	if !slices.Equal(api.approvals, []string{"bound"}) {
 		t.Fatalf("approved %v", api.approvals)
 	}
-	for csr, node := range map[string]string{"other-node": "optiplex", "cluster-wide": "shale", "older-token": "riptide", "server-auth": "riptide", "retiring": "swell"} {
-		if got := journalFor(nb, "request "+csr+","); len(got) != 1 || !strings.Contains(got[0], "kubectl certificate approve "+csr) {
-			t.Errorf("%s (%s): journal %v", csr, node, got)
-		}
-	}
-	for want, part := range map[string]string{
-		"is not the token fleetd mints for optiplex": "request other-node,",
-		"is not the token fleetd mints for shale":    "request cluster-wide,",
-		"older than riptide's newest":                "request older-token,",
-		`"server auth"`:                              "request server-auth,",
-		"swell is decommissioning":                   "request retiring,",
+	for csr, want := range map[string]struct {
+		kind, part string
+		devices    int
+	}{
+		"other-node":   {"danger", "riptide's bootstrap token " + JoinTokenID("riptide") + " asked for optiplex's certificate", 2},
+		"cluster-wide": {"warning", "kubectl certificate approve cluster-wide", 1},
+		"older-token":  {"warning", "older than riptide's newest", 1},
+		"server-auth":  {"warning", `"server auth"`, 1},
+		"no-group":     {"warning", "not in " + JoinGroup, 1},
+		"retiring":     {"warning", "swell is decommissioning", 1},
 	} {
-		if got := journalFor(nb, part); len(got) != 1 || !strings.Contains(got[0], want) {
-			t.Errorf("%s: %v", part, got)
+		var got []map[string]any
+		for _, j := range nb.journals {
+			if c := j["comments"].(string); strings.Contains(c, "request "+csr+" ") || strings.Contains(c, "request "+csr+",") || strings.Contains(c, "request "+csr+":") {
+				got = append(got, j)
+			}
+		}
+		if len(got) != want.devices {
+			t.Errorf("%s: %d journal entries, want %d: %v", csr, len(got), want.devices, got)
+			continue
+		}
+		for _, j := range got {
+			c := j["comments"].(string)
+			if j["kind"] != want.kind || !strings.Contains(c, want.part) || (csr != "cluster-wide" && strings.Contains(c, "kubectl certificate approve")) {
+				t.Errorf("%s: %v", csr, j)
+			}
 		}
 	}
 	if journalFor(nb, "renewal") != nil {
@@ -261,6 +291,16 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 	}
 	if len(journalFor(nb, "approved the kubelet client certificate request bound")) != 1 {
 		t.Errorf("the approval's journal: %v", nb.journals)
+	}
+
+	// The token is spent on its first approval: another request it makes
+	// in the minute before fleetd deletes it is refused.
+	api.csrs["second"] = &joinCSR{username: riptide, request: kubeletRequest(t, "system:node:riptide", nil), created: at.Add(time.Second)}
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.approvals) != 1 || len(journalFor(nb, "spent: fleetd approved CSR bound")) != 1 {
+		t.Fatalf("a second request: approvals %v, journals %v", api.approvals, nb.journals)
 	}
 
 	// The token lives until the certificate is issued and a minute has
@@ -386,5 +426,81 @@ func TestMintRecordsTheToken(t *testing.T) {
 	}
 	if _, ok, _ := c.Ledger.Get("riptide"); ok {
 		t.Fatal("a revoked token is still recorded")
+	}
+}
+
+func approvalSubjectsMetric(t *testing.T, m *Metrics) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	m.ServeHTTP(rec, nil)
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if v, ok := strings.CutPrefix(line, "fleet_node_client_approval_subjects "); ok {
+			return v
+		}
+	}
+	return ""
+}
+
+// Each pass reads the controller manager's approval binding before NetBox,
+// so its metric holds while NetBox does not answer: its subjects, or -1
+// when fleetd cannot read it. Without the cluster's API there is no metric.
+func TestApprovalBindingIsWatched(t *testing.T) {
+	r, _, api, _ := newJoinTest(t)
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := approvalSubjectsMetric(t, r.Metrics); got != "0" {
+		t.Fatalf("metric %q, want 0", got)
+	}
+	api.subjects = 1
+	r.NetBox.URL = "http://127.0.0.1:1"
+	if err := r.Reconcile(t.Context()); err == nil || !strings.Contains(err.Error(), "NetBox") {
+		t.Fatalf("a pass without NetBox: %v", err)
+	}
+	if got := approvalSubjectsMetric(t, r.Metrics); got != "1" {
+		t.Fatalf("metric %q while NetBox is down, want 1", got)
+	}
+	api.bindingDown = true
+	if err := r.Reconcile(t.Context()); err == nil {
+		t.Fatal("an unreadable binding is no error")
+	}
+	if got := approvalSubjectsMetric(t, r.Metrics); got != "-1" {
+		t.Fatalf("metric %q, want -1", got)
+	}
+	if got := approvalSubjectsMetric(t, NewMetrics()); got != "" {
+		t.Fatalf("metric %q without the cluster's API", got)
+	}
+}
+
+// The keys fleetd keeps to journal a CSR once go with the CSR.
+func TestReportedKeysGoWithTheirCSR(t *testing.T) {
+	r, nb, api, clock := newJoinTest(t)
+	api.csrs = map[string]*joinCSR{"cluster-wide": {username: "system:bootstrap:b3qcf7", request: kubeletRequest(t, "system:node:shale", nil), created: testNow}}
+	*clock = testNow.Add(time.Minute)
+	for range 2 {
+		if err := r.Reconcile(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	csrKeys := func() int {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		n := 0
+		for k := range r.reported {
+			if strings.Contains(k, "csr/") {
+				n++
+			}
+		}
+		return n
+	}
+	if csrKeys() == 0 || len(journalFor(nb, "request cluster-wide,")) != 1 {
+		t.Fatalf("keys %v, journals %v", r.reported, nb.journals)
+	}
+	api.csrs = map[string]*joinCSR{}
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if n := csrKeys(); n != 0 {
+		t.Fatalf("%d keys of a deleted CSR remain: %v", n, r.reported)
 	}
 }

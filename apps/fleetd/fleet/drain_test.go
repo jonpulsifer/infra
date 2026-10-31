@@ -126,6 +126,9 @@ func (f *fakeClusterAPI) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"items": items})
 		return
+	case r.URL.Path == approvalBindingPath && r.Method == http.MethodGet:
+		http.NotFound(w, r)
+		return
 	case isCSR && r.Method == http.MethodDelete:
 		if _, ok := f.csrs[csr]; !ok {
 			http.NotFound(w, r)

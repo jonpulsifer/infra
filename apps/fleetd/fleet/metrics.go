@@ -38,6 +38,16 @@ type Metrics struct {
 	pendingOldest    time.Time
 	unreleased       int
 	unreleasedOldest time.Time
+	// approvalSubjects counts the subjects of ApprovalBinding, -1 when
+	// fleetd cannot read it, or is nil without the cluster's API.
+	approvalSubjects *int
+}
+
+// SetApprovalSubjects records the subjects of ApprovalBinding.
+func (m *Metrics) SetApprovalSubjects(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.approvalSubjects = &n
 }
 
 // SetPending records the configs not served yet with the render
@@ -110,6 +120,9 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP fleet_install_configs_oldest_age_seconds Age of the oldest unserved config, 0 with none.\n# TYPE fleet_install_configs_oldest_age_seconds gauge\nfleet_install_configs_oldest_age_seconds %.0f\n", age(m.pendingOldest))
 	fmt.Fprintf(w, "# HELP fleet_install_unreleased Served configs whose release NetBox has not taken yet.\n# TYPE fleet_install_unreleased gauge\nfleet_install_unreleased %d\n", m.unreleased)
 	fmt.Fprintf(w, "# HELP fleet_install_unreleased_oldest_age_seconds Time since the oldest unreleased config was served, 0 with none.\n# TYPE fleet_install_unreleased_oldest_age_seconds gauge\nfleet_install_unreleased_oldest_age_seconds %.0f\n", age(m.unreleasedOldest))
+	if m.approvalSubjects != nil {
+		fmt.Fprintf(w, "# HELP fleet_node_client_approval_subjects Subjects the controller manager's approval of a kubelet's first certificate binds; 0 on folly, -1 when fleetd cannot read the binding.\n# TYPE fleet_node_client_approval_subjects gauge\nfleet_node_client_approval_subjects %d\n", *m.approvalSubjects)
+	}
 	fmt.Fprintf(w, "# HELP fleet_devices NetBox devices by status.\n# TYPE fleet_devices gauge\n")
 	statuses := make([]string, 0, len(m.devices))
 	for s := range m.devices {

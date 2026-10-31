@@ -122,11 +122,13 @@ func (c *Cluster) Mint(ctx context.Context, node string, expires time.Time) (str
 }
 
 // JoinRecord is the bootstrap token fleetd minted for a node: its ID, when
-// the API server created it, and when it expires.
+// the API server created it, when it expires, and the one CSR fleetd
+// approved with it, which spends it.
 type JoinRecord struct {
-	ID      string    `json:"id"`
-	Created time.Time `json:"created"`
-	Expires time.Time `json:"expires"`
+	ID       string    `json:"id"`
+	Created  time.Time `json:"created"`
+	Expires  time.Time `json:"expires"`
+	Approved string    `json:"approved,omitempty"`
 }
 
 // JoinLedger holds each node's newest bootstrap token, by node name. With
@@ -211,6 +213,26 @@ func (l *JoinLedger) Get(node string) (JoinRecord, bool, error) {
 	}
 	r, ok := l.records[node]
 	return r, ok, nil
+}
+
+// MarkApproved spends the node's token on the CSR fleetd approves with it,
+// before the approval, so no other CSR of the token is approved.
+func (l *JoinLedger) MarkApproved(node, csr string) error {
+	if l == nil {
+		return errors.New("fleetd keeps no record of its bootstrap tokens")
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if err := l.load(); err != nil {
+		return err
+	}
+	r, ok := l.records[node]
+	if !ok {
+		return fmt.Errorf("fleetd holds no bootstrap token for %s", node)
+	}
+	r.Approved = csr
+	l.records[node] = r
+	return l.save()
 }
 
 // Drop forgets the node's token, once it is spent or revoked.
