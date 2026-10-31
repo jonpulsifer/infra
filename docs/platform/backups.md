@@ -41,6 +41,8 @@ folly's Garage runs at replication factor 3 on the anchors: spore, capsule and f
 
 1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
 
+Velero's server runs as `velero-server`, which the chart binds to `cluster-admin`. The node agents, one on every node, run as `velero-node-agent` instead. Its role in `clusters/base/platform/velero/node-agent-rbac.yaml` reads pods, claims and volumes, and works only on Velero's own objects in the `velero` namespace, so a token read from a node is not a cluster-admin token. The chart has no value for a second account, so a post-renderer on the HelmRelease sets the DaemonSet's `serviceAccountName`. The server keeps `cluster-admin` because the chart offers no narrower binding.
+
 ## Volumes
 
 Every claim on folly uses `local-path`, a `local` volume on one node's `data` volume. No pod mounts storage from a host outside the cluster, so a stopped anchor does not hang a pod. A claim lives on one node, so Velero is the copy of a claim that has no second instance. [Restore a volume](../runbooks/restore-a-volume.md) recovers it on another node.

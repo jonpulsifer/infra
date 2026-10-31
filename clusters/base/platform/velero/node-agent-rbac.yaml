@@ -1,0 +1,79 @@
+---
+# The chart runs the node agent as velero-server, which is bound to
+# cluster-admin. This account carries only what file-system backup needs, so a
+# token read from any node is not a cluster-admin token.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: velero-node-agent
+  namespace: velero
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: velero-node-agent
+rules:
+  # Pods to find volumes, claims and volumes to resolve them to host paths,
+  # and the node for the data-mover checks.
+  - apiGroups: [""]
+    resources: [pods, persistentvolumeclaims, persistentvolumes, nodes]
+    verbs: [get, list, watch]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: velero-node-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: velero-node-agent
+subjects:
+  - kind: ServiceAccount
+    name: velero-node-agent
+    namespace: velero
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: velero-node-agent
+  namespace: velero
+rules:
+  - apiGroups: [velero.io]
+    resources: [podvolumebackups, podvolumerestores]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [velero.io]
+    resources: [podvolumebackups/status, podvolumerestores/status]
+    verbs: [get, update, patch]
+  - apiGroups: [velero.io]
+    resources: [backuprepositories, backupstoragelocations, backups, restores]
+    verbs: [get, list, watch]
+  - apiGroups: [velero.io]
+    resources: [datauploads, datadownloads]
+    verbs: [get, list, watch, update, patch]
+  - apiGroups: [velero.io]
+    resources: [datauploads/status, datadownloads/status]
+    verbs: [get, update, patch]
+  # The repository password and the object-store credentials.
+  - apiGroups: [""]
+    resources: [secrets, configmaps]
+    verbs: [get, list, watch]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [get, list, watch, create, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: velero-node-agent
+  namespace: velero
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: velero-node-agent
+subjects:
+  - kind: ServiceAccount
+    name: velero-node-agent
+    namespace: velero
