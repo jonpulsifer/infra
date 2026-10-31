@@ -90,17 +90,17 @@ func (r *Reconciler) bmcJob(ctx context.Context, name string) (outcome, why stri
 }
 
 // stopMachine asks the BMC to power the device's machine off to stop run,
-// once per run, and returns the stop Job's outcome. It waits up to
+// once per run, audits why, and returns the stop Job's outcome. It waits up to
 // Config.BMCJobWait for Rufio, and a Job still running is the next pass's to
 // read.
-func (r *Reconciler) stopMachine(ctx context.Context, d Device, run string) (outcome, why string, err error) {
+func (r *Reconciler) stopMachine(ctx context.Context, d Device, run, reason string) (outcome, why string, err error) {
 	name := stopJob(run)
 	outcome, why, err = r.bmcJob(ctx, name)
 	if errors.Is(err, ErrNotFound) {
 		if err := r.Kube.Create(ctx, JobResource, r.Config.StopJob(d, run)); err != nil && !errors.Is(err, ErrConflict) {
 			return "", "", fmt.Errorf("create Job %s: %w", name, err)
 		}
-		Audit("fleet.bmc", r.Config.Site, d, run, "power off: the retirement supersedes it")
+		Audit("fleet.bmc", r.Config.Site, d, run, reason)
 		outcome, why, err = r.bmcJob(ctx, name)
 	}
 	deadline := time.Now().Add(r.Config.BMCJobWait)

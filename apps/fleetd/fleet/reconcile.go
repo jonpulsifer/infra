@@ -754,7 +754,7 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 		_, err := r.start(ctx, d, ActionRetire, swap(workflows, old, fresh), false)
 		return err
 	}
-	outcome, refusal, err := r.stopMachine(ctx, d, old)
+	outcome, refusal, err := r.stopMachine(ctx, d, old, "power off: the retirement supersedes it")
 	switch {
 	case err != nil:
 		return err
@@ -813,19 +813,40 @@ func swap(workflows []Object, name string, o Object) []Object {
 }
 
 // abandon ends the unfinished retirement of a device the owner took out of
-// decommissioning, and says whether it did. As startRetire does, it deletes
-// the run only with a BMC and only while the run is as a read just before
-// shows it.
-// The delete stops no action already running on the machine; the next run's
-// power cycle does. Without a BMC the run is kept, and it ends at its timeout
-// once the machine is off.
+// decommissioning, and says whether it did. The owner cancelled a wipe, and a
+// deleted retirement's action goes on and wipes the disk the owner chose to
+// keep, so, as startRetire does, fleetd deletes it only once the BMC has
+// powered the machine off (stopMachine), and only while the run is as a read
+// just after shows it. A BMC that refuses, and a device without one, keep the
+// retirement running, and the journal says once that the cancellation could
+// not stop it.
 func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, error) {
 	name := wf.Name()
 	if !d.HasBMC() {
-		why := fmt.Sprintf("fleetd: %s left decommissioning while the retirement Workflow %s runs, and no BMC can stop the machine, so the retirement goes on. Power the machine off to stop it; the run then ends at its global timeout, and a new desired_action starts after it", d.Name, name)
+		why := fmt.Sprintf("fleetd: %s left decommissioning while the retirement Workflow %s runs, and no BMC can stop the machine, so the cancellation cannot stop the retirement: it goes on and wipes the disk. Power the machine off by hand to stop it; the run then ends at its global timeout, and a new desired_action starts after it", d.Name, name)
 		return false, r.journalOnce(ctx, "abandon-waits/"+name, d, "warning", why)
 	}
 	fresh, err := r.Kube.Get(ctx, WorkflowResource, name)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("read %s: %w", name, err)
+	case Finished(fresh.State()):
+		return false, nil
+	}
+	outcome, refusal, err := r.stopMachine(ctx, d, name, "power off: the device left decommissioning")
+	switch {
+	case err != nil:
+		return false, err
+	case outcome == jobFailed:
+		why := fmt.Sprintf("fleetd: %s left decommissioning, and the cancellation could not stop the retirement Workflow %s: the BMC did not power the machine off (Rufio Job %s failed: %s). A deleted retirement's action would go on, so fleetd keeps %s, and it goes on and wipes the disk. Power the machine off by hand to stop it; %s then ends at its global timeout, and a new desired_action starts after it", d.Name, name, stopJob(name), refusal, name, name)
+		return false, r.journalOnce(ctx, "abandon-refused/"+name, d, "danger", why)
+	case outcome != jobCompleted:
+		return false, nil
+	}
+	// The machine is off; a report may have landed while it powered off.
+	fresh, err = r.Kube.Get(ctx, WorkflowResource, name)
 	switch {
 	case errors.Is(err, ErrNotFound):
 		return true, nil
@@ -842,7 +863,7 @@ func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, er
 		return false, fmt.Errorf("abandon %s: %w", name, err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, name, "abandoned: the device left decommissioning")
-	why := fmt.Sprintf("fleetd: %s left decommissioning, so fleetd deleted the unfinished retirement Workflow %s. An action already running on the machine runs to its end, so the disk may be partly wiped; the next run's power cycle stops the machine", d.Name, name)
+	why := fmt.Sprintf("fleetd: %s left decommissioning, so the BMC powered the machine off (Rufio Job %s), which stopped the retirement Workflow %s, and fleetd deleted it. The disk may be partly wiped; set desired_action to provision to install the node again", d.Name, stopJob(name), name)
 	return true, r.journalOnce(ctx, "abandoned/"+name, d, "warning", why)
 }
 

@@ -260,10 +260,14 @@ run whose record NetBox refused is adopted. A retirement that failed at an actio
 as before. A provision, wipe or attest that ends at its boot job is journaled with the Job's
 message and runs again only when the owner sets `desired_action`.
 
-A device the owner moves out of `decommissioning` has its unfinished retirement deleted the same
-way, with a BMC and a fresh read's `resourceVersion`, and journaled; an action already running on the
-machine runs to its end, and the next run's power cycle stops it. Without a BMC the retirement is
-kept and journaled, and once it passes its global timeout it ends as any run does.
+A device the owner moves out of `decommissioning` cancels its unfinished retirement, whose wipe would
+destroy the disk the owner chose to keep, so fleetd stops it the same way: the `stop-` Job powers the
+machine off, then a fresh read's `resourceVersion` deletes the retirement, and the journal says the
+disk may be partly wiped. A BMC that refuses the power-off keeps the retirement running, and the
+`danger` journal line says once that the cancellation could not stop it, with the BMC's answer, and
+that powering the machine off by hand stops it. Without a BMC the retirement is kept and the journal
+says the cancellation cannot stop it. A kept retirement ends at its global timeout once the machine
+is off, as any run does.
 
 A node retired mid-install never fetches its config: [Config](#config) drops it.
 
