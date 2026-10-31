@@ -16,7 +16,7 @@ real scheduling, real acknowledgements and real Rufio jobs.
 | Tinkerbell | The v0.25.0 embedded binary, amd64, pinned by SHA-256 and checked against the release's `checksums-embedded.txt`. Flags from `nix/services/tinkerbell.nix`. | Namespace addresses. The apiserver listens on loopback (spore: every address behind its firewall) and needs `--advertise-address`, because the namespace has no default route. Smee's proxy DHCP listens on an empty interface; see DHCP. |
 | Restarts | A supervisor restarts a Tinkerbell process that fails after 15 s, as the unit's `Restart=on-failure` does. | `TINK_LAB_SPLIT=1` runs etcd, the apiserver, the Tink server, the Tink controller, Smee and Rufio as separate processes of the same binary, so each can be killed alone. spore runs one process. |
 | Template | `clusters/folly/tinkerbell/template.yaml` as committed, rendered by the controller. | None. |
-| Hardware, Workflow | `provision` and `reconcile` write the objects in fleetd's shapes (`Config.Hardware` and `Config.Workflow` in `apps/fleetd/fleet/objects.go`). They also follow `Reconciler.start`: finished Workflows are deleted, a running one is adopted, and netboot goes on before the Workflow exists. | fleetd does not run: there is no NetBox, no webhook and no reconcile loop. `reconcile` is one pass, run by hand. The HookOS URL and command line are tink-lab's. |
+| Hardware, Workflow | `provision` and `reconcile` write the objects in fleetd's shapes (`Config.Hardware` and `Config.Workflow` in `apps/fleetd/fleet/objects.go`). They also follow `Reconciler.start`: finished Workflows are deleted, a running one is adopted, and netboot goes on before the Workflow exists. The hardwareMap's `install_disk_serial` is the machine's declared serial, as fleetd copies it from NetBox. | fleetd does not run: there is no NetBox, no webhook and no reconcile loop. `reconcile` is one pass, run by hand. fleetd starts no wiping run without a well-formed serial (`Device.Unidentified`); `provision` does, so the Template's own check can be tested. The HookOS URL and command line are tink-lab's. |
 | Rufio | The embedded Rufio, with a Machine for each VM. | The Machine uses the Redfish provider against `bmc.py`, not Intel AMT. One-time PXE sets the VM's BootNext while it is off. |
 | DHCP | dnsmasq leases and serves DNS. It hands out the boot option (`talos/lab/ipxe-amd64.efi`), as UniFi does on folly's Kubernetes network, and serves that file over TFTP, as spore does. | Smee proxies on spore's bootstrap VLAN, which no node's port carries. Here it proxies on an empty interface, so the VMs never hear it. OVMF also declines a lease when Smee's proxy answers its REQUEST. |
 | iPXE | `ipxe.nix`: the embedded script of `nix/images/ipxe-folly.nix`, chaining Smee's script for the MAC and falling back to the HookOS menu item. | Built locally and unsigned, with tink-lab's addresses and command line. |
@@ -74,10 +74,15 @@ tink-lab.sh reconcile n1             # fleetd's pass: netboot off once no Workfl
 tink-lab.sh observe n1
 ```
 
+Each disk reports the serial its spec names, or `tl<index><disk>`. The machine declares the first
+disk's serial as its install disk's, as `disk_serial` in the nodes file does, unless
+`--install-disk-serial` names another.
+
 Other commands:
 
 - `provision --action wipe|attest|retire` runs the other fleetd actions.
-- `--set KEY=VALUE` overrides a `hardwareMap` key. A test that does this must say so.
+- `--set KEY=VALUE` overrides a `hardwareMap` key, and `--unset KEY` leaves one out, as a controller
+  that predates the key would. A test that does this must say so.
 - `--again` creates a second Workflow while one runs.
 - `--no-boot` leaves out the boot mode, as fleetd does for a device without a BMC or a machine that
   waits in HookOS. Rufio does not power-cycle the VM, and the agent of the boot it is in takes the

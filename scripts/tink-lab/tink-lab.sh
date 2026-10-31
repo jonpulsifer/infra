@@ -9,9 +9,11 @@
 #                                       but the downloads, or print the processes and machines
 #   kubectl ARGS... | sh                kubectl against the local API, or a shell in the namespace
 #   selftest [NAME]                     provision a machine end to end and print the times
-#   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--attest VERDICT]
+#   vm create NAME [--disk NAME:SIZE[:BUS[:SERIAL]]]... [--install-disk DEV] [--install-disk-serial S]
+#             [--attest VERDICT]
 #   vm delete NAME | vm console NAME TIMEOUT CMD... | vm screen NAME FILE.png
-#   provision NAME [--action A] [--set KEY=VALUE]... [--again] [--template NAME] [--no-boot]
+#   provision NAME [--action A] [--set KEY=VALUE]... [--unset KEY]... [--again] [--template NAME]
+#             [--no-boot]
 #   template NAME [--from FILE] [--timeout ACTION=SECONDS]... [--global SECONDS]   a copy of the
 #                                       provision Template, or of FILE, with other timeouts
 #   slow-installer SECONDS              the class's installer, writing ticks to its disk first
@@ -610,7 +612,7 @@ read_sentinels() {
 }
 
 vm_create() {
-  local name=$1 idx d spec dname size bus serial install="" verdict=pass json='[]' n=0 disks=()
+  local name=$1 idx d spec dname size bus serial install="" install_serial="" verdict=pass json='[]' n=0 disks=()
   shift
   [[ "$name" =~ ^[a-z][a-z0-9-]{0,15}$ ]] || die "a machine's name is a short DNS label"
   [ -f "$(vmdir "$name")/vm.json" ] && die "machine $name exists"
@@ -618,6 +620,7 @@ vm_create() {
     case $1 in
       --disk) disks+=("$2") && shift 2 ;;
       --install-disk) install=$2 && shift 2 ;;
+      --install-disk-serial) install_serial=$2 && shift 2 ;;
       --attest) verdict=$2 && shift 2 ;;
       *) die "vm create: unknown $1" ;;
     esac
@@ -641,12 +644,14 @@ vm_create() {
   done
   [ -n "$install" ] || install=$(jq -r '.[0] | if .bus == "virtio" then "/dev/vda"
     elif .bus == "nvme" then "/dev/nvme0n1" else "/dev/sda" end' <<<"$json")
+  [ -n "$install_serial" ] || install_serial=$(jq -r '.[0].serial' <<<"$json")
   jq -n --arg name "$name" --argjson index "$idx" --argjson disks "$json" --arg install "$install" \
-    --arg verdict "$verdict" --arg net "$NET" '{name: $name, index: $index,
+    --arg install_serial "$install_serial" --arg verdict "$verdict" --arg net "$NET" '{name: $name, index: $index,
       mac: ("52:54:00:7e:00:" + ($index | tostring | if length == 1 then "0" + . else . end)),
       ip: ($net + "." + (100 + $index | tostring)), tap: ("tap" + ($index | tostring)),
       uuid: ("7e1ab000-0000-4000-8000-" + ($index | tostring | "000000000000"[length:] + .)),
-      bmc_port: (8440 + $index), install_disk: $install, attest: $verdict, disks: $disks}' >"$d/vm.json"
+      bmc_port: (8440 + $index), install_disk: $install,
+      install_disk_serial: $install_serial, attest: $verdict, disks: $disks}' >"$d/vm.json"
   echo "$(vmjson "$name" .mac),$(vmjson "$name" .ip),$name" >"$dir/dhcp-hosts/$name"
   start_bmc "$name"
   apply_machine "$name"
@@ -733,13 +738,14 @@ finished() {
 # the boot mode, as fleetd does for a device without a BMC or a machine that waits in HookOS, so
 # Rufio does not power-cycle the machine and the agent of the boot it is in takes the run.
 provision() {
-  local name=$1 action=provision again=false sets=() wf running="" w tmpl=provision boot=netboot
+  local name=$1 action=provision again=false sets=() unsets=() wf running="" w tmpl=provision boot=netboot
   shift
   need_vm "$name"
   while [ $# -gt 0 ]; do
     case $1 in
       --action) action=$2 && shift 2 ;;
       --set) sets+=("$2") && shift 2 ;;
+      --unset) unsets+=("$2") && shift 2 ;;
       --again) again=true && shift ;;
       --template) tmpl=$2 && shift 2 ;;
       --no-boot) boot="" && shift ;;
@@ -772,14 +778,19 @@ provision() {
   fi
   wf=$(jq -n --arg name "$action-$name-$(date +%s)" --arg ns "$NS" --argjson labels "$(labels "$name" "$action")" \
     --arg hw "$name" --arg attest "$attest" --arg wipe "$wipe" --arg retire "$retire" \
-    --arg install "$install" --arg installer "$installer" --arg tmpl "$tmpl" --arg boot "$boot" '{
+    --arg install "$install" --arg installer "$installer" \
+    --arg serial "$(vmjson "$name" '.install_disk_serial // ""')" --arg tmpl "$tmpl" --arg boot "$boot" '{
       apiVersion: "tinkerbell.org/v1alpha1", kind: "Workflow",
       metadata: {name: $name, namespace: $ns, labels: $labels},
       spec: {templateRef: $tmpl, hardwareRef: $hw,
-        hardwareMap: {attest: $attest, wipe: $wipe, retire: $retire, install: $install, installer_image: $installer},
+        hardwareMap: {attest: $attest, wipe: $wipe, retire: $retire, install: $install, installer_image: $installer,
+          install_disk_serial: $serial},
         bootOptions: ({toggleAllowNetboot: false} + if $boot != "" then {bootMode: $boot} else {} end)}}')
   for w in "${sets[@]}"; do
     wf=$(jq -c --arg k "${w%%=*}" --arg v "${w#*=}" '.spec.hardwareMap[$k] = $v' <<<"$wf")
+  done
+  for w in "${unsets[@]}"; do
+    wf=$(jq -c --arg k "$w" 'del(.spec.hardwareMap[$k])' <<<"$wf")
   done
   apply_hardware "$name" true
   KUBE create -f - <<<"$wf" >/dev/null
@@ -978,7 +989,7 @@ observe() {
     # shellcheck disable=SC2016
     local blocks='for b in /sys/block/[sv]d* /sys/block/nvme*; do [ -e $b ] || continue;
       echo "${b##*/} rm=$(cat $b/removable) sectors=$(cat $b/size)
-      serial=$(cat $b/serial $b/device/serial 2>/dev/null | head -n 1 | tr -d " ")
+      serial=$( (cat $b/serial || cat $b/device/serial || tail -c +5 $b/device/vpd_pg80) 2>/dev/null | head -n 1 | tr -d " \\000")
       wwid=$(cat $b/wwid $b/device/wwid 2>/dev/null | head -n 1 | tr -d " ") path=$(readlink -f $b)"; done;
       echo ====; ls /dev/disk/by-id | cat'
     if out=$(console "$name" 20 "cat /proc/cmdline; echo ====; nerdctl -n services.linuxkit exec hook-docker ls -la /worker/fleet 2>&1;" \
