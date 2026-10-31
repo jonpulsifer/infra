@@ -240,7 +240,10 @@ type fakeKube struct {
 	// racing replaces an object just before its delete, as a write that lands
 	// between fleetd's read and its delete.
 	racing map[string]Object
-	log    []string
+	// created runs after each create, as a write another party makes while
+	// fleetd starts a run.
+	created func()
+	log     []string
 }
 
 func matches(o Object, selector string) bool {
@@ -321,6 +324,9 @@ func (f *fakeKube) handler() http.Handler {
 			o["metadata"].(map[string]any)["creationTimestamp"] = time.Now().UTC().Format(time.RFC3339)
 			o["metadata"].(map[string]any)["resourceVersion"] = "1"
 			f.objects[path] = o
+			if f.created != nil {
+				f.created()
+			}
 			w.WriteHeader(http.StatusCreated)
 			w.Write([]byte("{}"))
 		case http.MethodGet:

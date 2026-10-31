@@ -208,6 +208,12 @@ its record was late, and it is <state>`. The pass reports the failed write each 
 still going moves the device's status. The rule holds across a restart, since the record is in
 the API server.
 
+NetBox 4.5 takes no precondition on a PATCH; `If-Match` arrives in 4.6. So fleetd reads the device
+again just before the write that records a run, and clears `desired_action` only while it still
+holds the request the pass read. A request the owner set since stays set and waits for the run,
+and the journal line ends `desired_action changed to <action> while fleetd started it`. Only an
+edit inside the one round trip between that read and the PATCH is still overwritten.
+
 A device set `decommissioning` while a run of another action goes gets its retirement at once
 when it has a BMC. In one pass fleetd reads the run again, deletes it with that read's
 `resourceVersion`, creates the retire Workflow with `bootMode: netboot`, and journals `the retirement ends Workflow X

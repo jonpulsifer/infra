@@ -337,6 +337,38 @@ func TestTheSameRequestDuringItsRunIsThatRun(t *testing.T) {
 	}
 }
 
+// A request the owner sets between the pass's read and its record is not
+// cleared with the request the pass consumed: the run is recorded, and the
+// new request stays set and waits for it.
+func TestARequestSetWhileARunStartsIsKept(t *testing.T) {
+	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), apply: true}
+	kube := &fakeKube{}
+	kube.created = func() { nb.set("desired_action", "wipe") }
+	r, done := newTest(t, nb, kube)
+	defer done()
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	kube.created = nil
+	names := kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-riptide-") {
+		t.Fatalf("workflows %v", names)
+	}
+	cf := nb.patches[0]["custom_fields"].(map[string]any)
+	if _, cleared := cf["desired_action"]; cleared || cf["last_workflow"] != names[0] {
+		t.Fatalf("patch %v", nb.patches[0])
+	}
+	if len(nb.journalWith("desired_action changed to wipe while fleetd started it, so it stays set and waits for "+names[0])) != 1 {
+		t.Fatalf("journals %v", nb.journals)
+	}
+	if err := r.Reconcile(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if kube.creates() != 1 || len(nb.journalWith("wipe waits: Workflow "+names[0])) != 1 {
+		t.Fatalf("creates %d, journals %v", kube.creates(), nb.journals)
+	}
+}
+
 // An intake pass that asks for a provision while a wipe runs starts nothing
 // and renders nothing; the owner's provision waits for the wipe.
 func TestAdmitDuringAnotherRunRendersNothing(t *testing.T) {

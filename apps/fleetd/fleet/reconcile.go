@@ -587,10 +587,24 @@ func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Obje
 	return r.record(ctx, d, action, name, status, comment)
 }
 
-// record writes a run to NetBox: desired_action back to none, last_workflow
-// the run, and the status the action moves the device to.
+// record writes a run to NetBox: last_workflow the run, the status the action
+// moves the device to, and desired_action back to none. NetBox 4.5 takes no
+// precondition on a PATCH, so fleetd reads the device again just before it
+// and clears desired_action only while it still holds the request the pass
+// read; a request the owner set since stays, and waits for the run.
 func (r *Reconciler) record(ctx context.Context, d Device, action, name, status, comment string) (string, error) {
-	fields := map[string]any{"desired_action": "none", "last_workflow": name}
+	now, err := r.NetBox.ByID(ctx, r.Config.Site, d.ID)
+	if err != nil {
+		return "", fmt.Errorf("record Workflow %s: read %s again: %w", name, d.Name, err)
+	}
+	fields := map[string]any{"last_workflow": name}
+	switch now.DesiredAction {
+	case d.DesiredAction:
+		fields["desired_action"] = "none"
+	case "none", "":
+	default:
+		comment += fmt.Sprintf("; desired_action changed to %s while fleetd started it, so it stays set and waits for %s", now.DesiredAction, name)
+	}
 	if err := r.NetBox.Update(ctx, d, status, fields, "info", comment); err != nil {
 		return "", fmt.Errorf("record Workflow %s: %w", name, err)
 	}
