@@ -182,6 +182,23 @@ CRD keeps only a disk's `device`. The Template refuses to wipe or install unless
 `install_disk` reports that serial, no other disk reports it, and it is neither removable nor on
 USB.
 
+## One run per machine
+
+Tinkerbell's server hands an agent an action from any of its machine's Workflows, chosen afresh on
+each request, so two Workflows for one machine interleave and either can wipe what the other
+installed. fleetd keeps at most one unfinished Workflow per device. Each pass and each `Admit`
+take one lock, and every request reads the device's Workflows from the API server. A request
+that finds a run going never creates another.
+
+The Workflow is the record of the request that started it. fleetd creates the run, then writes
+`desired_action: none` and `last_workflow` in one NetBox PATCH. When that write fails, the request
+stays set, and every later pass finds a newest Workflow with the action's `lolwtf.ca/action` label
+that `last_workflow` does not name. It adopts that run, unfinished or ended, creates and deletes
+nothing, and writes again until NetBox takes it, with the journal `started Workflow X (<action>);
+its record was late, and it is <state>`. The pass reports the failed write each time. Only a run
+still going moves the device's status. The rule holds across a restart, since the record is in
+the API server.
+
 ## Overdue Workflows
 
 Tinkerbell's controller checks a Workflow's global timeout only when it reconciles that Workflow,

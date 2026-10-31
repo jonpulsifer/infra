@@ -29,6 +29,8 @@ fleetd decides whether a machine may become a folly node, gives it the means to 
 
 A device in `decommissioning` gets the `retire` run, which wipes and powers the node off, then goes `offline`. A `provision`, `wipe` or `retire` run wipes the disk, so it starts only for a device with `install_disk_serial`, the serial its install disk reports; until then fleetd journals that the run waits and leaves `desired_action` set. The Workflow carries the serial in its `hardwareMap`, since the Hardware's disk holds only the kernel name. The Template's `wipe-disk` and `install` write the disk at that name only when it reports the serial, no other disk reports it, and it is neither removable nor on USB. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
 
+fleetd keeps at most one unfinished Workflow per device, because Tinkerbell hands a machine's agent the actions of all its Workflows in a random order. The Workflow is the record of the request that started it: when NetBox refuses the write that names a new run, every later pass adopts that run, finished or not, and writes again, with the journal `its record was late`, and never starts a second one. The section "One run per machine" of `apps/fleetd/README.md` has the rules.
+
 ## Limits
 
 - An approved EK binding is only as true as its evidence. fleetd admits the TPM the nodes file names, so the receiving scan or the supplier's record that ties the chassis serial to its EKs is the trust source. A serial that SMBIOS or Redfish reports, a pending claim and the console of a box nobody checked prove nothing.

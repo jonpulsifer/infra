@@ -465,67 +465,106 @@ func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object
 // start makes sure one Workflow runs for the device and that NetBox names it,
 // and returns its name. A run that is still going is adopted, never
 // doubled: a second netboot Workflow would power-cycle the node mid-wipe.
-// The device's finished Workflows are deleted first, because Tinkerbell's
-// server may answer the agent with the first finished Workflow it finds for
-// its ID. A new run's Hardware allows netboot before the Workflow exists, so
-// Smee answers the firmware as soon as Rufio power-cycles it; a create that
-// fails leaves the flags on until the next pass turns them off. With hookos,
-// the machine already waits in HookOS, so Rufio stays out of the run.
+// The Workflow is the request's record: a run this request started, whose
+// NetBox write failed, is adopted finished or not and recorded again, never
+// run twice. The device's finished Workflows are deleted before a create,
+// because Tinkerbell's server may answer the agent with the first finished
+// Workflow it finds for its ID. A new run's Hardware allows netboot before the
+// Workflow exists, so Smee answers the firmware as soon as Rufio power-cycles
+// it; a create that fails leaves the flags on until the next pass turns them
+// off. With hookos, the machine already waits in HookOS, so Rufio stays out
+// of the run.
 func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object, hookos bool) (string, error) {
-	var name, running string
-	manual := false
+	var running Object
+	for _, wf := range workflows {
+		if !Finished(wf.State()) {
+			running = wf
+			break
+		}
+	}
+	if running == nil && len(workflows) > 0 && unrecorded(d, action, workflows[0]) {
+		return r.adopt(ctx, d, action, workflows[0])
+	}
 	for _, wf := range workflows {
 		if Finished(wf.State()) {
 			if err := r.Kube.Delete(ctx, WorkflowResource, wf.Name()); err != nil {
 				return "", fmt.Errorf("delete finished %s: %w", wf.Name(), err)
 			}
-			continue
-		}
-		if running == "" {
-			running = wf.Name()
 		}
 	}
-	if running != "" {
-		name = running
-	} else {
-		wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
-		if err != nil {
-			Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
-			if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
-				return "", jerr
-			}
-			return "", err
-		}
-		name = wf.Name()
-		if err := r.applyHardware(ctx, d, true); err != nil {
-			return "", err
-		}
-		if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
-			return "", fmt.Errorf("create Workflow %s: %w", name, err)
-		}
-		r.Metrics.WorkflowsCreated.Add(1)
-		manual = hookos || d.ManualBoot()
+	if running != nil {
+		return r.adopt(ctx, d, action, running)
 	}
-	status := NextStatus(action, d.Status)
+	wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
+	if err != nil {
+		Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
+		if jerr := r.journalOnce(ctx, "no-class/"+d.Name+"/"+d.Class, d, "warning", "fleetd: "+action+" refused: "+err.Error()); jerr != nil {
+			return "", jerr
+		}
+		return "", err
+	}
+	name := wf.Name()
+	if err := r.applyHardware(ctx, d, true); err != nil {
+		return "", err
+	}
+	if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
+		return "", fmt.Errorf("create Workflow %s: %w", name, err)
+	}
+	r.Metrics.WorkflowsCreated.Add(1)
+	comment := fmt.Sprintf("fleetd: started Workflow %s (%s)", name, action)
+	switch {
+	case hookos:
+		comment += "; the machine attested from HookOS, where it waits, and takes it"
+	case d.ManualBoot():
+		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	}
+	return r.record(ctx, d, action, name, NextStatus(action, d.Status), comment)
+}
+
+// unrecorded says whether wf, the device's newest Workflow, is a run of the
+// action that NetBox does not name, which fleetd created for this request
+// and could not record. fleetd names every run it starts in last_workflow in
+// the same write that clears desired_action, so while that write fails the
+// request stays set, and the newest run of its action is the request's run.
+func unrecorded(d Device, action string, wf Object) bool {
+	return wf.Labels()[ActionLabel] == action && wf.Name() != d.LastWorkflow
+}
+
+// adopt names an existing run in NetBox instead of starting one. The status
+// moves only while the run goes: a run that has ended already did its work.
+func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Object) (string, error) {
+	name := wf.Name()
+	status := ""
+	if !Finished(wf.State()) {
+		status = NextStatus(action, d.Status)
+	}
 	if d.DesiredAction == "none" && d.LastWorkflow == name && status == "" {
 		return name, nil
 	}
+	comment := fmt.Sprintf("fleetd: Workflow %s is still running; %s waits for it", name, action)
+	if unrecorded(d, action, wf) {
+		comment = fmt.Sprintf("fleetd: started Workflow %s (%s); its record was late, and it is %s", name, action, stateWord(wf))
+	}
+	return r.record(ctx, d, action, name, status, comment)
+}
+
+// record writes a run to NetBox: desired_action back to none, last_workflow
+// the run, and the status the action moves the device to.
+func (r *Reconciler) record(ctx context.Context, d Device, action, name, status, comment string) (string, error) {
 	fields := map[string]any{"desired_action": "none", "last_workflow": name}
-	comment := fmt.Sprintf("fleetd: started Workflow %s (%s)", name, action)
-	switch {
-	case manual && hookos:
-		comment += "; the machine attested from HookOS, where it waits, and takes it"
-	case manual:
-		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
-	}
-	if running != "" {
-		comment = fmt.Sprintf("fleetd: Workflow %s is still running; %s waits for it", name, action)
-	}
 	if err := r.NetBox.Update(ctx, d, status, fields, "info", comment); err != nil {
 		return "", fmt.Errorf("record Workflow %s: %w", name, err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, name, action)
 	return name, nil
+}
+
+// stateWord is a Workflow's state for the journal.
+func stateWord(wf Object) string {
+	if s := strings.TrimPrefix(wf.State(), "STATE_"); s != "" {
+		return s
+	}
+	return "not yet picked up by Tinkerbell"
 }
 
 // retire runs one retire Workflow for a decommissioning device and, when the
