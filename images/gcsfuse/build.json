@@ -1,0 +1,7 @@
+[
+  {
+    "_comment": "The gcsfuse release .deb is amd64 only, and offsite runs amd64.",
+    "image": "gcsfuse",
+    "platforms": "linux/amd64"
+  }
+]

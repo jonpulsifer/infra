@@ -16,6 +16,7 @@
     "spire-agent-tpm",
     "kthx-engine",
     "kthx-engine-verifier",
+    "gcsfuse",
     "switchboard",
     "tally",
     "tally-ocr",
