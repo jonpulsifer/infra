@@ -4,7 +4,7 @@
 # its hash again. The entrypoint, install-ubuntu, writes the image to a disk. Nothing in it is
 # signed by the lab: Ubuntu's shim is signed by Microsoft's UEFI CA, which the nodes' db holds.
 FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
-RUN apk add --no-cache qemu-img sgdisk dosfstools e2fsprogs efibootmgr util-linux tar
+RUN apk add --no-cache qemu-img sgdisk dosfstools e2fsprogs e2fsprogs-extra efibootmgr util-linux blkid tar
 ARG IMAGE_SHA256
 COPY ubuntu-cloudimg.img /ubuntu-cloudimg.img
 RUN echo "$IMAGE_SHA256  /ubuntu-cloudimg.img" | sha256sum -c -
