@@ -1,26 +1,29 @@
 {
   "controlplane": {
-    "description": "A Talos control plane. Its installer image comes from class-inputs.json. Boots only the lab's signed UKI.",
+    "description": "A Talos control plane. .github/workflows/talos-images.yml pins its installer here by digest. Boots the lab's signed UKI; the control plane at the API server's address installs from the Talos root, not from here.",
     "os": "talos",
     "template": "provision",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:54fab00470e079181bce5a21e2bd8eb060bfd974616bc10dd9a06de97ab7cb71",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
     "reattest": true
   },
   "worker-g5": {
-    "description": "A Talos worker on a G5 desktop. Its installer image comes from class-inputs.json. Boots only the lab's signed UKI.",
+    "description": "A Talos worker on a G5 desktop. .github/workflows/talos-images.yml pins its installer here by digest. Boots only the lab's signed UKI.",
     "os": "talos",
     "template": "provision",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:54fab00470e079181bce5a21e2bd8eb060bfd974616bc10dd9a06de97ab7cb71",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
     "reattest": true
   },
   "worker-g2": {
-    "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. Its installer image comes from class-inputs.json.",
+    "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. .github/workflows/talos-images.yml pins its installer here by digest.",
     "os": "talos",
     "template": "provision",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:54fab00470e079181bce5a21e2bd8eb060bfd974616bc10dd9a06de97ab7cb71",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",

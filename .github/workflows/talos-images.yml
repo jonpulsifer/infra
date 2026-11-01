@@ -132,6 +132,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+    outputs:
+      installer_digest: ${{ steps.push.outputs.digest }}
     env:
       VERSION: ${{ needs.inputs.outputs.version }}
     steps:
@@ -251,11 +253,14 @@ jobs:
           retention-days: 3
 
       - name: Push the installer
+        id: push
         run: |
           set -euo pipefail
           image="$INSTALLER_REPO:$VERSION"
           crane push "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$image"
-          echo "Installer: \`$image@$(crane digest "$image")\`" >>"$GITHUB_STEP_SUMMARY"
+          digest=$(crane digest "$image")
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          echo "Installer: \`$image@$digest\`" >>"$GITHUB_STEP_SUMMARY"
 
       # Releases in this repository are immutable, and a tag name that an
       # immutable release used is spent for good. Each build is its own release,
@@ -274,3 +279,66 @@ jobs:
             "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
             "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
           echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"
+
+  # fleetd installs only an image pinned by digest, so each build pins the
+  # installer it pushed in clusters/folly/fleet/classes.json, through a pull
+  # request the continuous-delivery App opens and merges, as containers.yml
+  # does for the other images. The tag in class-inputs.json is the Talos root's
+  # own and stays; fleetd prefers the class table's pin.
+  pin:
+    needs: [inputs, build]
+    if: >-
+      needs.build.result == 'success'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          # The pull request's checks run only when the identity that opens it
+          # also pushes the branch, so git must not send GITHUB_TOKEN.
+          persist-credentials: false
+      - name: Mint a continuous-delivery App token
+        id: cd-app-token
+        if: vars.CD_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.CD_APP_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
+      - name: Pin the installer digest in the class table
+        env:
+          GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ needs.build.outputs.installer_digest }}
+          VERSION: ${{ needs.inputs.outputs.version }}
+          CLASSES: clusters/folly/fleet/classes.json
+          BRANCH_NAME: cd/talos-installer-digest
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the build pushed no digest"; exit 1; }
+          image="$INSTALLER_REPO@$DIGEST"
+          jq --arg image "$image" 'with_entries(if .value.os == "talos" then .value.installer_image = $image else . end)' \
+            "$CLASSES" >"$RUNNER_TEMP/classes.json"
+          if cmp -s "$CLASSES" "$RUNNER_TEMP/classes.json"; then
+            echo "$CLASSES already pins $image"
+            exit 0
+          fi
+          cp "$RUNNER_TEMP/classes.json" "$CLASSES"
+          git config user.name "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]"
+          git config user.email "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -B "$BRANCH_NAME"
+          git commit -am "fix(cd): pin the Talos $VERSION installer by digest" -m "$image"
+          git push origin "$BRANCH_NAME" --force
+          title="fix(cd): pin the Talos $VERSION installer by digest"
+          body="Automated pin of the installer this build pushed, for fleetd's class table."
+          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --head "$BRANCH_NAME" --base main
+          else
+            gh pr edit "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+          # On the merge commit only: the branch commit keeps its checks.
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]"
