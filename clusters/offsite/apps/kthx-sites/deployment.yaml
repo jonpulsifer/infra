@@ -30,7 +30,7 @@ spec:
         - name: gcsfuse
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # full `ghcr.io/…/gcsfuse…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/gcsfuse:latest@sha256:466dccb3d93981767d314ba79425ef0d6812cfc1ad9a75fc8896652956d01008
+          image: ghcr.io/jonpulsifer/gcsfuse:latest@sha256:96a66b30c4bc7238d15e936dff852a0fa218e49e75c665728d159ade7b3ccf82
           env:
             - name: BUCKET
               value: bluenose-kthx-sites
