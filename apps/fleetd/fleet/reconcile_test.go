@@ -248,7 +248,7 @@ type fakeKube struct {
 	// once, "refuse" fails its first Task as a BMC that answers 500 does, and
 	// "down" leaves it running.
 	bmc string
-	// power is the status.power Rufio reports for a Machine fleetd applies;
+	// power is the status.powerState Rufio reports for a Machine fleetd applies;
 	// "" leaves the status as it stands.
 	power string
 }
@@ -323,7 +323,7 @@ func (f *fakeKube) handler() http.Handler {
 					o["status"] = st
 				}
 				if f.power != "" && strings.Contains(r.URL.Path, "/machines/") {
-					o["status"] = map[string]any{"power": f.power}
+					o["status"] = map[string]any{"powerState": f.power}
 				}
 				f.objects[r.URL.Path] = o
 			case "application/merge-patch+json":

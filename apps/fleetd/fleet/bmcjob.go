@@ -235,11 +235,11 @@ const PowerOffWait = 15 * time.Minute
 // so the wait holds across a restart.
 const PowerWaitAnnotation = "lolwtf.ca/power-wait-started-at"
 
-// machinePower is the power state Rufio's Machine reports: status.power, "on",
+// machinePower is the power state Rufio's Machine reports: status.powerState, "on",
 // "off" or "unknown", empty before Rufio has read it.
 func machinePower(m Object) string {
 	st, _ := m["status"].(map[string]any)
-	p, _ := st["power"].(string)
+	p, _ := st["powerState"].(string)
 	return strings.ToLower(p)
 }
 
@@ -271,7 +271,7 @@ func (r *Reconciler) corroborated(ctx context.Context, d Device, wf Object) (boo
 			return false, fmt.Errorf("mark the power-off wait on %s: %w", wf.Name(), err)
 		}
 	}
-	why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC %s (Machine status.power); fleetd waits for the power-off before it takes the node out of the cluster", wf.Name(), report)
+	why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC %s (Machine status.powerState); fleetd waits for the power-off before it takes the node out of the cluster", wf.Name(), report)
 	if err := r.journalOnce(ctx, "power-waits/"+wf.Name(), d, "info", why); err != nil {
 		return false, err
 	}

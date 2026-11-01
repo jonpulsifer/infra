@@ -19,7 +19,7 @@ func TestRetirementWaitsForTheBMCToReportPowerOff(t *testing.T) {
 	if len(api.calls) != 1 || len(nb.patches) != 0 || kube.get(hwPath) == nil || kube.get(mPath) == nil {
 		t.Fatalf("calls %v patches %v: the retirement did not wait", api.calls, nb.patches)
 	}
-	if n := journaled(nb, "the BMC reports the machine on (Machine status.power); fleetd waits for the power-off"); n != 1 {
+	if n := journaled(nb, "the BMC reports the machine on (Machine status.powerState); fleetd waits for the power-off"); n != 1 {
 		t.Fatalf("%d wait journals: %v", n, nb.journals)
 	}
 	kube.power = "off"
