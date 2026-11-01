@@ -15,7 +15,8 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 6. fleetd returns an install code wrapped to the TPM. The Workflow wipes the system disk, installs Talos and stores the code in META.
 7. Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address.
 8. After the complete response, fleetd deletes the configuration and sets the device `active`.
-9. Once spore has the node's alias, the SPIRE agent attests by LDevID and serves SVIDs.
+9. fleetd approves the worker's initial kubelet certificate only when its per-node bootstrap token and requested node name match. Kubernetes readiness remains separate.
+10. Once spore has the node's alias, the SPIRE agent attests by LDevID and serves SVIDs.
 
 An unknown serial also waits. A machine must prove every EK that its inventory entry approves before fleetd issues an identity.
 
@@ -59,6 +60,7 @@ See [Identity](identity.md#terms) for the credential terms and [Tinkerbell](nixo
 
 ## Where to go next
 
+- [Security engineering brief](../reference/purchase-to-identity.md): purchase, receiving, trust boundaries and off-the-shelf alternatives.
 - [Technical design](../reference/folly-design.md): component relationships, sequence diagrams, tradeoffs, evidence and threats.
 - [Prepare a machine](../runbooks/prepare-a-machine.md), [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md), [Retire a node](../runbooks/retire-a-node.md)
 - [Identity](identity.md), [fleetd](../apps/fleetd.md), [Tinkerbell](nixos/tinkerbell.md), [NetBox](netbox.md)
