@@ -177,7 +177,8 @@ func TestInstallActionScript(t *testing.T) {
 	disk := filepath.Join(dev, "nvme0n1")
 	argsFile := filepath.Join(dir, "args")
 	os.WriteFile(filepath.Join(dir, "docker"), []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" > "+argsFile+"\n"), 0o755)
-	codeFile := filepath.Join(dir, "install_code")
+	codeFile, wipedFile := filepath.Join(dir, "install_code"), filepath.Join(dir, "wiped")
+	os.WriteFile(wipedFile, nil, 0o600)
 
 	run := func(install, code string) (string, error) {
 		os.Remove(argsFile)
@@ -190,7 +191,7 @@ func TestInstallActionScript(t *testing.T) {
 		for k, v := range wf.Tasks[0].Environment {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
-		cmd.Env = append(cmd.Env, "INSTALL="+install, "INSTALL_CODE_FILE="+codeFile, "DISK="+disk)
+		cmd.Env = append(cmd.Env, "INSTALL="+install, "INSTALL_CODE_FILE="+codeFile, "WIPED_FILE="+wipedFile, "DISK="+disk)
 		out, err := cmd.CombinedOutput()
 		args, _ := os.ReadFile(argsFile)
 		if err != nil {
@@ -220,6 +221,36 @@ func TestInstallActionScript(t *testing.T) {
 	}
 	if args, err := run("false", testCode); err != nil || args != "" {
 		t.Fatalf("a run without install: %v %q", err, args)
+	}
+	// A run that resumed at install in a new boot finds no mark of this
+	// boot's wipe: it names that reason and runs no installer.
+	os.Remove(wipedFile)
+	for _, code := range []string{testCode, ""} {
+		out, err := run("true", code)
+		if err == nil || !strings.Contains(out, "this run resumed in a new boot after wipe-disk; nothing installed; set desired_action to provision") {
+			t.Errorf("a resumed run with code %q: %v %q", code, err, out)
+		}
+		if _, statErr := os.Stat(argsFile); statErr == nil {
+			t.Errorf("a resumed run with code %q ran docker", code)
+		}
+	}
+	if args, err := run("false", testCode); err != nil || args != "" {
+		t.Fatalf("a run without install and without the mark: %v %q", err, args)
+	}
+}
+
+// wipe-disk marks its wipe for install only once the disk reads blank, in
+// the per-boot /worker/fleet that both actions mount.
+func TestWipeMarksTheWipeLast(t *testing.T) {
+	wf := renderTemplate(t, provisionMap(t))
+	if wf.Tasks[0].Environment["WIPED_FILE"] != "/tmp/fleet/wiped" {
+		t.Fatalf("WIPED_FILE %q is not under /worker/fleet", wf.Tasks[0].Environment["WIPED_FILE"])
+	}
+	wipe := actionScripts(t)["wipe-disk"]
+	blank := strings.Index(wipe, `if blkid -p "$DISK"; then`)
+	mark := strings.Index(wipe, `touch "$WIPED_FILE"`)
+	if blank < 0 || mark < blank || strings.Count(wipe, "$WIPED_FILE") != 1 {
+		t.Errorf("wipe-disk marks the wipe at %d, before the blank check at %d", mark, blank)
 	}
 }
 
@@ -483,7 +514,7 @@ func TestWipeFetchesTheInstallerFirst(t *testing.T) {
 		for k, v := range wf.Tasks[0].Environment {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
-		cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL="+install, "INSTALLER_IMAGE="+image, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dev, "nvme0n1"))
+		cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL="+install, "INSTALLER_IMAGE="+image, "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "WIPED_FILE="+filepath.Join(dir, "wiped"), "DISK="+filepath.Join(dev, "nvme0n1"))
 		out, _ := cmd.CombinedOutput()
 		return string(out)
 	}
@@ -533,7 +564,7 @@ func TestWipeProbesTheEFIStoreBeforeWiping(t *testing.T) {
 	for k, v := range wf.Tasks[0].Environment {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
-	cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL=true", "INSTALLER_IMAGE=ghcr.io/x/y:v1", "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "DISK="+filepath.Join(dev, "nvme0n1"))
+	cmd.Env = append(cmd.Env, "WIPE=true", "INSTALL=true", "INSTALLER_IMAGE=ghcr.io/x/y:v1", "ATTESTED_FILE="+attested, "INSTALL_CODE_FILE="+code, "WIPED_FILE="+filepath.Join(dir, "wiped"), "DISK="+filepath.Join(dev, "nvme0n1"))
 	out, err := cmd.CombinedOutput()
 	if err == nil || !strings.Contains(string(out), "refuses to store EFI variables") || !strings.Contains(string(out), "nothing wiped") || strings.Contains(string(out), "wiping every partition") {
 		t.Errorf("an EFI store that refuses writes did not stop the wipe: %v %q", err, out)
