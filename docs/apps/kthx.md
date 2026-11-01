@@ -8,7 +8,7 @@ kthx is the lab's hosting product. The owner and agents use it to put apps on th
 
 | Kind | You give it | You get |
 | --- | --- | --- |
-| [Quick site](kthx/sites.md) | A directory, a zip or an `index.html` | `https://<name>.kthx.dev`, with a database, a websocket, a visitor ID and a file store |
+| [Quick site](kthx/sites.md) | A directory, or a page the builder writes | `https://<name>.kthx.dev`, with a database, a websocket, a visitor ID and a file store |
 | [Built app](kthx/built-apps.md) | A GitHub repository or an uploaded archive | A signed build, deployed to a cluster, Cloud Run, Firebase Hosting, Vercel or Cloudflare Pages |
 
 [Ownership and security](kthx/security.md) says which system owns each part and what it can reach.
@@ -19,13 +19,13 @@ kthx is the lab's hosting product. The owner and agents use it to put apps on th
 | --- | --- | --- |
 | Quick sites | `https://<name>.kthx.dev` | Anyone |
 | Landing page, site directory, SDK, agent reference and CLI | `https://kthx.dev` | Anyone |
-| Console, and the CLI's claims, uploads and deletes | `https://kthx.lolwtf.ca` | The lab, the offsite LAN and the tailnet owner. The console needs a passkey. |
-| Quick-site builder and tailnet-login claims | [`https://kthx.<tailnet>`](../hosts/index.md#reach-a-host) | Every tailnet member |
+| Console | `https://kthx.lolwtf.ca` | The lab, the offsite LAN and the tailnet owner. The console needs a passkey. |
+| Quick-site builder | [`https://kthx.<tailnet>`](../hosts/index.md#reach-a-host) | Every tailnet member |
 | MCP endpoint for built apps | `https://kthx-engine.lolwtf.dev/mcp` | The internet, with an agent token |
 
 ## How it works
 
-One Bun process in the `kthx` namespace serves quick sites. The kthx engine in the `spindrift` namespace builds and deploys built apps. The engine is a `web` process for the console, API and MCP, a `reconciler` that builds and deploys, and their CloudNativePG database.
+nginx in the `kthx-sites` namespace serves quick sites' files from the `bluenose-kthx-sites` bucket, and one Bun process in the `kthx` namespace serves their API. The kthx engine in the `spindrift` namespace builds and deploys built apps. The engine is a `web` process for the console, API and MCP, a `reconciler` that builds and deploys, and their CloudNativePG database.
 
 Quick sites and the engine share the Cloudflare tunnel named `kthx-engine`, called the kthx Apps tunnel, and the `kthx-apps` Gateway on offsite. They also share the archive reader in `packages/archive/` and the bluenose GCP project, and each has its own database and bucket.
 

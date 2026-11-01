@@ -8,28 +8,6 @@ import { SQL } from 'bun';
 
 const MIGRATIONS = join(import.meta.dir, 'migrations');
 
-/**
- * Either credential may be null, and either opens the site: an agent's claim
- * has only `token_hash`, and a tailnet person's may have `owner_login` too.
- */
-export interface SiteRow {
-  readonly name: string;
-  readonly token_hash: string | null;
-  readonly owner_login: string | null;
-  readonly serving: number | null;
-  readonly held: boolean;
-  readonly deleted_at: Date | null;
-}
-
-/** One release row. `size` arrives as a string: `bigint` is wider than a JS number. */
-export interface ReleaseRow {
-  readonly n: number;
-  readonly digest: string;
-  readonly size: string | number;
-  readonly location: string;
-  readonly at: Date;
-}
-
 export function createClient(url: string): SQL {
   return new SQL(url);
 }

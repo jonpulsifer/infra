@@ -1,12 +1,12 @@
 /**
  * Ownership by tailnet login: which door believes a header, which peer may send
- * one, and what it opens. The Tailscale proxy sets `tailscale-user-login`,
+ * one, and what it opens beside an ID token. The Tailscale proxy sets `tailscale-user-login`,
  * keeps `Host`, and appends the caller's tailnet address to `x-forwarded-for`.
  */
 import { describe, expect, test } from 'bun:test';
-import { tarGz } from '../../cli/tar.ts';
 import { callerOf } from '../../server/caller.ts';
 import { type Config, readConfig } from '../../server/env.ts';
+import { idToken } from '../harness/identity.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const CONTROL = 'ops.kthx-private.test';
@@ -22,10 +22,6 @@ const kthx = withServer({
 
 const DAD = 'dad@example.test';
 const MOM = 'mom@example.test';
-
-const SITE = tarGz([
-  { path: 'index.html', bytes: new TextEncoder().encode('<h1>hi</h1>') },
-]);
 
 /** Every test needs a peer: without one the handler believes every header. */
 function peer(address: string): Bun.Server<unknown> {
@@ -60,17 +56,8 @@ function ontailnet(
   );
 }
 
-async function claimAs(login: string | null, label: string) {
-  const name = kthx().name(label);
-  const claimed = await json(
-    await ontailnet('/api/sites', login, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-    }),
-  );
-  expect(claimed.status).toBe(201);
-  return { name, token: claimed.body.token as string };
+async function claimAs(login: string, label: string) {
+  return kthx().site(label, login);
 }
 
 describe('the identity header', () => {
@@ -105,28 +92,36 @@ describe('the identity header', () => {
     });
     expect(response.status).toBe(404);
   });
+
+  test('gives way to a verified ID token on every other door', async () => {
+    const response = await kthx().fetch(
+      ask('/api/whoami', { host: CONTROL, token: await idToken(MOM) }),
+      peer(PROXY),
+    );
+    expect(await json(response)).toEqual({ status: 200, body: { login: MOM } });
+  });
 });
 
 describe('a site', () => {
-  test('is opened by its bearer, its login, and nothing else', async () => {
+  test("is opened by its owner's login or ID token, and nothing else", async () => {
     const dads = await claimAs(DAD, 'dads');
     expect(
       (await json(await ontailnet(`/api/sites/${dads.name}`, DAD))).body,
     ).toMatchObject({ name: dads.name, owner: DAD });
 
-    // The bearer still works on the control host, where agents have no login.
-    const byBearer = await kthx().fetch(
+    // A machine with no login sends the ID token of the same account.
+    const byToken = await kthx().fetch(
       ask(`/api/sites/${dads.name}`, { host: CONTROL, token: dads.token }),
       peer(PROXY),
     );
-    expect(byBearer.status).toBe(200);
+    expect(byToken.status).toBe(200);
 
     // Another login is no credential offered for his site, so the answer stays
     // the 401 an anonymous read gets.
     const moms = await claimAs(MOM, 'moms');
     expect((await ontailnet(`/api/sites/${moms.name}`, MOM)).status).toBe(200);
     expect((await ontailnet(`/api/sites/${dads.name}`, MOM)).status).toBe(401);
-    // A bearer that is not this site's is a credential offered and refused.
+    // Her token is a credential offered and refused.
     const wrong = await ontailnet(`/api/sites/${dads.name}`, MOM, {
       token: moms.token,
     });
@@ -135,44 +130,20 @@ describe('a site', () => {
     expect((await ontailnet(`/api/sites/${dads.name}`, null)).status).toBe(401);
   });
 
-  test('with a null token_hash is opened by its login alone', async () => {
-    const dads = await claimAs(DAD, 'nulled');
-    await kthx().sql`
-      update sites set token_hash = null where name = ${dads.name}
-    `;
-
-    // Without the hash the bearer opens nothing, and the compare is skipped.
-    const byBearer = await kthx().fetch(
-      ask(`/api/sites/${dads.name}`, { host: CONTROL, token: dads.token }),
-      peer(PROXY),
-    );
-    expect(byBearer.status).toBe(403);
-    expect((await ontailnet(`/api/sites/${dads.name}`, MOM)).status).toBe(401);
-    expect((await ontailnet(`/api/sites/${dads.name}`, DAD)).status).toBe(200);
-  });
-
-  test('refuses a release posted from another origin', async () => {
+  test('refuses a delete posted from another origin', async () => {
     const dads = await claimAs(DAD, 'crossed');
-    const refused = await ontailnet(`/api/sites/${dads.name}/releases`, DAD, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/gzip',
-        origin: 'https://evil.test',
-      },
-      body: SITE,
+    const refused = await ontailnet(`/api/sites/${dads.name}`, DAD, {
+      method: 'DELETE',
+      headers: { origin: 'https://evil.test' },
     });
     expect(refused.status).toBe(403);
     expect((await refused.json()).code).toBe('FORBIDDEN');
 
-    const allowed = await ontailnet(`/api/sites/${dads.name}/releases`, DAD, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/gzip',
-        origin: `https://${IDENTITY}`,
-      },
-      body: SITE,
+    const allowed = await ontailnet(`/api/sites/${dads.name}`, DAD, {
+      method: 'DELETE',
+      headers: { origin: `https://${IDENTITY}` },
     });
-    expect(allowed.status).toBe(201);
+    expect(allowed.status).toBe(204);
   });
 });
 
@@ -210,7 +181,7 @@ describe('GET /api/names/:name', () => {
   const probe = async (name: string) =>
     json(await kthx().fetch(ask(`/api/names/${name}`)));
 
-  test('answers whether a name can be claimed', async () => {
+  test('answers whether a name can be claimed, and a delete frees it', async () => {
     const free = kthx().name('unclaimed');
     expect((await probe(free)).body).toEqual({
       name: free,
@@ -227,41 +198,29 @@ describe('GET /api/names/:name', () => {
       yours: null,
     });
 
-    // A deleted row answers 410 forever, so the name stays taken.
     const removed = await ontailnet(`/api/sites/${taken.name}`, DAD, {
       method: 'DELETE',
     });
     expect(removed.status).toBe(204);
     expect((await probe(taken.name)).body).toMatchObject({
-      available: false,
-      why: 'TAKEN',
+      available: true,
+      why: null,
     });
   });
 
   test('tells a person their own address apart from somebody else’s', async () => {
-    const mine = await claimAs(DAD, 'mine-empty');
+    const mine = await claimAs(DAD, 'mine-live');
     const asDad = async (name: string) =>
       json(await ontailnet(`/api/names/${name}`, DAD));
     expect((await asDad(mine.name)).body).toEqual({
       name: mine.name,
       available: false,
       why: 'TAKEN',
-      yours: 'empty',
+      yours: 'live',
     });
-
-    // With a page on it, it is his website, not a claim to finish.
-    await ontailnet(`/api/sites/${mine.name}/releases`, DAD, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/gzip',
-        origin: `https://${IDENTITY}`,
-      },
-      body: SITE,
-    });
-    expect((await asDad(mine.name)).body).toMatchObject({ yours: 'live' });
 
     // Hers is not his, and an anonymous caller on the public apex owns nothing.
-    const hers = await claimAs(MOM, 'hers-empty');
+    const hers = await claimAs(MOM, 'hers');
     expect((await asDad(hers.name)).body).toMatchObject({
       available: false,
       why: 'TAKEN',
@@ -270,27 +229,17 @@ describe('GET /api/names/:name', () => {
     expect(
       (await json(await kthx().fetch(ask(`/api/names/${mine.name}`)))).body,
     ).toMatchObject({ why: 'TAKEN', yours: null });
-
-    // A deleted name is nobody's, its old owner's included.
-    const gone = await claimAs(DAD, 'mine-deleted');
-    expect(
-      (await ontailnet(`/api/sites/${gone.name}`, DAD, { method: 'DELETE' }))
-        .status,
-    ).toBe(204);
-    expect((await asDad(gone.name)).body).toMatchObject({
-      available: false,
-      why: 'TAKEN',
-      yours: null,
-    });
   });
 
-  test('refuses a name the rules refuse, without reading a row', async () => {
+  test('refuses a name the rules refuse, without reading the bucket', async () => {
+    const before = kthx().gcs.calls.length;
     expect((await probe('admin')).body).toMatchObject({ why: 'RESERVED' });
     expect((await probe('no')).body).toMatchObject({ why: 'INVALID_NAME' });
     expect((await probe('Not-A-Name!')).body).toMatchObject({
       why: 'INVALID_NAME',
     });
     expect((await probe('')).status).toBe(404);
+    expect(kthx().gcs.calls.length).toBe(before);
   });
 });
 
@@ -356,6 +305,7 @@ describe('the config', () => {
     DATABASE_URL: 'postgres://x',
     KTHX_ME_KEY: 'k'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_SITES_BUCKET: 'sites',
   };
 
   test('refuses an identity host inside the zone or on the control host', () => {

@@ -102,6 +102,7 @@ sections:
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd-on-talos.md
           - runbooks/restore-from-the-gcs-copy.md
+          - runbooks/restore-a-site.md
           - runbooks/migrate-a-local-path-volume.md
           - runbooks/migrate-garage-to-three-nodes.md
       - group: Cloud and network

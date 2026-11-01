@@ -1,39 +1,83 @@
 #!/usr/bin/env bun
 /**
- * kthx: a directory becomes `https://<name>.kthx.dev`. Tokens live in
- * `$XDG_CONFIG_HOME/kthx/sites.json`, never in the uploaded directory.
- * `KTHX_ORIGIN` points the client at another apex.
+ * kthx: a directory becomes `https://<name>.kthx.dev`. A site is the folder
+ * `<name>/` in the sites bucket, and `kthx deploy` writes it with the caller's
+ * own Application Default Credentials. `KTHX_ORIGIN` points the client at
+ * another apex, `KTHX_SITES_BUCKET` at another bucket.
  */
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import bundledSkill from '@repo/kthx/skill.md' with { type: 'text' };
-import { nameProblem } from '../server/names.ts';
-import { KthxError, refusal } from './error.ts';
-import { banner, faint, link, rainbow, tint } from './paint.ts';
-import { pack } from './tar.ts';
 import {
-  buildId,
-  configDir,
-  updateNudge,
-  upgrade,
-  versionLine,
-} from './upgrade.ts';
+  type Bucket,
+  claimMarker,
+  listMarkers,
+  type Marker,
+  readMarker,
+  removeSite,
+  SiteRaced,
+  syncSite,
+} from '../server/bucket.ts';
+import { nameProblem } from '../server/names.ts';
+import { type Credentials, loadCredentials } from './adc.ts';
+import { KthxError, refusal } from './error.ts';
+import { collect } from './files.ts';
+import { banner, faint, link, rainbow, tint } from './paint.ts';
+import { buildId, updateNudge, upgrade, versionLine } from './upgrade.ts';
 
 export { KthxError } from './error.ts';
 
 export const origin = () =>
   (process.env.KTHX_ORIGIN?.trim() || 'https://kthx.dev').replace(/\/+$/, '');
 
-// Asked of the origin, since claims may run on a private host. Never read from
-// the committed project: this URL is where `kthx dev` sends the owner bearer.
+export const DEFAULT_SITES_BUCKET = 'bluenose-kthx-sites';
+
+export const sitesBucket = () =>
+  process.env.KTHX_SITES_BUCKET?.trim() || DEFAULT_SITES_BUCKET;
+
+/** How a command asks a person something. Tests answer for them. */
+export interface Io {
+  /** A terminal is attached, so a question can be answered. */
+  readonly tty: boolean;
+  ask(question: string): string | null;
+}
+
+export const terminal: Io = {
+  get tty() {
+    return process.stdin.isTTY === true && process.stdout.isTTY === true;
+  },
+  ask: (question) => prompt(question),
+};
+
+let held: Credentials | null = null;
+
+/** Read once per process; `forgetCredentials` is for tests. */
+export function credentials(): Credentials {
+  held ??= loadCredentials();
+  return held;
+}
+
+export function forgetCredentials(): void {
+  held = null;
+}
+
+function bucket(): Bucket {
+  const creds = credentials();
+  return {
+    bucketName: sitesBucket(),
+    auth: { token: () => creds.accessToken() },
+  };
+}
+
+// Asked of the origin, since the zone may not be the origin's host. Never read
+// from the committed project: this URL is where `kthx dev` sends an ID token.
 let apex: Promise<{ url: string }> | null = null;
 
 export async function siteUrl(name: string): Promise<string> {
@@ -41,11 +85,6 @@ export async function siteUrl(name: string): Promise<string> {
   const { protocol, host } = new URL((await apex).url);
   return `${protocol}//${name}.${host}`;
 }
-
-export const sitesFile = () => join(configDir(), 'sites.json');
-
-/** origin → name → token */
-type Tokens = Record<string, Record<string, string>>;
 
 /** Only a missing file gets `fallback`; a corrupt one throws. */
 function readJson<T>(path: string, fallback: T): T {
@@ -55,46 +94,6 @@ function readJson<T>(path: string, fallback: T): T {
   } catch (error) {
     throw new KthxError('UNREADABLE', `${path}: ${(error as Error).message}`);
   }
-}
-
-function remember(name: string, token: string): void {
-  const path = sitesFile();
-  const tokens = readJson<Tokens>(path, {});
-  tokens[origin()] = { ...tokens[origin()], [name]: token };
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
-  // `mode` applies only when the file is created.
-  chmodSync(path, 0o600);
-}
-
-function forget(name: string): void {
-  forgetWhere((known) => {
-    delete known[name];
-  });
-}
-
-function forgetWhere(edit: (known: Record<string, string>) => void): void {
-  const path = sitesFile();
-  const tokens = readJson<Tokens>(path, {});
-  const known = tokens[origin()];
-  if (known === undefined) return;
-  edit(known);
-  writeFileSync(path, `${JSON.stringify(tokens, null, 2)}\n`, { mode: 0o600 });
-  chmodSync(path, 0o600);
-}
-
-const knownToken = (name: string): string | undefined =>
-  readJson<Tokens>(sitesFile(), {})[origin()]?.[name];
-
-function tokenFor(name: string): string {
-  const token = knownToken(name);
-  if (token === undefined) {
-    throw new KthxError(
-      'NO_TOKEN',
-      `${sitesFile()} has no token for ${name} at ${origin()}`,
-    );
-  }
-  return token;
 }
 
 /**
@@ -111,8 +110,8 @@ function named(dir: string): string | undefined {
         `${at} names ${JSON.stringify(name)}, which is not a name`,
       );
     }
-    // A cloned `kthx.json` becomes a hostname and an API path, so it must pass
-    // the server's name rule first.
+    // A cloned `kthx.json` becomes a hostname and an object prefix, so it must
+    // pass the server's name rule first.
     const problem = nameProblem(name);
     if (problem !== null) {
       throw new KthxError(
@@ -153,11 +152,6 @@ async function api<T>(
   return (await response.json().catch(() => ({}))) as T;
 }
 
-const json = (body: unknown) => ({
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify(body),
-});
-
 /** The same `adj-animal-NN` dice as the landing page. */
 const ADJ = 'plum brisk quiet amber loose tiny wired damp clever spare'.split(
   ' ',
@@ -169,14 +163,50 @@ const pick = (list: readonly string[]) =>
 export const mint = () =>
   `${pick(ADJ)}-${pick(ANI)}-${10 + Math.floor(Math.random() * 89)}`;
 
+interface Standing {
+  readonly available: boolean;
+  readonly why: string | null;
+}
+
 /**
- * Claims a name when nothing names `dir` yet. `deploy` and `dev` write
- * `kthx.json` to `.`, so a rebuilt output directory keeps its name.
+ * The site's marker, written for `me` if the name is free. A name the server
+ * reserves, or holds for a built app, is refused; one somebody already has
+ * answers their marker, and the caller decides what that means.
+ */
+async function claim(
+  target: Bucket,
+  name: string,
+  me: string,
+): Promise<Marker> {
+  const standing = await api<Standing>(
+    `/api/names/${encodeURIComponent(name)}`,
+  );
+  if (!standing.available && standing.why !== 'TAKEN') {
+    throw new KthxError(
+      standing.why ?? 'TAKEN',
+      `${name} is not a name a site can have`,
+    );
+  }
+  if (standing.available) {
+    const claimed = await claimMarker(target, name, me);
+    if (claimed !== null) return claimed;
+  }
+  // Taken, or lost the race to another claim: whose is it?
+  const marker = await readMarker(target, name);
+  if (marker !== null) return marker;
+  throw new KthxError('TAKEN', `${name} is held for a built app`);
+}
+
+/**
+ * The name for `dir`: its `kthx.json`, else `--name`, else a minted one that
+ * is claimed here. `deploy` and `dev` write `kthx.json` to `.`, so a rebuilt
+ * output directory keeps its name.
  */
 async function nameFor(
   dir: string,
   chosen: string | undefined,
   writeTo: string,
+  me: string,
 ): Promise<string> {
   const already = named(dir);
   if (already !== undefined) {
@@ -188,25 +218,28 @@ async function nameFor(
     }
     return already;
   }
-  // A token here means this machine already claimed the name.
-  if (chosen !== undefined && knownToken(chosen) !== undefined) {
+  if (chosen !== undefined) {
+    const problem = nameProblem(chosen);
+    if (problem !== null) {
+      throw new KthxError(problem, `${chosen} is not a name a site can have`);
+    }
     write(writeTo, chosen);
     return chosen;
   }
+  const target = bucket();
   for (let attempt = 1; ; attempt += 1) {
-    const name = chosen ?? mint();
-    try {
-      const { token } = await api<{ token: string }>('/api/sites', {
-        method: 'POST',
-        ...json({ name }),
-      });
-      remember(name, token);
+    const name = mint();
+    const marker = await claim(target, name, me).catch((error: unknown) => {
+      if (error instanceof KthxError && error.code === 'TAKEN') return null;
+      throw error;
+    });
+    if (marker !== null && marker.owner === me) {
       write(writeTo, name);
-      if (chosen === undefined) console.log(`  no name set — uses ${name}`);
+      console.log(`  no name set — uses ${name}`);
       return name;
-    } catch (error) {
-      const taken = error instanceof KthxError && error.code === 'TAKEN';
-      if (chosen !== undefined || attempt >= 5 || !taken) throw error;
+    }
+    if (attempt >= 5) {
+      throw new KthxError('TAKEN', 'five minted names in a row were taken');
     }
   }
 }
@@ -237,13 +270,48 @@ const STARTER = `<!doctype html>
 <p>Edit index.html, then run <code>kthx deploy</code>.</p>
 `;
 
+const when = (iso: string | null): string =>
+  iso === null ? 'never' : `${iso.slice(0, 16).replace('T', ' ')} UTC`;
+
+/**
+ * Ownership is a courtesy: the owner's name is on the marker and anyone with
+ * write access to the bucket may write over it, after saying so.
+ */
+function overrule(
+  marker: Marker,
+  verb: 'Overwrite' | 'Delete',
+  force: boolean,
+  io: Io,
+): void {
+  if (force) return;
+  const question = `site "${marker.name}" is owned by ${marker.owner || 'nobody'} (last deploy ${when(marker.deployed)}). ${verb}? [y/N] `;
+  if (!io.tty) {
+    throw new KthxError(
+      'NOT_YOURS',
+      `site "${marker.name}" is owned by ${marker.owner || 'nobody'}; with no terminal to ask, pass --force to ${verb.toLowerCase()} it`,
+    );
+  }
+  const answer = io.ask(question)?.trim().toLowerCase();
+  if (answer !== 'y' && answer !== 'yes') {
+    throw new KthxError('DECLINED', `${marker.name} is left as it is`);
+  }
+}
+
 export async function init(
   dir = '.',
   options: { name?: string } = {},
 ): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const empty = readdirSync(dir).length === 0;
-  const name = await nameFor(dir, options.name, dir);
+  const me = await credentials().email();
+  const name = await nameFor(dir, options.name, dir, me);
+  const marker = await claim(bucket(), name, me);
+  if (marker.owner !== me) {
+    throw new KthxError(
+      'TAKEN',
+      `${name} is owned by ${marker.owner || 'nobody'} (last deploy ${when(marker.deployed)})`,
+    );
+  }
   // An existing SKILL.md may be hand-written, so it is never overwritten.
   const kept = !empty && existsSync(join(dir, 'SKILL.md'));
   if (!kept) writeFileSync(join(dir, 'SKILL.md'), await skill());
@@ -255,102 +323,66 @@ export async function init(
   return name;
 }
 
-interface Release {
-  readonly n: number;
-  readonly digest: string;
+export interface Deployed {
+  readonly name: string;
   readonly url: string;
-  readonly serving: number;
+  readonly uploaded: readonly string[];
+  readonly unchanged: number;
+  readonly deleted: readonly string[];
 }
 
 export async function deploy(
   dir = '.',
-  options: { name?: string } = {},
-): Promise<Release> {
+  options: { name?: string; force?: boolean } = {},
+  io: Io = terminal,
+): Promise<Deployed> {
   const started = Date.now();
-  const name = await nameFor(dir, options.name, '.');
-  const token = tokenFor(name);
-  const packed = pack(dir);
-  console.log(
-    `  ${packed.files} files · ${kb(packed.size)} · ${short(digestOf(packed.bytes))}`,
-  );
-  const release = await api<Release>(`/api/sites/${name}/releases`, {
-    method: 'POST',
-    token,
-    headers: {
-      'content-type': 'application/gzip',
-      'x-filename': 'site.tar.gz',
-    },
-    body: packed.bytes,
-  });
-  console.log(
-    `  ${tint('→', 0.9)} ${link(release.url)}  ${faint(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)} — v${release.n}`,
-  );
-  return release;
-}
+  // Refused before anything is claimed or sent: a bad kthx.json, then files.
+  named(dir);
+  const files = collect(dir);
+  const me = await credentials().email();
+  const name = await nameFor(dir, options.name, '.', me);
+  const target = bucket();
+  const marker =
+    (await readMarker(target, name)) ?? (await claim(target, name, me));
+  if (marker.owner !== me)
+    overrule(marker, 'Overwrite', options.force === true, io);
 
-interface Site {
-  readonly name: string;
-  readonly url: string;
-  readonly serving: number | null;
-  readonly held: boolean;
-  readonly releases: readonly {
-    readonly n: number;
-    readonly digest: string;
-    readonly size: number;
-    readonly at: string;
-  }[];
-  readonly usage: Record<string, number>;
-  readonly quotas: Record<string, number>;
-}
-
-const site = (name: string) =>
-  api<Site>(`/api/sites/${name}`, { token: tokenFor(name) });
-
-export async function rollback(dir = '.', n?: number): Promise<number> {
-  const name = nameOf(dir);
-  const found = await site(name);
-  const target = n ?? found.releases.find((r) => r.n < (found.serving ?? 0))?.n;
-  if (target === undefined) {
-    throw new KthxError(
-      'NOT_FOUND',
-      `${name} has no release before v${found.serving}`,
-    );
+  let synced: Awaited<ReturnType<typeof syncSite>>;
+  try {
+    synced = await syncSite(target, name, files, me, marker.generation);
+  } catch (error) {
+    if (error instanceof SiteRaced) throw new KthxError('RACED', error.message);
+    throw error;
   }
-  const { serving, held } = await api<{ serving: number; held: boolean }>(
-    `/api/sites/${name}/serve`,
-    { method: 'POST', token: tokenFor(name), ...json({ n: target }) },
+  const url = await siteUrl(name);
+  const size = files.reduce((sum, file) => sum + file.bytes.byteLength, 0);
+  console.log(
+    `  ${files.length} files · ${kb(size)} · ${synced.uploaded.length} uploaded, ${synced.unchanged} unchanged, ${synced.deleted.length} deleted`,
   );
   console.log(
-    `  v${found.serving} → v${serving}${held ? ' · held: the next deploy takes it over, or kthx release jumps to the newest' : ''}`,
+    `  ${tint('→', 0.9)} ${link(url)}  ${faint(`(${((Date.now() - started) / 1000).toFixed(1)}s)`)}`,
   );
-  return serving;
-}
-
-export async function release(dir = '.'): Promise<number | null> {
-  const name = nameOf(dir);
-  const { serving } = await api<{ serving: number | null }>(
-    `/api/sites/${name}/hold`,
-    { method: 'DELETE', token: tokenFor(name) },
-  );
-  console.log(
-    `  released: v${serving} serves, and the next upload replaces it`,
-  );
-  return serving;
+  return {
+    name,
+    url,
+    uploaded: synced.uploaded,
+    unchanged: synced.unchanged,
+    deleted: synced.deleted,
+  };
 }
 
 /** One entry in the public directory. */
 interface Listed {
   readonly name: string;
   readonly url: string;
-  readonly serving: number | null;
-  readonly releases: number;
-  readonly at: string;
+  readonly deployed: string | null;
 }
 
 export async function ls(
   dir = '.',
   options: { all?: boolean } = {},
-): Promise<Site | undefined> {
+): Promise<Marker | undefined> {
   if (options.all === true) {
     await listEverySite();
     return undefined;
@@ -360,21 +392,30 @@ export async function ls(
     await listMySites();
     return undefined;
   }
-  const found = await site(name);
-  const held = found.held ? ' (held)' : '';
-  console.log(`  ${rainbow(found.name)}  ${link(found.url)}`);
-  console.log(
-    found.serving === null
-      ? '  serving nothing yet'
-      : `  serving v${found.serving}${held}`,
-  );
-  for (const r of found.releases) {
-    const serving = r.n === found.serving;
-    const row = `v${String(r.n).padEnd(4)} ${r.at}  ${kb(r.size).padStart(9)}  ${short(r.digest)}`;
-    console.log(
-      serving ? `  ${tint('→', 0.9)} ${tint(row, 0.9)}` : `    ${faint(row)}`,
-    );
+  const marker = await readMarker(bucket(), name);
+  if (marker === null) {
+    throw new KthxError('NOT_FOUND', `${name} has no site; run kthx deploy`);
   }
+  console.log(`  ${rainbow(name)}  ${link(await siteUrl(name))}`);
+  console.log(
+    `  owned by ${marker.owner || 'nobody'} · last deploy ${when(marker.deployed)}`,
+  );
+  if (marker.owner === (await credentials().email())) await usage(name);
+  return marker;
+}
+
+/** What the server meters for the site; skipped when it cannot be asked. */
+async function usage(name: string): Promise<void> {
+  const found = await credentials()
+    .idToken()
+    .then((token) =>
+      api<{
+        usage: Record<string, number>;
+        quotas: Record<string, number>;
+      }>(`/api/sites/${name}`, { token }),
+    )
+    .catch(() => null);
+  if (found === null) return;
   for (const [what, used, limit] of [
     ['db', found.usage.db_bytes, found.quotas.db_bytes],
     ['files', found.usage.files_bytes, found.quotas.files_bytes],
@@ -388,31 +429,20 @@ export async function ls(
       `  ai     ${ai_requests_today} of ${found.quotas.ai_requests_day} requests, ${ai_tokens_today} of ${found.quotas.ai_tokens_day} tokens today`,
     );
   }
-  return found;
 }
 
-// A name whose token no longer works still prints, with the refusal code.
 async function listMySites(): Promise<void> {
-  const names = Object.keys(
-    readJson<Tokens>(sitesFile(), {})[origin()] ?? {},
-  ).sort();
-  if (names.length === 0) {
-    console.log(`  no tokens for ${origin()} in ${sitesFile()}`);
+  const me = await credentials().email();
+  const mine = (await listMarkers(bucket())).filter((one) => one.owner === me);
+  if (mine.length === 0) {
+    console.log(`  ${me} owns no site in gs://${sitesBucket()}`);
     console.log('  run kthx init here, or kthx ls --all for every site');
     return;
   }
-  const states = await Promise.all(
-    names.map(async (name) => {
-      try {
-        const found = await site(name);
-        return `${link(found.url)}  ${serves(found.serving)}${found.held ? ' (held)' : ''}`;
-      } catch (error) {
-        return error instanceof KthxError ? error.code : String(error);
-      }
-    }),
-  );
-  for (const [index, name] of names.entries()) {
-    console.log(`  ${name.padEnd(24)} ${states[index]}`);
+  for (const marker of mine) {
+    console.log(
+      `  ${marker.name.padEnd(24)} ${link(await siteUrl(marker.name))}  ${when(marker.deployed)}`,
+    );
   }
 }
 
@@ -426,7 +456,7 @@ async function listEverySite(): Promise<void> {
   }
   for (const found of page.items) {
     console.log(
-      `  ${found.name.padEnd(24)} ${link(found.url)}${' '.repeat(Math.max(0, 32 - found.url.length))} ${serves(found.serving).padEnd(12)} ${found.releases} releases  ${found.at}`,
+      `  ${found.name.padEnd(24)} ${link(found.url)}${' '.repeat(Math.max(0, 32 - found.url.length))} ${when(found.deployed)}`,
     );
   }
   if (page.next !== null) {
@@ -434,19 +464,45 @@ async function listEverySite(): Promise<void> {
   }
 }
 
-const serves = (n: number | null) => (n === null ? 'nothing yet' : `v${n}`);
-
-// No undo: a deleted name answers 410 forever, so the name must be typed back.
-export async function rm(dir = '.', confirm = prompt): Promise<void> {
+/**
+ * The name must be typed back. The owner's own site also goes from the
+ * server, database and files included; anyone's folder then goes from the
+ * bucket, marker last, and the name is free.
+ */
+export async function rm(
+  dir = '.',
+  options: { force?: boolean } = {},
+  io: Io = terminal,
+): Promise<void> {
   const name = nameOf(dir);
-  const typed = confirm(`  type ${name} to delete it, and everything in it: `);
+  const target = bucket();
+  const marker = await readMarker(target, name);
+  if (marker === null) {
+    throw new KthxError('NOT_FOUND', `${name} has no site`);
+  }
+  const me = await credentials().email();
+  if (marker.owner !== me)
+    overrule(marker, 'Delete', options.force === true, io);
+  const typed = io.ask(`  type ${name} to delete it, and everything in it: `);
   if (typed?.trim() !== name) {
     console.log('  nothing deleted');
     return;
   }
-  await api(`/api/sites/${name}`, { method: 'DELETE', token: tokenFor(name) });
-  forget(name);
-  console.log(`  ${name} is gone; the name stays taken`);
+  if (marker.owner === me) {
+    await credentials()
+      .idToken()
+      .then((token) => api(`/api/sites/${name}`, { method: 'DELETE', token }))
+      .catch((error: unknown) => {
+        // The bucket delete below still frees the name; the server drops the
+        // site's database and files when it sees the marker gone.
+        const code = error instanceof KthxError ? error.code : String(error);
+        console.log(
+          faint(`  the server did not delete it (${code}); the bucket will`),
+        );
+      });
+  }
+  await removeSite(target, name);
+  console.log(`  ${name} is gone, and the name is free`);
 }
 
 /**
@@ -479,12 +535,8 @@ export async function nuke(
     }
     throw cause;
   }
-  // Every site's name is claimable again, so the local tokens are dead.
-  forgetWhere((known) => {
-    for (const name of Object.keys(known)) delete known[name];
-  });
   console.log(
-    `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every site's name is claimable again, and names reserved for built apps stay taken`,
+    `  ${counts.deleted} deleted${counts.failed ? `, ${counts.failed} failed` : ''}; every site's name is free, and names reserved for built apps stay taken`,
   );
 }
 
@@ -508,32 +560,24 @@ const kb = (n: number) =>
       ? `${(n / 1024).toFixed(1)} KB`
       : `${(n / 1048576).toFixed(1)} MB`;
 
-function digestOf(bytes: Uint8Array): string {
-  return new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
-}
-
-const short = (hex: string) => {
-  const bare = hex.replace(/^sha256:/, '');
-  return `sha256:${bare.slice(0, 4)}…${bare.slice(-4)}`;
-};
-
 const hello = () =>
   banner(
     `${versionLine()} — kthx upgrade · bun add -g ${origin()}/cli/kthx.tgz`,
   );
 
-const USAGE = `usage: kthx <command> [dir] [--name <name>] [--all] [--version]
+const USAGE = `usage: kthx <command> [dir] [--name <name>] [--force] [--all] [--version]
   init      claim a name; write kthx.json, SKILL.md and a starter page
-  deploy    upload the directory as a release
+  deploy    sync the directory to the site; --force writes over someone else's
   dev       serve the directory on :4321 against the site's live backends
-  rollback  serve an earlier release and hold it
-  release   drop the hold; the newest release serves
-  ls        what the site serves; with no kthx.json, every site of yours
+  ls        the site's owner and last deploy; with no kthx.json, every site of yours
   ls --all  every site on the apex
-  rm        delete the site
+  rm        delete the site and free the name
   open      open the site in a browser
   upgrade   replace this copy with the one the apex serves
-  nuke      delete every site on the apex (operator key; --yes skips the prompt)`;
+  nuke      delete every site on the apex (tailnet admin; --yes skips the prompt)
+
+Credentials are Google Application Default Credentials:
+  gcloud auth application-default login`;
 
 if (import.meta.main) {
   let values: {
@@ -542,6 +586,7 @@ if (import.meta.main) {
     all?: boolean;
     help?: boolean;
     yes?: boolean;
+    force?: boolean;
   } = {};
   let positionals: string[] = [];
   try {
@@ -552,6 +597,7 @@ if (import.meta.main) {
         all: { type: 'boolean' },
         help: { type: 'boolean', short: 'h' },
         yes: { type: 'boolean' },
+        force: { type: 'boolean' },
       },
       allowPositionals: true,
     }));
@@ -585,33 +631,25 @@ if (import.meta.main) {
           await deploy(dir, values);
           break;
         case 'dev': {
-          const name = await nameFor(dir, values.name, '.');
-          // `knownToken`, not `tokenFor`: a fresh clone has no token and still
-          // runs the loop.
+          const creds = credentials();
+          const me = await creds.email();
+          const name = await nameFor(dir, values.name, '.', me);
+          const target = bucket();
+          if ((await readMarker(target, name)) === null) {
+            await claim(target, name, me);
+          }
           (await import('./dev.ts')).dev(dir, {
             name,
-            token: knownToken(name),
+            authorization: () => creds.idToken().catch(() => null),
             site: await siteUrl(name),
           });
           break;
         }
-        case 'rollback': {
-          const n = argument === undefined ? undefined : Number(argument);
-          if (n !== undefined && !(Number.isInteger(n) && n > 0)) {
-            console.error(USAGE);
-            process.exit(2);
-          }
-          await rollback('.', n);
-          break;
-        }
-        case 'release':
-          await release('.');
-          break;
         case 'ls':
           await ls(dir, values);
           break;
         case 'rm':
-          await rm(dir);
+          await rm(dir, values);
           break;
         case 'open':
           await openSite(dir);
@@ -625,7 +663,7 @@ if (import.meta.main) {
         case 'mcp':
           // This build has no stdio MCP bridge, so point at the HTTP endpoint.
           console.error(
-            `MCP: not in this build — point the editor at ${await siteUrl(nameOf(dir))}/api/mcp with the bearer from ${sitesFile()}`,
+            `MCP: not in this build — point the editor at ${await siteUrl(nameOf(dir))}/api/mcp with an ID token: gcloud auth print-identity-token`,
           );
           process.exitCode = 1;
           break;

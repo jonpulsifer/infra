@@ -1,14 +1,11 @@
 /**
  * `/api/files` and `/files/*`: a site's file store. Anyone on the site origin
- * may upload; only the creating visitor or the site's bearer may replace or
+ * may upload; only the creating visitor or the site's owner may replace or
  * delete a path. Rows live in the control database; bytes go through to the depot.
  */
-import { mkdir, rename, rm } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
 import type { SQL } from 'bun';
 import { bodyWithin, empty, logCause, ok, refuse, siteUrl } from './http.ts';
 import type { Me } from './me.ts';
-import { fileAt } from './serve.ts';
 import type { Ctx } from './sites.ts';
 
 /** One file, and everything a site may hold. */
@@ -98,11 +95,6 @@ type Listed = Omit<FileRow, 'owner' | 'sha256'>;
 /** What a failed `PUT` restores. */
 type Existing = Omit<FileRow, 'path'>;
 
-/** Beside the site's release directories, never inside one. */
-export function filesDir(sitesDir: string, site: string): string {
-  return join(sitesDir, site, 'files');
-}
-
 function objectName(site: string, path: string): string {
   return `files/${site}/${path}`;
 }
@@ -115,11 +107,11 @@ export async function filesBytes(sql: SQL, site: string): Promise<number> {
   return Number(row?.bytes ?? 0);
 }
 
-/**
- * Object names come from the rows, so the rows are read before they are
- * deleted. The caller removes the bytes on the volume.
- */
-export async function dropFiles(ctx: Ctx, site: string): Promise<void> {
+/** Object names come from the rows, so the rows are read before they are deleted. */
+export async function dropFiles(
+  ctx: Pick<Ctx, 'sql' | 'depot' | 'id'>,
+  site: string,
+): Promise<void> {
   const rows = (await ctx.sql`
     select path from files where site = ${site}
   `) as { path: string }[];
@@ -299,7 +291,6 @@ async function store(
 
   const sha256 = new Bun.CryptoHasher('sha256').update(bytes).digest('hex');
   const release = reserve(site, bytes.byteLength);
-  const target = join(filesDir(ctx.config.sitesDir, site), path);
   // The row goes first and is restored if the bytes fail. Bytes first would, on
   // a database error, leave the old etag and type describing the new bytes.
   try {
@@ -311,13 +302,9 @@ async function store(
         set size = excluded.size, type = excluded.type,
             sha256 = excluded.sha256, updated_at = excluded.updated_at
     `;
-    await write(ctx.config.sitesDir, site, target, bytes);
     await ctx.depot.put(objectName(site, path), bytes);
   } catch (cause) {
-    await undo(ctx, site, path, existing, target);
-    // A path that names a directory, or runs through a file, is the caller's
-    // error: a 400 with no log line.
-    if (COLLIDES.has(errno(cause))) return refuse('INVALID_PATH', ctx.id);
+    await undo(ctx, site, path, existing);
     logCause(ctx.id, `storing files/${site}/${path}`, cause);
     return refuse('STORAGE_FAILURE', ctx.id);
   } finally {
@@ -336,23 +323,12 @@ async function store(
   );
 }
 
-/** `write` fails with these when the path is already something else on disk. */
-const COLLIDES: ReadonlySet<string> = new Set(['EISDIR', 'ENOTDIR', 'EEXIST']);
-
-function errno(cause: unknown): string {
-  return typeof cause === 'object' && cause !== null && 'code' in cause
-    ? String((cause as { code: unknown }).code)
-    : '';
-}
-
 async function undo(
   ctx: Ctx,
   site: string,
   path: string,
   existing: Existing | undefined,
-  target: string,
 ): Promise<void> {
-  await rm(target, { force: true }).catch(() => undefined);
   try {
     if (existing === undefined) {
       await ctx.sql`delete from files where site = ${site} and path = ${path}`;
@@ -365,27 +341,6 @@ async function undo(
     `;
   } catch (cause) {
     logCause(ctx.id, `undoing files/${site}/${path}`, cause);
-  }
-}
-
-/**
- * Temp file and rename, so a reader sees the old file or the new one. The temp
- * name starts with a dot, which no legal path segment can.
- */
-async function write(
-  sitesDir: string,
-  site: string,
-  target: string,
-  bytes: Uint8Array,
-): Promise<void> {
-  const root = filesDir(sitesDir, site);
-  await mkdir(dirname(target), { recursive: true, mode: 0o755 });
-  const temp = join(root, `.tmp-${crypto.randomUUID()}`);
-  try {
-    await Bun.write(temp, bytes, { mode: 0o644 });
-    await rename(temp, target);
-  } finally {
-    await rm(temp, { force: true }).catch(() => undefined);
   }
 }
 
@@ -406,9 +361,6 @@ async function remove(
     if (row.owner !== me.id && !owner) return refuse('FORBIDDEN', ctx.id);
 
     await ctx.sql`delete from files where site = ${site} and path = ${path}`;
-    await rm(join(filesDir(ctx.config.sitesDir, site), path), {
-      force: true,
-    }).catch(() => undefined);
     await ctx.depot.delete(objectName(site, path)).catch((cause: unknown) => {
       // The row is gone, so a leftover object is never served.
       logCause(ctx.id, `deleting ${objectName(site, path)}`, cause);
@@ -458,32 +410,23 @@ export async function serveFile(
     return new Response(null, { status: 304, headers });
   }
 
-  const root = filesDir(ctx.config.sitesDir, site);
-  let onDisk = await fileAt(root, `/${file}`);
-  if (onDisk === null) {
-    const bytes = await ctx.depot.get(
-      ctx.depot.locate(objectName(site, file)),
-      MAX_FILE_BYTES,
+  const body = await ctx.depot.open(objectName(site, file), MAX_FILE_BYTES);
+  // A row with no bytes is a lost file.
+  if (body === null) {
+    logCause(
+      ctx.id,
+      `reading files/${site}/${file}`,
+      'the depot has no object',
     );
-    // A row with no bytes anywhere is a lost file.
-    if (bytes === null) {
-      logCause(
-        ctx.id,
-        `rehydrating files/${site}/${file}`,
-        'the depot has no object',
-      );
-      return refuse('NOT_FOUND', ctx.id);
-    }
-    const target = join(root, file);
-    await write(ctx.config.sitesDir, site, target, bytes);
-    onDisk = target;
+    return refuse('NOT_FOUND', ctx.id);
   }
-
-  const bytes = Bun.file(onDisk);
   if (request.method === 'HEAD') {
+    await body.cancel();
     return new Response(null, {
-      headers: { ...headers, 'content-length': String(bytes.size) },
+      headers: { ...headers, 'content-length': String(Number(row.size)) },
     });
   }
-  return new Response(bytes, { headers });
+  return new Response(body, {
+    headers: { ...headers, 'content-length': String(Number(row.size)) },
+  });
 }

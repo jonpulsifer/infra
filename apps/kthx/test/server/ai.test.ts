@@ -11,7 +11,7 @@ import {
   utcDay,
 } from '../../server/ai.ts';
 import { readConfig } from '../../server/env.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer } from '../harness/server.ts';
 
 interface Seen {
   readonly method: string;
@@ -61,14 +61,6 @@ beforeEach(() => {
     });
 });
 
-// Its own address block: the claim caps are module-level, so test files that
-// share addresses spend each other's day.
-let nextAddress = 0;
-function address(): string {
-  nextAddress += 1;
-  return `100.64.0.${nextAddress % 250}`;
-}
-
 interface Site {
   readonly name: string;
   readonly host: string;
@@ -76,18 +68,7 @@ interface Site {
 }
 
 async function claimed(label: string, at = kthx): Promise<Site> {
-  const name = at().name(label);
-  const response = await at().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(response.status).toBe(201);
-  const body = (await response.json()) as { token: string };
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return at().site(label);
 }
 
 function chat(
@@ -472,6 +453,7 @@ describe('streaming', () => {
 describe('the budget', () => {
   test('a spent day is 429 AI_BUDGET with a retry-after, and calls nobody', async () => {
     const site = await claimed('ai-budget');
+    await kthx().sql`insert into sites (name) values (${site.name})`;
     await kthx().sql`
       insert into ai_usage (site, day, requests, tokens)
       values (${site.name}, ${utcDay()}, ${MAX_AI_REQUESTS_DAY}, 0)
@@ -485,6 +467,7 @@ describe('the budget', () => {
 
   test('a day past the token ceiling is 429 too, not only the request one', async () => {
     const site = await claimed('ai-tokens');
+    await kthx().sql`insert into sites (name) values (${site.name})`;
     await kthx().sql`
       insert into ai_usage (site, day, requests, tokens)
       values (${site.name}, ${utcDay()}, 1, ${MAX_AI_TOKENS_DAY})
@@ -571,6 +554,7 @@ describe('the model configuration', () => {
     DATABASE_URL: 'postgres://x',
     KTHX_ME_KEY: 'k'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_SITES_BUCKET: 'sites',
   };
 
   test('a default model outside its own allow-list refuses to boot', () => {

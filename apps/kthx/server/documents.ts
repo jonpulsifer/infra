@@ -402,7 +402,7 @@ export async function bodyOf(
 
 /**
  * `segments` is `['', 'api', 'db', collection?, id?]`. `owner` means the request
- * carried the site's bearer, which `DELETE /api/db/:c` needs.
+ * carried the owner's ID token, which `DELETE /api/db/:c` needs.
  */
 export async function dbApi(
   request: Request,

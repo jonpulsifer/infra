@@ -1,13 +1,18 @@
 /**
- * The kthx server. It dispatches by `Host` before path: `/` is the landing page
- * on the apex and a site's `index.html` on a site host. Nothing is minted per
- * site; the zone's wildcard reaches this process.
+ * The kthx server. It dispatches by `Host` before path: the apex and the
+ * private hosts are this process's own, and on a site host it answers `/api/*`
+ * and `/files/*`, which nginx forwards. nginx serves every other site path
+ * from the sites bucket.
  */
 
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { loadDeploymentFederation } from '@repo/archive/federation-credential';
+import { federatedAuth } from '@repo/archive/gcs';
 import { LANDING_PATH, SDK_PATH, SKILL_PATH } from '@repo/kthx/assets';
 import { FAVICON_PATH } from '@repo/kthx/favicon';
 import { AI_IDLE_SECONDS, aiApi } from './ai.ts';
+import type { Marker } from './bucket.ts';
 import { buildApi } from './build.ts';
 import { type Caller, callerOf } from './caller.ts';
 import { createClient, migrate } from './db.ts';
@@ -27,24 +32,22 @@ import {
   siteOf,
   siteUrl,
 } from './http.ts';
+import { looksLikeJwt, verifyIdToken } from './identity.ts';
 import { spendAll, writes } from './limits.ts';
+import { Sites } from './markers.ts';
 import { mcpApi } from './mcp.ts';
 import { type Me, meOf } from './me.ts';
+import { decodePath, faviconResponse, notHere } from './pages.ts';
 import { Pg } from './pg.ts';
 import { type SocketData, socketsFull, websocket } from './realtime.ts';
-import { ensureRelease, releaseDir } from './releases.ts';
-import {
-  decodePath,
-  faviconResponse,
-  notHere,
-  staticResponse,
-} from './serve.ts';
 import {
   type Ctx,
+  ensureSite,
   nameStatus,
   opensSite,
   opensZone,
   sitesApi,
+  sweepSites,
 } from './sites.ts';
 
 const RETIRED = 'the /_/ API is retired; use /api/ — https://kthx.dev/skill.md';
@@ -69,7 +72,8 @@ let landing: Promise<string> | null = null;
 
 /**
  * Tells the page what a browser cannot see: the zone (a private host's name is
- * not it), claim and admin rights, the tailnet login and the console's address.
+ * not it), which door it is, admin rights, the tailnet login and the console's
+ * address.
  * These are hints only; every route decides again from the request.
  */
 async function landingHtml(
@@ -191,9 +195,7 @@ async function apex(
 ): Promise<Response> {
   const segments = path.split('/');
   if (segments[1] === 'api' && segments[2] === 'sites') {
-    // With a private host configured, the public apex only lists the directory.
-    const directory = request.method === 'GET' && segments.length === 3;
-    if (!ctx.caller.control && !directory) return refuse('PRIVATE', ctx.id);
+    // The owner routes ask an ID token or a tailnet login, so every door has them.
     return (
       (await sitesApi(request, ctx, segments)) ?? refuse('NOT_FOUND', ctx.id)
     );
@@ -216,10 +218,11 @@ async function apex(
     if (!READ_METHODS.has(request.method)) {
       return refuse('METHOD_NOT_ALLOWED', ctx.id);
     }
-    // Only the identity host sets a login, so every other door answers 401.
-    return ctx.caller.login === null
+    // The tailnet login on the identity host, else a verified ID token.
+    const login = ctx.caller.login ?? (await ctx.identity());
+    return login === null
       ? refuse('UNAUTHENTICATED', ctx.id)
-      : ok({ login: ctx.caller.login }, ctx.id);
+      : ok({ login }, ctx.id);
   }
   // The retired v1 API, with no shim.
   if (path === '/kthx' || path.startsWith('/kthx/')) {
@@ -285,16 +288,6 @@ async function apex(
   return notHere(ctx.host, ctx.config.zone, 404, ctx.id, ctx.port);
 }
 
-interface Serving {
-  readonly deleted_at: Date | null;
-  readonly provisioned_at: Date | null;
-  readonly token_hash: string | null;
-  readonly owner_login: string | null;
-  readonly serving: number | null;
-  readonly digest: string | null;
-  readonly location: string | null;
-}
-
 async function site(
   request: Request,
   ctx: Ctx,
@@ -316,64 +309,25 @@ async function site(
     );
   }
 
-  const page = (status: 404 | 410 | 503) =>
-    notHere(ctx.host, ctx.config.zone, status, ctx.id, ctx.port);
-
   const reserved =
     path === '/api' ||
     path.startsWith('/api/') ||
     path === '/files' ||
     path.startsWith('/files/');
+  // nginx serves every other path; one that reaches here was misrouted.
+  if (!reserved) {
+    return notHere(ctx.host, ctx.config.zone, 404, ctx.id, ctx.port);
+  }
 
-  // A database blip on a page request answers the 503 page, not a JSON 500.
-  let row: Serving | undefined;
+  let marker: Marker | null;
   try {
-    [row] = (await ctx.sql`
-      select s.deleted_at, s.provisioned_at, s.token_hash, s.owner_login,
-             s.serving, r.digest, r.location
-      from sites s
-      left join releases r on r.site = s.name and r.n = s.serving
-      where s.name = ${name} limit 1
-    `) as Serving[];
+    marker = await ctx.sites.marker(name);
   } catch (cause) {
-    logCause(ctx.id, 'reading the serving release', cause);
-    return reserved ? refuse('BUSY', ctx.id) : page(503);
+    logCause(ctx.id, 'reading the site marker', cause);
+    return refuse('BUSY', ctx.id);
   }
-
-  if (reserved) {
-    if (row === undefined) return refuse('NOT_FOUND', ctx.id);
-    if (row.deleted_at !== null) return refuse('GONE', ctx.id);
-    return siteApi(request, ctx, name, path, row);
-  }
-
-  if (row === undefined) return page(404);
-  if (row.deleted_at !== null) return page(410);
-  if (!READ_METHODS.has(request.method)) {
-    return refuse('METHOD_NOT_ALLOWED', ctx.id);
-  }
-  if (row.serving === null || row.digest === null || row.location === null) {
-    return page(404);
-  }
-
-  const here = await ensureRelease(
-    ctx.config.sitesDir,
-    name,
-    row.serving,
-    row.location,
-    ctx.depot,
-  ).catch((cause) => {
-    logCause(ctx.id, 'rehydrating a release', cause);
-    return false;
-  });
-  if (!here) return page(503);
-
-  const answered = await staticResponse(
-    request,
-    releaseDir(ctx.config.sitesDir, name, row.serving),
-    row.digest,
-    path,
-  );
-  return answered ?? page(404);
+  if (marker === null) return refuse('NOT_FOUND', ctx.id);
+  return siteApi(request, ctx, name, path, marker);
 }
 
 async function siteApi(
@@ -381,7 +335,7 @@ async function siteApi(
   ctx: Ctx,
   name: string,
   path: string,
-  row: Serving,
+  marker: Marker,
 ): Promise<Response | undefined> {
   const read = READ_METHODS.has(request.method);
   // Cacheable, so it is served before anything that sets a cookie.
@@ -394,12 +348,12 @@ async function siteApi(
   }
 
   // Public bytes: a cookie would defeat the edge cache, and any page may fetch
-  // them anyway. Rows live in the control database, so no provisioning wait.
+  // them anyway. Rows live in the control database, so no database is needed.
   if (path === '/files' || path.startsWith('/files/')) {
     return serveFile(request, ctx, name, path);
   }
 
-  const owner = opensSite(ctx.caller, row);
+  const owner = await opensSite(ctx, marker);
   // `SameSite=Lax` cannot separate sites: the zone is not on the Public Suffix
   // List. The `/api/ws` GET is guarded too, since a socket is a write channel.
   const guarded = request.method !== 'GET' || path === '/api/ws';
@@ -409,6 +363,16 @@ async function siteApi(
 
   const me = meOf(request, name, ctx.config.meKey, ctx.config.mePreviousKey);
   const address = ctx.caller.bucket;
+  const segments = path.split('/');
+  // A site gets its database on first use, not when its marker is written.
+  const database =
+    path === '/api/ws' || path === '/api/mcp' || segments[2] === 'db';
+  try {
+    await ensureSite(ctx, name, database);
+  } catch (cause) {
+    logCause(ctx.id, `preparing ${name}`, cause);
+    return refuse('BUSY', ctx.id);
+  }
 
   if (path === '/api/files' || path.startsWith('/api/files/')) {
     const refusal = charge(
@@ -421,15 +385,6 @@ async function siteApi(
     );
     if (refusal !== null) return refusal;
     return cookied(await filesApi(request, ctx, name, path, me, owner), me);
-  }
-
-  if (row.provisioned_at === null) {
-    // A site row exists before its database. Repair is deduplicated per name;
-    // the caller gets BUSY and retries.
-    void ctx.pg.repair(name).catch((cause: unknown) => {
-      logCause(ctx.id, `repairing ${name}`, cause);
-    });
-    return refuse('BUSY', ctx.id);
   }
 
   if (path === '/api' && read) {
@@ -462,8 +417,6 @@ async function siteApi(
     return upgrade(request, ctx, name, me);
   }
 
-  const segments = path.split('/');
-
   if (path === '/api/mcp') {
     // This endpoint opens no stream, so only `POST` carries a message.
     if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
@@ -476,7 +429,7 @@ async function siteApi(
       );
     }
     // Buckets are spent per tool inside, where reads stay free. No cookie:
-    // every caller here holds a bearer.
+    // every caller here holds the owner's ID token.
     return mcpApi(request, ctx, name);
   }
 
@@ -508,8 +461,8 @@ function cookied(response: Response, me: Me): Response {
 }
 
 /**
- * An owner bearer skips the visitor and address buckets but never the site one,
- * so a leaked token cannot outrun the site's ceiling.
+ * The owner skips the visitor and address buckets but never the site one, so a
+ * leaked token cannot outrun the site's ceiling.
  */
 function charge(
   ctx: Ctx,
@@ -571,6 +524,7 @@ export function handler(
   config: Config,
   sql: ReturnType<typeof createClient>,
   depot: Depot,
+  sites: Sites,
   pg: Pg = new Pg(config, sql),
 ): Kthx {
   const engine = config.engine === null ? null : new EngineKeys(config.engine);
@@ -592,17 +546,29 @@ export function handler(
       return refuse('NOT_FOUND', id);
     }
 
+    let verified: Promise<string | null> | null = null;
+    const identity = (): Promise<string | null> => {
+      const token = caller.bearer;
+      if (token === null || !looksLikeJwt(token)) return Promise.resolve(null);
+      verified ??= verifyIdToken(token, config).catch((cause: unknown) => {
+        logCause(id, 'verifying an id token', cause);
+        return null;
+      });
+      return verified;
+    };
     const ctx: Ctx = {
       config,
       sql,
       pg,
       depot,
+      sites,
       server,
       id,
       host,
       port: portOf(request),
       caller,
       engine,
+      identity,
     };
     const path = decodePath(request.url);
     if (path === null) {
@@ -626,6 +592,8 @@ export function handler(
 }
 
 const SWEEP_MS = 24 * 60 * 60 * 1000;
+/** How soon a site's database and files go after its marker does. */
+const SITE_SWEEP_MS = 10 * 60 * 1000;
 
 export async function start(): Promise<Bun.Server<unknown>> {
   const config = readConfig();
@@ -634,14 +602,27 @@ export async function start(): Promise<Bun.Server<unknown>> {
   if (ran.length > 0) console.log(`migrated: ${ran.join(', ')}`);
 
   const pg = new Pg(config, sql);
-  // Before serving: every claim needs the template and the group role.
+  // Before serving: every site database is cloned from the template.
   await pg.bootstrap();
 
   const depot =
     config.bucket === null
-      ? diskDepot(`${config.sitesDir}/.depot`)
+      ? diskDepot(join(tmpdir(), 'kthx-depot'))
       : bucketDepot(config.bucket);
-  const fetch = handler(config, sql, depot, pg);
+  const federation = await loadDeploymentFederation();
+  if (federation === null && !Bun.env.STORAGE_EMULATOR_HOST) {
+    throw new Error(
+      'KTHX_SITES_BUCKET needs GOOGLE_APPLICATION_CREDENTIALS, or STORAGE_EMULATOR_HOST for a local run',
+    );
+  }
+  const sites = new Sites({
+    bucketName: config.sitesBucket,
+    auth:
+      federation === null
+        ? { token: () => 'emulator' }
+        : federatedAuth(federation),
+  });
+  const fetch = handler(config, sql, depot, sites, pg);
 
   const server = Bun.serve({
     port: config.port,
@@ -674,6 +655,15 @@ export async function start(): Promise<Bun.Server<unknown>> {
       .catch((cause: unknown) => logCause('sweep', 'dropping orphans', cause));
   }, SWEEP_MS);
   sweep.unref();
+
+  const siteSweep = setInterval(() => {
+    void sweepSites({ sql, pg, depot, sites, id: 'sweep' })
+      .then((erased) => {
+        if (erased.length > 0) console.log(`erased: ${erased.join(', ')}`);
+      })
+      .catch((cause: unknown) => logCause('sweep', 'erasing sites', cause));
+  }, SITE_SWEEP_MS);
+  siteSweep.unref();
   return server;
 }
 

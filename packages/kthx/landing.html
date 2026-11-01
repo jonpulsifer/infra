@@ -63,8 +63,8 @@ a{color:inherit}
 }
 
 /* press feedback lives on pointer-down, 100ms, and is the only hover/press transform on the page */
-.tiny,.dice,.drop,.chev{transition:transform .1s var(--ease-out),color .13s,border-color .13s,background-color .13s}
-.tiny:active,.dice:active,.drop:active,.chev:active{transform:scale(.97)}
+.tiny{transition:transform .1s var(--ease-out),color .13s,border-color .13s,background-color .13s}
+.tiny:active{transform:scale(.97)}
 
 /* hero: the wordmark arrives letter by letter, the dot lands, the inks slip once in a while */
 .hero{position:relative;z-index:1;min-height:min(36vh,300px);display:grid}
@@ -89,94 +89,15 @@ a{color:inherit}
   2.5%,100%{filter:none;transform:none}
 }
 
-/* the deploy card */
-.deck,.props,.term,.sdk{background:var(--card)}
-.deck{border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shade);overflow:hidden;margin-top:-28px}
-.deckhead{
-  display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line-soft);
-  font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
-}
-.deckhead .n{
-  width:17px;height:17px;border-radius:calc(var(--r-sm) - 2px);background:var(--hot);color:var(--hot-ink);
-  display:grid;place-items:center;font-family:var(--sans);font-size:10px;font-weight:700;letter-spacing:0;
-}
-.deckhead .sp{flex:1}
-
-/* name field: the zone is part of the input, not a label beside it */
-.namefield{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;padding:4px 16px;border-bottom:1px solid var(--line-soft)}
-.namefield input{
-  min-width:0;background:none;border:0;outline:0;padding:15px 0;
-  font-family:var(--mono);font-size:20px;letter-spacing:-.02em;text-align:right;font-variant-numeric:tabular-nums;
-}
-.namefield input::placeholder{color:var(--ink-3)}
-.namefield .zone{font-family:var(--mono);font-size:20px;letter-spacing:-.02em;color:var(--ink-3);white-space:nowrap}
-.namefield .verdict{
-  font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
-  padding:3px 8px;border-radius:calc(var(--r-sm) - 2px);margin-left:12px;white-space:nowrap;border:1px solid transparent;
-}
-.namefield .verdict.free{color:var(--ok);background:var(--ok-soft)}
-.namefield .verdict.taken{color:var(--hot);background:var(--hot-soft);border-color:var(--hot-line)}
-.namefield .verdict.idle{color:var(--ink-3)}
-.namefield .dice{margin-left:10px;font-size:13px;color:var(--ink-3);border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 8px}
-.namefield .dice:hover{color:var(--hot);border-color:var(--hot-line)}
-.dice.roll{animation:roll360 .5s var(--spring)}
-@keyframes roll360{from{transform:rotate(-180deg)}to{transform:rotate(0)}}
-@media (max-width:480px){
-  .namefield{grid-template-columns:minmax(0,1fr) auto auto;padding-bottom:10px}
-  .namefield input{font-size:17px;padding:13px 0}
-  .namefield .zone{font-size:17px}
-  .namefield .dice{grid-row:1;grid-column:3}
-  .namefield .verdict{grid-row:2;grid-column:1 / -1;justify-self:end;margin:0}
-}
-
-.drop{
-  padding:30px 20px;text-align:center;display:grid;gap:6px;justify-items:center;cursor:pointer;width:calc(100% - 20px);
-  border:2px dashed transparent;margin:10px;border-radius:calc(var(--r) - 4px);
-  transition:background-color .15s,border-color .15s,transform .18s var(--ease-out);
-  will-change:transform;
-}
-.drop:hover{background:var(--sunk)}
-.drop.hot{border-color:var(--hot);background:var(--hot-soft)}
-.drop h2{font-size:16px;font-weight:700;letter-spacing:-.01em}
-.drop p{margin:0;font-size:13px;color:var(--ink-2)}
-.drop code{font-family:var(--mono);font-size:12.5px;color:var(--ink)}
-.drop .arrow{font-size:20px;color:var(--hot);line-height:1;display:block}
-.drop.hot .arrow{animation:nod .9s var(--ease-in-out) infinite}
-@keyframes nod{50%{transform:translateY(5px)}}
-
-/* live deploy readout: the drop zone becomes a receipt, printed one line at a time */
-.run{padding:20px 18px;display:grid;gap:9px;font-family:var(--mono);font-size:13px}
-.run .ln{
-  display:grid;grid-template-columns:15px 1fr auto;gap:10px;align-items:baseline;color:var(--ink-2);
-  transition:opacity .22s var(--ease-out),transform .22s var(--ease-out);
-}
-.run .ln.wait{opacity:0;transform:translateY(-6px)}
-.run .ln .g{display:inline-block}
-.run .ln.done .g{color:var(--ok);animation:pop .4s var(--spring)}
-.run .ln.now .g{color:var(--hot)}
-@keyframes pop{from{transform:scale(.5)}to{transform:scale(1)}}
 .sdknote b{color:var(--ink);font-weight:500}
 pre.sh b{color:var(--ink);font-weight:500}
 .termbar i{width:8px;height:8px;border-radius:50%;background:var(--line);display:block}
 pre.sh i{color:var(--ink-3);font-style:normal}
 pre.sh u{color:var(--ok);text-decoration:none}
-.run .ln b{font-weight:400;color:var(--ink)}
-.run .ln.bad .g,.run .ln.bad b{color:var(--hot)}
-.run .ln .t{color:var(--ink-3);font-variant-numeric:tabular-nums;font-size:11.5px}
-.run .out{
-  margin-top:4px;border-top:1px solid var(--line-soft);padding-top:14px;
-  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
-  animation:land .55s var(--spring) both;
-}
-.run .out a{
-  font-size:16px;letter-spacing:-.02em;text-decoration:none;border-bottom:1px solid var(--hot-line);padding-bottom:1px;
-  animation:register .6s var(--ease-out) .12s both;
-}
-.run .out a:hover{color:var(--hot)}
-.run .out .sp{flex:1}
-@keyframes land{from{opacity:0;transform:translateY(10px) scale(.97)}to{opacity:1;transform:none}}
 
-/* properties */
+.props,.term,.sdk{background:var(--card)}
+
+/* the directory */
 .sec{margin-top:38px;display:grid;gap:2px}
 .sechead{
   display:flex;align-items:center;gap:10px;padding-bottom:9px;
@@ -186,17 +107,6 @@ pre.sh u{color:var(--ok);text-decoration:none}
 .sechead .sp{flex:1;height:1px;background:var(--line)}
 
 .props{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
-/* a row is the address (a real link) plus a chevron that opens it; the row itself also toggles */
-.prop{
-  display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:14px;align-items:center;cursor:pointer;
-  padding:10px 12px 10px 16px;border-bottom:1px solid var(--line-soft);
-  transition:background-color .13s;
-}
-.prop:last-of-type{border-bottom:0}
-.prop:hover{background:var(--sunk)}
-.prop.open{background:var(--sunk)}
-.prop.new{animation:land .5s var(--spring) both,glow 1.4s var(--ease-out) .3s backwards}
-@keyframes glow{from{background-color:var(--hot-soft)}to{background-color:var(--sunk)}}
 /* right-aligned label so every zone suffix stacks into one column */
 .addr{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;font-family:var(--mono);font-size:15px;letter-spacing:-.015em;min-width:0;text-decoration:none;padding:4px 0}
 .addr .lb{text-align:right;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -205,25 +115,11 @@ pre.sh u{color:var(--ok);text-decoration:none}
 .pmeta{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:12px;color:var(--ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
 .pmeta .dot{width:6px;height:6px;border-radius:50%;background:var(--ok);flex:none}
 .pmeta .dot.off{background:var(--line)}
-.chev{width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r-sm);color:var(--ink-3);border:1px solid transparent}
-.chev:hover{color:var(--ink);border-color:var(--line)}
-.chev svg{transition:transform .2s var(--ease-out)}
-.chev[aria-expanded="true"] svg{transform:rotate(180deg)}
 @media (max-width:560px){.pmeta .hide{display:none}.addr{font-size:13.5px}}
 
-.pdetail{
-  padding:2px 16px 18px;border-bottom:1px solid var(--line-soft);background:var(--sunk);
-  display:grid;gap:14px;animation:open .2s var(--ease-out) both;
-}
-.pdetail:last-child{border-bottom:0}
-@keyframes open{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
-.block{display:grid;gap:6px;align-content:start;min-width:0}
-.block h3{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);font-weight:400}
-.acts{display:flex;gap:7px;flex-wrap:wrap;padding-top:2px}
 .tiny{border:1px solid var(--line);border-radius:var(--r-sm);padding:5px 11px;font-size:13px;color:var(--ink-2);background:var(--card);text-decoration:none}
 .tiny:hover{color:var(--ink);border-color:var(--ink-3)}
 .tiny.danger:hover{color:var(--hot);border-color:var(--hot-line)}
-.tiny.go{color:var(--hot);border-color:var(--hot-line)}
 
 .hint{font-size:13px;color:var(--ink-2);text-align:center;padding:26px 16px}
 
@@ -242,8 +138,6 @@ pre.sh u{color:var(--ok);text-decoration:none}
 .pub:last-child{border-bottom:0}
 .pub:hover{background:var(--sunk)}
 .more{padding:14px 16px;text-align:center;border-top:1px solid var(--line-soft)}
-
-/* link a site this browser has no token for */
 
 /* terminal */
 .term{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
@@ -270,29 +164,6 @@ pre.sh .p{color:var(--hot)}
 .toast.bye{animation:none;opacity:0;transform:translate(-50%,7px)}
 @keyframes rise{from{opacity:0;transform:translate(-50%,7px)}to{opacity:1;transform:translate(-50%,0)}}
 
-/* releases */
-.rels{position:relative;padding-left:14px}
-/* the pin is the one thing that moves on a rollback: it slides between versions */
-.rels .pin{position:absolute;left:0;top:0;width:6px;height:6px;border-radius:50%;background:var(--hot);will-change:transform}
-.rel{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;
-  font-family:var(--mono);font-size:13px;padding:5px 0;border-bottom:1px solid var(--line-soft);font-variant-numeric:tabular-nums}
-.rel:last-child{border-bottom:0}
-.rel .v{color:var(--ink-3);min-width:26px;transition:color .2s}
-.rel .v.cur{color:var(--hot)}
-.rel .w{color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rel .a{opacity:0;transition:opacity .13s}
-.rel:hover .a,.rel:focus-within .a{opacity:1}
-.rel .now{color:var(--ok);font-size:11.5px}
-.hold{
-  display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:12px;
-  color:var(--hot);background:var(--hot-soft);border:1px solid var(--hot-line);
-  border-radius:var(--r-sm);padding:5px 9px;animation:latch .45s var(--spring) both;transform-origin:left center;
-}
-.hold .bar{display:inline-block;animation:swing .45s var(--spring) both;transform-origin:center}
-.hold button{font-size:12px;color:var(--hot);text-decoration:underline;text-underline-offset:2px}
-@keyframes latch{from{opacity:0;transform:translateX(-8px)}to{opacity:1;transform:none}}
-@keyframes swing{from{transform:rotate(-90deg)}to{transform:rotate(0)}}
-
 /* sdk tabs */
 .sdk{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shade)}
 .sdktabs{display:flex;border-bottom:1px solid var(--line-soft);background:var(--sunk);overflow-x:auto}
@@ -306,21 +177,13 @@ pre.sh .p{color:var(--hot)}
 
 /* reduced motion: every entrance becomes a short cross-fade, nothing travels, nothing loops */
 @media (prefers-reduced-motion: reduce){
-  .run .out a{animation:none}
-  .run .out,.prop.new,.pdetail,.toast,.hold,.sdkpane,.big .l,.bdot{animation:fade .2s ease both}
-  .prop.new{animation:fade .2s ease both,glow 1.4s ease .3s backwards}
-  .run .ln{transition:opacity .2s ease}
-  .run .ln.wait{transform:none}
-  .run .ln.done .g,.hold .bar,.dice.roll,.drop.hot .arrow,.big,.hero.launch .big,.hero.launch .bdot,.jack .dots::after,
+  .toast,.sdkpane,.big .l,.bdot{animation:fade .2s ease both}
+  .big,.hero.launch .big,.hero.launch .bdot,.jack .dots::after,
   .gridfloor,.copter.fly,.copter .body{animation:none}
   .copter{transform:translateX(64vw)}
   .toast.bye{transform:translate(-50%,0)}
-  .drop{transition:background-color .15s,border-color .15s}
-  .chev svg{transition:none}
-  .tiny:active,.dice:active,.drop:active,.chev:active{transform:none}
+  .tiny:active{transform:none}
 }
-/* the public apex of a deployment whose claiming lives on a private host: the directory reads, nothing claims */
-html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar{display:none}
 
 /* the builder: "build me a website for …", for somebody who has never heard of
    a release, on a phone, held at arm's length — one thing to press per screen,
@@ -330,19 +193,14 @@ html[data-readonly] .deck,html[data-readonly] #mine,html[data-readonly] #nukebar
 
    Which door it is on decides whether it exists. The server stamps
    `data-identity` on the tailnet host, so on the apex and the control host
-   none of this is rendered at all — the same way `data-readonly` already takes
-   the claim deck off a public apex that cannot claim. */
+   none of this is rendered at all. */
 /* builder:start */
 #builder{display:none;margin-top:-28px}
 html[data-identity] #builder{display:block}
 /* And the other way round: what the tailnet door does not have. Ownership
-   there is a login, so the properties kept in this browser would be a second
-   list that can only contradict "your websites" inside the builder; the rest —
-   a name field, a dice, a file drop, a terminal, SDK tabs, a directory of
+   there is a login, and the rest — a terminal, SDK tabs, a directory of
    everybody's sites — is for people who deploy things, which is the one
    audience this door does not have. */
-html[data-identity] .deck,
-html[data-identity] #mine,
 html[data-identity] #every,
 html[data-identity] #cli,
 html[data-identity] #sdkbox,
@@ -473,7 +331,7 @@ html[data-identity] .foot{display:none}
         </div>
       </section>
 
-      <!-- what it wrote, before anything is claimed -->
+      <!-- what it wrote, before it is put online -->
       <section id="b-proposal" hidden>
         <h2>Here it is</h2>
         <p class="lede">Have a look. If it is right, put it online.</p>
@@ -532,25 +390,6 @@ html[data-identity] .foot{display:none}
   </section>
   <!-- builder:end -->
 
-  <div class="deck">
-    <div class="deckhead"><span class="n">1</span> Select a name <span class="sp"></span></div>
-    <div class="namefield">
-      <input id="name" autocomplete="off" spellcheck="false" placeholder="notes" aria-label="Site name" maxlength="40">
-      <span class="zone" id="zone"></span>
-      <span class="verdict idle" id="verdict" aria-live="polite">Enter a name</span>
-      <button type="button" class="dice" id="dice" title="Select a random name" aria-label="Select a random name">&#127922;</button>
-    </div>
-
-    <div class="deckhead" style="border-top:1px solid var(--line-soft)"><span class="n">2</span> Upload the files</div>
-    <div id="stage2"></div>
-  </div>
-
-  <section class="sec" id="mine">
-    <div class="sechead">Your properties <span class="sp"></span><span id="count"></span></div>
-    <div class="props" id="props"></div>
-    <p class="hint" id="keep">Your sites are kept in this browser. Keep the token safe: there is no account and no password reset.</p>
-  </section>
-
   <section class="sec" id="every">
     <div class="sechead">Every site <span class="sp"></span><span id="dircount"></span></div>
     <input class="filter" id="filter" autocomplete="off" spellcheck="false" placeholder="Filter the names" aria-label="Filter the names" hidden>
@@ -558,10 +397,12 @@ html[data-identity] .foot{display:none}
   </section>
 
   <section class="sec" id="cli">
-    <div class="sechead">Or use the command line <span class="sp"></span></div>
+    <div class="sechead">Publish from the command line <span class="sp"></span></div>
     <div class="term">
       <div class="termbar"><i></i><i></i><i></i><span>~/notes</span></div>
-      <pre class="sh"><span class="p">$</span> <b>bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>
+      <pre class="sh"><span class="p">$</span> <b id="cliinstall">bun add -g https://kthx.dev/cli/kthx.tgz</b>  <i># the only install; there is no npm package</i>
+
+<span class="p">$</span> <b>gcloud auth application-default login</b>  <i># your own Google credentials; there are no site tokens</i>
 
 <span class="p">$</span> <b>kthx init</b>
 <i>  quiet-lynx-73 — kthx.json, SKILL.md and index.html written; run kthx deploy</i>
@@ -572,16 +413,10 @@ html[data-identity] .foot{display:none}
 
 <span class="p">$</span> <b>kthx deploy</b>
 <i>  no name set — uses</i> <u>plum-otter-41</u>
-<i>  6 files &middot; 214 KB &middot; sha256:8c1f…d902</i>
-<i>  →</i> <u id="cli1"></u>  <i>(3.1s) — v1</i>
-
-<span class="p">$</span> <b>kthx deploy</b>
-<i>  6 files &middot; 214 KB &middot; sha256:2a77…f0c4</i>
-<i>  →</i> <u id="cli2"></u>  <i>(1.4s) — v2</i>
-
-<span class="p">$</span> <b>kthx rollback</b>
-<i>  v2 → v1 · held: new uploads do not replace v1 until you run</i> <b>kthx release</b></pre>
+<i>  6 files &middot; 214 KB</i>
+<i>  →</i> <u id="cli1"></u>  <i>(3.1s)</i></pre>
     </div>
+    <p class="hint">Sites are published from a terminal with the CLI. Install it, sign in to Google, then run <code>kthx init</code> and <code>kthx deploy</code> in the folder to publish.</p>
   </section>
 
   <section class="sec" id="sdkbox">
@@ -654,7 +489,7 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
   <div class="foot">
     <span>Each site is one name in <code id="footzone"></code>.</span>
     <span class="sp"></span>
-    <span>Every site keeps its releases; <code>kthx rollback</code> serves an earlier one.</span>
+    <span>Each site is a folder in a storage bucket.</span>
   </div>
 
   <!-- the operator's own, and the last thing on the page: hidden unless the
@@ -672,95 +507,58 @@ kthx.site.name           <i>// this site's name, right even under kthx dev</i></
 const ZONE = document.documentElement.dataset.zone || location.hostname;
 const API = "/api/sites";
 const $ = (s, r = document) => r.querySelector(s);
-const KB = n => n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
 const ago = t => { const s = (Date.now() - t) / 1000;
   return s < 60 ? "just now" : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
-const RESERVED = ["www", "api", "app", "admin", "mail", "ftp", "sdk", "static", "assets", "cdn", "fn", "dev", "test", "staging", "kthx", "lolwtf", "spindrift", "root", "internal", "_"];
 const root = document.documentElement;
-/* The tailnet door. It adds the builder below and takes away everything this
-   page has that answers to a token rather than to a login. */
+/* The tailnet door. It adds the builder below and takes away what is for people
+   who deploy from a terminal. */
 const IDENTITY = root.hasAttribute("data-identity");
 const REDUCE = matchMedia("(prefers-reduced-motion: reduce)");
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const SPRING = getComputedStyle(root).getPropertyValue("--spring").trim();
-for (const el of document.querySelectorAll("#zone, #footzone")) el.textContent = (el.id === "zone" ? "." : "") + ZONE;
-$("#cli1").textContent = $("#cli2").textContent = `https://plum-otter-41.${ZONE}`;
+$("#footzone").textContent = ZONE;
+$("#cliinstall").textContent = `bun add -g https://${ZONE}/cli/kthx.tgz`;
+$("#cli1").textContent = `https://plum-otter-41.${ZONE}`;
 /* the console is private, so the server names it only on an installation that has one */
 if (root.dataset.console) { const link = $("#console"); link.href = root.dataset.console; link.hidden = false; }
 
-/* the tokens are the sites: whoever holds one owns the name */
-const STORE = "kthx.sites";
-/* no prototype: `tokens["constructor"]` must be a site of this browser or nothing */
-const tokens = Object.create(null);
-try { Object.assign(tokens, JSON.parse(localStorage.getItem(STORE) || "{}")); } catch {}
-function store() { try { localStorage.setItem(STORE, JSON.stringify(tokens)); } catch {} }
-function forget(name) { delete tokens[name]; store(); sites = sites.filter(s => s.name !== name); }
-let sites = [];   /* [{ name, url, serving, held, releases: [{ n, digest, size, at }] }] newest first */
-let open = null;
-
-async function api(method, path, { json, body, name, token, filename } = {}) {
+async function api(method, path, { json, body } = {}) {
   const headers = {};
-  /* `token` is the one being tried: a site is linked before it is stored */
-  if (name) headers.authorization = `Bearer ${token || tokens[name]}`;
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
-  if (filename) headers["x-filename"] = filename;
   const r = await fetch(path, { method, headers, body });
   if (r.status === 204) return null;
   const data = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(data.message || r.statusText); e.code = data.code; e.status = r.status; throw e; }
   return data;
 }
-async function refresh(name) {
-  try {
-    const s = await api("GET", `${API}/${name}`, { name });
-    s.releases.forEach(r => { r.at = Date.parse(r.at); });
-    sites = [s, ...sites.filter(x => x.name !== name)];
-  } catch (e) {
-    /* the public apex of a deployment that claims elsewhere: the token is not dead, it is just not askable here */
-    if (e.code === "PRIVATE") return;
-    if (e.status === 401 || e.status === 403 || e.status === 404) forget(name);
-    else throw e;
-  }
-}
-async function loadAll() {
-  /* read only here: the owner routes answer elsewhere, and asking would only be told so */
-  const readonly = document.documentElement.hasAttribute("data-readonly");
-  if (!readonly) await Promise.all(Object.keys(tokens).map(n => refresh(n).catch(() => {})));
-  sites.sort((a, b) => (b.releases[0]?.at ?? 0) - (a.releases[0]?.at ?? 0));
-  renderProps();
-  $("#jackText").textContent = IDENTITY ? "connected" : readonly ? "connected · read only here" : `connected · ${sites.length} site${sites.length === 1 ? "" : "s"}`;
-  $("#jack").classList.add("on");
-}
 
-/* the directory: every live site in the zone, newest claim first. Names are
+/* the directory: every site in the zone, newest deploy first. Names are
    public — each one answers on its own host to anyone — so the list carries
-   nothing a walk of the zone would not give. Sites of this browser are shown
-   above instead, with their releases. */
+   nothing a walk of the zone would not give. */
 let listed = null;   /* null until the directory answers: nothing is asserted before it does */
 let more = null;
+const count = n => `${n}${more ? "+" : ""} site${n === 1 && !more ? "" : "s"}`;
 async function loadDir(after) {
   const page = await api("GET", after ? `${API}?after=${encodeURIComponent(after)}` : API);
   listed = after && listed ? [...listed, ...page.items] : page.items;
   more = page.next;
   renderDir();
+  $("#jackText").textContent = `connected · ${count(listed.length)}`;
+  $("#jack").classList.add("on");
 }
 function renderDir() {
   if (listed === null) return;
   const q = $("#filter").value.trim().toLowerCase();
-  /* the sites of this browser are rendered above, with their releases */
-  const others = listed.filter(s => !Object.hasOwn(tokens, s.name));
-  const rows = others.filter(s => s.name.includes(q));
-  $("#filter").hidden = others.length === 0;
-  $("#dircount").textContent = others.length === 0 ? ""
-    : q ? `${rows.length} of ${others.length}` : `${others.length} site${others.length === 1 ? "" : "s"}`;
+  const rows = listed.filter(s => s.name.includes(q));
+  $("#filter").hidden = listed.length === 0;
+  $("#dircount").textContent = listed.length === 0 ? "" : q ? `${rows.length} of ${listed.length}` : count(listed.length);
   $("#dir").innerHTML = (rows.length ? rows.map(s => `<div class="pub">
-      <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${esc(s.name)}</span><span class="zn">.${ZONE}</span></a>
+      <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${esc(s.name)}</span><span class="zn">.${esc(ZONE)}</span></a>
       <span class="pmeta">
-        <span class="hide">${s.serving === null ? "claimed, nothing yet" : `v${s.serving} · ${s.releases} release${s.releases === 1 ? "" : "s"}`}</span>
-        <span>${ago(Date.parse(s.at))}</span>
-        <span class="dot${s.serving === null ? " off" : ""}" title="${s.serving === null ? "nothing served yet" : "live"}"></span>
+        ${s.owner ? `<span class="hide">yours</span>` : ""}
+        <span>${s.deployed ? ago(Date.parse(s.deployed)) : "not deployed"}</span>
+        <span class="dot${s.deployed ? "" : " off"}" title="${s.deployed ? "live" : "nothing deployed yet"}"></span>
       </span>
-    </div>`).join("") : `<div class="hint">${q ? "No name matches." : "No other site yet."}</div>`)
+    </div>`).join("") : `<div class="hint">${q ? "No name matches." : "No site yet."}</div>`)
     + (more && !q ? `<div class="more"><button class="tiny" id="dirmore">Show more sites</button></div>` : "");
 }
 $("#filter").addEventListener("input", renderDir);
@@ -787,341 +585,9 @@ function deployed() {
   flyover();
 }
 
-/* name */
-const LABEL = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
-const ADJ = ["plum", "brisk", "quiet", "amber", "loose", "tiny", "wired", "damp", "clever", "spare"];
-const ANI = ["otter", "heron", "marten", "raven", "shrew", "lynx", "grebe", "wombat", "tapir", "civet"];
-const ALPHA = "abcdefghijklmnopqrstuvwxyz";
-const pick = a => a[Math.floor(Math.random() * a.length)];
-function mint() { return `${pick(ADJ)}-${pick(ANI)}-${10 + Math.floor(Math.random() * 89)}`; }
-function check(n) {
-  if (!n) return { ok: false, why: "Enter a name", cls: "idle" };
-  if (n.length < 3) return { ok: false, why: "Too short", cls: "taken" };
-  if (n.length > 40) return { ok: false, why: "Too long", cls: "taken" };
-  if (!LABEL.test(n)) return { ok: false, why: "Use a-z, 0-9, -", cls: "taken" };
-  if (RESERVED.includes(n)) return { ok: false, why: "Reserved", cls: "taken" };
-  if (Object.hasOwn(tokens, n)) return { ok: true, why: "Yours · will update", cls: "free" };
-  return { ok: true, why: "Available", cls: "free" };
-}
-const nameInput = $("#name");
-function say(cls, why) { const el = $("#verdict"); el.className = `verdict ${cls}`; el.textContent = why; }
-/* the server knows whether a name is taken; asked a beat after typing stops */
-let probeTimer;
-function probe(n) {
-  clearTimeout(probeTimer);
-  probeTimer = setTimeout(async () => {
-    try {
-      const r = await fetch(`${API}/${n}`);
-      if (nameInput.value.trim().toLowerCase() !== n) return;
-      if (r.status === 401) say("taken", "Taken");
-    } catch {}
-  }, 250);
-}
-function verdict() {
-  const n = nameInput.value.trim().toLowerCase();
-  const v = check(n);
-  say(v.cls, v.why);
-  if (v.ok && !Object.hasOwn(tokens, n)) probe(n);
-  return v;
-}
-nameInput.addEventListener("input", () => { abort(); nameInput.value = nameInput.value.toLowerCase().replace(/[^a-z0-9-]/g, ""); verdict(); });
-
-/* the selected name tumbles in: settled letters on the left, two still rolling on the right */
-let minted = null;
-let tumbleId = 0;
-function abort() { cancelAnimationFrame(tumbleId); minted = null; }
-function settle() {
-  if (!minted) return;
-  const n = minted; abort(); nameInput.value = n; verdict();
-}
-function tumble(n) {
-  settle(); minted = n;
-  if (REDUCE.matches) return settle();
-  say("idle", "Selecting");
-  const t0 = performance.now();
-  const tick = t => {
-    const k = Math.floor((t - t0) / 22);
-    if (k >= n.length) return settle();
-    nameInput.value = n.slice(0, k) + pick(ALPHA) + (k + 1 < n.length ? pick(ALPHA) : "");
-    tumbleId = requestAnimationFrame(tick);
-  };
-  tumbleId = requestAnimationFrame(tick);
-}
-$("#dice").onclick = e => {
-  const d = e.currentTarget;
-  d.classList.remove("roll"); void d.offsetWidth; d.classList.add("roll");
-  tumble(mint()); nameInput.focus();
-};
-$("#dice").addEventListener("animationend", e => e.currentTarget.classList.remove("roll"));
-
-/* zip, read with the platform's own views — enough to count the files and find index.html */
-async function readZip(buf) {
-  const dv = new DataView(buf);
-  const u8 = new Uint8Array(buf);
-  const dec = new TextDecoder();
-  let eocd = -1;
-  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65558); i--)
-    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
-  if (eocd < 0) throw new Error("This file is not a zip file.");
-  const n = dv.getUint16(eocd + 10, true);
-  let p = dv.getUint32(eocd + 16, true);
-  const out = [];
-  for (let i = 0; i < n && dv.getUint32(p, true) === 0x02014b50; i++) {
-    const usize = dv.getUint32(p + 24, true);
-    const nlen = dv.getUint16(p + 28, true);
-    const elen = dv.getUint16(p + 30, true);
-    const clen = dv.getUint16(p + 32, true);
-    const name = dec.decode(u8.subarray(p + 46, p + 46 + nlen));
-    p += 46 + nlen + elen + clen;
-    if (name.endsWith("/") || name.startsWith("__MACOSX/") || name.includes("/.")) continue;
-    out.push([name, usize]);
-  }
-  if (!out.length) throw new Error("This zip file has no files to serve.");
-  return out;
-}
-function unwrap(files) {
-  const tops = new Set(files.map(f => f[0].split("/")[0]));
-  if (tops.size !== 1 || !files.every(f => f[0].includes("/"))) return files;
-  const cut = [...tops][0].length + 1;
-  return files.map(f => [f[0].slice(cut), f[1]]);
-}
-/* a stored zip of one file, so a bare index.html travels the same road as a folder */
-let crcTable;
-function crc32(bytes) {
-  if (!crcTable) { crcTable = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crcTable[i] = c >>> 0; } }
-  let crc = 0xffffffff;
-  for (const b of bytes) crc = crcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
-  return (crc ^ 0xffffffff) >>> 0;
-}
-function zipOne(name, bytes) {
-  const enc = new TextEncoder().encode(name);
-  const crc = crc32(bytes);
-  const local = new Uint8Array(30 + enc.length + bytes.length);
-  const lv = new DataView(local.buffer);
-  lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint32(14, crc, true);
-  lv.setUint32(18, bytes.length, true); lv.setUint32(22, bytes.length, true); lv.setUint16(26, enc.length, true);
-  local.set(enc, 30); local.set(bytes, 30 + enc.length);
-  const central = new Uint8Array(46 + enc.length);
-  const cv = new DataView(central.buffer);
-  cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true); cv.setUint32(16, crc, true);
-  cv.setUint32(20, bytes.length, true); cv.setUint32(24, bytes.length, true); cv.setUint16(28, enc.length, true);
-  central.set(enc, 46);
-  const end = new Uint8Array(22);
-  const ev = new DataView(end.buffer);
-  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, 1, true); ev.setUint16(10, 1, true);
-  ev.setUint32(12, central.length, true); ev.setUint32(16, local.length, true);
-  return new Blob([local, central, end], { type: "application/zip" });
-}
-
-/* upload */
-/* the zone leans a few px toward the dragged file; transform only, eased between dragover events */
-function lean(e) {
-  const d = $("#drop"); if (!d) return;
-  d.classList.add("hot");
-  if (REDUCE.matches) return;
-  const r = d.getBoundingClientRect();
-  const dx = ((e.clientX - r.left) / r.width - .5) * 8;
-  const dy = ((e.clientY - r.top) / r.height - .5) * 6;
-  d.style.transform = `translate(${dx.toFixed(1)}px,${dy.toFixed(1)}px) scale(1.01)`;
-}
-function unlean() { const d = $("#drop"); if (!d) return; d.classList.remove("hot"); d.style.transform = ""; }
-/* The whole window takes a drop, because a person aiming at a zone that small
-   misses it. Not on the tailnet door: the deck is not on the screen there, and
-   a file dropped on a page with no drop zone on it would claim a name and
-   deploy into a receipt nobody can see. */
-if (!IDENTITY) {
-  for (const ev of ["dragenter", "dragover"]) addEventListener(ev, e => { e.preventDefault(); lean(e); });
-  addEventListener("dragleave", e => { if (!e.relatedTarget) unlean(); });
-  addEventListener("drop", e => {
-    e.preventDefault(); unlean();
-    const f = e.dataTransfer?.files?.[0];
-    if (f) { if (!$("#drop")) resetStage(); take(f); }
-  });
-}
-document.addEventListener("change", e => { if (e.target.id === "file" && e.target.files[0]) take(e.target.files[0]); });
-
-let busy = false;
-async function take(file) {
-  settle();
-  if (busy) return;
-  try {
-    let body;
-    let what;
-    let filename = file.name;
-    if (/\.zip$/i.test(file.name)) {
-      const files = unwrap(await readZip(await file.arrayBuffer()));
-      if (!files.some(f => /^index\.html?$/i.test(f[0]))) throw new Error("This zip file has no index.html. kthx needs one.");
-      // The server refuses on the unpacked size, and text compresses hard
-      // enough that a zip well under 25 MB can pass that check and still be
-      // refused after the whole upload. This is the same total the label
-      // below shows, so the refusal costs the upload rather than following it.
-      const unpacked = files.reduce((s, f) => s + f[1], 0);
-      if (unpacked > 32 * 1048576) throw new Error(`Those files are ${KB(unpacked)} unpacked. kthx takes 32 MB at most once unpacked.`);
-      body = file; what = `${files.length} file${files.length === 1 ? "" : "s"} · ${KB(unpacked)}`;
-    } else if (/\.(tar\.gz|tgz)$/i.test(file.name)) {
-      body = file; what = KB(file.size);
-    } else if (/\.html?$/i.test(file.name)) {
-      body = zipOne("index.html", new Uint8Array(await file.arrayBuffer())); filename = "index.zip"; what = `1 file · ${KB(file.size)}`;
-    } else throw new Error("kthx serves static files only. Drop a .zip, a .tar.gz, or an index.html file.");
-    if (file.size > 25 * 1048576) throw new Error("That is more than 25 MB. kthx takes 25 MB at most.");
-
-    let name = nameInput.value.trim().toLowerCase();
-    if (!check(name).ok) {
-      const fromFile = file.name.replace(/\.(zip|tar\.gz|tgz|html?)$/i, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-|-$/g, "");
-      name = fromFile && check(fromFile).ok ? fromFile : mint();
-      nameInput.value = name; verdict();
-    }
-    await deploy(name, body, filename, what);
-  } catch (err) { toast(err.message || String(err)); }
-  finally { const p = $("#file"); if (p) p.value = ""; }
-}
-
-/* the receipt: one line per step, printed as the step starts, the URL lands last */
-async function deploy(name, body, filename, what) {
-  const box = $("#stage2");
-  const mine = !!tokens[name];
-  let result = null;
-  const steps = [
-    { text: mine ? `<b>${name}.${ZONE}</b> · yours` : `Claim <b>${name}.${ZONE}</b>`,
-      run: async () => { if (mine) return; const r = await api("POST", API, { json: { name } }); tokens[name] = r.token; store(); } },
-    { text: `Upload <b>${what}</b>`, run: async () => { result = await api("POST", `${API}/${name}/releases`, { body, name, filename }); } },
-    { text: "Publish", run: () => refresh(name) },
-  ];
-  box.innerHTML = `<div class="run">${steps.map(s => `
-      <div class="ln wait"><span class="g">&#8226;</span><span>${s.text}</span><span class="t"></span></div>`).join("")}</div>`;
-  const lns = box.querySelectorAll(".ln");
-  void box.offsetHeight;
-  busy = true;
-  try {
-    for (let i = 0; i < steps.length; i++) {
-      lns[i].className = "ln now";
-      const t0 = performance.now();
-      try { await steps[i].run(); }
-      catch (err) {
-        lns[i].className = "ln bad"; $(".g", lns[i]).innerHTML = "&#10007;"; $(".t", lns[i]).textContent = err.code || "failed";
-        if (err.code === "TAKEN") say("taken", "Taken");
-        $(".run", box).insertAdjacentHTML("beforeend", `<div class="out"><b>${esc(err.message)}</b><span class="sp"></span><button class="tiny" id="again">Try again</button></div>`);
-        toast(err.message); return;
-      }
-      lns[i].className = "ln done"; $(".g", lns[i]).innerHTML = "&#10003;"; $(".t", lns[i]).textContent = `${((performance.now() - t0) / 1000).toFixed(1)}s`;
-    }
-  } finally { busy = false; }
-  const site = sites.find(s => s.name === name);
-  $(".run", box).insertAdjacentHTML("beforeend", `<div class="out">
-      <a href="${esc(result.url)}" target="_blank" rel="noopener">${name}.${ZONE}</a>
-      <button class="tiny" data-copy="${esc(result.url)}">Copy the URL</button>
-      <span class="sp"></span><button class="tiny" id="again">Deploy another site</button></div>`);
-  nameInput.value = ""; verdict(); open = name; renderProps(name); renderDir();
-  deployed();
-  if (site?.held && result.serving !== result.n) toast(`v${result.n} is stored. ${name} is held at v${result.serving}.`);
-  else toast(`${result.url} is live.`);
-}
-function resetStage() {
-  $("#stage2").innerHTML = `<button class="drop" id="drop">
-      <span class="arrow" aria-hidden="true">&darr;</span>
-      <h2>Drop a zip file or an index.html file</h2>
-      <p>Static files only. <code>.zip</code>, <code>.tar.gz</code>, or <code>.html</code>. Maximum 25 MB, or 32 MB unpacked.</p>
-      <input type="file" id="file" accept=".html,.htm,.zip,.tgz,.gz" hidden></button>`;
-}
-
-/* properties */
-const CHEV = `<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M2.5 4.5 6 8l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
-function current(s) { return s.releases.find(r => r.n === s.serving) || null; }
-function renderProps(fresh) {
-  $("#count").textContent = `${sites.length} site${sites.length === 1 ? "" : "s"}`;
-  $("#keep").hidden = sites.length === 0;
-  $("#props").innerHTML = sites.length ? sites.map(s => {
-    const cur = current(s);
-    const isOpen = open === s.name;
-    return `<div class="prop${isOpen ? " open" : ""}${s.name === fresh ? " new" : ""}" data-n="${s.name}">
-      <a class="addr" href="${esc(s.url)}" target="_blank" rel="noopener"><span class="lb">${s.name}</span><span class="zn">.${ZONE}</span></a>
-      <span class="pmeta">
-        <span class="hide">${cur ? `v${cur.n}${s.held ? " · held" : ""}` : "no release"}</span>
-        <span class="hide">${cur ? KB(cur.size) : ""}</span>
-        <span>${cur ? ago(cur.at) : ""}</span>
-        <span class="dot${cur ? "" : " off"}" title="${cur ? "live" : "nothing served yet"}"></span>
-      </span>
-      <button class="chev" aria-expanded="${isOpen}" aria-label="${isOpen ? "Hide" : "Show"} the details for ${s.name}.${ZONE}">${CHEV}</button>
-    </div>${isOpen ? detail(s) : ""}`;
-  }).join("") : `<div class="hint">You have no sites. Select a name and drop a file.</div>`;
-  placePin();
-}
-
-/* the live pin sits beside the current release; on a rollback it slides there from where it was */
-function pinY() { const cur = $(".rels .v.cur"); return cur ? cur.closest(".rel").offsetTop + cur.closest(".rel").offsetHeight / 2 - 3 : null; }
-function placePin(fromY) {
-  const pin = $(".rels .pin");
-  const y = pinY();
-  if (!pin || y === null) return;
-  pin.style.transform = `translateY(${y}px)`;
-  if (fromY != null && fromY !== y && !REDUCE.matches)
-    pin.animate([{ transform: `translateY(${fromY}px)` }, { transform: `translateY(${y}px)` }], { duration: 500, easing: SPRING });
-}
-
-function detail(s) {
-  const rels = s.releases.length ? s.releases.map(r => `<div class="rel">
-      <span class="v ${r.n === s.serving ? "cur" : ""}">v${r.n}</span>
-      <span class="w">${KB(r.size)} · ${ago(r.at)} · ${r.digest.slice(7, 19)}</span>
-      <span class="a">${r.n === s.serving ? `<span class="now">live</span>` : `<button class="tiny" data-roll="${s.name}:${r.n}">${r.n > s.serving ? "Roll forward" : "Roll back"}</button>`}</span>
-    </div>`).join("") : `<div class="rel"><span class="v"></span><span class="w">No release yet. Drop a file with this name selected.</span><span></span></div>`;
-  const hold = s.held ? `<div class="hold"><span class="bar" aria-hidden="true">&#9646;</span> Held at v${s.serving}. New uploads do not go live until you <button data-release="${s.name}">release the hold</button>.</div>` : "";
-  return `<div class="pdetail">
-    ${hold}
-    <div class="block"><h3>Releases</h3><div class="rels"><i class="pin" aria-hidden="true"></i>${rels}</div></div>
-    <div class="acts">
-      <a class="tiny go" href="${esc(s.url)}" target="_blank" rel="noopener">Open the site &#8599;</a>
-      <button class="tiny" data-copy="${esc(s.url)}">Copy the URL</button>
-      <button class="tiny" data-replace="${s.name}">New release</button>
-      <button class="tiny danger" data-del="${s.name}">Delete</button>
-    </div>
-  </div>`;
-}
-
 /* wiring */
-document.addEventListener("click", async e => {
+document.addEventListener("click", e => {
   const t = e.target;
-  if (t.closest(".drop")) { $("#file")?.click(); return; }
-
-  if (t.closest(".prop .addr")) return;
-  const p = t.closest(".prop");
-  if (p) { open = open === p.dataset.n ? null : p.dataset.n; renderProps(); if (open) $(`.prop[data-n="${open}"] .chev`)?.focus(); return; }
-
-  const c = t.closest("[data-copy]");
-  if (c) { navigator.clipboard?.writeText(c.dataset.copy); toast(`Copied ${c.dataset.copy}`); return; }
-
-  try {
-    const roll = t.closest("[data-roll]");
-    if (roll) {
-      const [n, v] = roll.dataset.roll.split(":");
-      const s = sites.find(x => x.name === n);
-      const from = s.serving;
-      const fromY = pinY();
-      await api("POST", `${API}/${n}/serve`, { json: { n: +v }, name: n });
-      await refresh(n); renderProps(); placePin(fromY);
-      toast(`${n}: v${from} → v${v} · held`);
-      return;
-    }
-    const rel = t.closest("[data-release]");
-    if (rel) {
-      const n = rel.dataset.release;
-      const fromY = pinY();
-      const r = await api("DELETE", `${API}/${n}/hold`, { name: n });
-      await refresh(n); renderProps(); placePin(fromY); toast(`Hold released. v${r.serving} is live.`);
-      return;
-    }
-    const d = t.closest("[data-del]");
-    if (d) {
-      const n = d.dataset.del;
-      if (!confirm(`${n}.${ZONE} will stop serving and the name stays taken. Delete it?`)) return;
-      await api("DELETE", `${API}/${n}`, { name: n });
-      forget(n); open = null; renderProps(); renderDir(); toast(`${n}.${ZONE} is deleted.`);
-      loadDir().catch(() => {});
-      return;
-    }
-  } catch (err) { toast(err.message || String(err)); return; }
-
-  const r = t.closest("[data-replace]");
-  if (r) { nameInput.value = r.dataset.replace; verdict(); resetStage(); $("#drop").scrollIntoView({ block: "center", behavior: REDUCE.matches ? "auto" : "smooth" }); toast("Drop the new files."); return; }
 
   const tab = t.closest(".sdktabs button");
   if (tab) {
@@ -1130,9 +596,7 @@ document.addEventListener("click", async e => {
     return;
   }
 
-  if (t.id === "dirmore") { loadDir(more).catch(err => toast(err.message || String(err))); return; }
-
-  if (t.id === "again") { resetStage(); nameInput.focus(); }
+  if (t.id === "dirmore") loadDir(more).catch(err => toast(err.message || String(err)));
 });
 
 let toastEl;
@@ -1156,9 +620,6 @@ $("#nuke").addEventListener("click", async () => {
   if (prompt("Every site on the zone is deleted and every name comes free. Type NUKE:")?.trim() !== "NUKE") { toast("Nothing deleted."); return; }
   try {
     const counts = await api("DELETE", API);
-    /* the tokens are now tokens for nothing */
-    for (const name of Object.keys(tokens)) delete tokens[name];
-    store(); sites = []; open = null; renderProps();
     /* re-read rather than assert: a site that refused to drop is still live */
     listed = []; more = null; renderDir(); loadDir().catch(() => {});
     toast(`${counts.deleted} site${counts.deleted === 1 ? "" : "s"} deleted${counts.failed ? `, ${counts.failed} failed` : ""}.`);
@@ -1167,20 +628,18 @@ $("#nuke").addEventListener("click", async () => {
   }
 });
 
-resetStage(); renderProps(); renderDir(); verdict();
-loadAll().catch(() => { $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });
-if (!IDENTITY) loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; });
-document.fonts?.ready.then(() => placePin());
+if (IDENTITY) { $("#jackText").textContent = "connected"; $("#jack").classList.add("on"); }
+else loadDir().catch(() => { $("#dir").innerHTML = `<div class="hint">The list of sites is not available.</div>`; $("#jackText").textContent = "offline"; $("#jack").classList.add("on"); });
 
 /* ==== the builder ==========================================================
  * "Build me a website for …", the tailnet door's one component.
  *
  * All of it is inside this block, and the block runs on that door alone. Every
  * name in here is private to it — `api`, `ago` and `busy` deliberately shadow
- * the page's own, because this surface answers to a login rather than to a
- * token in this browser and translates a dropped connection into a sentence
- * rather than a toast. `$`, `ZONE`, `REDUCE` and `zipOne` are the page's own,
- * shared because they are the same thing and this is one file.
+ * the page's own, because this surface answers to a login and translates a
+ * dropped connection into a sentence rather than a toast. `$`, `ZONE`, `REDUCE`
+ * and `deployed` are the page's own, shared because they are the same thing
+ * and this is one file.
  */
 /* builder:start */
 if (IDENTITY) (() => {
@@ -1196,22 +655,17 @@ const DRAFT = "kthx.build";
 const TYPED = "kthx.typed";
 /* And the address he settled on, which the row on the server does not know: it
    was written with the name the model proposed, at generation time, and
-   "Change the name" happens in this tab alone. A tab discarded after the claim
-   that follows comes back through `recover()`, and a name read back off the row
-   would be a different address — free, so the claim there would take a SECOND
-   name and leave the first one paid for and stranded. */
+   "Change the name" happens in this tab alone. A tab discarded after that
+   comes back through `recover()` to the address he picked, not the proposal. */
 const CHOSEN = "kthx.name";
 
 /* ---- state: exactly one page in hand at a time ---------------------------- */
 /* {build, name, site, changing, taken, yours, document}: the draft id, the
-   address it would live at, the site it already belongs to (null until
-   something is claimed), whether it is a change to a site that is already
-   online, whether that name turned out to be spoken for, and — when it is
-   spoken for by *him* — whether it is an empty claim or a website. */
+   address it would live at, the site it is a change to (null for a new page),
+   whether it is a change to a site that is already online, whether that name
+   turned out to be spoken for by somebody else, and — when it is his — that
+   it is a website of his own, which publishing replaces. */
 let held = null;
-/* An address of his with nothing on it, chosen from the list: the next page
-   made goes on that one rather than on the name the model proposes. */
-let pinned = null;
 
 let painted = false;
 function show(id) {
@@ -1263,7 +717,7 @@ const SAYS = {
   MALFORMED_REQUEST: "That is more than this page can send at once. Try saying it in fewer words.",
   /* the name */
   TAKEN: "That name is taken. Pick another one.",
-  YOURS: "You already have a website at that address. Give this page a name of its own — the one you have stays exactly as it is.",
+  YOURS: "You already have a website at that address, and putting this page online replaces it. To keep both, give this page a name of its own.",
   INVALID_NAME: "That name will not work. Three letters or more, using letters, numbers and hyphens, and not starting or ending with a hyphen.",
   RESERVED: "That name is kept for the system. Pick another one.",
   /* the door */
@@ -1274,16 +728,15 @@ const SAYS = {
   /* the server */
   BUSY: "The server is busy. Try again in a moment.",
   STORAGE_FAILURE: "Something went wrong saving it. Nothing was lost — try again.",
+  PRECONDITION_FAILED: "That website was being changed at the same moment. Nothing was lost — try again.",
   /* what this page says about itself, in the same voice as the rest */
   UNCHANGED: "It came back exactly the same, so nothing was put online. Try saying it a different way.",
   PICKED_UP: "This is the page you were making when the tab closed. It is still here.",
-  CLAIMED: "The address is yours already. The page is not on it yet — press Put it online.",
   TYPED_BACK: "This is what you were asking for when the tab closed. Nothing was lost — it is ready to go again.",
-  PINNED: "Say what it should be about, and the page you make goes on that address.",
 };
-/* Not everything this box has to say is a refusal. These four are plainly good
+/* Not everything this box has to say is a refusal. These two are plainly good
    news, and they are why it has a second colour. */
-const GOOD = new Set(["PICKED_UP", "CLAIMED", "TYPED_BACK", "PINNED"]);
+const GOOD = new Set(["PICKED_UP", "TYPED_BACK"]);
 /* The same refusal, read on a screen that asked a different question. Told to
    "say more about what you do" while asking for a green heading, he writes his
    business into the change box and the next turn is worse for it. */
@@ -1324,10 +777,9 @@ function oops(where, err, lead, also) {
 async function reach(path, init) {
   try { return await fetch(path, init); } catch { throw fault("OFFLINE"); }
 }
-async function api(method, path, { json, body, filename } = {}) {
+async function api(method, path, { json, body } = {}) {
   const headers = {};
   if (json !== undefined) { headers["content-type"] = "application/json"; body = JSON.stringify(json); }
-  if (filename) headers["x-filename"] = filename;
   const r = await reach(path, { method, headers, body });
   if (r.status === 204) return null;
   const data = await r.json().catch(() => ({}));
@@ -1345,16 +797,7 @@ function ago(iso) {
   const months = Math.round(days / 30);
   return months < 12 ? `changed ${months} months ago` : "changed over a year ago";
 }
-/**
- * Every address of his, including the ones with no page on them.
- *
- * An address with nothing published is not nothing: it is a name taken for
- * good, a Postgres database and a role, and it is what a failed upload leaves
- * behind when the person presses "Start again" instead of trying once more.
- * Filtered out of this list, it was unreachable from every screen on this page
- * and nothing on the server reclaims it. So it is listed, and the one thing to
- * do with it — put a page on it — is the button.
- */
+/** Every site of his, with when it was last put online and what to do with it. */
 async function listMine() {
   let items = [];
   try { items = (await api("GET", "/api/sites?owner=me")).items || []; } catch { return; }
@@ -1362,7 +805,6 @@ async function listMine() {
   const list = $("#b-minelist");
   list.replaceChildren();
   for (const s of items) {
-    const empty = s.serving === null && (s.releases || 0) === 0;
     const card = document.createElement("div");
     card.className = "bsite";
     const host = document.createElement("span");
@@ -1370,50 +812,21 @@ async function listMine() {
     host.textContent = hostOf(s.name);
     const when = document.createElement("span");
     when.className = "bwhen";
-    when.textContent = empty ? "nothing on it yet" : ago(s.changed);
+    when.textContent = ago(s.deployed);
     const acts = document.createElement("span");
     acts.className = "bacts";
-    if (empty) {
-      const use = document.createElement("button");
-      use.className = "tiny";
-      use.textContent = "Put a page on it";
-      use.onclick = () => usePinned(s.name);
-      acts.append(use);
-    } else {
-      const open = document.createElement("a");
-      open.className = "tiny";
-      open.href = s.url; open.target = "_blank"; open.rel = "noopener";
-      open.textContent = "Open";
-      const edit = document.createElement("button");
-      edit.className = "tiny";
-      edit.textContent = "Change it";
-      edit.onclick = () => askChange(s.name);
-      acts.append(open, edit);
-    }
+    const open = document.createElement("a");
+    open.className = "tiny";
+    open.href = s.url; open.target = "_blank"; open.rel = "noopener";
+    open.textContent = "Open";
+    const edit = document.createElement("button");
+    edit.className = "tiny";
+    edit.textContent = "Change it";
+    edit.onclick = () => askChange(s.name);
+    acts.append(open, edit);
     card.append(host, when, acts);
     list.append(card);
   }
-}
-
-/**
- * An address he already owns, waiting for the next page he makes.
- *
- * It says where the next page goes and nothing else. It does not touch the
- * sentence in the box, its backup, or a draft this phone recovered — the
- * button sits at the top of the start screen, above the greeting, so the tap
- * that reaches it is most often the one *after* he has typed, and a button
- * that answers "where" by throwing away "what" is a button nobody can afford
- * to press.
- */
-function usePinned(name) {
-  pinned = name;
-  held = null;
-  const box = $("#b-ask");
-  // The sentence outlives the tap; a box that lost it to a reload gets it back.
-  if (box.value.trim() === "") box.value = typedBack()?.ask ?? "";
-  oops("#b-startoops", { code: "PINNED" }, `${hostOf(name)} is waiting for a page`);
-  show("b-start");
-  box.focus();
 }
 
 /* ---- the wait ------------------------------------------------------------- */
@@ -1543,59 +956,11 @@ async function build(ask, site) {
 }
 
 /* ---- publishing ----------------------------------------------------------- */
-/* The document goes up as a stored zip of one file, through `zipOne` above —
-   the deck's own — so it travels the ordinary release road and meets the same
-   25 MiB refusal, unpack slot, daily cap and same-site guard every CLI upload
-   does. */
-async function put(name, document_) {
-  const zip = zipOne("index.html", new TextEncoder().encode(document_));
-  const out = await api("POST", `/api/sites/${encodeURIComponent(name)}/releases`, { body: zip, filename: "index.zip" });
-  /* A site somebody rolled back is held: the release above is stored, numbered
-     and NOT serving, and every later one would be too. Publishing a change is
-     saying "this is the one", so the hold comes off with it. */
-  if (out.serving !== out.n) await api("DELETE", `/api/sites/${encodeURIComponent(name)}/hold`);
-  return out;
-}
-
-/**
- * The name, claimed once and only once.
- *
- * This is the one step on the road that cannot be repeated: a claim makes a
- * real Postgres database and a role, and a kthx name is taken for good — even
- * deleting a site keeps the row. So when the claim answers "taken" the question
- * is whose, and an address of his own with nothing on it is not somebody
- * else's: it is this same claim, already made, by a press or a whole tab that
- * did not live to see its answer. Told "that name is taken" about his own
- * website he would rename, and the first address would be spent for nothing.
- */
-async function claim(name) {
-  try {
-    await api("POST", "/api/sites", { json: { name } });
-  } catch (err) {
-    if (err.code !== "TAKEN" || !(await claimedEmpty(name))) throw err;
-  }
-}
-
-/**
- * Whether that address is his, with nothing published on it yet.
- *
- * Asked of the server rather than of this tab, because the tab that claimed may
- * be gone. A site of his that *has* releases is not a claim to resume — it is a
- * page he made before, and putting a new one over it is not what pressing the
- * button twice means. A refusal with a status settles it (somebody else's, or
- * nothing at all); a request that never arrived settles nothing and must not
- * read as "not yours", or one dropped packet sends him to rename an address he
- * already owns.
- */
-async function claimedEmpty(name) {
-  let site;
-  try {
-    site = await api("GET", `/api/sites/${encodeURIComponent(name)}`);
-  } catch (err) {
-    if (err.status) return false;
-    throw err;
-  }
-  return site.serving === null && (site.releases || []).length === 0;
+/* One call claims a free name for this login and writes the page, or replaces
+   the login's own site with it. The server decides whose a name is, so a
+   refusal of TAKEN here is final. */
+async function publishPage(name, document_) {
+  return api("POST", "/api/build/publish", { json: { name, document: document_ } });
 }
 
 /* ---- screens -------------------------------------------------------------- */
@@ -1607,24 +972,20 @@ function greet() {
 /**
  * A page, in hand, with whatever its address turned out to be.
  *
- * Three answers about the name arrive here and only one of them is a refusal.
- * A name nobody has is the ordinary road. A name of *his* with nothing on it is
- * the claim a failed upload stranded — the green button finishes it, and
- * calling it taken is what sent him off to spend a second address. A name of
- * his with a website already on it is the only one that needs another name, and
- * it is not somebody else's either.
+ * Three answers about the name arrive here. A name nobody has is the ordinary
+ * road. A name of *his* with a website on it is not a refusal: publishing
+ * replaces it, and the screen says so before he presses. Only a name that is
+ * somebody else's needs another one.
  */
 function propose(done) {
-  /* A page asked for from the list goes to the address that was waiting for it;
-     the name the model proposed is not the one it lives at. */
-  const name = pinned ?? done.name;
-  const yours = pinned === null ? (done.yours ?? null) : "empty";
+  const name = done.name;
+  const yours = done.yours ?? null;
   held = {
     build: done.build,
     name,
     site: done.site,
     changing: done.site !== null,
-    taken: yours !== "empty" && done.available === false,
+    taken: yours === null && done.available === false,
     yours,
     document: done.document,
   };
@@ -1632,16 +993,8 @@ function propose(done) {
   /* The row on the server holds the ask from here on. */
   typed(null);
   proposal(
-    held.taken
-      ? { code: yours === "live" ? "YOURS" : "TAKEN" }
-      : yours === "empty"
-        ? { code: "CLAIMED" }
-        : null,
-    yours === "live"
-      ? `${hostOf(name)} is already your website`
-      : yours === "empty"
-        ? `${hostOf(name)} is already yours`
-        : `${hostOf(name)} is taken`,
+    held.taken ? { code: "TAKEN" } : yours === "live" && !held.changing ? { code: "YOURS" } : null,
+    yours === "live" ? `${hostOf(name)} is already your website` : `${hostOf(name)} is taken`,
   );
 }
 
@@ -1665,7 +1018,7 @@ function proposal(err, lead, also) {
   $("#b-put").hidden = held.taken === true;
   $("#b-pickname").hidden = held.taken !== true;
   /* An address that already exists cannot be renamed by typing a different one
-     here: the release would go to a site nobody has claimed, and the change
+     here: the page would go to a different site, and the change
      would have nowhere to land. */
   $("#b-rename").hidden = held.taken === true || held.site !== null;
   oops("#b-proposaloops", err, lead, also);
@@ -1690,10 +1043,10 @@ function online(name, changed) {
   $("#b-livepreview").srcdoc = held ? held.document : "";
   oops("#b-liveoops", null);
   held = held ? { ...held, site: name } : { site: name, name, document: "" };
-  pinned = null;
   draft(null);
   typed(null);
   show("b-live");
+  deployed();
   void listMine();
 }
 
@@ -1716,9 +1069,7 @@ function startNaming(pushed) {
      waited a minute for nowhere in sight. */
   $("#b-namingsay").textContent = !pushed
     ? "Letters, numbers and hyphens. This becomes the address."
-    : held.yours === "live"
-      ? `${hostOf(pushed)} already has your website on it. Give this page a name of its own and you keep both.`
-      : `${hostOf(pushed)} is already taken. Your page is safe — give it another name and it goes online.`;
+    : `${hostOf(pushed)} is already taken. Your page is safe — give it another name and it goes online.`;
   /* Never hidden, whichever road arrived. This screen has exactly two buttons,
      and it opens holding a name that has just been refused — so the green one
      starts disabled, and hiding the other leaves a screen with nothing live on
@@ -1752,8 +1103,8 @@ function paintName() {
     } catch {
       if ($("#b-name").value.trim().toLowerCase() !== asked) return;
       /* A check that could not be made is not a no, and leaving the only button
-         on the screen dead is not an answer. The claim is the authority anyway
-         — it asks the catalogue this probe cannot — so the button goes live and
+         on the screen dead is not an answer. The publish is the authority anyway
+         — so the button goes live and
          a name that really is taken is refused there, in a sentence. */
       nameVerdict("It could not be checked just now. You can still try it.");
       $("#b-usename").disabled = false;
@@ -1765,21 +1116,16 @@ function paintName() {
       RESERVED: "That name is kept for the system. Pick another.",
       TAKEN: "That one is already taken. Pick another.",
     };
-    /* An address of his own is not "somebody already has that one". An empty
-       one is the claim a failed upload left behind, and typing it back in here
-       is the only road to it, so the button has to go live for it. A live one
-       is a website of his, which this page changes by asking rather than by
-       writing a new one over the top. */
-    const empty = answer.yours === "empty";
-    const usable = answer.available || empty;
+    /* An address of his own is not "somebody already has that one": it is a
+       website of his, and putting this page there replaces it. */
+    const mine = answer.yours === "live";
+    const usable = answer.available || mine;
     nameVerdict(
       answer.available
         ? "That one is free."
-        : empty
-          ? "That one is already yours, with nothing on it yet."
-          : answer.yours === "live"
-            ? "That is your website already. Change it from the first screen."
-            : (why[answer.why] || "That name cannot be used."),
+        : mine
+          ? "That is your website already. Putting this page there replaces it."
+          : (why[answer.why] || "That name cannot be used."),
       usable ? "yes" : "no",
     );
     $("#b-usename").disabled = !usable;
@@ -1814,29 +1160,16 @@ $("#b-put").onclick = () => guard(async () => {
   oops("#b-proposaloops", null);
   waiting("Putting it online", PUTTING);
   try {
-    if (page.site === null) {
-      await claim(page.name);
-      /* Written down the moment it succeeds, and before the upload — which is
-         the half that fails, on a tailnet blip or a pod rolling under a merge.
-         A second press has to be a second upload and never a second claim: the
-         claim would answer "taken", about his own website. */
-      held = { ...page, site: page.name };
-    }
-    await put(page.name, page.document);
+    await publishPage(page.name, page.document);
     online(page.name, page.changing === true);
   } catch (err) {
-    const owned = held.site !== null;
-    /* Refused by the catalogue after all — a race, or a page left open while
-       the address went live somewhere else — so whatever this tab believed
-       about whose it is, it no longer knows. */
+    /* Refused as taken after all — a race, or a page left open while the
+       address went to somebody else — so whatever this tab believed about
+       whose it is, it no longer knows. */
     if (err.code === "TAKEN") held = { ...held, taken: true, yours: null };
     proposal(
       err,
-      err.code === "TAKEN"
-        ? `${hostOf(page.name)} is taken`
-        : owned
-          ? `${hostOf(page.name)} is yours — it is just not on the web yet`
-          : "It could not be put online",
+      err.code === "TAKEN" ? `${hostOf(page.name)} is taken` : "It could not be put online",
       WHILE_PUBLISHING,
     );
   }
@@ -1850,17 +1183,15 @@ $("#b-usename").onclick = () => {
   held = { ...held, name, taken: false, yours: null };
   /* Written down beside the draft, because the row on the server still says
      whatever the model proposed and nothing here tells it otherwise: a tab
-     discarded after the claim that follows has to come back to THIS address,
-     or the resumed-claim check asks about a name he never took, finds it free,
-     and claims a second one. */
+     discarded now has to come back to THIS address. */
   draft(held.build, name);
   proposal(null);
 };
-function afresh() { held = null; pinned = null; draft(null); typed(null); $("#b-ask").value = ""; oops("#b-startoops", null); show("b-start"); void listMine(); }
+function afresh() { held = null; draft(null); typed(null); $("#b-ask").value = ""; oops("#b-startoops", null); show("b-start"); void listMine(); }
 $("#b-scrap").onclick = afresh;
 $("#b-another").onclick = afresh;
 $("#b-change").onclick = () => askChange(held.site);
-$("#b-nevermind").onclick = () => { held = null; pinned = null; typed(null); oops("#b-startoops", null); show("b-start"); void listMine(); };
+$("#b-nevermind").onclick = () => { held = null; typed(null); oops("#b-startoops", null); show("b-start"); void listMine(); };
 $("#b-name").oninput = paintName;
 
 $("#b-applychange").onclick = () => guard(async () => {
@@ -1893,7 +1224,7 @@ $("#b-applychange").onclick = () => guard(async () => {
   typed(null);
   waiting("Putting it online", PUTTING);
   try {
-    await put(site, done.document);
+    await publishPage(site, done.document);
     online(site, true);
   } catch (err) {
     /* The page is written and the row is safe on the server; only the publish
@@ -1919,9 +1250,7 @@ async function recover() {
   }
   /* The row carries the name the model proposed at generation time; "Change the
      name" happened here and never reached it. So this tab's own note of the
-     address wins — asking the server about the row's name instead would find a
-     name he never claimed, call it free, and claim a SECOND one on the next
-     press, stranding the first. */
+     address wins. */
   const name = draftName() || row.name;
   held = {
     build: row.id,
@@ -1932,15 +1261,7 @@ async function recover() {
     yours: null,
     document: row.document,
   };
-  /* The draft says nothing about a claim, so a tab discarded between claiming
-     the name and publishing to it would come back offering to change the name —
-     and publishing under a new one would spend the first address for nothing.
-     A server that cannot be asked leaves the name changeable, which the claim
-     itself then sorts out in a sentence. */
-  if (held.site === null && await claimedEmpty(name).catch(() => false)) {
-    held = { ...held, site: name };
-  }
-  proposal({ code: held.site === null ? "PICKED_UP" : "CLAIMED" }, "Picked up where you left off");
+  proposal({ code: "PICKED_UP" }, "Picked up where you left off");
   return true;
 }
 

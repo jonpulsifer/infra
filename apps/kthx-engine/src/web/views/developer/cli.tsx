@@ -23,7 +23,7 @@ export const CLI_VERBS: readonly Verb[] = [
   {
     verb: 'deploy',
     usage: 'kthx deploy [dir]',
-    does: 'Upload the directory as a release.',
+    does: "Sync the directory to the site's folder in the sites bucket. --force writes over a site someone else owns.",
   },
   {
     verb: 'dev',
@@ -31,19 +31,9 @@ export const CLI_VERBS: readonly Verb[] = [
     does: "Serve the directory on :4321 against the site's live backends.",
   },
   {
-    verb: 'rollback',
-    usage: 'kthx rollback [n]',
-    does: 'Serve an earlier release and hold it.',
-  },
-  {
-    verb: 'release',
-    usage: 'kthx release',
-    does: 'Drop the hold, so the newest release serves.',
-  },
-  {
     verb: 'ls',
     usage: 'kthx ls [dir]',
-    does: 'What the site serves. With no kthx.json, every site of yours.',
+    does: "The site's owner and last deploy. With no kthx.json, every site of yours.",
   },
   {
     verb: 'ls',
@@ -53,7 +43,7 @@ export const CLI_VERBS: readonly Verb[] = [
   {
     verb: 'rm',
     usage: 'kthx rm [dir]',
-    does: 'Delete the site. Its name stays taken.',
+    does: 'Delete the site and free its name.',
   },
   {
     verb: 'open',
@@ -73,13 +63,14 @@ export const CLI_VERBS: readonly Verb[] = [
   {
     verb: 'mcp',
     usage: 'kthx mcp [dir]',
-    does: "Print the site's MCP address and the file that holds its bearer. This build has no stdio bridge.",
+    does: "Print the site's MCP address, which takes the owner's Google ID token. This build has no stdio bridge.",
   },
 ];
 
 function quickstart(origin: string): string {
   return [
     `bun add -g ${origin}/cli/kthx.tgz`,
+    'gcloud auth application-default login',
     `export KTHX_ORIGIN=${origin}`,
     'kthx init my-site',
     'kthx deploy my-site',
@@ -98,7 +89,7 @@ export function CliPage({
       <PageHeader
         eyebrow="developer"
         title="CLI"
-        description="kthx turns a directory into a site. The CLI claims a name, uploads each release, and holds or rolls back what serves."
+        description="kthx turns a directory into a site. The CLI claims a name and syncs the directory to the site's folder in the sites bucket."
       />
 
       <Section title="Install">
@@ -130,13 +121,13 @@ export function CliPage({
         </dl>
       </Section>
 
-      <Section title="Tokens">
+      <Section title="Credentials">
         <Prose>
-          A claim's owner bearer is shown once and kept in{' '}
-          <code>$XDG_CONFIG_HOME/kthx/sites.json</code>, readable only by you.
-          The file keys tokens by origin and then by site name, so the same name
-          on two origins keeps two tokens. There is no reset: a lost token is a
-          lost site.
+          The CLI writes the sites bucket with your Google Application Default
+          Credentials: <code>gcloud auth application-default login</code>, or a
+          workload's <code>external_account</code> file. Their email owns what
+          you deploy, and owner calls to kthx carry a Google ID token. Ownership
+          is a courtesy: deploying over someone else's site asks first.
         </Prose>
       </Section>
 

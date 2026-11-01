@@ -1,6 +1,6 @@
 /**
  * Who is calling, decided once per request. The public host trusts nothing,
- * reaching the control host is the credential a claim needs, and the identity
+ * a site's owner shows a Google ID token on any of them, and the identity
  * host trusts a login header from its tailnet proxy.
  */
 import type { Config } from './env.ts';
@@ -24,7 +24,7 @@ export interface Caller {
    */
   readonly bucket: string | null;
   /**
-   * Both private hosts may claim and control sites. The public host may too
+   * Both private hosts get the whole landing page. The public host does too
    * while no control host is set.
    */
   readonly control: boolean;

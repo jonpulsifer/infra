@@ -1,24 +1,12 @@
-/** The site control API against a real database and a real volume. */
+/**
+ * The control API over the sites bucket: names, owner auth by Google ID token,
+ * the report, deletes and the public directory. Real Postgres, fake bucket.
+ */
 import { describe, expect, test } from 'bun:test';
-import { readdir, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tarGz } from '../../cli/tar.ts';
-import { DIRECTORY_BUCKET, secondsToMidnight } from '../../server/limits.ts';
-import {
-  KEEP_RELEASES,
-  MAX_ARCHIVE_BYTES,
-  MAX_UNPACKED_BYTES,
-  MAX_UNPACKS,
-  pruneSite,
-  takeSlot,
-} from '../../server/releases.ts';
-import {
-  MAX_CLAIMS_PER_DAY,
-  MAX_UPLOADS_PER_DAY,
-  nameProblem,
-  RESERVED_NAMES,
-} from '../../server/sites.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { DIRECTORY_BUCKET } from '../../server/limits.ts';
+import { nameProblem, RESERVED_NAMES } from '../../server/sites.ts';
+import { GCLOUD_AUDIENCE, idToken } from '../harness/identity.ts';
+import { ask, OWNER, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -29,88 +17,11 @@ function address(): string {
   return `198.51.100.${nextAddress % 250}`;
 }
 
-function site(files: Record<string, string>): Uint8Array<ArrayBuffer> {
-  return tarGz(
-    Object.entries(files).map(([path, text]) => ({
-      path,
-      bytes: new TextEncoder().encode(text),
-    })),
-  );
-}
-
-const SITE = site({ 'index.html': '<h1>v1</h1>', 'style.css': 'h1{}' });
-
-async function claim(name: string, init: Parameters<typeof ask>[1] = {}) {
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-      ...init,
-    }),
-  );
-  return { status: response.status, body: await response.json() };
-}
-
-/** Prefixed: a claim creates a database and role on the shared Postgres. */
-async function mine(label = 'notes') {
-  const name = kthx().name(label);
-  const claimed = await claim(name);
-  expect(claimed.status).toBe(201);
-  return { name, token: claimed.body.token as string };
-}
-
-async function upload(
-  name: string,
-  token: string,
-  bytes: Uint8Array<ArrayBuffer> = SITE,
-  init: Parameters<typeof ask>[1] = {},
-) {
-  const response = await kthx().fetch(
-    ask(`/api/sites/${name}/releases`, {
-      method: 'POST',
-      token,
-      body: bytes,
-      address: address(),
-      ...init,
-    }),
-  );
-  return { status: response.status, body: await response.json() };
-}
-
 async function inspect(name: string, token?: string) {
   const response = await kthx().fetch(
     ask(`/api/sites/${name}`, token === undefined ? {} : { token }),
   );
   return { status: response.status, body: await response.json() };
-}
-
-async function serveRelease(name: string, token: string, n: unknown) {
-  const response = await kthx().fetch(
-    ask(`/api/sites/${name}/serve`, {
-      method: 'POST',
-      token,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ n }),
-    }),
-  );
-  return { status: response.status, body: await response.json() };
-}
-
-async function unhold(name: string, token: string) {
-  const response = await kthx().fetch(
-    ask(`/api/sites/${name}/hold`, { method: 'DELETE', token }),
-  );
-  return { status: response.status, body: await response.json() };
-}
-
-async function releaseDirs(name: string): Promise<number[]> {
-  const entries = await readdir(join(kthx().sitesDir, name)).catch(() => []);
-  return entries
-    .map(Number)
-    .filter((n) => Number.isInteger(n))
-    .sort((a, b) => a - b);
 }
 
 describe('names', () => {
@@ -131,516 +42,236 @@ describe('names', () => {
     expect(nameProblem('postgres')).toBe('RESERVED');
     expect(nameProblem('template0')).toBe('RESERVED');
   });
-});
 
-describe('claiming', () => {
-  test('a free name answers 201 with the token, shown once', async () => {
-    const name = kthx().name('notes');
-    const claimed = await claim(name);
-    expect(claimed.status).toBe(201);
-    expect(claimed.body.name).toBe(name);
-    expect(claimed.body.url).toBe(`https://${name}.kthx.test`);
-    expect(claimed.body.token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+  test('a name is free until a marker or the engine holds it', async () => {
+    const standing = async (name: string, token?: string) =>
+      (
+        await kthx().fetch(
+          ask(`/api/names/${name}`, token === undefined ? {} : { token }),
+        )
+      ).json();
+    const free = kthx().name('free');
+    expect(await standing(free)).toEqual({
+      name: free,
+      available: true,
+      why: null,
+      yours: null,
+    });
 
-    const [row] = await kthx()
-      .sql`select token_hash, provisioned_at from sites where name = ${name}`;
-    // The claim provisions the site's database before any upload.
-    expect(row.provisioned_at).not.toBeNull();
-    // Only the token's hash is stored.
-    expect(row.token_hash).toMatch(/^[0-9a-f]{64}$/);
-    expect(row.token_hash).not.toBe(claimed.body.token);
-  });
-
-  test('a reserved, invalid, or taken name is refused by code', async () => {
-    expect(await claim('www')).toMatchObject({
-      status: 400,
-      body: { code: 'RESERVED' },
-    });
-    expect(await claim('ab')).toMatchObject({
-      status: 400,
-      body: { code: 'INVALID_NAME' },
-    });
-    const taken = kthx().name('taken');
-    expect((await claim(taken)).status).toBe(201);
-    expect(await claim(taken)).toMatchObject({
-      status: 409,
-      body: { code: 'TAKEN' },
-    });
-  });
-
-  test('a name the engine holds for an app is taken, to a claim and a check', async () => {
-    const held = kthx().name('held');
-    await kthx().sql`
-      insert into reservations (name, holder) values (${held}, 'app-id')
-    `;
-    expect(await claim(held)).toMatchObject({
-      status: 409,
-      body: { code: 'TAKEN' },
-    });
-    const standing = await kthx().fetch(
-      ask(`/api/names/${held}`, { address: address() }),
-    );
-    expect(await standing.json()).toEqual({
-      name: held,
+    const site = await kthx().site('held');
+    expect(await standing(site.name)).toMatchObject({
       available: false,
       why: 'TAKEN',
       yours: null,
     });
-    const [row] = (await kthx().sql`
-      select count(*)::int as sites from sites where name = ${held}
-    `) as { sites: number }[];
-    expect(row?.sites).toBe(0);
-  });
-
-  test('the API answers on the apex only', async () => {
-    expect((await claim('notes', { host: 'other.kthx.test' })).status).toBe(
-      404,
-    );
-    const elsewhere = await kthx().fetch(
-      ask('/api/sites', { method: 'POST', host: 'example.test' }),
-    );
-    expect(elsewhere.status).toBe(404);
-  });
-
-  test('a browser on another kthx host cannot claim through this one', async () => {
-    const name = kthx().name('origin');
-    const foreign = await claim(name, {
-      headers: {
-        'content-type': 'application/json',
-        origin: 'https://evil.kthx.test',
-      },
+    expect(await standing(site.name, site.token)).toMatchObject({
+      available: false,
+      why: 'TAKEN',
+      yours: 'live',
     });
-    expect(foreign).toMatchObject({ status: 403, body: { code: 'FORBIDDEN' } });
-    const own = await claim(name, {
-      headers: {
-        'content-type': 'application/json',
-        origin: `https://${ZONE}`,
-      },
+
+    const app = kthx().name('app');
+    await kthx().sql`
+      insert into reservations (name, holder) values (${app}, 'an-app')
+    `;
+    expect(await standing(app)).toMatchObject({
+      available: false,
+      why: 'TAKEN',
     });
-    expect(own.status).toBe(201);
+    expect(await standing('www')).toMatchObject({ why: 'RESERVED' });
+    expect(await standing('a_b')).toMatchObject({ why: 'INVALID_NAME' });
   });
 
-  test('a body that is not declared JSON is refused', async () => {
-    const response = await kthx().fetch(
+  test('a claim is no longer a server route', async () => {
+    const refused = await kthx().fetch(
       ask('/api/sites', {
         method: 'POST',
-        body: JSON.stringify({ name: 'notes' }),
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: kthx().name('claimed') }),
         address: address(),
       }),
     );
-    expect(response.status).toBe(400);
-    expect((await response.json()).code).toBe('MALFORMED_REQUEST');
-  });
-
-  test('one address gets a day of claims and no more', async () => {
-    const from = address();
-    const statuses: number[] = [];
-    let last: Response | null = null;
-    for (let i = 0; i < MAX_CLAIMS_PER_DAY + 1; i += 1) {
-      last = await kthx().fetch(
-        ask('/api/sites', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: kthx().name(`burst-${i}`) }),
-          address: from,
-        }),
+    expect(refused.status).toBe(405);
+    for (const tail of ['releases', 'serve', 'hold']) {
+      const gone = await kthx().fetch(
+        ask(`/api/sites/${kthx().name('x')}/${tail}`, { method: 'POST' }),
       );
-      statuses.push(last.status);
+      expect([tail, gone.status]).toEqual([tail, 404]);
     }
-    expect(statuses.slice(0, MAX_CLAIMS_PER_DAY).every((s) => s === 201)).toBe(
-      true,
-    );
-    expect(statuses.at(-1)).toBe(429);
-    // Retry-After counts to UTC midnight, which can be under a minute away, so
-    // compare the value itself.
-    const wait = Number(last?.headers.get('retry-after'));
-    expect(Math.abs(wait - secondsToMidnight())).toBeLessThanOrEqual(2);
   });
 });
 
-describe('ownership', () => {
-  test('no bearer is 401, the wrong bearer is 403, no site is 404', async () => {
-    const owned = await mine();
-    expect(await inspect(owned.name)).toMatchObject({
+describe("the owner's ID token", () => {
+  test("opens a site whose marker names the token's email", async () => {
+    const site = await kthx().site('opened');
+    const found = await inspect(site.name, site.token);
+    expect(found.status).toBe(200);
+    expect(found.body).toMatchObject({
+      name: site.name,
+      url: `https://${site.name}.${ZONE}`,
+      owner: OWNER,
+      deployed: expect.any(String),
+      usage: { db_bytes: 0, files_bytes: 0 },
+    });
+  });
+
+  test("gcloud's own audience opens it too, and email case does not matter", async () => {
+    const site = await kthx().site('gcloud');
+    const token = await idToken(OWNER.toUpperCase(), {
+      claims: { aud: GCLOUD_AUDIENCE },
+    });
+    expect((await inspect(site.name, token)).status).toBe(200);
+  });
+
+  test('a token for another email is 403, and none at all is 401', async () => {
+    const site = await kthx().site('closed');
+    const stranger = await idToken('stranger@example.com');
+    expect(await inspect(site.name, stranger)).toMatchObject({
+      status: 403,
+      body: { code: 'FORBIDDEN' },
+    });
+    expect(await inspect(site.name)).toMatchObject({
       status: 401,
       body: { code: 'UNAUTHENTICATED' },
     });
-    expect(await inspect(owned.name, `${owned.token.slice(1)}x`)).toMatchObject(
-      {
-        status: 403,
-        body: { code: 'FORBIDDEN' },
-      },
-    );
-    // The landing page's taken-probe reads 401 as taken and 404 as free.
-    expect((await inspect('nobody')).status).toBe(404);
-    expect((await inspect('%E0', owned.token)).status).toBe(404);
   });
-});
 
-describe('releases', () => {
-  test('an upload lands on disk, serves at once, and is listed newest first', async () => {
-    const owned = await mine();
-    const first = await upload(owned.name, owned.token);
-    expect(first.status).toBe(201);
-    expect(first.body).toMatchObject({
-      n: 1,
-      serving: 1,
-      url: `https://${owned.name}.kthx.test`,
+  test('a token that fails any check opens nothing', async () => {
+    const site = await kthx().site('checked');
+    const now = Math.floor(Date.now() / 1000);
+    const refused = {
+      'wrong audience': await idToken(OWNER, {
+        claims: { aud: 'https://someone-else.example' },
+      }),
+      expired: await idToken(OWNER, {
+        claims: { iat: now - 7200, exp: now - 3600 },
+      }),
+      'wrong issuer': await idToken(OWNER, {
+        claims: { iss: 'https://evil.example' },
+      }),
+      'unverified email': await idToken(OWNER, {
+        claims: { email_verified: false },
+      }),
+      'unpublished key': await idToken(OWNER, { unpublished: true }),
+      'no email': await idToken(OWNER, { claims: { email: undefined } }),
+      'not a token': 'a.b.c',
+    };
+    for (const [why, token] of Object.entries(refused)) {
+      const answer = await inspect(site.name, token);
+      expect([why, answer.status]).toEqual([why, 403]);
+    }
+  });
+
+  test("a service account's token without email_verified still opens", async () => {
+    const site = await kthx().site(
+      'robot',
+      'deployer@p.iam.gserviceaccount.com',
+    );
+    const token = await idToken('deployer@p.iam.gserviceaccount.com', {
+      claims: { email_verified: undefined },
     });
-    expect(first.body.digest).toMatch(/^[0-9a-f]{64}$/);
-
-    const root = join(kthx().sitesDir, owned.name, '1');
-    expect(await Bun.file(join(root, 'index.html')).text()).toBe('<h1>v1</h1>');
-    expect(await Bun.file(join(root, 'style.css')).exists()).toBe(true);
-
-    const second = await upload(
-      owned.name,
-      owned.token,
-      site({ 'index.html': '<h1>v2</h1>' }),
-    );
-    expect(second.body).toMatchObject({ n: 2, serving: 2 });
-
-    const shown = await inspect(owned.name, owned.token);
-    expect(shown.body).toMatchObject({
-      name: owned.name,
-      serving: 2,
-      held: false,
-    });
-    // db_bytes is the size of the site's own database, above 0 even when empty.
-    expect(shown.body.usage.db_bytes).toBeGreaterThan(0);
-    expect(shown.body.releases.map((r: { n: number }) => r.n)).toEqual([2, 1]);
-    expect(shown.body.releases[0].size).toBeGreaterThan(0);
-    expect(shown.body.quotas.db_bytes).toBe(256 * 1024 * 1024);
+    expect((await inspect(site.name, token)).status).toBe(200);
   });
 
-  test('the same bundle twice is one depot object', async () => {
-    const owned = await mine();
-    const first = await upload(owned.name, owned.token);
-    const again = await upload(owned.name, owned.token);
-    expect(again.body.digest).toBe(first.body.digest);
-    expect(again.body.n).toBe(2);
-    const objects = await readdir(join(kthx().sitesDir, '.depot', 'releases'));
-    expect(objects).toEqual([`${first.body.digest}.tar.gz`]);
-  });
-
-  test('an archive with no entry page is refused before it is stored', async () => {
-    const owned = await mine();
-    expect(
-      await upload(owned.name, owned.token, site({ 'about.html': 'hi' })),
-    ).toMatchObject({ status: 400, body: { code: 'NO_INDEX' } });
-    expect(await Bun.file(join(kthx().sitesDir, '.depot')).exists()).toBe(
-      false,
-    );
-
-    // `200.html` is an entry page too, for a single-page app.
-    expect(
-      (await upload(owned.name, owned.token, site({ '200.html': 'spa' })))
-        .status,
-    ).toBe(201);
-  });
-
-  test('a wrapper directory is stripped; the file inside it is the root', async () => {
-    const owned = await mine();
-    const wrapped = await upload(
-      owned.name,
-      owned.token,
-      site({ 'dist/index.html': 'hi', 'dist/app.js': '//' }),
-    );
-    expect(wrapped.status).toBe(201);
-    const root = join(kthx().sitesDir, owned.name, '1');
-    expect(await Bun.file(join(root, 'index.html')).text()).toBe('hi');
-    expect(await Bun.file(join(root, 'dist/index.html')).exists()).toBe(false);
-  });
-
-  test('an entry that would write outside the release is refused', async () => {
-    const owned = await mine();
-    const escaping = await upload(
-      owned.name,
-      owned.token,
-      tarGz([
-        { path: 'index.html', bytes: new TextEncoder().encode('hi') },
-        { path: '../escape.html', bytes: new TextEncoder().encode('no') },
-      ]),
-    );
-    expect(escaping).toMatchObject({
-      status: 400,
-      body: { code: 'PATH_ESCAPES_ARCHIVE' },
-    });
-  });
-
-  test('a name that is both a file and a directory is refused', async () => {
-    const owned = await mine();
-    const colliding = await upload(
-      owned.name,
-      owned.token,
-      tarGz([
-        { path: 'index.html', bytes: new TextEncoder().encode('hi') },
-        { path: 'app', bytes: new TextEncoder().encode('file') },
-        { path: 'app/main.js', bytes: new TextEncoder().encode('//') },
-      ]),
-    );
-    expect(colliding).toMatchObject({
-      status: 400,
-      body: { code: 'MALFORMED_ZIP' },
-    });
-  });
-
-  test('anything that is not an archive is refused by name', async () => {
-    const owned = await mine();
-    expect(
-      await upload(
-        owned.name,
-        owned.token,
-        new TextEncoder().encode('<h1>not an archive</h1>'),
-      ),
-    ).toMatchObject({ status: 400, body: { code: 'UNKNOWN_FORMAT' } });
-  });
-
-  test('an archive over either limit is 413', async () => {
-    const owned = await mine();
-    expect(
-      await upload(
-        owned.name,
-        owned.token,
-        new Uint8Array(MAX_ARCHIVE_BYTES + 1),
-      ),
-    ).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
-    expect(
-      await upload(
-        owned.name,
-        owned.token,
-        Bun.gzipSync(new Uint8Array(MAX_UNPACKED_BYTES + 1)),
-      ),
-    ).toMatchObject({ status: 413, body: { code: 'TOO_LARGE' } });
-  });
-
-  test('with every unpack slot held, an upload and a rehydrate both wait', async () => {
-    const owned = await mine();
-    await upload(owned.name, owned.token);
-    await rm(join(kthx().sitesDir, owned.name, '1'), {
-      recursive: true,
-      force: true,
-    });
-
-    const held = Array.from({ length: MAX_UNPACKS }, () => takeSlot());
-    expect(held.every((slot) => slot !== null)).toBe(true);
+  test('no audience configured accepts no token', async () => {
+    const site = await kthx().site('closed-zone');
+    const config = kthx().config as { idAudiences: readonly string[] };
+    const audiences = config.idAudiences;
+    (config as { idAudiences: readonly string[] }).idAudiences = [];
     try {
-      expect(await upload(owned.name, owned.token)).toMatchObject({
-        status: 503,
-        body: { code: 'BUSY' },
-      });
-      // A rehydrate needs a slot too, and a page request gets the HTML 503.
-      const page = await kthx().fetch(
-        ask('/', { host: `${owned.name}.${ZONE}` }),
-      );
-      expect(page.status).toBe(503);
+      expect((await inspect(site.name, site.token)).status).toBe(403);
     } finally {
-      for (const slot of held) slot?.();
+      (config as { idAudiences: readonly string[] }).idAudiences = audiences;
     }
-
-    expect((await upload(owned.name, owned.token)).status).toBe(201);
-    expect(
-      (await kthx().fetch(ask('/', { host: `${owned.name}.${ZONE}` }))).status,
-    ).toBe(200);
-  });
-
-  test('an archive this boundary refuses does not spend a day of uploads', async () => {
-    const owned = await mine();
-    const empty = site({ 'about.html': 'no entry page' });
-    for (let i = 0; i < MAX_UPLOADS_PER_DAY + 1; i += 1) {
-      expect(await upload(owned.name, owned.token, empty)).toMatchObject({
-        status: 400,
-        body: { code: 'NO_INDEX' },
-      });
-    }
-    expect((await upload(owned.name, owned.token)).status).toBe(201);
   });
 });
 
-describe('rolling back and holding', () => {
-  test('a rollback holds, and choosing the newest again does not', async () => {
-    const owned = await mine();
-    await upload(owned.name, owned.token);
-    await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
-
-    // Serving an older release holds the site: later uploads are stored but
-    // not served.
-    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
-      status: 200,
-      body: { serving: 1, held: true },
-    });
-    const rolled = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(await rolled.text()).toContain('v1');
-
-    const third = await upload(
-      owned.name,
-      owned.token,
-      site({ 'index.html': 'v3' }),
-    );
-    expect(third.body).toMatchObject({ n: 3, serving: 1 });
-    const still = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(await still.text()).toContain('v1');
-
-    // Serving the newest release clears the hold, or one rollback would pin
-    // the site for good.
-    expect(await serveRelease(owned.name, owned.token, 3)).toMatchObject({
-      status: 200,
-      body: { serving: 3, held: false },
-    });
-    expect((await inspect(owned.name, owned.token)).body).toMatchObject({
-      serving: 3,
-      held: false,
-    });
-    const published = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(await published.text()).toBe('v3');
-
-    const fourth = await upload(
-      owned.name,
-      owned.token,
-      site({ 'index.html': 'v4' }),
-    );
-    expect(fourth.body).toMatchObject({ n: 4, serving: 4 });
+describe('a site host', () => {
+  test('answers the API for a site whose marker exists', async () => {
+    const site = await kthx().site('api');
+    const answer = await kthx().fetch(ask('/api', { host: site.host }));
+    expect(answer.status).toBe(200);
+    expect(await answer.json()).toMatchObject({ name: site.name });
   });
 
-  test('choosing the newest release holds nothing', async () => {
-    const owned = await mine('forward');
-    await upload(owned.name, owned.token);
-    await upload(owned.name, owned.token, site({ 'index.html': 'v2' }));
-
-    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
-      body: { serving: 1, held: true },
-    });
-    expect((await serveRelease(owned.name, owned.token, 2)).body).toEqual({
-      serving: 2,
-      held: false,
-    });
-    expect(await unhold(owned.name, owned.token)).toMatchObject({
-      status: 200,
-      body: { held: false, serving: 2 },
-    });
-    expect((await serveRelease(owned.name, owned.token, 9)).status).toBe(404);
-    expect((await serveRelease(owned.name, owned.token, 'one')).status).toBe(
-      404,
+  test('a name with no marker is 404 to the API', async () => {
+    const answer = await kthx().fetch(
+      ask('/api/me', { host: `${kthx().name('nobody')}.${ZONE}` }),
     );
+    expect(answer.status).toBe(404);
+    expect((await answer.json()).code).toBe('NOT_FOUND');
   });
 
-  test('a rollback reaches a release the volume no longer carries', async () => {
-    const owned = await mine('pinned');
-    expect(
-      (await upload(owned.name, owned.token, site({ 'index.html': 'pinned' })))
-        .status,
-    ).toBe(201);
-    for (let i = 0; i < KEEP_RELEASES - 1; i += 1) {
-      expect(
-        (
-          await upload(
-            owned.name,
-            owned.token,
-            site({ 'index.html': `v${i + 2}` }),
-          )
-        ).status,
-      ).toBe(201);
+  test('a site path nginx should have answered is the kthx 404 page', async () => {
+    const site = await kthx().site('static');
+    for (const path of ['/', '/index.html', '/about']) {
+      const answer = await kthx().fetch(ask(path, { host: site.host }));
+      expect([path, answer.status]).toEqual([path, 404]);
+      expect(answer.headers.get('content-type')).toContain('text/html');
     }
-    // Empty the volume, so serving v1 has to rehydrate it from the depot.
-    await pruneSite(kthx().sitesDir, owned.name, new Set(), new Set());
-    expect(await releaseDirs(owned.name)).toEqual([]);
-
-    expect(await serveRelease(owned.name, owned.token, 1)).toMatchObject({
-      status: 200,
-      body: { serving: 1, held: true },
-    });
-    const served = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(served.status).toBe(200);
-    expect(await served.text()).toBe('pinned');
-    const seen = (await inspect(owned.name, owned.token)).body;
-    expect(seen).toMatchObject({ serving: 1, held: true });
-    expect(seen.releases).toHaveLength(KEEP_RELEASES);
-  });
-});
-
-describe('the volume', () => {
-  test('a full volume keeps the serving and previous releases and no more', async () => {
-    const owned = await mine();
-    for (const version of ['v1', 'v2', 'v3']) {
-      expect(
-        (await upload(owned.name, owned.token, site({ 'index.html': version })))
-          .status,
-      ).toBe(201);
-    }
-    expect(await releaseDirs(owned.name)).toEqual([1, 2, 3]);
-
-    // The last argument stands in for a full volume.
-    await pruneSite(
-      kthx().sitesDir,
-      owned.name,
-      new Set([1, 2, 3]),
-      new Set([3, 2]),
-      true,
-    );
-    expect(await releaseDirs(owned.name)).toEqual([2, 3]);
   });
 
-  test('a release with no directory is refilled from the depot', async () => {
-    const owned = await mine();
-    await upload(owned.name, owned.token);
-    await rm(join(kthx().sitesDir, owned.name, '1'), {
-      recursive: true,
-      force: true,
+  test('a bucket that cannot be read is 503, not a 500', async () => {
+    const site = await kthx().site('unreadable');
+    kthx().gcs.failures.push({
+      match: (call) => call.name === `${site.name}/.kthx`,
+      status: 500,
     });
-    expect(await releaseDirs(owned.name)).toEqual([]);
-
-    const response = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(response.status).toBe(200);
-    expect(await response.text()).toBe('<h1>v1</h1>');
-    expect(await releaseDirs(owned.name)).toEqual([1]);
-  });
-
-  test('a release whose depot object is gone is the 503 page, not a 500', async () => {
-    const owned = await mine();
-    await upload(owned.name, owned.token);
-    await rm(join(kthx().sitesDir, owned.name, '1'), {
-      recursive: true,
-      force: true,
-    });
-    await rm(join(kthx().sitesDir, '.depot'), { recursive: true, force: true });
-
-    const response = await kthx().fetch(
-      ask('/', { host: `${owned.name}.${ZONE}` }),
-    );
-    expect(response.status).toBe(503);
-    expect(response.headers.get('cache-control')).toBe('no-store');
+    const answer = await kthx().fetch(ask('/api/me', { host: site.host }));
+    expect(answer.status).toBe(503);
+    expect((await answer.json()).code).toBe('BUSY');
   });
 });
 
 describe('deleting', () => {
-  test('answers 204, takes the bytes, and the name stays taken', async () => {
-    const owned = await mine();
-    await upload(owned.name, owned.token);
-    const gone = await kthx().fetch(
-      ask(`/api/sites/${owned.name}`, { method: 'DELETE', token: owned.token }),
+  test('the owner deletes the folder, marker last, and the name is free', async () => {
+    const site = await kthx().site('deleted');
+    kthx().gcs.put(kthx().bucket, `${site.name}/app.js`, '1');
+    const before = kthx().gcs.calls.length;
+    const removed = await kthx().fetch(
+      ask(`/api/sites/${site.name}`, { method: 'DELETE', token: site.token }),
     );
-    expect(gone.status).toBe(204);
-    expect(await releaseDirs(owned.name)).toEqual([]);
+    expect(removed.status).toBe(204);
+    expect(kthx().gcs.names(kthx().bucket, `${site.name}/`)).toEqual([]);
+    const deletes = kthx()
+      .gcs.calls.slice(before)
+      .filter((call) => call.kind === 'delete')
+      .map((call) => call.name);
+    expect(deletes.at(-1)).toBe(`${site.name}/.kthx`);
+    expect(
+      await (await kthx().fetch(ask(`/api/names/${site.name}`))).json(),
+    ).toMatchObject({ available: true });
+  });
 
-    expect(await inspect(owned.name, owned.token)).toMatchObject({
-      status: 410,
-      body: { code: 'GONE' },
-    });
-    expect((await inspect(owned.name)).status).toBe(410);
-    expect(await claim(owned.name)).toMatchObject({
-      status: 409,
-      body: { code: 'TAKEN' },
-    });
+  test('a stranger may not delete, and the folder stays', async () => {
+    const site = await kthx().site('kept');
+    const refused = await kthx().fetch(
+      ask(`/api/sites/${site.name}`, {
+        method: 'DELETE',
+        token: await idToken('stranger@example.com'),
+      }),
+    );
+    expect(refused.status).toBe(403);
+    expect(kthx().gcs.names(kthx().bucket, `${site.name}/`)).toHaveLength(2);
+  });
+
+  test('a browser on another host cannot delete through this one', async () => {
+    const site = await kthx().site('foreign');
+    const refused = await kthx().fetch(
+      ask(`/api/sites/${site.name}`, {
+        method: 'DELETE',
+        token: site.token,
+        headers: { origin: `https://evil.${ZONE}` },
+      }),
+    );
+    expect(refused.status).toBe(403);
+  });
+
+  test('a name with no site is 404', async () => {
+    const refused = await kthx().fetch(
+      ask(`/api/sites/${kthx().name('ghost')}`, { method: 'DELETE' }),
+    );
+    expect(refused.status).toBe(404);
   });
 });
 
@@ -649,14 +280,16 @@ describe('the directory', () => {
     readonly name: string;
     readonly url: string;
     readonly owner: string | null;
-    readonly serving: number | null;
-    readonly releases: number;
-    readonly at: string;
-    readonly changed: string | null;
+    readonly deployed: string | null;
   }
 
-  async function directory(query = '') {
-    const response = await kthx().fetch(ask(`/api/sites${query}`));
+  async function directory(query = '', token?: string) {
+    const response = await kthx().fetch(
+      ask(`/api/sites${query}`, {
+        address: address(),
+        ...(token === undefined ? {} : { token }),
+      }),
+    );
     return {
       status: response.status,
       cache: response.headers.get('cache-control'),
@@ -664,80 +297,50 @@ describe('the directory', () => {
     };
   }
 
-  /** Pins the claim time, so the order under test does not depend on timing. */
-  async function claimedAt(name: string, iso: string) {
-    await kthx().sql`
-      update sites set created_at = ${iso}::timestamptz where name = ${name}
-    `;
-  }
-
-  /** This test's names only, since other tests' sites share the zone. */
+  /** This test's names only. */
   const names = (items: readonly Item[], mine: readonly string[]) =>
     items.map((item) => item.name).filter((name) => mine.includes(name));
 
-  test('lists every live site newest first, and nothing an owner alone may see', async () => {
-    const first = await mine('first');
-    const second = await mine('second');
-    const gone = await mine('gone');
-    await upload(second.name, second.token);
-    await claimedAt(first.name, '2026-08-01T00:00:00Z');
-    await claimedAt(second.name, '2026-08-02T00:00:00Z');
-    await claimedAt(gone.name, '2026-08-03T00:00:00Z');
-    const removed = await kthx().fetch(
-      ask(`/api/sites/${gone.name}`, { method: 'DELETE', token: gone.token }),
+  test('lists every site newest deploy first, and owners only to themselves', async () => {
+    const first = await kthx().site('first', OWNER, '2026-08-01T00:00:00.000Z');
+    const second = await kthx().site(
+      'second',
+      'other@example.com',
+      '2026-08-02T00:00:00.000Z',
     );
-    expect(removed.status).toBe(204);
 
     const listed = await directory();
     expect(listed.status).toBe(200);
     expect(listed.cache).toBe('no-store');
-    expect(
-      names(listed.body.items, [first.name, second.name, gone.name]),
-    ).toEqual([second.name, first.name]);
-    expect(listed.body.next).toBeNull();
-
-    const served = listed.body.items.find((item) => item.name === second.name);
-    expect(served).toEqual({
-      name: second.name,
-      url: `https://${second.name}.${ZONE}`,
-      // A login is an email address, so owner is shown only to that owner.
+    expect(names(listed.body.items, [first.name, second.name])).toEqual([
+      second.name,
+      first.name,
+    ]);
+    expect(listed.body.items).toContainEqual({
+      name: first.name,
+      url: `https://${first.name}.${ZONE}`,
       owner: null,
-      serving: 1,
-      releases: 1,
-      at: '2026-08-02T00:00:00.000Z',
-      // The newest release's time; `at` is the claim time.
-      changed: expect.any(String),
+      deployed: '2026-08-01T00:00:00.000Z',
     });
-    expect(listed.body.items).toContainEqual(
-      expect.objectContaining({
-        name: first.name,
-        serving: null,
-        releases: 0,
-        changed: null,
-      }),
-    );
-    for (const item of listed.body.items) {
-      expect(Object.keys(item).sort()).toEqual([
-        'at',
-        'changed',
-        'name',
-        'owner',
-        'releases',
-        'serving',
-        'url',
-      ]);
-    }
+
+    const asOwner = await directory('', first.token);
+    const own = asOwner.body.items.find((item) => item.name === first.name);
+    const theirs = asOwner.body.items.find((item) => item.name === second.name);
+    expect(own?.owner).toBe(OWNER);
+    expect(theirs?.owner).toBeNull();
+
+    const mine = await directory('?owner=me', first.token);
+    expect(mine.body.items.map((item) => item.name)).toEqual([first.name]);
+    expect((await directory('?owner=me')).status).toBe(401);
+    expect((await directory('?owner=someone')).status).toBe(400);
   });
 
   test('walks the whole list with the cursor, one page at a time', async () => {
     const owned = [
-      await mine('walk-a'),
-      await mine('walk-b'),
-      await mine('walk-c'),
+      await kthx().site('walk-a', OWNER, '2026-07-01T00:00:00.000Z'),
+      await kthx().site('walk-b', OWNER, '2026-07-02T00:00:00.000Z'),
+      await kthx().site('walk-c', OWNER, '2026-07-03T00:00:00.000Z'),
     ].map((site) => site.name);
-    for (const [index, name] of owned.entries()) {
-      await claimedAt(name, `2026-07-0${index + 1}T00:00:00Z`);
-    }
 
     const seen: string[] = [];
     let after: string | null = null;
@@ -751,15 +354,13 @@ describe('the directory', () => {
       if (after === null) break;
     }
     expect(seen).toEqual([...owned].reverse());
-    expect(after).toBeNull();
   });
 
   test('clamps the page size and refuses a cursor that is not a name', async () => {
-    const first = await mine('clamp');
-    const second = await mine('clamp-two');
+    const first = await kthx().site('clamp');
+    const second = await kthx().site('clamp-two');
     expect((await directory('?limit=99999')).status).toBe(200);
     expect((await directory('?limit=nonsense')).status).toBe(200);
-    // An empty limit means the default page size.
     expect(
       names((await directory('?limit=')).body.items, [first.name, second.name]),
     ).toHaveLength(2);
@@ -767,11 +368,7 @@ describe('the directory', () => {
       status: 400,
       body: { code: 'INVALID_QUERY' },
     });
-    // A cursor that matches no row, a reserved name included, ends the walk.
-    expect((await directory('?after=nobody-here-at-all')).body.items).toEqual(
-      [],
-    );
-    expect(await directory('?after=admin')).toMatchObject({
+    expect(await directory('?after=nobody-here-at-all')).toMatchObject({
       status: 200,
       body: { items: [], next: null },
     });
@@ -779,7 +376,6 @@ describe('the directory', () => {
 
   test('bounds how fast one address asks for a page', async () => {
     const from = address();
-    // Every page is a fresh query, so every page spends a token.
     for (let asked = 0; asked < DIRECTORY_BUCKET.capacity; asked += 1) {
       const paged = await kthx().fetch(ask('/api/sites', { address: from }));
       expect(paged.status).toBe(200);
@@ -789,34 +385,24 @@ describe('the directory', () => {
     expect(refused.status).toBe(429);
     expect((await refused.json()).code).toBe('RATE_LIMITED');
     expect(Number(refused.headers.get('retry-after'))).toBeGreaterThan(0);
-
-    const other = await kthx().fetch(ask('/api/sites', { address: address() }));
-    expect(other.status).toBe(200);
-    await other.json();
   });
 
-  test('has no nuke when the deployment has no admin key', async () => {
-    const owned = await mine('kept');
+  test('has no nuke when the deployment has no admin login', async () => {
+    const owned = await kthx().site('survivor');
     const refused = await kthx().fetch(
-      ask('/api/sites', { method: 'DELETE', token: 'anything' }),
+      ask('/api/sites', { method: 'DELETE', token: owned.token }),
     );
     expect(refused.status).toBe(404);
-    expect((await refused.json()).code).toBe('NOT_FOUND');
     expect(names((await directory()).body.items, [owned.name])).toEqual([
       owned.name,
     ]);
   });
 
-  test('keeps nothing: a row written behind the API is on the next page', async () => {
-    const owned = await mine('uncached');
-    expect(names((await directory()).body.items, [owned.name])).toEqual([
-      owned.name,
-    ]);
-
+  test('reads the bucket: a marker written behind the API is listed', async () => {
     const smuggled = kthx().name('smuggled');
-    await kthx().sql`
-      insert into sites (name, token_hash) values (${smuggled}, ${'0'.repeat(64)})
-    `;
+    kthx().gcs.put(kthx().bucket, `${smuggled}/.kthx`, '{}', {
+      metadata: { 'kthx-owner': 'x@example.com' },
+    });
     expect(names((await directory()).body.items, [smuggled])).toEqual([
       smuggled,
     ]);

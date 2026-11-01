@@ -1,4 +1,7 @@
-/** The CLI against a stub server: what it sends, stores and fails with. */
+/**
+ * The CLI against a fake bucket and a stub apex: what it claims, uploads,
+ * deletes and asks, and what it refuses.
+ */
 import {
   afterAll,
   afterEach,
@@ -8,188 +11,135 @@ import {
   test,
 } from 'bun:test';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readBundle } from '@repo/archive/bundle';
+import { base64urlEncode } from '@repo/archive/bytes';
+import { type FakeCall, fakeGcs } from '@repo/archive/fake-gcs';
 import {
   deploy,
+  forgetCredentials,
+  type Io,
   init,
-  KthxError,
   ls,
   nuke,
   openSite,
-  release,
   rm,
-  rollback,
-  sitesFile,
   siteUrl,
 } from '../cli/main.ts';
 
-interface Upload {
-  readonly name: string;
-  readonly bearer: string | null;
-  readonly filename: string | null;
-  readonly paths: string[];
-}
-
+const BUCKET = 'sites-under-test';
+const ME = 'me@example.com';
+const THEM = 'them@example.com';
 const NAME = /^[a-z]+-[a-z]+-\d\d$/;
-const calls: { method: string; path: string; body: unknown }[] = [];
-const uploads: Upload[] = [];
-const tokens = new Map<string, string>();
-const deleted: string[] = [];
-let n = 0;
-/** How many claims to answer TAKEN before accepting one. */
-let refuseClaims = 0;
-
-/** How many sites the last nuke deleted, or `null` before one. */
-let nuked: number | null = null;
-/** False answers the nuke with 404, as a host with no operator does. */
-let nukeOpens = true;
-
 const SKILL = '# kthx\n\nthe apex copy\n';
-/** `/skill.md` answers 503, so the CLI falls back to its packed copy. */
+
+const gcs = fakeGcs();
+
+/** Who the stub token endpoint says the caller is. */
+let email = ME;
+/** Names `/api/names/:name` reports as held for a built app. */
+const held = new Set<string>();
+/** Requests to the stub apex, in order. */
+const calls: { method: string; path: string; authorization: string | null }[] =
+  [];
+let nukeOpens = true;
 let skillDown = false;
+
+/** An unsigned ID token: the CLI reads it, the stub server never checks it. */
+function idTokenFor(address: string): string {
+  const part = (value: unknown) =>
+    base64urlEncode(new TextEncoder().encode(JSON.stringify(value)));
+  return `${part({ alg: 'none' })}.${part({ email: address, exp: Math.floor(Date.now() / 1000) + 3600 })}.sig`;
+}
 
 const stub = Bun.serve({
   port: 0,
   async fetch(request) {
     const { pathname } = new URL(request.url);
-    const [, , , name, act] = pathname.split('/');
+    calls.push({
+      method: request.method,
+      path: pathname,
+      authorization: request.headers.get('authorization'),
+    });
+    if (pathname === '/token') {
+      return Response.json({
+        access_token: `access-${email}`,
+        id_token: idTokenFor(email),
+        expires_in: 3600,
+      });
+    }
     if (pathname === '/skill.md') {
       return skillDown
         ? new Response(null, { status: 503 })
         : new Response(SKILL);
     }
-    if (request.method === 'GET' && pathname === '/api') {
+    if (pathname === '/api') {
       return Response.json({ zone: 'kthx.test', url: 'https://kthx.test' });
     }
-    if (request.method === 'GET' && pathname === '/api/sites') {
-      calls.push({ method: 'GET', path: pathname, body: null });
+    const named = /^\/api\/names\/(.+)$/.exec(pathname)?.[1];
+    if (named !== undefined) {
+      const name = decodeURIComponent(named);
+      if (name === 'admin') {
+        return Response.json({ name, available: false, why: 'RESERVED' });
+      }
+      const taken = held.has(name) || gcs.get(BUCKET, `${name}/.kthx`);
       return Response.json({
-        items: [...tokens.keys()].map((claimed) => ({
-          name: claimed,
-          url: `https://${claimed}.kthx.test`,
-          serving: 3,
-          releases: 3,
-          at: '2026-08-31T00:00:00.000Z',
-        })),
+        name,
+        available: !taken,
+        why: taken ? 'TAKEN' : null,
+        yours: null,
+      });
+    }
+    if (pathname === '/api/sites' && request.method === 'GET') {
+      return Response.json({
+        items: gcs
+          .names(BUCKET)
+          .filter((name) => name.endsWith('/.kthx'))
+          .map((name) => ({
+            name: name.slice(0, -6),
+            url: `https://${name.slice(0, -6)}.kthx.test`,
+            owner: null,
+            deployed: '2026-11-01T00:00:00.000Z',
+          })),
         next: null,
       });
     }
-    if (request.method === 'POST' && pathname === '/api/sites') {
-      const body = (await request.json()) as { name: string };
-      calls.push({ method: 'POST', path: pathname, body });
-      if (
-        refuseClaims-- > 0 ||
-        tokens.has(body.name) ||
-        body.name === 'taken'
-      ) {
-        return Response.json(
-          { code: 'TAKEN', message: `${body.name} is taken` },
-          { status: 409 },
-        );
-      }
-      const token = `tok-${body.name}`;
-      tokens.set(body.name, token);
-      return Response.json(
-        { name: body.name, url: `https://${body.name}.kthx.test`, token },
-        { status: 201 },
-      );
+    if (pathname === '/api/sites' && request.method === 'DELETE') {
+      return nukeOpens
+        ? Response.json({ deleted: 2, failed: 0 })
+        : Response.json(
+            { code: 'NOT_FOUND', message: 'there is nothing here' },
+            { status: 404 },
+          );
     }
-    if (request.method === 'DELETE' && pathname === '/api/sites') {
-      calls.push({ method: 'DELETE', path: pathname, body: null });
-      if (!nukeOpens) {
-        return Response.json(
-          { code: 'NOT_FOUND', message: 'there is nothing here' },
-          { status: 404 },
-        );
-      }
-      nuked = tokens.size;
-      tokens.clear();
-      return Response.json({ deleted: nuked, failed: 0 });
-    }
-    const bearer = request.headers.get('authorization')?.slice(7) ?? null;
-    if (name === undefined || tokens.get(name) !== bearer) {
-      return Response.json(
-        { code: 'FORBIDDEN', message: 'that token does not open this site' },
-        { status: 403 },
-      );
-    }
-    if (request.method === 'POST' && act === 'releases') {
-      const paths = readBundle(new Uint8Array(await request.arrayBuffer())).map(
-        (file) => file.path,
-      );
-      uploads.push({
-        name,
-        bearer,
-        filename: request.headers.get('x-filename'),
-        paths,
-      });
-      if (!paths.includes('/index.html')) {
-        return Response.json(
-          { code: 'NO_INDEX', message: 'no index.html' },
-          { status: 400 },
-        );
-      }
-      n += 1;
-      return Response.json(
-        {
-          n,
-          digest: 'a'.repeat(64),
-          url: `https://${name}.kthx.test`,
-          serving: n,
-        },
-        { status: 201 },
-      );
-    }
-    const body = request.method === 'POST' ? await request.json() : null;
-    calls.push({ method: request.method, path: pathname, body });
-    if (request.method === 'DELETE' && act === undefined) {
-      deleted.push(name);
+    const site = /^\/api\/sites\/([^/]+)$/.exec(pathname)?.[1];
+    if (site !== undefined && request.method === 'DELETE') {
       return new Response(null, { status: 204 });
     }
-    if (request.method === 'GET' && act === undefined) {
+    if (site !== undefined && request.method === 'GET') {
       return Response.json({
-        name,
-        url: `https://${name}.kthx.test`,
-        serving: 3,
-        held: false,
-        releases: [3, 2, 1].map((r) => ({
-          n: r,
-          digest: 'b'.repeat(64),
-          size: 2048,
-          at: '2026-08-31T00:00:00.000Z',
-        })),
-        usage: {
-          db_bytes: 1024,
-          files_bytes: 0,
-          ai_requests_today: 2,
-          ai_tokens_today: 40,
-        },
-        quotas: {
-          db_bytes: 268435456,
-          files_bytes: 268435456,
-          ai_requests_day: 200,
-          ai_tokens_day: 500000,
-        },
+        usage: { db_bytes: 1024, files_bytes: 0 },
+        quotas: { db_bytes: 268435456, files_bytes: 268435456 },
       });
     }
-    if (act === 'serve') {
-      return Response.json({ serving: (body as { n: number }).n, held: true });
-    }
-    if (act === 'hold') return Response.json({ held: false, serving: 3 });
     return new Response(null, { status: 404 });
   },
 });
-afterAll(() => stub.stop(true));
+afterAll(() => {
+  stub.stop(true);
+  gcs.stop();
+});
 
-function site(files: Record<string, string> = { 'index.html': '<h1>hi</h1>' }) {
+function directory(
+  files: Record<string, string> = { 'index.html': '<h1>hi</h1>' },
+) {
   const dir = mkdtempSync(join(tmpdir(), 'kthx-site-'));
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(join(dir, path, '..'), { recursive: true });
@@ -210,119 +160,367 @@ async function capture(run: () => Promise<unknown>): Promise<string> {
   return lines.join('\n');
 }
 
+/** A terminal that answers from a script, and records what it was asked. */
+function answering(...answers: (string | null)[]): Io & { asked: string[] } {
+  const asked: string[] = [];
+  return {
+    tty: true,
+    asked,
+    ask(question) {
+      asked.push(question);
+      return answers.shift() ?? null;
+    },
+  };
+}
+
+const noTerminal: Io = { tty: false, ask: () => null };
+
+/** A site somebody already deployed, as their marker and one page. */
+function theirs(name: string, owner = THEM) {
+  gcs.put(BUCKET, `${name}/index.html`, '<h1>theirs</h1>');
+  gcs.put(BUCKET, `${name}/.kthx`, '{}', {
+    contentType: 'application/json',
+    metadata: {
+      'kthx-owner': owner,
+      'kthx-deployed': '2026-10-31T12:34:56.000Z',
+    },
+  });
+}
+
+const writes = (from: number): FakeCall[] =>
+  gcs.calls.slice(from).filter((call) => call.kind === 'write');
+const deletes = (from: number): string[] =>
+  gcs.calls
+    .slice(from)
+    .filter((call) => call.kind === 'delete')
+    .map((call) => call.name);
+
 const cwd = process.cwd();
 beforeEach(() => {
+  const config = mkdtempSync(join(tmpdir(), 'kthx-config-'));
+  const adc = join(config, 'adc.json');
+  writeFileSync(
+    adc,
+    JSON.stringify({
+      type: 'authorized_user',
+      client_id: 'id',
+      client_secret: 'secret',
+      refresh_token: 'refresh',
+      token_uri: `${stub.url.origin}/token`,
+    }),
+  );
+  process.env.GOOGLE_APPLICATION_CREDENTIALS = adc;
   process.env.KTHX_ORIGIN = `${stub.url.origin}/`;
-  process.env.XDG_CONFIG_HOME = mkdtempSync(join(tmpdir(), 'kthx-config-'));
+  process.env.KTHX_SITES_BUCKET = BUCKET;
+  process.env.STORAGE_EMULATOR_HOST = gcs.url;
+  process.env.XDG_CONFIG_HOME = config;
+  gcs.buckets.delete(BUCKET);
+  gcs.before = null;
   calls.length = 0;
-  uploads.length = 0;
-  deleted.length = 0;
-  tokens.clear();
-  n = 0;
-  nuked = null;
+  held.clear();
+  email = ME;
   nukeOpens = true;
-  refuseClaims = 0;
   skillDown = false;
+  forgetCredentials();
 });
 // Commands write `kthx.json` relative to the working directory.
 afterEach(() => process.chdir(cwd));
 
 describe('deploy', () => {
-  test('mints a name, keeps the token out of the directory, and uploads the tar', async () => {
-    const dir = site({
+  test('mints and claims a name, then uploads every file but the excluded', async () => {
+    const dir = directory({
       'index.html': '<h1>hi</h1>',
       'app.js': 'x',
+      'img/logo.svg': '<svg/>',
       '.env': 'SECRET',
       'node_modules/x.js': 'x',
     });
     process.chdir(dir);
-    const first = await deploy('.');
+    const from = gcs.calls.length;
+    const result = await deploy('.', {}, noTerminal);
     const { name } = JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'));
     expect(name).toMatch(NAME);
-    expect(first.url).toBe(`https://${name}.kthx.test`);
+    expect(result.url).toBe(`https://${name}.kthx.test`);
+    expect(gcs.names(BUCKET, `${name}/`)).toEqual([
+      `${name}/.kthx`,
+      `${name}/app.js`,
+      `${name}/img/logo.svg`,
+      `${name}/index.html`,
+    ]);
 
-    const stored = JSON.parse(readFileSync(sitesFile(), 'utf8'));
-    expect(stored[stub.url.origin][name]).toBe(`tok-${name}`);
-    expect(statSync(sitesFile()).mode & 0o777).toBe(0o600);
+    // The claim is a marker written only if absent, and the deploy's last
+    // write rewrites it against the generation the claim made.
+    const markers = writes(from).filter(
+      (call) => call.name === `${name}/.kthx`,
+    );
+    expect(markers.map((call) => call.ifGenerationMatch)).toEqual([
+      '0',
+      expect.stringMatching(/^\d+$/),
+    ]);
+    expect(writes(from).at(-1)?.name).toBe(`${name}/.kthx`);
 
-    expect(uploads).toHaveLength(1);
-    expect(uploads[0]!.filename).toBe('site.tar.gz');
-    expect(uploads[0]!.paths).toEqual(['/app.js', '/index.html']);
+    const marker = gcs.get(BUCKET, `${name}/.kthx`);
+    expect(marker?.metadata['kthx-owner']).toBe(ME);
+    expect(marker?.metadata['kthx-deployed']).toMatch(/^\d{4}-\d\d-\d\dT.*Z$/);
+    expect(marker?.contentType).toBe('application/json');
+    expect(new TextDecoder().decode(marker?.bytes)).toBe('{}');
 
-    const second = await deploy('.');
-    expect(second.n).toBe(2);
-    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(1);
-    expect(uploads[1]!.bearer).toBe(`tok-${name}`);
-  });
-
-  test('rolls the dice again when a minted name is taken', async () => {
-    refuseClaims = 1;
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.');
-    const claims = calls.filter((call) => call.path === '/api/sites');
-    expect(claims).toHaveLength(2);
-    expect(claims[0]!.body).not.toEqual(claims[1]!.body);
-    expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual(
-      claims[1]!.body,
+    const page = gcs.get(BUCKET, `${name}/index.html`);
+    expect(page?.contentType).toBe('text/html; charset=utf-8');
+    expect(page?.cacheControl).toBe('no-cache');
+    expect(gcs.get(BUCKET, `${name}/img/logo.svg`)?.contentType).toBe(
+      'image/svg+xml',
     );
   });
 
-  test('--name claims that name, reuses a known one, and refuses to rename', async () => {
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.', { name: 'notes' });
-    expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
-      name: 'notes',
-    });
-    const other = site();
-    process.chdir(other);
-    await expect(deploy('.', { name: 'taken' })).rejects.toMatchObject({
-      code: 'TAKEN',
+  test('uploads HTML last, and only what changed', async () => {
+    const dir = directory({
+      'index.html': '<h1>one</h1>',
+      'about.html': 'about',
+      'app.js': 'one',
+      'style.css': 'h1{}',
     });
     process.chdir(dir);
-    await expect(deploy('.', { name: 'other' })).rejects.toMatchObject({
-      code: 'NAMED',
-    });
+    await deploy('.', { name: 'rsync-me' }, noTerminal);
 
-    const again = site();
-    process.chdir(again);
-    await deploy('.', { name: 'notes' });
-    expect(calls.filter((call) => call.path === '/api/sites')).toHaveLength(2);
+    writeFileSync(join(dir, 'index.html'), '<h1>two</h1>');
+    writeFileSync(join(dir, 'app.js'), 'two');
+    const from = gcs.calls.length;
+    const second = await deploy('.', {}, noTerminal);
+    expect(second.uploaded).toEqual(['app.js', 'index.html']);
+    expect(second.unchanged).toBe(2);
+    expect(writes(from).map((call) => call.name)).toEqual([
+      'rsync-me/app.js',
+      'rsync-me/index.html',
+      'rsync-me/.kthx',
+    ]);
+    expect(gcs.text(BUCKET, 'rsync-me/index.html')).toBe('<h1>two</h1>');
+
+    // Every non-HTML upload of a first deploy precedes every HTML one.
+    const fresh = directory({
+      'b.html': 'b',
+      'a.css': 'a',
+      'index.html': 'i',
+      'z.js': 'z',
+      'deep/page.htm': 'p',
+    });
+    process.chdir(fresh);
+    const start = gcs.calls.length;
+    await deploy('.', { name: 'ordered' }, noTerminal);
+    const order = writes(start)
+      .map((call) => call.name)
+      .filter((name) => !name.endsWith('/.kthx'));
+    const firstHtml = order.findIndex((name) => /\.html?$/.test(name));
+    expect(order.slice(0, firstHtml).every((n) => !/\.html?$/.test(n))).toBe(
+      true,
+    );
+    expect(order.slice(firstHtml).every((n) => /\.html?$/.test(n))).toBe(true);
+    expect(order).toHaveLength(5);
+  });
+
+  test('deletes what the directory no longer holds, after the uploads', async () => {
+    const dir = directory({ 'index.html': 'i', 'old.js': 'o', 'keep.js': 'k' });
+    process.chdir(dir);
+    await deploy('.', { name: 'pruned' }, noTerminal);
+    writeFileSync(join(dir, 'new.js'), 'n');
+    Bun.spawnSync(['rm', join(dir, 'old.js')]);
+
+    const from = gcs.calls.length;
+    const result = await deploy('.', {}, noTerminal);
+    expect(result.deleted).toEqual(['old.js']);
+    expect(gcs.names(BUCKET, 'pruned/')).toEqual([
+      'pruned/.kthx',
+      'pruned/index.html',
+      'pruned/keep.js',
+      'pruned/new.js',
+    ]);
+    const order = gcs.calls
+      .slice(from)
+      .map((call) => `${call.kind} ${call.name}`);
+    expect(order.indexOf('delete pruned/old.js')).toBeGreaterThan(
+      order.indexOf('write pruned/new.js'),
+    );
+    expect(order.at(-1)).toBe('write pruned/.kthx');
+  });
+
+  test('a deploy that loses the marker race fails, and deletes nothing', async () => {
+    const dir = directory({ 'index.html': 'mine', 'extra.js': 'e' });
+    process.chdir(dir);
+    await deploy('.', { name: 'raced' }, noTerminal);
+    Bun.spawnSync(['rm', join(dir, 'extra.js')]);
+    writeFileSync(join(dir, 'index.html'), 'mine again');
+
+    // Somebody else's deploy lands while this one uploads.
+    gcs.before = (call) => {
+      if (call.kind === 'write' && call.name === 'raced/index.html') {
+        gcs.before = null;
+        theirs('raced');
+      }
+    };
+    await expect(deploy('.', {}, noTerminal)).rejects.toMatchObject({
+      code: 'RACED',
+    });
+    expect(gcs.names(BUCKET, 'raced/')).toContain('raced/extra.js');
+    expect(gcs.get(BUCKET, 'raced/.kthx')?.metadata['kthx-owner']).toBe(THEM);
+  });
+
+  test('a marker rewritten after the last check still fails the deploy', async () => {
+    const dir = directory({ 'index.html': 'one' });
+    process.chdir(dir);
+    await deploy('.', { name: 'late-race' }, noTerminal);
+    writeFileSync(join(dir, 'index.html'), 'two');
+    gcs.before = (call) => {
+      if (
+        call.kind === 'write' &&
+        call.name === 'late-race/.kthx' &&
+        call.ifGenerationMatch !== '0'
+      ) {
+        gcs.before = null;
+        theirs('late-race');
+      }
+    };
+    await expect(deploy('.', {}, noTerminal)).rejects.toMatchObject({
+      code: 'RACED',
+    });
+    expect(gcs.get(BUCKET, 'late-race/.kthx')?.metadata['kthx-owner']).toBe(
+      THEM,
+    );
+  });
+
+  test('refuses a directory with no index page, and sends nothing', async () => {
+    process.chdir(directory({ 'about.html': 'no index here' }));
+    const from = gcs.calls.length;
+    await expect(
+      deploy('.', { name: 'empty' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'NO_INDEX' });
+    expect(gcs.calls.length).toBe(from);
+    expect(existsSync('kthx.json')).toBe(false);
+  });
+
+  test('refuses a dangling link rather than deploying a smaller site', async () => {
+    const dir = directory();
+    symlinkSync(join(dir, 'nowhere'), join(dir, 'broken.js'));
+    process.chdir(dir);
+    await expect(
+      deploy('.', { name: 'linked' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'DANGLING_LINK' });
+  });
+
+  test('takes a lone top-level directory as the site', async () => {
+    const dir = directory({ 'dist/index.html': 'built', 'dist/app.js': 'a' });
+    process.chdir(dir);
+    await deploy('.', { name: 'wrapped' }, noTerminal);
+    expect(gcs.names(BUCKET, 'wrapped/')).toEqual([
+      'wrapped/.kthx',
+      'wrapped/app.js',
+      'wrapped/index.html',
+    ]);
   });
 
   test('deploys a subdirectory under the project root’s name', async () => {
-    const project = site({ 'dist/index.html': '<h1>built</h1>' });
-    process.chdir(project);
-    await deploy('dist');
-    const { name } = JSON.parse(
-      readFileSync(join(project, 'kthx.json'), 'utf8'),
-    );
-    expect(name).toMatch(NAME);
-    // Never in the build output, which a build rewrites.
-    expect(() => statSync(join(project, 'dist', 'kthx.json'))).toThrow();
-    expect(uploads[0]!.paths).toEqual(['/index.html']);
-    expect(uploads[0]!.name).toBe(name);
+    const root = directory({
+      'kthx.json': JSON.stringify({ name: 'project' }),
+      'dist/index.html': 'built',
+    });
+    process.chdir(root);
+    await deploy('dist', {}, noTerminal);
+    expect(gcs.text(BUCKET, 'project/index.html')).toBe('built');
   });
 
-  test("fails with the server's code, and without a token", async () => {
-    const dir = site({ 'readme.md': 'no index' });
-    process.chdir(dir);
-    const error = await deploy('.').catch((cause: unknown) => cause);
-    expect(error).toBeInstanceOf(KthxError);
-    expect((error as KthxError).code).toBe('NO_INDEX');
+  test('a name held for a built app, or reserved, is refused', async () => {
+    held.add('apps-name');
+    process.chdir(directory());
+    await expect(
+      deploy('.', { name: 'apps-name' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'TAKEN' });
+    process.chdir(directory());
+    await expect(
+      deploy('.', { name: 'admin' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'RESERVED' });
+    expect(gcs.names(BUCKET)).toEqual([]);
+  });
+});
 
-    const orphan = site();
-    writeFileSync(join(orphan, 'kthx.json'), '{"name":"lost"}');
-    process.chdir(orphan);
-    await expect(deploy('.')).rejects.toMatchObject({ code: 'NO_TOKEN' });
+describe("somebody else's site", () => {
+  const question =
+    'site "shared" is owned by them@example.com (last deploy 2026-10-31 12:34 UTC). Overwrite? [y/N] ';
+
+  test('asks before writing over it, and yes writes it as mine', async () => {
+    theirs('shared');
+    process.chdir(directory({ 'index.html': '<h1>mine</h1>' }));
+    const io = answering('y');
+    await deploy('.', { name: 'shared' }, io);
+    expect(io.asked).toEqual([question]);
+    expect(gcs.text(BUCKET, 'shared/index.html')).toBe('<h1>mine</h1>');
+    expect(gcs.get(BUCKET, 'shared/.kthx')?.metadata['kthx-owner']).toBe(ME);
+  });
+
+  test('anything but yes leaves it alone', async () => {
+    theirs('shared');
+    process.chdir(directory({ 'index.html': '<h1>mine</h1>' }));
+    const from = gcs.calls.length;
+    await expect(
+      deploy('.', { name: 'shared' }, answering('n')),
+    ).rejects.toMatchObject({ code: 'DECLINED' });
+    await expect(deploy('.', {}, answering(''))).rejects.toMatchObject({
+      code: 'DECLINED',
+    });
+    expect(writes(from)).toEqual([]);
+    expect(gcs.text(BUCKET, 'shared/index.html')).toBe('<h1>theirs</h1>');
+  });
+
+  test('with no terminal it refuses unless --force', async () => {
+    theirs('shared');
+    process.chdir(directory({ 'index.html': '<h1>mine</h1>' }));
+    await expect(
+      deploy('.', { name: 'shared' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'NOT_YOURS' });
+    expect(gcs.text(BUCKET, 'shared/index.html')).toBe('<h1>theirs</h1>');
+
+    await deploy('.', { force: true }, noTerminal);
+    expect(gcs.text(BUCKET, 'shared/index.html')).toBe('<h1>mine</h1>');
+    expect(gcs.get(BUCKET, 'shared/.kthx')?.metadata['kthx-owner']).toBe(ME);
+  });
+
+  test('a claim that loses the race is somebody else’s site, not mine', async () => {
+    process.chdir(directory());
+    // Their claim lands between the name check and this claim.
+    gcs.before = (call) => {
+      if (call.kind === 'write' && call.ifGenerationMatch === '0') {
+        gcs.before = null;
+        theirs('contested');
+      }
+    };
+    await expect(
+      deploy('.', { name: 'contested' }, noTerminal),
+    ).rejects.toMatchObject({ code: 'NOT_YOURS' });
+    expect(
+      gcs.calls.some(
+        (call) =>
+          call.kind === 'write' &&
+          call.name === 'contested/.kthx' &&
+          call.ifGenerationMatch === '0',
+      ),
+    ).toBe(true);
+    expect(gcs.get(BUCKET, 'contested/.kthx')?.metadata['kthx-owner']).toBe(
+      THEM,
+    );
+  });
+
+  test('init says whose a taken name is', async () => {
+    theirs('wanted');
+    const dir = directory({});
+    await expect(init(dir, { name: 'wanted' })).rejects.toMatchObject({
+      code: 'TAKEN',
+      message: expect.stringContaining('them@example.com'),
+    });
   });
 });
 
 describe('init', () => {
   test('claims, writes the apex reference, and starts an empty directory off', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'kthx-init-'));
-    const name = await init(dir);
+    const name = await init(dir, {});
     expect(name).toMatch(NAME);
     expect(JSON.parse(readFileSync(join(dir, 'kthx.json'), 'utf8'))).toEqual({
       name,
@@ -331,176 +529,169 @@ describe('init', () => {
     expect(readFileSync(join(dir, 'index.html'), 'utf8')).toContain(
       '/api/sdk.js',
     );
+    expect(gcs.get(BUCKET, `${name}/.kthx`)?.metadata['kthx-owner']).toBe(ME);
+    // A claim writes the marker and nothing else.
+    expect(gcs.names(BUCKET, `${name}/`)).toEqual([`${name}/.kthx`]);
   });
 
-  test('keeps a SKILL.md somebody wrote', async () => {
-    const dir = site({ 'index.html': '<h1>mine</h1>', 'SKILL.md': '# mine\n' });
-    await init(dir, { name: 'notes' });
-    expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe('# mine\n');
-  });
+  test('keeps a SKILL.md somebody wrote, and falls back when the apex is away', async () => {
+    const dir = directory({ 'SKILL.md': 'mine' });
+    await init(dir, { name: 'kept-skill' });
+    expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe('mine');
+    // A directory with files in it gets no starter page.
+    expect(existsSync(join(dir, 'index.html'))).toBe(false);
 
-  test('leaves a directory that has files alone, and falls back when the apex is away', async () => {
-    const dir = site({ 'index.html': '<h1>mine</h1>' });
-    process.env.KTHX_ORIGIN = stub.url.origin;
-    await init(dir, { name: 'notes' });
-    expect(readFileSync(join(dir, 'index.html'), 'utf8')).toBe('<h1>mine</h1>');
-
-    const offline = mkdtempSync(join(tmpdir(), 'kthx-init-'));
-    writeFileSync(join(offline, 'kthx.json'), '{"name":"notes"}');
     skillDown = true;
-    await init(offline);
-    const bundled = readFileSync(join(offline, 'SKILL.md'), 'utf8');
-    expect(bundled).not.toBe(SKILL);
-    expect(bundled).toContain('/api/db');
+    const other = mkdtempSync(join(tmpdir(), 'kthx-init-'));
+    await init(other, { name: 'bundled-skill' });
+    expect(readFileSync(join(other, 'SKILL.md'), 'utf8')).not.toBe(SKILL);
+  });
+
+  test('a name already mine is mine to init again', async () => {
+    theirs('again', ME);
+    const dir = mkdtempSync(join(tmpdir(), 'kthx-init-'));
+    expect(await init(dir, { name: 'again' })).toBe('again');
   });
 });
 
-describe('rollback, release, ls and rm', () => {
-  test('serve the release before the serving one, or the one named, then unhold', async () => {
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.', { name: 'notes' });
-    expect(await rollback('.')).toBe(2);
-    expect(await rollback('.', 1)).toBe(1);
-    expect(await release('.')).toBe(3);
-    expect(
-      calls.filter((call) => call.path.startsWith('/api/sites/notes')),
-    ).toEqual([
-      { method: 'GET', path: '/api/sites/notes', body: null },
-      { method: 'POST', path: '/api/sites/notes/serve', body: { n: 2 } },
-      { method: 'GET', path: '/api/sites/notes', body: null },
-      { method: 'POST', path: '/api/sites/notes/serve', body: { n: 1 } },
-      { method: 'DELETE', path: '/api/sites/notes/hold', body: null },
-    ]);
-  });
-
-  test('ls reads the site, and rm needs the name typed back', async () => {
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.', { name: 'notes' });
-
-    const found = await ls('.');
-    expect(found?.serving).toBe(3);
-    expect(found?.releases).toHaveLength(3);
-
-    await rm('.', () => 'nope');
-    expect(deleted).toEqual([]);
-    expect(
-      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin].notes,
-    ).toBe('tok-notes');
-
-    await rm('.', () => 'notes');
-    expect(deleted).toEqual(['notes']);
-    expect(
-      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
-    ).toEqual({});
-  });
-
-  test('nuke asks for NUKE, and carries no key of its own', async () => {
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.', { name: 'notes' });
-    const sent = () =>
-      calls.filter(
-        (call) => call.method === 'DELETE' && call.path === '/api/sites',
-      );
-
-    // A `null` prompt means no terminal; only `--yes` skips typing NUKE.
-    await nuke({}, () => 'nope');
-    await nuke({}, () => null);
-    expect(sent()).toHaveLength(0);
-
-    const said = await capture(() => nuke({}, () => 'NUKE'));
-    expect(said).toContain('1 deleted');
-    expect(said).toContain(
-      "every site's name is claimable again, and names reserved for built apps stay taken",
+describe('ls and rm', () => {
+  test('ls reads the marker, and with no kthx.json lists only my sites', async () => {
+    theirs('mine-one', ME);
+    theirs('not-mine', THEM);
+    process.chdir(
+      directory({ 'kthx.json': JSON.stringify({ name: 'mine-one' }) }),
     );
-    expect(nuked).toBe(1);
-    expect(sent()).toHaveLength(1);
+    const one = await capture(() => ls('.'));
+    expect(one).toContain('owned by me@example.com');
+    expect(one).toContain('2026-10-31 12:34 UTC');
+    expect(one).toContain('1.0 KB');
+    const asked = calls.find((call) => call.path === '/api/sites/mine-one');
+    expect(asked?.authorization).toBe(`Bearer ${idTokenFor(ME)}`);
 
-    // Every stored token now names a claimable site, so the store is emptied.
-    expect(
-      JSON.parse(readFileSync(sitesFile(), 'utf8'))[stub.url.origin],
-    ).toEqual({});
+    process.chdir(directory());
+    const mine = await capture(() => ls('.'));
+    expect(mine).toContain('mine-one');
+    expect(mine).not.toContain('not-mine');
+
+    const all = await capture(() => ls('.', { all: true }));
+    expect(all).toContain('mine-one');
+    expect(all).toContain('not-mine');
   });
 
-  test('nuke against a host with no nuke says where one is', async () => {
-    const dir = site();
-    process.chdir(dir);
-    await deploy('.', { name: 'notes' });
-    // A 404 means the deployment names no operator; the CLI says where the
-    // nuke opens.
-    nukeOpens = false;
-    await expect(nuke({ yes: true })).rejects.toMatchObject({
-      code: 'NO_NUKE',
+  test('rm needs the name typed back, then frees the name, marker last', async () => {
+    theirs('doomed', ME);
+    gcs.put(BUCKET, 'doomed/app.js', 'a');
+    process.chdir(
+      directory({ 'kthx.json': JSON.stringify({ name: 'doomed' }) }),
+    );
+
+    await rm('.', {}, answering('nope'));
+    expect(gcs.names(BUCKET, 'doomed/')).toHaveLength(3);
+
+    const from = gcs.calls.length;
+    await rm('.', {}, answering('doomed'));
+    expect(gcs.names(BUCKET, 'doomed/')).toEqual([]);
+    expect(deletes(from).at(-1)).toBe('doomed/.kthx');
+    // The owner's site goes from the server too: its database and files.
+    const server = calls.find(
+      (call) => call.method === 'DELETE' && call.path === '/api/sites/doomed',
+    );
+    expect(server?.authorization).toBe(`Bearer ${idTokenFor(ME)}`);
+  });
+
+  test("rm asks before deleting somebody else's site", async () => {
+    theirs('their-site', THEM);
+    process.chdir(
+      directory({ 'kthx.json': JSON.stringify({ name: 'their-site' }) }),
+    );
+    await expect(rm('.', {}, noTerminal)).rejects.toMatchObject({
+      code: 'NOT_YOURS',
     });
-    expect(nuked).toBeNull();
+    const io = answering('y', 'their-site');
+    await rm('.', {}, io);
+    expect(io.asked[0]).toContain('is owned by them@example.com');
+    expect(io.asked[0]).toContain('Delete? [y/N]');
+    expect(gcs.names(BUCKET, 'their-site/')).toEqual([]);
+    // Not mine, so the server is not asked to delete it for me.
+    expect(calls.some((call) => call.path === '/api/sites/their-site')).toBe(
+      false,
+    );
   });
 
   test('every command but init, deploy and dev needs a name', async () => {
-    const dir = site();
-    process.chdir(dir);
-    for (const command of [rollback, release]) {
-      await expect(command('.')).rejects.toMatchObject({ code: 'NO_NAME' });
-    }
-  });
-
-  test('ls with no kthx.json lists every site this machine has a token for', async () => {
-    process.chdir(site());
-    await deploy('.', { name: 'notes' });
-    process.chdir(site());
-    await deploy('.', { name: 'other' });
-    process.chdir(site());
-
-    const printed = await capture(() => ls('.'));
-    expect(printed).toContain('notes');
-    expect(printed).toContain('other');
-    expect(printed).toContain('https://notes.kthx.test');
-    expect(
-      calls.filter(
-        (call) => call.method === 'GET' && call.path.startsWith('/api/sites/'),
-      ),
-    ).toHaveLength(2);
-    expect(
-      calls.filter(
-        (call) => call.method === 'GET' && call.path === '/api/sites',
-      ),
-    ).toHaveLength(0);
-  });
-
-  test('ls --all prints the public directory whatever the directory is', async () => {
-    process.chdir(site());
-    await deploy('.', { name: 'notes' });
-
-    const printed = await capture(() => ls('.', { all: true }));
-    expect(printed).toContain('notes');
-    expect(printed).toContain('v3');
-    expect(
-      calls.filter(
-        (call) => call.method === 'GET' && call.path === '/api/sites',
-      ),
-    ).toHaveLength(1);
+    process.chdir(directory());
+    await expect(rm('.', {}, noTerminal)).rejects.toMatchObject({
+      code: 'NO_NAME',
+    });
+    await expect(openSite('.')).rejects.toMatchObject({ code: 'NO_NAME' });
   });
 
   test('refuses a kthx.json that names something no site can be called', async () => {
-    // The file is committed and cloned, and its name becomes a host and a path,
-    // so it is checked before either is built.
     for (const [name, code] of [
       ['evil.example/#', 'INVALID_NAME'],
       ['ab', 'INVALID_NAME'],
       ['api', 'RESERVED'],
     ] as const) {
-      const dir = site({ 'kthx.json': JSON.stringify({ name }) });
-      process.chdir(dir);
+      process.chdir(directory({ 'kthx.json': JSON.stringify({ name }) }));
       await expect(openSite('.')).rejects.toMatchObject({ code });
       await expect(ls('.')).rejects.toMatchObject({ code });
+      await expect(deploy('.', {}, noTerminal)).rejects.toMatchObject({ code });
     }
+  });
+});
+
+describe('nuke', () => {
+  test('asks for NUKE, and carries no key of its own', async () => {
+    const sent = () =>
+      calls.filter(
+        (call) => call.method === 'DELETE' && call.path === '/api/sites',
+      );
+    await nuke({}, () => 'nope');
+    await nuke({}, () => null);
+    expect(sent()).toHaveLength(0);
+
+    const said = await capture(() => nuke({}, () => 'NUKE'));
+    expect(said).toContain('2 deleted');
+    expect(sent()).toHaveLength(1);
+    expect(sent()[0]?.authorization).toBeNull();
+  });
+
+  test('against a host with no nuke says where one is', async () => {
+    nukeOpens = false;
+    await expect(nuke({ yes: true })).rejects.toMatchObject({
+      code: 'NO_NUKE',
+    });
+  });
+});
+
+describe('credentials', () => {
+  test('none at all says how to get some', async () => {
+    process.env.GOOGLE_APPLICATION_CREDENTIALS = join(
+      tmpdir(),
+      'nothing-here.json',
+    );
+    forgetCredentials();
+    process.chdir(directory());
+    await expect(
+      deploy('.', { name: 'nobody' }, noTerminal),
+    ).rejects.toMatchObject({
+      code: 'NO_CREDENTIALS',
+      message: expect.stringContaining('gcloud auth application-default login'),
+    });
+  });
+
+  test('the owner is whoever the credentials say', async () => {
+    email = 'other@example.com';
+    process.chdir(directory());
+    await deploy('.', { name: 'whose' }, noTerminal);
+    expect(gcs.get(BUCKET, 'whose/.kthx')?.metadata['kthx-owner']).toBe(
+      'other@example.com',
+    );
   });
 });
 
 describe('siteUrl', () => {
   test('is the zone the origin states with the name in front, whatever the origin is', async () => {
-    process.env.KTHX_ORIGIN = `${stub.url.origin}/`;
     expect(await siteUrl('notes')).toBe('https://notes.kthx.test');
   });
 });

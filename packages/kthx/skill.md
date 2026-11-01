@@ -3,11 +3,12 @@
 A directory becomes `https://<name>.kthx.dev`. Every site host also answers
 `/api/*` with backends the server fronts with credentials the site never sees:
 documents, realtime, an anonymous visitor id, an OpenAI-compatible model
-endpoint, files, and MCP. There is no build step, no account, and no server to
+endpoint, files, and MCP. There is no build step and no server to
 run — a static bundle plus `window.kthx` is the whole application.
 
-There is no password reset. A site is opened by one bearer token, shown once at
-claim. A lost token is a lost site.
+A site is the folder `<name>/` in a storage bucket, and `kthx deploy` writes it
+with your own Google credentials. Its owner is the email those credentials
+name. There is no rollback.
 
 ## Client
 
@@ -109,7 +110,7 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | PATCH | `/api/db/:collection/:id` | shallow merge; `?overwrite=1`; `If-Match` |
 | PUT | `/api/db/:collection/:id` | upsert; `If-Match` / `If-None-Match: *` |
 | DELETE | `/api/db/:collection/:id` | 204 |
-| DELETE | `/api/db/:collection` | 204 — owner bearer only; drops every document |
+| DELETE | `/api/db/:collection` | 204 — owner only; drops every document |
 | GET | `/api/ws` | websocket |
 | POST | `/api/ai/v1/chat/completions` | OpenAI-compatible; also `/models`. `/v1` is optional; nothing else under `/api/ai` exists |
 | GET | `/api/ai/usage` | `{day, requests, tokens, quotas}` — today, against the daily budget |
@@ -120,28 +121,24 @@ The SDK is a convenience; the routes are the product. `<site>` is
 | POST | `/api/mcp` | JSON-RPC 2.0, one message per request |
 
 The apex has one route no token opens: `GET https://kthx.dev/api/sites` is the
-public directory — `{items: [{name, url, owner, serving, releases, at}],
-next}`, newest claim first, `limit` up to 500 and `after=<name>` for the page
-after that. It names sites and nothing else; a site's releases, usage and hold
-stay behind its bearer, and `owner` is an address only when the caller is that
-site's owner and `null` to everyone else — attribution is for the owner, not
-for the zone. It is never cached, so a name claimed a second ago is on it; ask
-for more than sixty pages a minute from one address and the answer is 429
-`RATE_LIMITED`.
-
-Three more apex routes exist for a caller whose identity the deployment can
-verify — a person on the tailnet host, where a proxy vouches for a login. An
-agent has a bearer instead and needs none of them.
+public directory — `{items: [{name, url, owner, deployed}], next}`, newest
+deploy first, `limit` up to 500 and `after=<name>` for the page after that.
+`owner` is an address only when the caller is that site's owner, and `null`
+to everyone else. Ask for more than sixty pages a minute from one address and
+the answer is 429 `RATE_LIMITED`.
 
 | Method | Path | Answers |
 | --- | --- | --- |
-| GET | `/api/whoami` | `{login}`, or 401 `UNAUTHENTICATED` when nobody is vouched for |
-| GET | `/api/names/:name` | whether a name can be claimed — the answer a 409 at publish would otherwise be |
+| GET | `/api/names/:name` | `{available, why, yours}` — whether a name is free to claim |
+| GET | `/api/whoami` | `{login}` for a tailnet login or a verified ID token, else 401 |
 | GET | `/api/sites?owner=me` | the directory, narrowed to the caller's own sites |
+| GET | `/api/sites/:name` | owner only: `{owner, deployed, usage, quotas}` |
+| DELETE | `/api/sites/:name` | owner only: deletes the folder, the database and the files; the name is free |
 
-A site answers to a bearer **or** to its owner's login, permanently and both:
-the login is only ever presented from a browser on one host, and a command
-line, an agent or a phone off the tailnet still needs something to carry.
+The owner is the email on the site's marker. A request opens a site as its
+owner with `Authorization: Bearer <Google ID token>` whose email is that one —
+`gcloud auth print-identity-token` prints one — or, on the tailnet host, with
+the tailnet login a proxy vouches for.
 
 Every non-`GET` `/api/*` from a browser must send `Origin` equal to the site's
 own; a non-browser client sends none. JSON routes require `content-type:
@@ -160,17 +157,18 @@ s→c  {t:"create"|"update",collection,id,etag,doc?} {t:"delete",collection,id}
 
 ## Site files
 
-A release is a ZIP or gzipped tar with `index.html` or `200.html` at its root; a
-lone wrapping directory is stripped. Resolution: the exact file, then
-`index.html` and `200.html` in a directory, then `/200.html` (served 200, the
-SPA fallback), then `/404.html` (served 404). `/api/`, `/files/` and `/_/` are
-the server's on every site — a bundle file under one of them is never served.
+A deploy is the directory: every file but dotfiles, `node_modules` and
+`kthx.json`, with `index.html` at its root; a lone wrapping directory is the
+root. Resolution: the exact file, then `<path>/index.html`, then the site's
+`/404.html` (served 404). `/api/` and `/files/` are the server's on every site
+— a deployed file under either is never served. A deploy shows within about
+ten seconds, and is not atomic: HTML uploads last, after the files it names.
 
 ## The file store
 
-`/files/*` is the site's own store, separate from its releases. Anyone on the
+`/files/*` is the site's own store, separate from its deployed files. Anyone on the
 site may `PUT` a file; the path then belongs to that visitor, and only they or
-the site's bearer may overwrite or delete it (else 403). `content-type` is
+the site's owner may overwrite or delete it (else 403). `content-type` is
 required and is the stored type — nothing sniffs the bytes. Allowed:
 `image/*` except SVG, `audio/*`, `video/*`, `application/pdf`,
 `application/json`, `text/plain`, `text/csv`, `text/markdown`. Everything else,
@@ -183,7 +181,7 @@ with a dot. Served with the stored type, `nosniff`, a strong etag and
 
 | What | Limit |
 | --- | --- |
-| upload | 25 MiB compressed, 32 MiB unpacked, 2000 files, 60 per day |
+| deploy | 32 MiB, 2000 files |
 | document | 1 MiB, nesting 32, 10 000 keys; request body 2 MiB; bulk create 100 |
 | site database | 256 MiB, 256 collections |
 | query | 500 items, 16 `where` clauses, `$in` of 100, `offset` 10 000 |
@@ -198,8 +196,7 @@ Reads are unmetered.
 
 `INVALID_NAME` `RESERVED` `INVALID_COLLECTION` `INVALID_ID` `INVALID_DOCUMENT`
 `INVALID_QUERY` `INVALID_PATH` `UNSUPPORTED_TYPE` `INVALID_MODEL`
-`UNKNOWN_FORMAT` `UNSUPPORTED_ZIP` `MALFORMED_ZIP` `PATH_ESCAPES_ARCHIVE`
-`NO_INDEX` `MALFORMED_REQUEST` (400) · `UNAUTHENTICATED` (401) · `FORBIDDEN`
+`MALFORMED_REQUEST` (400) · `UNAUTHENTICATED` (401) · `FORBIDDEN`
 (403) · `NOT_FOUND` (404) · `METHOD_NOT_ALLOWED` (405) · `TIMEOUT` (408) ·
 `TAKEN` `EXISTS` (409) · `GONE` (410) · `PRECONDITION_FAILED` (412) ·
 `TOO_LARGE` (413) · `RATE_LIMITED` `AI_BUDGET` (429) · `STORAGE_FAILURE` (500) ·
@@ -209,29 +206,26 @@ Reads are unmetered.
 
 ```
 bun add -g https://kthx.dev/cli/kthx.tgz
+gcloud auth application-default login
 ```
 
 | Command | Does |
 | --- | --- |
 | `kthx init [dir]` | claims a name, writes `kthx.json` and this file |
-| `kthx deploy [dir]` | uploads the directory and serves it |
+| `kthx deploy [dir]` | syncs the directory to the site: uploads what changed, deletes what is gone |
 | `kthx dev [dir]` | serves the directory on `:4321` against the site's live `/api` |
-| `kthx rollback [n]` | serves release `n` and holds it there |
-| `kthx release` | drops the hold; the newest release serves |
-| `kthx ls` | releases, what is serving, usage against the quotas; with no `kthx.json`, every site in `sites.json` |
+| `kthx ls` | the site's owner, last deploy and usage; with no `kthx.json`, every site you own |
 | `kthx ls --all` | the public directory: every site on the apex |
-| `kthx rm` | deletes the site |
+| `kthx rm` | deletes the site and frees the name |
 | `kthx open` | opens `https://<name>.kthx.dev` |
 | `kthx upgrade` | replaces this copy with the one the apex serves |
 
-The token lives in `$XDG_CONFIG_HOME/kthx/sites.json`, never in the project
-directory — which is what gets uploaded. `kthx.json` holds `{name}` and nothing
-secret.
-
-A deployment may answer claiming and site control on a private host only; the
-public apex says so with `403 PRIVATE`. Set `KTHX_ORIGIN` to that host for every
-command. The site itself stays at `https://<name>.kthx.dev`: `GET /api` on
-either apex answers `{zone, url, docs}`, and that is how the CLI finds it.
+The CLI reads Google Application Default Credentials: a gcloud user's, or a
+workload's `external_account` file in `GOOGLE_APPLICATION_CREDENTIALS`. A claim
+is a marker, `<name>/.kthx`, written only if absent. Ownership is a courtesy:
+deploying over or deleting a site someone else owns asks first, and with no
+terminal it refuses unless you pass `--force`. A deploy that races another
+fails with `RACED`; deploy again. `kthx.json` holds `{name}` and nothing secret.
 
 `kthx upgrade` re-runs `bun add -g` on the apex tarball. It replaces only a
 `bun add -g` install. `kthx --version` prints the version and the build id; set
@@ -241,14 +235,14 @@ to turn the colour off.
 ## MCP
 
 An editor that speaks Streamable HTTP with headers connects to
-`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`; the
-token is the one in `sites.json`. Tools: `site_info`, `db_collections`,
+`https://<name>.kthx.dev/api/mcp` with `Authorization: Bearer <token>`, a
+Google ID token for the site's owner from `gcloud auth print-identity-token`. Tools: `site_info`, `db_collections`,
 `db_query`, `db_get`, `db_create`, `db_update`, `db_delete`.
 
 ## Owning a site
 
-The bearer is required by `/api/sites/*` on the apex, by `DELETE
-/api/db/:collection`, and by `/api/mcp`. Everywhere else a bearer that is not
-this site's is ignored and the caller proceeds as a visitor. Writes default to
+The owner's ID token is required by `/api/sites/:name` on the apex, by `DELETE
+/api/db/:collection`, and by `/api/mcp`. Everywhere else a bearer that does not
+open this site is ignored and the caller proceeds as a visitor. Writes default to
 anyone on the site's own origin, bounded by the quotas above — a kthx link is
 meant to be sendable to anyone.
