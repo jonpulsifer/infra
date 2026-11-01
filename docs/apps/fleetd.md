@@ -1,86 +1,53 @@
 ---
 title: fleetd
-description: The Go service on spore that attests folly's machines and nodes, issues their LDevIDs, drives Tinkerbell's installs from NetBox, and serves each first boot's Talos config once.
+description: The service on spore that checks machine identity and controls folly node installation.
 status: live
 ---
 
-fleetd decides whether a machine may become a folly node, gives it the means to become one, and keeps watching it. It checks a machine's TPM evidence against the attestation profile of its class (`apps/fleetd/attest/policy/`), issues the node's LDevID, a TPM-resident key with a certificate from spore's YubiKey CA, and its LAK certificate. It turns NetBox's `kubernetes-node` devices into [Tinkerbell](../platform/nixos/tinkerbell.md)'s objects, renders the Talos config an install fetches, and cordons a node it quarantines. NetBox is its system of record, and the owner acts there.
+fleetd controls how a machine becomes a folly Kubernetes node. It runs on spore and uses NetBox for device state and owner requests.
 
-## Use it
+It checks the machine's identity, authorizes installation, and checks the running node each day. [Tinkerbell](../platform/nixos/tinkerbell.md) runs the installation actions.
 
-| Surface | Address | Who can reach it |
-| --- | --- | --- |
-| Device flow | `https://enroll.lolwtf.ca/attest/v1/attest` and the session routes under it | HookOS on a netbooting machine, at spore's bootstrap address |
-| Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` | A node's first boot from disk |
-| LDevID and verdict lookups, renewal and daily check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
-| Webhook and metrics | `http://<SPORE_IP>:8446/webhook`, `/healthz`, `/metrics` | NetBox's event rule and the Anchor network |
-| Admin API | `https://spore.<tailnet>:8445`, `GET /machines` | Tailnet logins in `ATTEST_APPROVERS` |
-| NetBox | A device's `desired_action` and `status` | The owner |
+## Start here
 
-`SPORE_IP` and `SPORE_BOOTSTRAP_IP` are in `clusters/folly/config/anchor-topology.json`. The anchors' CoreDNS answers the enrollment name with spore's bootstrap address, and a public certificate covers it, since Talos trusts only its bundled roots before it has a config.
-
-| `desired_action` | The run |
+| To learn about | Read |
 | --- | --- |
-| `provision` | Netboot HookOS, which attests; wipe the system disk, install Talos and boot the disk. A class fleetd does not render is wiped and stays in HookOS |
-| `attest` | Netboot HookOS, which attests, and boot the disk again |
-| `wipe` | Wipe the system disk and stay in HookOS |
-
-`clusters/folly/fleet/classes.json` is the class table, and git owns it. Each class names its `os`, the Tinkerbell `template` every Workflow of the class runs, an `installer_image` pinned by digest (a Talos class leaves it empty, and its image comes from `class-inputs.json`), the `policy_profile` that judges its boot, `secure_boot`, `payload_kind` and `reattest`. fleetd reads the file from `FLEET_CLASSES`. A device whose class is not in the table is refused and journaled, and the verifier refuses a table whose profile is missing or disagrees about Secure Boot. The `talos` profile is the policy of the Talos classes. The `ubuntu` profile trusts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA as PCR 7 authorities after the separator, and pins no shim or GRUB digest. At each attestation fleetd records the SHA-256 of the dbx variable and of shim's `SbatLevel` in the `dbx_hash` and `sbat_level` fields of the device. A change raises a journal warning and never quarantines.
-
-A device in `decommissioning` gets the `retire` run, which wipes, erases the whole disk and powers the node off. fleetd then takes the node out of folly: it cordons the node, evicts its pods, waiting up to ten minutes on a PodDisruptionBudget, and deletes its Node, its kubelet's CSRs and its bootstrap token. Only then does the device go `offline`. While folly's API does not answer, the wiped device stays `decommissioning`, the journal says so once, and each pass tries again. A `provision`, `wipe` or `retire` run wipes the disk, so it starts only for a device with `install_disk_serial`, the serial its install disk reports; until then fleetd journals that the run waits and leaves `desired_action` set. The Workflow carries the serial in its `hardwareMap`, since the Hardware's disk holds only the kernel name. The Template's `wipe-disk` and `install` write the disk at that name only when it reports the serial, no other disk reports it, and it is neither removable nor on USB. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
-
-fleetd keeps at most one unfinished Workflow per device, because Tinkerbell hands a machine's agent the actions of all its Workflows in a random order. A `desired_action` set while a run goes is consumed when it asks for the run's own action; another action stays set, the journal says once that it waits, and the first pass after the run ends starts it. The Workflow is the record of the request that started it: when NetBox refuses the write that names a new run, every later pass adopts that run, finished or not, and writes again, with the journal `its record was late`, and never starts a second one. `decommissioning` set during another run of a device with a BMC has the BMC power the machine off through a Rufio Job, then deletes that run, only while it is as a read just before shows it, and starts the retirement. A BMC that refuses the power-off, and a device without a BMC, keep the run, since a deleted run's action goes on; the retirement waits for the run, and the journal says why. A retirement that fails at its BMC job ran nothing: the journal names the Rufio Job and the BMC's answer, and fleetd starts the retirement again after a wait that doubles from 5 minutes to 4 hours, while the device stays `decommissioning`. A config is served only while NetBox shows its device `planned`: a device that leaves `planned` or NetBox loses its unread config, and a NetBox that does not answer gets the fetch a 503 for the node to retry. The section "One run per machine" of `apps/fleetd/README.md` has the rules.
-
-## Limits
-
-- An approved EK binding is only as true as its evidence. fleetd admits the TPM the nodes file names, so the receiving scan or the supplier's record that ties the chassis serial to its EKs is the trust source. A serial that SMBIOS or Redfish reports, a pending claim and the console of a box nobody checked prove nothing.
-- Rendered configs live in a tmpfs, `/run/fleetd/configs`, which a restart of fleetd keeps and a reboot of spore drops, with the record of a served config NetBox has no release for. Nothing runs the provision again: a run goes on through the outage, so a node installed under a dropped config asks for it in vain and its device stays `planned`. fleetd journals the first ask, `FleetInstallConfigMissing` fires while the node asks, and the owner sets `desired_action` to `provision`. The configs stay off disk because each carries the cluster's secrets.
-- A node that acknowledged its whole config and lost it before Talos wrote it to STATE, as to a power loss in that second, asks again with its spent code. fleetd serves no config twice: the code is a bearer credential, in the clear in META and on the console. It journals the first ask of the run, `FleetInstallConfigRefetched` fires while the node asks, whatever the device's status, and the recovery is a new provision. The disk holds no STATE to lose.
-- A provision's `SUCCESS` means the reboot started, not that the node booted its disk. A node that boots HookOS again, as with PXE first in its boot order, attests with its config unread. fleetd journals once per run that the node booted HookOS after the Workflow succeeded, and `FleetNodeBootedHookOSAfterInstall` fires. A device with a `desired_action` set netboots on purpose and is no failure.
-- One issuer signs every LDevID. The bundle `terraform/pki/certs/folly-devid-ca.pem` keeps capsule's, forge's software and spore's CAs, so an LDevID another CA issued verifies until its node renews it from spore's.
-- A TPM 1.2 node, or class `worker-g2`, cannot attest, so it never installs from here.
-- A worker's unspent config joins as its node, and as no other: fleetd approves a kubelet certificate only for the node whose token asked, and the controller manager approves none. Until fleetd deletes the token, a minute after the approval, a holder of the config can join as that node.
-- A join with the cluster's bootstrap token, as shale's or a control plane's, waits for the owner's approval. fleetd journals the request on the device, and [Install Talos on a node](../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate) approves it. A disk or an image that holds the token can ask until [Rotate the cluster bootstrap token](../runbooks/rotate-the-cluster-bootstrap-token.md) replaces it.
-- A worker whose kubelet loses its client certificate, as to a wipe of `EPHEMERAL`, or that stays off past the certificate's year, cannot bootstrap again with its expired token. The recovery is a new provision.
-- Talos's trustd token, `machine.token` in every config, is the cluster's, and nothing rotates it. A config on a disk still gets Talos API certificates from trustd with it.
-- Nothing revokes a kubelet's client certificate. A disk image from before a retirement holds one, valid for up to a year, and its kubelet can register its Node again; the deleted Node and token are what fleetd can revoke.
-- The disk check trusts the serial a disk reports. Two disks that report one serial, such as clones or some USB bridges, are refused rather than told apart, and a disk that reports none through sysfs cannot be wiped or installed from here.
+| The system and its trust boundaries | [Folly design](../reference/folly-design.md) |
+| Provision, wipe and retirement requests | [Lifecycle](fleetd/lifecycle.md) |
+| Identity checks and configuration delivery | [Attestation and installation](fleetd/attestation.md) |
+| Endpoints, alerts and recovery limits | [Operate fleetd](fleetd/operations.md) |
 
 ## How it works
 
-HookOS attests on every boot, before tink-agent waits for work: the agent image's entrypoint sets the clock from `fleet_ntp_server` and runs `tink-attest` against `fleet_attest_url` (`images/tink-agent-autoid`). The machine's NetBox device, found by its SMBIOS serial, must be `planned` and carry an approved EK binding, which the nodes file declares and `terraform/netbox/folly` projects into `approved_ek_hash` and `approved_ek_hash_ecc`. A binding counts only when NetBox's changelog shows that Terraform's user, `homelab.fleetd.bindingAuthor` in `nix/services/fleetd.nix`, made its newest change. Every approved EK must be sent, match and activate its credential; a manufacturer certificate admits nothing on its own. A device without a binding, and a serial NetBox lacks, wait as a claim that authorizes nothing, and other EKs are refused and journaled on the device without a write. fleetd checks each EK certificate against `apps/fleetd/attest/roots/`, activates a credential, replays the quoted event log against the policy profile of the device's class, reads the device and its changelog again, and issues both certificates only while it holds the binding the session started with. The pins `ek_hash` and `ek_hash_ecc`, which fleetd alone writes, then hold the binding alone. Only a check the TPM signed for becomes a verdict. A transport error, a timeout, a missing TPM or evidence before a TPM proof never quarantines and writes nothing. Neither does a failed intake while no run expects the machine in HookOS, such as a worker that fell back to PXE: fleetd refuses it, journals the device and counts it, and the node keeps its identity.
+1. A machine boots HookOS, the network installation environment.
+2. Its Trusted Platform Module (TPM) proves possession of the approved endorsement keys (EKs).
+3. fleetd checks the boot evidence and the device's declaration in NetBox.
+4. fleetd issues device certificates and authorizes an eligible installation.
+5. Tinkerbell wipes the declared disk and installs Talos.
+6. Talos fetches its configuration once. fleetd then marks the device `active`.
+7. The running node sends a signed boot check each day.
 
-The signed confirm of an intake pass that matched a binding admits the device in the same process, once fleetd has read the binding again. fleetd fills in nothing: it refuses a device that lacks a field `terraform/netbox/folly` declares (`talos_class`, `install_disk`, `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` or the primary address) and a device whose attested LLDP port is not its `expected_port`, and writes only the journal. It then starts the provision Workflow, without a boot mode since the machine waits in HookOS, when the owner set `desired_action` to `provision`, or when the worker never ran a Workflow and auto-provision is on. A control plane waits for the owner. fleetd renders the config with talosctl from `clusters/folly/fleet/class-inputs.json` and the worker secrets, and answers 32 random bytes wrapped to the TPM. A worker's config carries a Kubernetes bootstrap token of its own, never the cluster's: fleetd creates it in folly's `kube-system` as `bootstrap-token-<id>`, one per node, and it expires four hours after the config's TTL. The kubelet uses it once, for its first client certificate, and renews with that certificate, so a config left on a disk cannot join again. fleetd approves that certificate only when the request names the node the token was minted for, once per token, and deletes the token once the kubelet has it. An admission policy refuses the controller manager the approval of any request a bootstrap token makes, and its approval binding binds only a group no one is in (`clusters/folly/tinkerbell-access/node-client-approval.yaml`). Once the device is `active`, the Talos root applies its own config to the node, whose token, `nojoin.0000000000000000`, no Secret holds, as [Talos Linux](../platform/kubernetes/talos.md) describes. The entrypoint leaves the code and a mark of the pass in `/worker/fleet`. The Template wipes a provision's disk only with both, and the install action writes the code to `META`. fleetd starts a new run only once the render's gates pass. The first GET of the config whose every byte the node acknowledged burns it, and fleetd sets the device `active` after the answer. An answer the node does not acknowledge before the connection closes or the write deadline passes keeps the config for its next fetch. HEAD and conditional requests are refused. An unread config goes after two hours, a control plane's after 30 minutes.
+The device certificates are the Local Device Identity (LDevID) and Local Attestation Key (LAK) certificates. The LAK signs later boot checks.
 
-On a running node, `tpm-reattest` sends a LAK-signed quote daily, and needs no binding; a `planned` device gets no renewal: a renewal from 30 days before expiry, else the daily check. An authenticated boot-policy failure quarantines a worker, blocks renewal and requests a cordon through `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`. The policy's `renew_required_authorities` is empty; its allowed-authority checks still apply. A control-plane failure records a failed verdict and alerts without a cordon; fleet-owned SPIRE registration eligibility can change. PCR 0 is kept per BIOS version in `pcr0_by_bios`. The session's AK signs network reports, but LLDP does not authenticate the physical switch port. [Identity](../platform/identity.md#renewal) has the renewal and the owner's quarantine lift.
+## Owner actions
 
-Each pass also writes `/var/lib/fleetd/spire-nodes.json`, the nodes that spore's SPIRE server registers: each `active` device with a passing verdict, with its name and its `ek_hash` and `ek_hash_ecc` pins. A device that is decommissioning, failed, quarantined, offline or gone from NetBox is absent. The file's `revoked` list names each machine fleetd holds a record of whose device is decommissioning, offline or gone, with its EK hashes and its LDevID's SHA-1 fingerprint until the LDevID's `notAfter`. fleetd holds no SPIRE credential and never calls the server. A root unit on spore, `spire-server-fleet-entries`, reads the file and owns the registration entries whose IDs start with `fleet-`; it deletes a node's entries and bans its agent when the node leaves the file, bans each revoked node's agents, and changes nothing when the file is malformed or drops more than one node at once. [Identity](../platform/identity.md#fleetd-entries) has the boundary with the entries that Nix declares.
+The owner sets `desired_action` in NetBox to request `provision`, `attest` or `wipe`. The `decommissioning` status requests retirement.
 
-## Operate
+- [Provision a node](../runbooks/provision-a-node.md): install an eligible machine.
+- [Reprovision a node](../runbooks/reprovision-a-node.md): replace an installation.
+- [Retire a node](../runbooks/retire-a-node.md): erase the disk and remove the node.
 
-| Alert | Meaning | Runbook |
-| --- | --- | --- |
-| `EnrollmentNameNotServed` | fleetd is down, or its certificate lapsed | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `FleetdDevIDNotServing` | The DevID listener on 8444, which every renewal reaches, does not answer | Read `journalctl -u fleetd` on spore |
-| `TalosAttestUnattendedBootFailed` | A node booted HookOS unprompted and failed attestation; nothing was recorded | Read the device's NetBox journal |
-| `BootFilesNotServed` | dnsmasq or nginx on spore does not serve iPXE or HookOS | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `FleetInstallPending` | A rendered config has waited 30 minutes for its node | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `FleetInstallConfigMissing` | A planned device's node asks for a config fleetd does not hold, as after a reboot of spore | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `FleetInstallConfigRefetched` | A node asks again for a config fleetd served it and did not keep it | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `FleetNodeBootedHookOSAfterInstall` | A planned device attested from HookOS after its provision succeeded, so its firmware did not boot the disk | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `TalosAttestQuarantined` | A node's newest verdict is a quarantine | [Provision a node](../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `TalosAttestWaitingForApproval` | An intake waits for an approved EK binding | [Provision a node](../runbooks/provision-a-node.md#approve-a-machines-eks) |
-| `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's daily quote or renewal fails | [Add a TPM node to SPIRE](../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
-| `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A daily check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
-| `KubeletCSRPending` | A kubelet's first certificate request has waited an hour | [Install Talos on a node](../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate) |
-| `NodeClientApprovalBindingRestored` | The controller manager's approval binding has subjects again, as after a Talos Kubernetes upgrade, or fleetd cannot read it | Reconcile Flux's `tinkerbell-access` |
+## Important limits
+
+- Provision, wipe and retirement erase data. Each requires the declared disk serial.
+- A successful installation Workflow means the reboot starts. It does not prove that Talos boots or Kubernetes becomes ready.
+- A spore reboot loses pending configurations. Recovery requires a new provision.
+- Retirement cannot revoke an issued kubelet client certificate.
+- TPM 1.2 nodes and class `worker-g2` cannot use this installation path.
 
 ## Reference
 
-- [Technical design](../reference/folly-design.md): installation authority, evidence and threat boundaries.
-- Source, environment and HTTP contract: `apps/fleetd/`
-- spore: `nix/services/fleetd.nix` and `nix/services/talos-boot.nix`
-- Template and Secrets: `clusters/folly/tinkerbell/`
-- HookOS agent: `images/tink-agent-autoid`; renewal image: `ghcr.io/jonpulsifer/tink-attest`
+- Source and HTTP contract: `apps/fleetd/`
+- Service: `nix/services/fleetd.nix`
+- Class declarations: `clusters/folly/fleet/classes.json`
 - Alerts: `clusters/folly/monitoring/fleetd-rules.yaml`
-- DevID CAs: `terraform/pki/devid.tf` and `terraform/pki/devid-ca.tf`

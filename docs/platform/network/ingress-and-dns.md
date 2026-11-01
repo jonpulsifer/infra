@@ -27,9 +27,28 @@ Each cluster that serves kthx Apps has an Apps Gateway with its own VIP. An App 
 
 [capsule](../../hosts/capsule.md), [spore](../../hosts/spore.md) and [forge](../../hosts/forge.md) are the three anchors. Each runs CoreDNS and chrony through `nix/profiles/anchor.nix`.
 
-Two shared addresses, `ns1.lolwtf.ca` and `ns2.lolwtf.ca` (`NS1_IP` and `NS2_IP` in `clusters/folly/config/anchor-topology.json`), make the three one service. keepalived on every anchor runs unicast VRRP for both, from `nix/services/anchor-vips.nix`. ns1 prefers capsule, then forge, then spore; ns2 prefers forge, then spore, then capsule. An anchor whose CoreDNS stops answering drops below every healthy anchor, so the address moves to one that answers. `AnchorVipDown` fires when an address has no holder or its CoreDNS is down. `s3.lolwtf.ca` (`S3_VIP`) fronts the anchors' Garage S3 API, held on capsule, then forge, then spore; a Garage that lacks a quorum or stops answering S3 drops its anchor below the healthy ones, and `AnchorS3VipDown` fires when no anchor serves it.
+### Shared service addresses
 
-DHCP on the Kubernetes, future and iot networks hands out ns1 and ns2 as resolvers, `dns.lolwtf.ca` and `time.lolwtf.ca` point at them, and folly's Talos nodes take time from them (`TimeSyncConfig` in `clusters/folly/talos/patches.tf`). NixOS hosts keep their own time servers (`networking.timeServers` in `nix/profiles/fleet.nix`).
+keepalived runs unicast VRRP on each anchor. It moves shared addresses between healthy anchors, as `nix/services/anchor-vips.nix` declares.
+
+| Name | Topology key | Preferred anchors, in order | Health check |
+| --- | --- | --- | --- |
+| `ns1.lolwtf.ca` | `NS1_IP` | capsule, forge, spore | CoreDNS answers |
+| `ns2.lolwtf.ca` | `NS2_IP` | forge, spore, capsule | CoreDNS answers |
+| `s3.lolwtf.ca` | `S3_VIP` | capsule, forge, spore | Garage has quorum and answers S3 requests |
+
+The keys come from `clusters/folly/config/anchor-topology.json`. An unhealthy anchor loses priority to every healthy anchor.
+
+`AnchorVipDown` fires when a DNS address has no holder or CoreDNS is down. `AnchorS3VipDown` fires when no anchor serves S3.
+
+### DNS and time clients
+
+- DHCP supplies ns1 and ns2 to the Kubernetes, future and iot networks.
+- `dns.lolwtf.ca` and `time.lolwtf.ca` point at those addresses.
+- Folly's Talos nodes use them for time, through `TimeSyncConfig` in `clusters/folly/talos/patches.tf`.
+- NixOS hosts use `networking.timeServers` in `nix/profiles/fleet.nix`.
+
+### Resolver behavior
 
 CoreDNS blocks the StevenBlack hosts list and forwards other queries over TLS to Cloudflare's malware-blocking resolvers. It answers `api.smiirl.com` with folly's smiirl Gateway address for the [Smiirl counter](../../apps/smiirl.md). [cloudpi4](../../hosts/cloudpi4.md) runs the same config as a test resolver.
 

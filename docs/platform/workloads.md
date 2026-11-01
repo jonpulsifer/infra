@@ -18,7 +18,16 @@ offsite runs the public and upload-heavy workloads, because folly's internet lin
 
 A `.yaml` file in `clusters/folly/apps/` next to a directory of the same name is a Flux Kustomization that applies that directory.
 
-To see what is live, run `flux --context <site> get kustomizations -A` and `flux --context <site> get helmreleases -A`. To see the objects that a directory makes, run `kubectl kustomize <path>`. `mise run k8s:render-apps` makes sure that each directory renders, and shows no objects.
+## Inspect workloads
+
+| Question | Command |
+| --- | --- |
+| Which Flux Kustomizations are live? | `flux --context <site> get kustomizations -A` |
+| Which Helm releases are live? | `flux --context <site> get helmreleases -A` |
+| Which objects does a directory produce? | `kubectl kustomize <path>` |
+| Does each directory render? | `mise run k8s:render-apps` |
+
+The render check reports errors. It does not print the objects.
 
 ## Workloads with a page
 

@@ -27,7 +27,23 @@ Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace
 
 A node with no `Hardware` or no running `Workflow` takes step 5 directly when it PXE-boots on the Kubernetes network. A declared `planned` device that attests there is admitted, and fleetd starts its provision without a boot mode, since the machine already waits in HookOS.
 
-Every HookOS boot attests before the agent waits for work. `images/tink-agent-autoid`'s entrypoint runs privileged in the host's network namespace with HookOS's `/worker` mounted, as hook-bootkit starts it. It sets the clock from `fleet_ntp_server`, mounts securityfs, and runs `tink-attest` against `fleet_attest_url` up to five times, 30 seconds apart. `tink-attest` reports the boot NIC's address and the switch's LLDP frame, signed by the session's AK; on these machines AMT shares the host's NIC. It leaves an install code in `/worker/fleet/install_code`, which the Template's install action mounts as `/tmp/fleet`. The UKI, iPXE's menu and each `Hardware`'s script take that command line from `nix/images/hookos-folly.nix`. [fleetd](../../apps/fleetd.md#how-it-works) says what an intake pass does.
+### Attestation before work
+
+Every HookOS boot attests before the agent waits for work. hook-bootkit starts the `images/tink-agent-autoid` entrypoint with these privileges:
+
+- The container is privileged.
+- It uses the host network namespace.
+- It mounts HookOS's `/worker` directory.
+
+The entrypoint sets the clock from `fleet_ntp_server` and mounts securityfs. It calls `tink-attest` at `fleet_attest_url` up to five times, with 30 seconds between attempts.
+
+`tink-attest` reports the boot NIC address and the switch's LLDP frame. The session's AK signs the report. On these machines, AMT shares the host NIC.
+
+The install code goes in `/worker/fleet/install_code`. The Template's install action mounts that directory at `/tmp/fleet`.
+
+The UKI, iPXE menu and Hardware scripts use the command line from `nix/images/hookos-folly.nix`. [fleetd](../../apps/fleetd.md#how-it-works) explains intake.
+
+### Logs and PXE state
 
 HookOS sends its syslog to Smee on UDP 514 at `SPORE_BOOTSTRAP_IP`, and Smee writes it to the `tinkerbell` journal on spore, so a failed action leaves a record: read a node's with `journalctl -u tinkerbell | grep <node address>`.
 

@@ -3,7 +3,9 @@ title: NixOS
 description: The flake that builds each Linux host and OS image, the fleet baseline each host shares, and the daily upgrade from main.
 ---
 
-Each Linux host in the lab runs NixOS, a Linux distribution that builds each system from Nix code. One flake builds every host, OS image and Nix-built package, and the registry, `nix/hosts/default.nix`, lists them.
+NixOS builds the lab's general-purpose Linux hosts from Nix code. Kubernetes nodes run Talos Linux.
+
+One flake builds the NixOS hosts, OS images and Nix-built packages. The registry, `nix/hosts/default.nix`, lists them.
 
 ## Parts
 

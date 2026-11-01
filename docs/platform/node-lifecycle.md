@@ -7,15 +7,34 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 
 ## At a glance
 
-1. The owner adds the node's entry to the nodes file in a pull request, and Atlantis applies it: a `planned` device with its serial, class, address and cable, and no MAC.
-2. The owner plugs the machine into its node port. Firmware PXE on the Kubernetes network loads the signed iPXE from spore, which chains the signed HookOS.
-3. HookOS attests the TPM and boot chain to fleetd before its agent waits for work, and fleetd writes the MAC on the device with the machine's serial. A device whose entry approves no EK, and a serial no entry names, wait: only a TPM that proves every EK its entry approves gets an identity.
-4. On a pass, fleetd issues an LDevID and a LAK certificate. The signed confirm admits the device: fleetd checks its attested switch port, starts its `provision` `Workflow` in [Tinkerbell](nixos/tinkerbell.md), renders its Talos config, and answers an install code wrapped to the TPM.
-5. The `Workflow` wipes the system disk, runs the Talos installer with the code in META, and boots the disk.
-6. On its first boot, Talos fetches its config by UUID and code from `/talos/config`, and takes the node's address statically from it. fleetd drops the config once it is served whole, and sets the device `active`.
-7. When spore has the node's alias, its SPIRE agent attests by the LDevID and serves SVIDs.
+1. The owner adds the node to the nodes file in a pull request. Atlantis creates a `planned` device with no MAC address.
+2. The owner connects the machine to its node port. Firmware PXE loads signed iPXE from spore, then signed HookOS.
+3. HookOS proves its TPM identity and boot state to fleetd. fleetd records the MAC against the device's serial.
+4. fleetd checks every approved EK, then issues the LDevID and LAK certificates. Without an approved binding, the machine waits.
+5. The signed confirmation triggers admission. fleetd checks the reported switch port, starts a Tinkerbell `provision` Workflow and renders the Talos configuration.
+6. fleetd returns an install code wrapped to the TPM. The Workflow wipes the system disk, installs Talos and stores the code in META.
+7. Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address.
+8. After the complete response, fleetd deletes the configuration and sets the device `active`.
+9. Once spore has the node's alias, the SPIRE agent attests by LDevID and serves SVIDs.
 
-An installed node reinstalls when the owner sets `desired_action` to `provision`: fleetd starts the run, Rufio powers the node into HookOS through AMT at its own address, and HookOS's attestation takes the code. A provision that installs nothing, such as for the control plane or a TPM 1.2 node, wipes the disk and leaves the node in HookOS. `attest` netboots HookOS, which attests. `wipe` erases the disk. The status `decommissioning` starts a `retire` run, which wipes and erases the whole disk and powers the node off, leaving it `offline`.
+An unknown serial also waits. A machine must prove every EK that its inventory entry approves before fleetd issues an identity.
+
+## Actions after installation
+
+The owner requests an action through NetBox. Rufio uses the node's AMT address to boot it into HookOS when needed.
+
+| Request | Result |
+| --- | --- |
+| `desired_action: provision` | Reinstalls an eligible node. HookOS attestation obtains the install code. |
+| `desired_action: attest` | Boots HookOS and attests the node. |
+| `desired_action: wipe` | Erases the disk. |
+| Status `decommissioning` | Starts retirement: wipes and erases the entire disk, powers off the node and sets it `offline`. |
+
+Retirement also cordons the Kubernetes node, evicts its pods and deletes its cluster records before fleetd marks it `offline`.
+
+A provision for an unsupported node, such as a TPM 1.2 node, wipes the disk and leaves it in HookOS. Control-plane installation additionally requires `homelab.fleetd.controlPlanes`; it is disabled by default.
+
+See [Identity](identity.md#terms) for the credential terms and [Tinkerbell](nixos/tinkerbell.md) for the Workflow components.
 
 ## Who owns what
 

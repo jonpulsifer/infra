@@ -4,7 +4,23 @@ description: "The owner's homelab at two sites, folly and offsite, managed as co
 cards: [apps, platform]
 ---
 
-This wiki documents the owner's homelab, which the [infra repository](https://github.com/jonpulsifer/infra) manages as code. The lab has two sites: folly at home and offsite at a remote site. Each site has a UniFi network and a Kubernetes cluster on NixOS hosts, and OpenTofu declares the network and cloud accounts. The owner and agents use these pages to run and change the lab. The wiki is public, and each merge of `docs/` to `main` publishes it.
+This wiki explains how to use, operate and change the owner's homelab.
+The [infra repository](https://github.com/jonpulsifer/infra) declares its configuration.
+
+The lab has two sites: folly at home and offsite at a remote site.
+Each site has a UniFi network and a Kubernetes cluster. Kubernetes nodes run Talos Linux.
+NixOS hosts run supporting services. OpenTofu declares network and cloud resources.
+
+## Learn the lab
+
+1. Read [How changes ship](platform/how-changes-ship.md) to learn which controller applies each kind of change.
+2. Read [Network](platform/network.md) to understand how the sites connect.
+3. Read [Folly design](reference/folly-design.md) to understand node installation, identity and trust limits.
+4. Read [fleetd](apps/fleetd.md) to learn how the node lifecycle controller works.
+5. Use a [runbook](runbooks/index.md) when you need to perform a task.
+
+The [glossary](reference/glossary.md) defines lab-specific terms.
+The wiki is public. Each merge of `docs/` to `main` publishes it.
 
 ## Start here
 

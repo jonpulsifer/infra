@@ -55,6 +55,8 @@ folly's signed Talos images use the lab's own Secure Boot keys, outside the FML 
 | PCR signing key | The expected PCR 11 value of each UKI. A TPM opens a sealed disk only under a policy this key signed. | None |
 | `PK`, `KEK` and `db` | The firmware's key lists. A machine in Setup Mode enrolls them. `db` holds both lab certificates and the Microsoft UEFI certificates. The UKI signing key signs all three. | `PK.auth`, `KEK.auth`, `db.auth` |
 
+### Key constraints
+
 The UKI and HookOS signing keys are RSA-2048. HP's EliteDesk 800 G2 and G5 firmware refused images signed with RSA-4096 keys whose certificates were in `db`. The item's `PK_auth`, `KEK_auth` and `db_auth` files match the committed `.auth` files. The PCR signing key is fleet-wide. Every disk that a TPM seals to the signed policy is bound to it, so a new key leaves each sealed disk unable to open after the next upgrade. Rotate it only with a plan that reinstalls each such node.
 
 ## DevID CAs
@@ -68,6 +70,8 @@ The DevID CAs sign each attested machine's LDevID and LAK certificates. Each one
 | `folly-devid-ca-capsule` | RSA-2048, generated in PIV slot 9c of a YubiKey 4c | capsule |
 
 A key never leaves its card. Its PIN policy is once and its touch policy is never, so a service signs unattended after one login. The keys are RSA because YubiKey 5 firmware before 5.7 leaks ECDSA keys (Yubico's EUCLEAK advisory), and the 4c's firmware is past the ROCA fix in 4.3.5.
+
+### Issuance and deployment
 
 - `scripts/devid-ca-yubikey.sh` sets each card's PIN, PUK and management key, stores them in the host's SOPS file and the 1Password item `devid-ca-<host>`, and commits the key's CSR.
 - `terraform/pki/devid.tf` issues the software CA. `scripts/pki/devid-ca.sh` writes it to `folly-devid-ca-software.pem` and its chain to `folly-devid-ca-software-chain.pem` in `terraform/pki/certs/`.

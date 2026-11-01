@@ -7,17 +7,96 @@ Git declares folly's Kubernetes nodes in `clusters/folly/inventory/nodes.yaml`, 
 
 ## Nodes file
 
-`models` holds what every machine of a model shares, keyed by its NetBox device type slug: the SMBIOS model name, the manufacturer, the NIC its template names, the install disk, the TPM version, Intel AMT and the expected Secure Boot state. `nodes` holds one entry per node, keyed by its name, with its model, serial, Talos class, switch port, address and BMC type. A node may override its model's disk, TPM, AMT or Secure Boot. The comment at the top of the file defines each key, and every value is a scalar on its own line.
+The file has two sections:
 
-A node may also carry its approved EK binding: `approved_ek_rsa2048` and `approved_ek_eccp256`, each optional, the hash of the TPM's RSA and ECC endorsement key as [fleetd](../apps/fleetd.md) hashes an EK, the lowercase hex SHA-256 of its DER SubjectPublicKeyInfo. fleetd admits a `planned` node, and issues its identity and install code, only when its TPM proves every approved EK, so a node without a binding waits. The binding is two flat keys, not a nested map, because every reader takes the file's scalar shape as it is. The receiving step is its trust source: a receiving scan of the TPM, or the supplier's authenticated record that ties the chassis serial to its EKs. A claim fleetd shows proves nothing on its own, and `mise run attest:approve <serial>` only prints the lines to compare. [Approve a machine's EKs](../runbooks/provision-a-node.md#approve-a-machines-eks) is the procedure.
+| Section | Contents |
+| --- | --- |
+| `models` | Shared hardware facts, keyed by NetBox device type slug |
+| `nodes` | One entry per node, keyed by node name |
 
-A node also carries `disk_serial`, the serial its install disk reports, quoted so that a serial of digits stays a string. `disk` is a kernel name such as `/dev/sda`, which follows probe order, so a swapped slot, a missing disk or a USB stick can take it. The provision Template therefore wipes and installs the disk at `disk` only when that disk reports `disk_serial`, no other disk reports it, and it is neither removable nor on USB, and fleetd starts no `provision`, `wipe` or retirement for a node without one. The serial belongs to one disk, so a model never sets it. Read it from the disk's label or a receiving scan, and on a running node from `talosctl --nodes <addr> get disks`: an NVMe disk's `serial`, or the last word of a SATA disk's `wwid`, which reads `t10.ATA <model> <serial>`. A replaced disk needs a new `disk_serial` before its node's next run that wipes. swell's entry has none, because swell is powered off and nobody has read its disk, so swell gets no run that wipes until a pull request adds it.
+Model facts include the SMBIOS model, manufacturer, NIC, install disk, TPM version, Intel AMT and expected Secure Boot state.
+Each node declares its model, serial, Talos class, switch port, address and BMC type.
+A node can override its model's disk, TPM, AMT or Secure Boot setting.
 
-To add a node, add its entry in a pull request and comment the plans that [Readers](#readers) names, since a change to the file alone gets no autoplan. Then comment `atlantis apply`. The plan fails on an unknown model or class, an address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json` as [Topology](topology.md) describes, a shared address, switch port or serial, an EK two nodes approve, an approved EK hash that is not 64 lowercase hex characters, another key that starts with `approved_`, a `disk_serial` that two nodes share, that is not a quoted string of letters, digits, dots, underscores and hyphens, or that a model sets, or when `API_SERVER_IP` there is no node's address. A node without `disk_serial` plans. `tofu test` in `terraform/netbox/folly` runs these checks against the fixtures in its `testdata/`.
+The file's opening comment defines each key. Every value is a scalar on its own line.
+
+### Approved TPM keys
+
+A node can declare two optional endorsement key (EK) hashes:
+
+- `approved_ek_rsa2048`: the TPM's RSA key hash.
+- `approved_ek_eccp256`: the TPM's ECC key hash.
+
+Each value is the lowercase hexadecimal SHA-256 hash of the key's DER SubjectPublicKeyInfo.
+Keep these as flat keys: every reader expects scalar values.
+
+[fleetd](../apps/fleetd.md) admits a `planned` node only when its TPM proves every approved EK.
+A node without a binding waits. Admission permits identity issuance and install-code delivery.
+
+The binding needs independent evidence: a receiving scan or an authenticated supplier record that ties the chassis serial to its EKs.
+A claim from fleetd is insufficient evidence. `mise run attest:approve <serial>` prints candidate lines for comparison; it approves nothing.
+See [Approve a machine's EKs](../runbooks/provision-a-node.md#approve-a-machines-eks).
+
+### Install disk
+
+Each node declares `disk_serial`, the serial its install disk reports. Quote the value so that digits remain a string.
+Models cannot declare this key because each disk has its own serial.
+
+The kernel name in `disk`, such as `/dev/sda`, depends on probe order.
+A different disk can acquire that name after a hardware change.
+The provision Template wipes and installs only when all these checks pass:
+
+- The disk at `disk` reports `disk_serial`.
+- No other disk reports that serial.
+- The disk is neither removable nor connected through USB.
+
+fleetd starts no provision, wipe or retirement without a disk serial.
+After a disk replacement, update `disk_serial` before the next destructive run.
+
+Read the serial from the disk label or a receiving scan.
+On a running node, use `talosctl --nodes <addr> get disks`:
+
+- For NVMe, read `serial`.
+- For SATA, read the last word of `wwid`, which has the form `t10.ATA <model> <serial>`.
+
+swell has no declared disk serial because it is powered off and its disk serial is unknown.
+It cannot receive a destructive run until a pull request declares the serial.
+
+### Add and validate an entry
+
+Add the node in a pull request. Request the plans listed under [Readers](#readers), then comment `atlantis apply`.
+A change to the nodes file alone does not trigger an autoplan.
+
+The plan rejects:
+
+- An unknown model or class.
+- An address outside `K8S_NODE_CIDR` in `clusters/folly/config/cluster-topology.json`.
+- A shared address, switch port, chassis serial, disk serial or approved EK.
+- An approved EK hash other than 64 lowercase hexadecimal characters.
+- An unknown key that starts with `approved_`.
+- A disk serial set by a model, or an unquoted disk serial.
+- A disk serial with characters other than letters, digits, dots, underscores and hyphens.
+- An `API_SERVER_IP` that matches no node address.
+
+A node without `disk_serial` can pass the plan, but cannot receive a destructive run.
+`tofu test` in `terraform/netbox/folly` checks the fixtures in its `testdata/` directory.
+See [Topology](topology.md) for the network keys.
 
 ## Terraform
 
-The root creates each device as `planned`, with its serial, device type, site, role and platform, the address on the interface its device type's template makes, that address as the primary IPv4, a cable to the switch port, and the custom fields `talos_class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt`, `secure_boot_expected` and `expected_port`, the switch port. fleetd writes none of them and refuses an install while one is empty. `install_disk_serial` goes to null for a node without `disk_serial`. The approved binding goes to `approved_ek_hash` and `approved_ek_hash_ecc`, and to null for a node without one; fleetd reads them and never writes them. No MAC is needed: fleetd writes it when the machine attests.
+The root creates each device with status `planned`. It declares:
+
+- The serial, device type, site, role and platform.
+- The address on the interface from the device type's template, and that address as the primary IPv4.
+- A cable to the switch port.
+- The hardware fields `talos_class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt` and `secure_boot_expected`.
+- `expected_port`, which identifies the switch port.
+
+fleetd does not write these fields. It refuses installation when a required field is empty.
+A missing `disk_serial` produces a null `install_disk_serial`.
+
+Terraform writes approved keys to `approved_ek_hash` and `approved_ek_hash_ecc`; absent bindings become null.
+fleetd reads these fields but does not write them. It records the MAC when the machine attests.
 
 | Field or object | Written by |
 | --- | --- |
@@ -37,13 +116,30 @@ Terraform never updates a device in place. A change to an entry's serial, model,
 | Talos | `address` for the node's static address, `class`, `disk` for the install selector, `tpm` for `tpm_nodes` unless `tpm_off` names the node, for each node NetBox holds `active` or `failed` | `clusters/folly/talos/nodes.tf`, `talos.tf` |
 | [fleetd](../apps/fleetd.md) | Nothing from the file; it reads each declared fact, the approved EK binding among them, from the node's NetBox device | `apps/fleetd/fleet/netbox.go` |
 
-The Talos root reads each node's status from NetBox at plan time, and its plan fails when NetBox holds no device for a declared node, so a new node's device comes from an apply of `terraform/netbox/folly` first. `mise run render-class-inputs` refuses the same case, and reads each status too, since the API server's SANs name the control planes NetBox holds `active` or `failed`. The MACs stay in NetBox: fleetd on spore links each one's `netboot-not-allowed` TFTP path from them on each reconcile pass.
+The Talos root reads each node's NetBox status at plan time.
+Its plan fails if a declared node has no NetBox device.
+Apply `terraform/netbox/folly` before planning Talos for a new node.
+
+`mise run render-class-inputs` also requires a NetBox device and reads its status.
+The API server's SANs include control planes with status `active` or `failed`.
+
+MACs remain in NetBox. On each reconcile pass, fleetd uses them to link each node's `netboot-not-allowed` TFTP path on spore.
 
 A change to the file alone gets no Atlantis autoplan. Comment `atlantis plan -d terraform/netbox/folly`, `atlantis plan -d terraform/network/unifi/folly` and `atlantis plan -d clusters/folly/talos` on the pull request.
 
 ## Drift
 
-`mise run inventory:check` reads each planned, active and failed node from NetBox, and then each active and failed node over the Talos API, from its SystemInformation, SecurityState and Ethernet link, and compares `model`, `sku`, `serial`, `bios`, `mac`, `secure_boot` and the address with NetBox. It prints each difference and exits 1 on any. A firmware update or a board swap is drift until NetBox records it. With `--record` it writes a journal entry on the device when its findings change and keeps the `drift` tag on a drifting device.
+`mise run inventory:check` compares NetBox with the machines:
+
+1. Read each planned, active and failed node from NetBox.
+2. Query active and failed nodes through the Talos API: SystemInformation, SecurityState and Ethernet link.
+3. Compare model, SKU, serial, BIOS, MAC, Secure Boot and address with NetBox.
+
+The check prints each difference and exits with status 1 if it finds drift.
+A firmware update or board replacement remains drift until NetBox records it.
+
+With `--record`, the check writes a device journal entry when its findings change.
+It also maintains the `drift` tag on each device with a difference.
 
 `mise run inventory:observe <address>` prints the same fields for one node. Add `--insecure` for a node in maintenance mode, which has no Talos config yet.
 

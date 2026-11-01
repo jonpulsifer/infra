@@ -29,7 +29,37 @@ The bootstrap network has no DHCP: it holds spore's boot address. The Kubernetes
 
 ## Netboot images
 
-iPXE, about 1.2 MB, carries an embedded script that runs `dhcp`, sets `boot-url` to `http://<SPORE_BOOTSTRAP_IP>/talos/folly`, and chains `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`, Smee's script for the booting MAC. If that fails, it shows a menu with a 10-second timeout. Its default, `hookos`, chains `${boot-url}/hookos-amd64-secureboot-uki.efi` with the command line from `nix/images/hookos-folly.nix`, which a `Hardware`'s script passes too. `enroll` sanboots the signed ISO. On firmware in Setup Mode, its systemd-boot menu offers "Enroll Secure Boot Keys: auto", which enrolls `PK`, `KEK` and `db` from `clusters/folly/talos/secureboot/` and reboots. Select it: systemd-boot enrolls on its own only in a virtual machine. On HP firmware, clear the keys with Secure Boot off, enroll, then turn Secure Boot on, because HP reloads its factory keys when Secure Boot is turned on with no keys. An 800 G2 on BIOS N21 2.37 refuses the `PK` write; 2.63 accepts it. `exit` returns to the firmware, as does an item that cannot load. sanboot takes no relative URL, which is why the script sets `boot-url`. Before HookOS, the script frees every other image with `imgfree`, because systemd-stub refuses to start while iPXE serves another image's initrd, and passes the command line as arguments, because without Secure Boot systemd-stub takes iPXE's arguments in place of its signed command line.
+iPXE is about 1.2 MB. Its embedded script runs DHCP and sets `boot-url` to `http://<SPORE_BOOTSTRAP_IP>/talos/folly`.
+
+It requests Smee's script for the booting MAC at `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`.
+
+### Fallback menu
+
+If the request fails, iPXE displays a menu with a 10-second timeout.
+
+| Item | Action |
+| --- | --- |
+| `hookos` (default) | Load `${boot-url}/hookos-amd64-secureboot-uki.efi` with the command line from `nix/images/hookos-folly.nix`. Hardware scripts use the same command line. |
+| `enroll` | Use sanboot to load the signed ISO. |
+| `exit` | Return to firmware. An item that cannot load also returns to firmware. |
+
+### Secure Boot enrollment
+
+In Setup Mode, the ISO's systemd-boot menu offers "Enroll Secure Boot Keys: auto". This loads `PK`, `KEK` and `db` from `clusters/folly/talos/secureboot/`, then reboots.
+
+Select the enrollment item. systemd-boot enrolls automatically only in a virtual machine.
+
+On HP firmware, clear the keys with Secure Boot off. Enroll the keys, then enable Secure Boot. HP restores factory keys if Secure Boot is enabled with no keys present.
+
+An 800 G2 with BIOS N21 2.37 refuses the `PK` write. Version 2.63 accepts it.
+
+### iPXE constraints
+
+- sanboot requires an absolute URL, so the script sets `boot-url`.
+- Before HookOS starts, `imgfree` releases other images. systemd-stub refuses to start while iPXE serves another image's initrd.
+- The script passes the command line as arguments. Without Secure Boot, systemd-stub uses those arguments instead of its signed command line.
+
+### HookOS image
 
 HookOS is one UKI for every node, signed with the HookOS key. Its signed command line names no worker, pins the agent image `ghcr.io/jonpulsifer/tink-agent-autoid` by digest, and names `fleet_attest_url` and `fleet_ntp_server`. That image sets the agent ID to the MAC of the NIC that holds the default route, and attests before the agent starts. The firmware checks iPXE, HookOS and each image iPXE chains against `db`, and [PKI](../pki.md#talos-secure-boot-keys) says which key signs what.
 

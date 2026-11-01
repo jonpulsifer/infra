@@ -3,7 +3,23 @@ title: Identity
 description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file.
 ---
 
-SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs on [spore](../hosts/spore.md). An agent on a folly node proves that it holds a TPM: by the LDevID, a TPM-resident key with a certificate from the DevID CA, that the attest service issued it, or by its endorsement key (EK) on the server's allow list. It then serves SVIDs, SPIFFE's X.509 and JWT credentials, to the pods on that node.
+SPIRE gives folly nodes and their pods identities in the trust domain `lolwtf.ca`. Its server runs on [spore](../hosts/spore.md).
+
+A node's agent proves that it holds a trusted TPM. SPIRE accepts either a device certificate or an approved TPM endorsement key. The agent then gives credentials to authorized pods.
+
+## Terms
+
+| Term | Meaning |
+| --- | --- |
+| SPIFFE ID | The name of a node or workload, such as `spiffe://lolwtf.ca/node/<name>` |
+| SVID | An X.509 or JWT credential that proves a SPIFFE identity |
+| TPM | The hardware security module that holds a node's keys |
+| EK | The TPM's endorsement key |
+| LDevID | A device identity certificate for a key held in the TPM |
+| LAK | The certified attestation key used to prove the node's boot state |
+| DevID CA | The certificate authority that signs device identities |
+
+Read [Node lifecycle](node-lifecycle.md) first for the installation sequence. The [technical design](../reference/folly-design.md) explains the trust limits.
 
 ## Server
 
@@ -47,17 +63,72 @@ Two owners write registration entries, and the entry ID says which.
 | Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`, which declares none, so the sync prunes every `git-*` entry |
 | fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the bans of withdrawn and revoked nodes' agents |
 
-fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]`, EK hashes of 64 lowercase hex characters and LDevID fingerprints of 40, and leaves every entry as it is when the file is malformed or names a node or an EK hash as both registered and revoked. A node is in `nodes` while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and bans each agent whose node selector no entry carries any longer.
+#### Registration and withdrawal
 
-A node is in `revoked` while fleetd holds its record and its device is `decommissioning`, `offline` or gone from NetBox. The entry names the node, its EK hashes, and the SHA-1 fingerprint of the LDevID on file until that LDevID's `notAfter`. The applier bans each agent that matches any of them: by its agent ID, by `tpm:pub_hash:<hash>`, or by `tpm_devid:subject:cn:<name>`, which covers every LDevID the node holds, renewed or not. It bans a revoked node's agent even while a `git-*` entry carries its selector. An EK hash that a registered node carries is never revoked, so a TPM that moves to a new name keeps its identity.
+fleetd writes `spire-nodes.json` from NetBox. It has no SPIRE credential. The applier runs as root through the server's socket.
 
-A banned agent cannot attest again with the same agent ID, so neither an unexpired LDevID nor an EK on the allow list admits it. SPIRE has no unban. When a node is registered again, after a quarantine is lifted or a re-provision, the applier evicts each banned agent that carries one of the node's selectors and that nothing revokes; the record goes, and the agent attests afresh. A re-provisioned node's new LDevID is a new agent ID and needs no eviction, but an EK agent's ID is its EK hash and does. The applier owns these bans: it lifts a ban made by hand on a registered node's agent, so set the device `failed` to keep a node out.
+The applier accepts these values:
 
-SPIRE checks no LDevID revocation beyond the ban. Between the owner setting `decommissioning` and the ban, the node's agent keeps its SVIDs: until fleetd's next pass rewrites the file, which starts the applier through the path unit, or the 10-minute timer when the path unit misses it. `BanAgent` needs an attested-node record, so an agent that first attests after a run is banned at the next one. A banned agent's workload SVIDs last until their TTL, an hour by SPIRE's default.
+- Node names that match `[a-z0-9-]`.
+- EK hashes with 64 lowercase hexadecimal characters.
+- LDevID fingerprints with 40 lowercase hexadecimal characters.
 
-One run withdraws, or bans an agent of, at most `homelab.spire.fleetEntries.maxWithdrawals` nodes, 1 by default. A withdrawn node is one that holds a `fleet-*` alias and is absent from `nodes`. A node also counts when the run bans an agent of it: a revoked node, or a listed node whose EK hash alias goes, as when a bulk edit clears the `ek_hash` pins. The run bans before it deletes entries, so a run that fails between the two plans the same bans again. A retirement or a quarantine takes out one node, so a file that drops two at once reads as a bulk edit in NetBox or a filter gone wrong. A run over the cap changes nothing, exits non-zero, and `SporeSpireFleetEntriesFailed` fires after 15 minutes. The applier, which is in `nix/services/spire/fleet-entries.sh`, then refuses every run until the file is back under the cap or the owner allows it. To allow it, the owner names each node in `/var/lib/spire-fleet-entries/withdraw` on spore, one name a line, as root. The next run withdraws or bans them and removes the file. `mise run spire:test` runs the applier against a stub server.
+A malformed file changes nothing. The same applies if a node or EK hash appears as both registered and revoked.
 
-SPIRE rejects an entry that repeats another's parent, SPIFFE ID and selectors. The applier skips an entry that a `git-*` entry, or one made by hand, already issues, and the Nix sync deletes a `fleet-*` entry that an entry it declares repeats. The declared entry wins in both orders, and no alias is missing while a node moves from one owner to the other.
+| Export list | Admission condition | Applier action |
+| --- | --- | --- |
+| `nodes` | The device is `active` and its verdict is `attested`. | Register its aliases and workloads. |
+| Absent from `nodes` | The node does not meet that condition. | Delete its `fleet-*` entries. Ban agents whose node selector has no remaining entry. |
+| `revoked` | fleetd holds a record, but the device is `decommissioning`, `offline` or absent from NetBox. | Ban matching agents, even if a `git-*` entry carries their selector. |
+
+A revoked record includes the node name and EK hashes. It also includes the stored LDevID's SHA-1 fingerprint until the certificate's `notAfter` time.
+
+The applier matches revoked agents by agent ID, EK hash or `tpm_devid:subject:cn:<name>`. The CN match covers renewed LDevIDs too. An EK hash held by a registered node is never revoked. A TPM can therefore move to a new node name.
+
+#### Bans and readmission
+
+A banned agent cannot attest with the same agent ID. An unexpired LDevID or an allowed EK does not override the ban.
+
+SPIRE has no unban operation. When the node registers again, the applier removes its banned agent record if nothing still revokes it. The agent can then attest again.
+
+A new LDevID produces a new agent ID. An EK agent retains its hash-based ID, so it needs the removal step.
+
+The applier also removes manual bans on registered nodes. To keep a node out, set its NetBox device to `failed`.
+
+#### Credential expiry
+
+SPIRE checks no LDevID revocation beyond the ban. Setting `decommissioning` does not immediately end access:
+
+1. fleetd updates its export on the next pass.
+2. The path unit starts the applier. A 10-minute timer retries if the path unit misses the update.
+3. The applier bans the agent. Existing workload SVIDs remain valid until their TTL expires, normally one hour.
+
+`BanAgent` needs an attested-node record. If an agent first attests after an applier run, the next run bans it.
+
+#### Protection against bulk withdrawal
+
+One run can withdraw or ban agents for at most `homelab.spire.fleetEntries.maxWithdrawals` nodes. The default is one.
+
+A node counts toward the limit if:
+
+- It has a `fleet-*` alias but is absent from `nodes`.
+- The run bans one of its agents. This includes revoked nodes and listed nodes that lose an EK alias.
+
+A bulk edit that clears `ek_hash` pins can exceed the limit. The applier then changes nothing and exits with an error. `SporeSpireFleetEntriesFailed` fires after 15 minutes.
+
+The applier refuses further runs until the export is below the limit or the owner authorizes the withdrawal. The owner records authorized node names in `/var/lib/spire-fleet-entries/withdraw` on spore, as root, one name per line. The next run acts on those names and removes the file.
+
+The applier bans agents before deleting entries. If it fails between these operations, the next run plans the bans again.
+
+Source: `nix/services/spire/fleet-entries.sh`. `mise run spire:test` tests it against a stub server.
+
+#### Duplicate registrations
+
+SPIRE rejects entries with identical parents, SPIFFE IDs and selectors.
+
+The fleet applier skips an entry already supplied by a `git-*` or manual entry. The Nix sync deletes a duplicate `fleet-*` entry when its declaration supplies the same identity.
+
+The declared entry wins in either order. The node keeps its alias while registration ownership changes.
 
 ## The chain
 
@@ -88,15 +159,43 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). fl
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
 | `offline` | Retired, and kept for history | fleetd, after the retirement run succeeds |
 
-Only the owner moves a device out of `failed` or into `decommissioning`, and fleetd refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, fleetd answers the node's `/devid` with 403 and cordons the node. fleetd refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and alerts without a cordon. That verdict can also remove fleet-owned SPIRE registration eligibility. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
+Only the owner moves a device out of `failed` or into `decommissioning`. fleetd refuses a `failed` device.
+
+### Quarantine
+
+Quarantine changes the attestation verdict, not the device status.
+
+| Evidence | Result |
+| --- | --- |
+| An authenticated worker quote fails policy | Set `attest_verdict` to `quarantined: <reason>`, refuse `/devid` with HTTP 403 and cordon the node. |
+| A control-plane quote fails policy | Record `failed-no-quarantine: <reason>` and alert without a cordon. Fleet-owned SPIRE registration eligibility can also change. |
+| A device is `decommissioning` or `offline` | Refuse LDevID renewal. Its LDevID remains valid until expiry. |
+
+A quarantined worker gets no new identity until the owner clears the verdict. Its next daily check or renewal must prove both keys and pass policy. fleetd then restores its record and LDevID files. The owner uncordons the node.
+
+Use [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) or [Retire a node](../runbooks/retire-a-node.md) for the procedures.
 
 ## Agents
 
 The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the EK plugin and `spire-devid-init` to SPIRE's agent.
 
-The init container `devid-init` reads the node's SMBIOS serial and fetches `<ATTEST_URL>/devid/<serial>` from fleetd's DevID listener on spore, with `ATTEST_URL` from the `spire-attest` ConfigMap. When the LDevID names this node and serial, is current and matches its key blob, it writes the files and renders the agent's config with `tpm_devid`. Otherwise, or with `ATTEST_URL` empty, it renders the EK attestor. The `tpm_devid` agent keeps its state in `/var/lib/spire-agent/tpm_devid`. The blobs are wrapped by the TPM's storage root key, which the agent derives from the TCG H-1 or H-2 template, so they load on no other TPM.
+### Agent initialization
+
+The init container `devid-init` reads the SMBIOS serial. It fetches `<ATTEST_URL>/devid/<serial>` from fleetd on spore. The `spire-attest` ConfigMap supplies `ATTEST_URL`.
+
+It selects `tpm_devid` only if the LDevID:
+
+- Names this node and serial.
+- Is current.
+- Matches its key blob.
+
+Otherwise, or if `ATTEST_URL` is empty, it selects the EK attestor.
+
+The `tpm_devid` agent stores state in `/var/lib/spire-agent/tpm_devid`. The TPM's storage root key wraps the blobs. The agent derives that key from the TCG H-1 or H-2 template. The blobs cannot load on another TPM.
 
 The container is privileged, since the device cgroup refuses `/dev/tpmrm0` to any other container. It shares the host's PID namespace and network, so the `k8s` workload attestor can ask the kubelet for a caller's pod. Its key and SVID stay in `/var/lib/spire-agent` on the node, so a new pod resumes with no second attestation.
+
+### Pod access
 
 A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a hostPath volume, which needs a privileged namespace. A node with no label runs no agent, so its pods get no SVID. The Job `spire-smoke` prints the SPIFFE ID that the agent serves it.
 
@@ -123,7 +222,9 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 
 ### Daily check
 
-On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are. A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
+On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are.
+
+A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
 
 A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 26 hours.
 
