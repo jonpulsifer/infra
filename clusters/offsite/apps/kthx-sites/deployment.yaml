@@ -35,7 +35,7 @@ spec:
             - name: BUCKET
               value: bluenose-kthx-sites
             - name: MOUNT
-              value: /sites
+              value: /sites/bucket
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /var/run/secrets/gcp/gcp-credentials.json
           securityContext:
@@ -48,18 +48,18 @@ spec:
                   - -c
                   - |
                     for i in 1 2 3 4 5 6 7 8 9 10; do
-                      fusermount3 -u /sites && exit 0
+                      fusermount3 -u /sites/bucket && exit 0
                       sleep 2
                     done
-                    fusermount3 -uz /sites
+                    fusermount3 -uz /sites/bucket
           startupProbe:
             exec:
-              command: [mountpoint, -q, /sites]
+              command: [mountpoint, -q, /sites/bucket]
             periodSeconds: 2
             failureThreshold: 30
           readinessProbe:
             exec:
-              command: [mountpoint, -q, /sites]
+              command: [mountpoint, -q, /sites/bucket]
             periodSeconds: 10
           resources:
             requests:
