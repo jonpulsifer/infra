@@ -125,10 +125,11 @@ export function McpPage({
           <>
             <Prose>
               Each kthx site serves its own tools at <code>{siteUrl}</code>.
-              They take the site's owner bearer from <code>sites.json</code>;{' '}
-              <code>kthx mcp</code> in the site's directory prints the address
-              and the file. Name the server <code>kthx-&lt;site&gt;</code> so
-              two sites stay apart.
+              They take the owner's Google ID token, as{' '}
+              <code>gcloud auth print-identity-token</code> prints it;{' '}
+              <code>kthx mcp</code> in the site's directory prints the address.
+              Name the server <code>kthx-&lt;site&gt;</code> so two sites stay
+              apart.
             </Prose>
             <Snippet
               label="the site add command"

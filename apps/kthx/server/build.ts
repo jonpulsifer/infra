@@ -1,12 +1,13 @@
 /**
  * `POST /api/build`: one sentence in, one HTML document out, streamed as ndjson.
+ * `POST /api/build/publish` puts a page online: it claims the name if it is
+ * free and writes `index.html` and the marker, owned by the caller's login.
  * Identity host only: every call spends the operator's AI plan under a login.
- * It never claims or publishes; the page does that through the sites API.
  */
 import { createHash } from 'node:crypto';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readGcsBytes } from '@repo/archive/gcs';
 import { enter, utcDay } from './ai.ts';
+import { SiteRaced } from './bucket.ts';
 import { bodyOf, isPlainObject } from './documents.ts';
 import {
   type Code,
@@ -20,7 +21,6 @@ import {
 } from './http.ts';
 import { secondsToMidnight } from './limits.ts';
 import { nameProblem, RESERVED_NAMES } from './names.ts';
-import { ensureRelease, releaseDir } from './releases.ts';
 import { type Ctx, nameStanding, opensSite } from './sites.ts';
 
 /** Room to describe a business, too small for a pasted document. */
@@ -440,6 +440,14 @@ export async function buildApi(
   const login = ctx.caller.login;
   if (login === null) return refuse('UNAUTHENTICATED', ctx.id);
 
+  if (segments.length === 4 && segments[3] === 'publish') {
+    if (request.method !== 'POST') return refuse('METHOD_NOT_ALLOWED', ctx.id);
+    if (!sameOrigin(request, ctx.host, ctx.port)) {
+      return refuse('FORBIDDEN', ctx.id);
+    }
+    if (!isJson(request)) return refuse('MALFORMED_REQUEST', ctx.id);
+    return publish(request, ctx, login);
+  }
   if (segments.length === 4) {
     if (request.method !== 'GET') return refuse('METHOD_NOT_ALLOWED', ctx.id);
     return draft(ctx, login, segments[3] ?? '');
@@ -561,50 +569,86 @@ async function changeable(
   name: string,
 ): Promise<{ document: string } | { code: Code }> {
   if (nameProblem(name) !== null) return { code: 'NOT_FOUND' };
-  const [row] = (await ctx.sql`
-    select s.token_hash, s.owner_login, s.serving, s.deleted_at, r.location
-    from sites s
-    left join releases r on r.site = s.name and r.n = s.serving
-    where s.name = ${name} limit 1
-  `) as {
-    token_hash: string | null;
-    owner_login: string | null;
-    serving: number | null;
-    deleted_at: Date | null;
-    location: string | null;
-  }[];
-  if (row === undefined || row.deleted_at !== null) {
-    return { code: 'NOT_FOUND' };
-  }
-  if (!opensSite(ctx.caller, row)) return { code: 'FORBIDDEN' };
-  if (row.serving === null || row.location === null) {
-    return { code: 'NOT_FOUND' };
-  }
-  const here = await ensureRelease(
-    ctx.config.sitesDir,
-    name,
-    row.serving,
-    row.location,
-    ctx.depot,
-  ).catch((cause: unknown) => {
-    logCause(ctx.id, 'rehydrating a release to change it', cause);
-    return false;
-  });
-  if (!here) return { code: 'BUSY' };
+  const marker = await ctx.sites.marker(name, true);
+  if (marker === null) return { code: 'NOT_FOUND' };
+  if (!(await opensSite(ctx, marker))) return { code: 'FORBIDDEN' };
 
-  const dir = releaseDir(ctx.config.sitesDir, name, row.serving);
-  const entries = await readdir(dir, { recursive: true }).catch(() => null);
+  const paths = await ctx.sites.paths(name);
   // Only a single-page site: publishing one file over a site with assets would
-  // strand its images in an old release.
-  if (entries === null || entries.length !== 1 || entries[0] !== 'index.html') {
+  // delete its images.
+  if (paths.length !== 1 || paths[0] !== 'index.html') {
     return { code: 'NOT_FOUND' };
   }
-  const page = Bun.file(join(dir, 'index.html'));
-  // The answer's cap, applied to the question: a release may hold 32 MiB, and
-  // this page is posted to the upstream once per model.
-  if (page.size > MAX_DOCUMENT_BYTES) return { code: 'TOO_LARGE' };
-  const document = await page.text().catch(() => null);
-  return document === null ? { code: 'BUSY' } : { document };
+  try {
+    // The answer's cap, applied to the question: this page is posted to the
+    // upstream once per model.
+    const bytes = await readGcsBytes({
+      bucketName: ctx.sites.bucket.bucketName,
+      objectName: `${name}/index.html`,
+      auth: ctx.sites.bucket.auth,
+      maxBytes: MAX_DOCUMENT_BYTES,
+    });
+    return bytes === null
+      ? { code: 'NOT_FOUND' }
+      : { document: new TextDecoder().decode(bytes) };
+  } catch (cause) {
+    logCause(ctx.id, 'reading a page to change it', cause);
+    return { code: 'TOO_LARGE' };
+  }
+}
+
+/**
+ * Puts one page online as the whole site. A free name is claimed for the
+ * caller's login; a name of theirs is replaced; anyone else's is `TAKEN`.
+ */
+async function publish(
+  request: Request,
+  ctx: Ctx,
+  login: string,
+): Promise<Response> {
+  const read = await bodyOf(request, MAX_DOCUMENT_BYTES + MAX_BUILD_BODY_BYTES);
+  if ('code' in read) return refuse(read.code, ctx.id);
+  if (!isPlainObject(read.json)) return refuse('MALFORMED_REQUEST', ctx.id);
+  const name =
+    typeof read.json.name === 'string'
+      ? read.json.name.trim().toLowerCase()
+      : '';
+  const document =
+    typeof read.json.document === 'string' ? read.json.document : '';
+  const problemWithName = nameProblem(name);
+  if (problemWithName !== null) return refuse(problemWithName, ctx.id);
+  if (document.trim() === '') return refuse('MALFORMED_REQUEST', ctx.id);
+  const bytes = new TextEncoder().encode(document);
+  if (bytes.byteLength > MAX_DOCUMENT_BYTES) return refuse('TOO_LARGE', ctx.id);
+
+  let marker = await ctx.sites.marker(name, true);
+  if (marker === null) {
+    // Names held for built apps are not the bucket's to give.
+    const standing = await nameStanding(ctx, name);
+    if (!standing.available) return refuse('TAKEN', ctx.id);
+    marker = await ctx.sites.claim(name, login);
+    if (marker === null) return refuse('TAKEN', ctx.id);
+  } else if (!(await opensSite(ctx, marker))) {
+    return refuse('TAKEN', ctx.id);
+  }
+  try {
+    await ctx.sites.publish(
+      name,
+      [{ path: 'index.html', bytes }],
+      login,
+      marker.generation,
+    );
+  } catch (cause) {
+    if (cause instanceof SiteRaced)
+      return refuse('PRECONDITION_FAILED', ctx.id);
+    logCause(ctx.id, `publishing ${name}`, cause);
+    return refuse('STORAGE_FAILURE', ctx.id);
+  }
+  return ok(
+    { name, url: siteUrl(ctx.config.zone, name, ctx.port) },
+    ctx.id,
+    201,
+  );
 }
 
 /**
@@ -745,7 +789,7 @@ async function ending(
   if (document === 'NO_DOCUMENT' || document === 'TOO_LARGE') {
     return { t: 'error', ...problem(document) };
   }
-  // An identical release would still take a number and push rollbacks back.
+  // Nothing changed, so there is nothing to publish.
   if (base !== null && document === base) {
     return { t: 'done', build: null, name: site, site, unchanged: true };
   }
@@ -773,8 +817,7 @@ async function ending(
     site,
     // `null` for a refine, so a page cannot read "taken" off its own site.
     available: standing?.available ?? null,
-    // `empty` is this person's name with nothing published, which the page
-    // finishes; `live` is their published site.
+    // `live` is a site of this person's, which publishing replaces.
     yours: standing?.yours ?? null,
     url: siteUrl(ctx.config.zone, name, ctx.port),
     unchanged: false,

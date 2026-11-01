@@ -5,9 +5,18 @@ port: 8080
 # The apex host; each site is `<name>.<zone>`.
 zone: kthx.dev
 
-# The depot for release archives, uploads and the nightly dump, owned by
+# The depot for `/api/files` objects and the nightly dump, owned by
 # `terraform/gcp/projects/bluenose`.
 bucket: ""
+
+# The bucket of sites: `<name>/` holds a site's files and its `.kthx` marker.
+# `kthx deploy` writes it with the caller's own credentials; this server reads
+# markers and writes what the builder publishes.
+sitesBucket: ""
+
+# Comma-separated `aud` values a Google ID token may carry to open a site as the
+# owner its marker names. Empty accepts no ID token.
+idAudiences: ""
 
 # Peers whose `cf-connecting-ip` is believed. Empty makes the whole zone one rate-limit
 # key. The gateway Envoy is host-networked, so the peer is usually a node address.
@@ -52,7 +61,7 @@ ai:
 # ExternalSecret. A key the chart generated would rotate on every upgrade.
 envFromSecret: ""
 
-# The node holding both local-path volumes; the server and Postgres pin to it. Empty
+# The node holding the Postgres local-path volume, which Postgres pins to. Empty
 # suits only `helm template`.
 node: ""
 
@@ -62,13 +71,6 @@ resources:
     memory: 512Mi
   limits:
     memory: 1Gi
-
-sites:
-  # A cache of the depot: a release with no directory is refetched.
-  size: 50Gi
-  mountPath: /sites
-  # Empty uses the cluster's default storage class.
-  storageClass: ""
 
 database:
   size: 20Gi

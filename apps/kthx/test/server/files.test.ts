@@ -6,7 +6,6 @@
 import { describe, expect, test } from 'bun:test';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tarGz } from '../../cli/tar.ts';
 import {
   MAX_FILE_BYTES,
   MAX_FILES,
@@ -14,7 +13,7 @@ import {
 } from '../../server/files.ts';
 import { bodyWithin } from '../../server/http.ts';
 import { ME_COOKIE } from '../../server/me.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer } from '../harness/server.ts';
 
 const kthx = withServer();
 
@@ -31,18 +30,7 @@ interface Site {
 }
 
 async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(response.status).toBe(201);
-  const body = await response.json();
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return kthx().site(label);
 }
 
 interface Visitor {
@@ -104,9 +92,10 @@ describe('putting a file', () => {
     expect(served.headers.get('content-disposition')).toBe('inline');
     expect(new Uint8Array(await served.arrayBuffer())).toEqual(PNG);
 
-    // On the volume beside the release directories, never in one.
-    const onDisk = join(kthx().sitesDir, site.name, 'files/art/cover.png');
-    expect((await stat(onDisk)).isFile()).toBe(true);
+    // In the depot, never in the site's folder.
+    const object = join(kthx().depotDir, 'files', site.name, 'art/cover.png');
+    expect((await stat(object)).isFile()).toBe(true);
+    expect(kthx().gcs.names(kthx().bucket, `${site.name}/art`)).toEqual([]);
 
     const listed = await get(site, '/api/files').then((r) => r.json());
     expect(listed.items).toMatchObject([
@@ -126,30 +115,21 @@ describe('putting a file', () => {
     expect(inspected.quotas.files_bytes).toBe(MAX_FILES_BYTES);
   });
 
-  test('writes through to the depot, and rehydrates from it', async () => {
-    const site = await claimed('rehydrate');
+  test('reads through the depot, and a row with no bytes is a 404', async () => {
+    const site = await claimed('depot');
     expect(
       (await put(site, 'notes.txt', 'hello', { type: 'text/plain' })).status,
     ).toBe(201);
 
-    const object = join(
-      kthx().sitesDir,
-      '.depot/files',
-      site.name,
-      'notes.txt',
-    );
+    const object = join(kthx().depotDir, 'files', site.name, 'notes.txt');
     expect(await Bun.file(object).text()).toBe('hello');
-
-    // The volume is a cache: losing it costs a fetch, never the file.
-    await rm(join(kthx().sitesDir, site.name, 'files/notes.txt'));
     const served = await get(site, '/files/notes.txt');
     expect(served.status).toBe(200);
+    expect(served.headers.get('content-length')).toBe('5');
     expect(await served.text()).toBe('hello');
-    expect(
-      await Bun.file(
-        join(kthx().sitesDir, site.name, 'files/notes.txt'),
-      ).text(),
-    ).toBe('hello');
+
+    await rm(object);
+    expect((await get(site, '/files/notes.txt')).status).toBe(404);
   });
 
   test('answers 304 to a matching etag, and HEAD without a body', async () => {
@@ -322,7 +302,7 @@ describe('the ownership floor', () => {
     const site = await claimed('delete');
     const alice: Visitor = {};
     await put(site, 'gone.txt', 'bytes', { type: 'text/plain', as: alice });
-    const object = join(kthx().sitesDir, '.depot/files', site.name, 'gone.txt');
+    const object = join(kthx().depotDir, 'files', site.name, 'gone.txt');
     expect(await Bun.file(object).exists()).toBe(true);
 
     const removed = await kthx().fetch(
@@ -336,11 +316,6 @@ describe('the ownership floor', () => {
     expect(removed.status).toBe(204);
     expect((await get(site, '/files/gone.txt')).status).toBe(404);
     expect(await Bun.file(object).exists()).toBe(false);
-    expect(
-      await Bun.file(
-        join(kthx().sitesDir, site.name, 'files/gone.txt'),
-      ).exists(),
-    ).toBe(false);
 
     const twice = await kthx().fetch(
       ask('/api/files/gone.txt', {
@@ -387,7 +362,7 @@ describe('the paths a file may have', () => {
       select count(*)::int as n from files where site = ${site.name}
     `) as { n: number }[];
     expect(rows[0]?.n).toBe(0);
-    expect(await Bun.file(join(kthx().sitesDir, 'etc/passwd')).exists()).toBe(
+    expect(await Bun.file(join(kthx().depotDir, 'etc/passwd')).exists()).toBe(
       false,
     );
   });
@@ -414,6 +389,7 @@ describe('the budget', () => {
 
   test('refuses a file past the site ceiling and past the file count', async () => {
     const site = await claimed('full');
+    await kthx().sql`insert into sites (name) values (${site.name})`;
     // The rows are the meter, so a row reaches the ceiling without an upload.
     await kthx().sql`
       insert into files (site, path, owner, size, type, sha256)
@@ -446,7 +422,7 @@ describe("a site's whole store", () => {
   test('goes when the site does', async () => {
     const site = await claimed('deleted');
     await put(site, 'keep.txt', 'bytes', { type: 'text/plain' });
-    const object = join(kthx().sitesDir, '.depot/files', site.name, 'keep.txt');
+    const object = join(kthx().depotDir, 'files', site.name, 'keep.txt');
     expect(await Bun.file(object).exists()).toBe(true);
 
     const removed = await kthx().fetch(
@@ -461,18 +437,18 @@ describe("a site's whole store", () => {
     expect(await Bun.file(object).exists()).toBe(false);
 
     const gone = await get(site, '/files/keep.txt');
-    expect(gone.status).toBe(410);
+    expect(gone.status).toBe(404);
   });
 
-  test('is served while the site database is still being made', async () => {
+  test('needs no site database', async () => {
     const site = await claimed('unprovisioned');
     await put(site, 'early.txt', 'bytes', { type: 'text/plain' });
-    // Unprovisioned, `/api/db` answers 503, but files live in the control
-    // database and keep serving.
-    await kthx().sql`
-      update sites set provisioned_at = null where name = ${site.name}
-    `;
-    expect((await get(site, '/api/db/things')).status).toBe(503);
+    // Files live in the control database, so a site that never asked for its
+    // own database has none.
+    const [row] = (await kthx().sql`
+      select provisioned_at from sites where name = ${site.name}
+    `) as { provisioned_at: Date | null }[];
+    expect(row?.provisioned_at).toBeNull();
     const served = await get(site, '/files/early.txt');
     expect(served.status).toBe(200);
     expect(await served.text()).toBe('bytes');
@@ -480,27 +456,17 @@ describe("a site's whole store", () => {
 });
 
 describe('the reserved prefix', () => {
-  test("is the server's on every site, never a bundle file", async () => {
+  test("is the server's on every site, never a file in the folder", async () => {
     const site = await claimed('reserved');
-    const uploaded = await kthx().fetch(
-      ask(`/api/sites/${site.name}/releases`, {
-        method: 'POST',
-        token: site.token,
-        address: address(),
-        body: tarGz([
-          {
-            path: 'index.html',
-            bytes: new TextEncoder().encode('<h1>hi</h1>'),
-          },
-          {
-            path: 'files/sneaky.html',
-            bytes: new TextEncoder().encode('<script>1</script>'),
-          },
-        ]),
-      }),
+    // nginx forwards `/files/*` here, so a deployed `files/` is unreachable.
+    kthx().gcs.put(
+      kthx().bucket,
+      `${site.name}/files/sneaky.html`,
+      '<script>1</script>',
+      {
+        contentType: 'text/html',
+      },
     );
-    expect(uploaded.status).toBe(201);
-    // `/files/*` is the store, so the bundle's own `files/` is unreachable.
     const sneaky = await get(site, '/files/sneaky.html');
     expect(sneaky.status).toBe(404);
     expect(sneaky.headers.get('content-type')).toContain('application/json');
@@ -599,59 +565,28 @@ describe('the bounds a body meets', () => {
   });
 });
 
-describe('a path already taken by something else on the volume', () => {
-  test("is the caller's to fix, and leaves no row behind", async () => {
-    const site = await claimed('collide');
-    expect(
-      (await put(site, 'a/b.txt', 'x', { type: 'text/plain' })).status,
-    ).toBe(201);
-    const onADirectory = await put(site, 'a', 'x', { type: 'text/plain' });
-    expect(onADirectory.status).toBe(400);
-    expect((await onADirectory.json()).code).toBe('INVALID_PATH');
-
-    expect((await put(site, 'c.txt', 'x', { type: 'text/plain' })).status).toBe(
-      201,
-    );
-    const throughAFile = await put(site, 'c.txt/deep.txt', 'x', {
-      type: 'text/plain',
-    });
-    expect(throughAFile.status).toBe(400);
-    expect((await throughAFile.json()).code).toBe('INVALID_PATH');
-
-    // The row is written before the bytes, so a refusal must take it back.
-    const listed = await get(site, '/api/files').then((r) => r.json());
-    expect(listed.items.map((item: { path: string }) => item.path)).toEqual([
-      'a/b.txt',
-      'c.txt',
-    ]);
-  });
-
+describe('a depot write that fails', () => {
   test('leaves the row it could not replace describing the bytes still there', async () => {
     const site = await claimed('rollback');
     const visitor: Visitor = {};
     await put(site, 'one.txt', 'ORIGINAL', { type: 'text/plain', as: visitor });
-    const first = await get(site, '/files/one.txt');
-    const etag = first.headers.get('etag');
+    const [before] = (await kthx().sql`
+      select size, sha256 from files where site = ${site.name}
+    `) as { size: string; sha256: string }[];
 
-    // A directory now sits at the rename's target, so the volume write fails.
-    await rm(join(kthx().sitesDir, site.name, 'files/one.txt'));
-    await mkdir(join(kthx().sitesDir, site.name, 'files/one.txt'));
+    // A directory now sits where the object goes, so the depot write fails.
+    const object = join(kthx().depotDir, 'files', site.name, 'one.txt');
+    await rm(object);
+    await mkdir(object);
     const failed = await put(site, 'one.txt', 'REPLACED', {
       type: 'text/plain',
       as: visitor,
     });
-    expect(failed.status).toBe(400);
+    expect(failed.status).toBe(500);
 
-    // The row still describes the bytes the depot holds. With the directory
-    // gone, the depot answers as it does for a lost volume.
-    await rm(join(kthx().sitesDir, site.name, 'files/one.txt'), {
-      recursive: true,
-    });
-    const again = await get(site, '/files/one.txt');
-    expect(again.headers.get('etag')).toBe(etag);
-    expect(await again.text()).toBe('ORIGINAL');
-    expect(
-      (await get(site, '/api/files').then((r) => r.json())).items[0].size,
-    ).toBe('ORIGINAL'.length);
+    const [after] = (await kthx().sql`
+      select size, sha256 from files where site = ${site.name}
+    `) as { size: string; sha256: string }[];
+    expect(after).toEqual(before as { size: string; sha256: string });
   });
 });
