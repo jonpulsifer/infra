@@ -249,6 +249,10 @@ run = [
 description = "Build the wiki from docs/ with the first-party Bun renderer"
 run = "bun run --cwd apps/wiki build"
 
+[tasks."docs:brief"]
+description = "Build the purchase-to-identity brief for kthx from its canonical wiki page"
+run = "bun apps/wiki/brief/build.ts"
+
 [tasks."docs:diagrams"]
 description = "Render every *.d2 to the *.svg committed beside it"
 # Per-file render settings belong in the file's `d2-config` var. The SVGs are
