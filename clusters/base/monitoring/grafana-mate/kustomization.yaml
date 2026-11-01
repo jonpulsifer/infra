@@ -1,0 +1,15 @@
+---
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - service.yaml
+  - network-policy.yaml
+configMapGenerator:
+  - name: grafana-mate
+    namespace: monitoring
+    files:
+      - nginx.conf
+configurations:
+  - name-reference.yaml
+patches:
+  - path: helm-release.yaml

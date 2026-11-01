@@ -1,0 +1,25 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: grafana-mate
+  namespace: monitoring
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/instance: prom-stack
+  ingress:
+    # Preserve Grafana's existing ingress, scrapes and probes on its own port.
+    - fromEntities: [all]
+      toPorts:
+        - ports:
+            - port: "3000"
+              protocol: TCP
+    # The API server authenticates the caller and authorizes services/proxy.
+    # As with Alertmanager, this also trusts the node's host-network pods.
+    - fromEntities: [host, kube-apiserver]
+      toPorts:
+        - ports:
+            - port: "8081"
+              protocol: TCP

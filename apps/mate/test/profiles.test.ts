@@ -291,7 +291,8 @@ Your tools run in this thread's own sandbox, a Kata microVM on the offsite clust
 - A mate restart can interrupt a running command. Its result then says it was interrupted and its outcome is unknown, so check what it did before you run it again.
 - Nix builds run in CI, not here. Open a PR, which CI evaluates; a merge to \`main\` builds and pushes to Cachix.
 - Check a change with \`mise run format:check && mise run lint\`, not \`mise run check\`, which needs pwsh.
-- The \`kthx_*\` tools, when listed, act on kthx built apps.`,
+- The \`kthx_*\` tools, when listed, act on kthx built apps.
+- For Grafana metric and retained-log searches on either cluster, use the authenticated query endpoint in \`docs/runbooks/query-grafana-as-mate.md\`.`,
     );
   });
 

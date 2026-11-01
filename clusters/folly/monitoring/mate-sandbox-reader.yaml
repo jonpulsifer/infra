@@ -1,5 +1,5 @@
 ---
-# The read-only Rowbutt sandbox's GET on Prometheus and Alertmanager
+# The read-only Rowbutt sandbox's monitoring query access
 # (clusters/base/monitoring/mate-sandbox-reader.yaml), for the federated user
 # folly admits its offsite token as.
 apiVersion: rbac.authorization.k8s.io/v1

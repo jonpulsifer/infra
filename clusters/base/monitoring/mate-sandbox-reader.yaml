@@ -20,3 +20,10 @@ rules:
       - prom-stack-kube-prometheus-prometheus:9090
       - prom-stack-kube-prometheus-alertmanager:9093
     verbs: [get]
+  # Only the query sidecar accepts POST. Grafana itself and the raw log store
+  # stay outside this grant; a Viewer alone does not constrain backend routes.
+  - apiGroups: [""]
+    resources: [services/proxy]
+    resourceNames:
+      - grafana-mate:8081
+    verbs: [get, create]
