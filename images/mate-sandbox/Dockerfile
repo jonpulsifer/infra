@@ -22,7 +22,7 @@ ARG BAT_VERSION=0.26.1
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.4
 # renovate: datasource=github-releases depName=cilium/cilium-cli
-ARG CILIUM_CLI_VERSION=0.20.1
+ARG CILIUM_CLI_VERSION=0.20.2
 # Must equal the operator's version, the appVersion of the chart that
 # clusters/base/platform/cloudnative-pg/helm-release.yaml pins. Renovate reads
 # it from the chart index and bumps it with the chart, in one pull request.
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.2
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.21
+ARG MISE_VERSION=2026.10.23
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
