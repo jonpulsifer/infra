@@ -16,7 +16,7 @@ fleetd exposes device, administration and monitoring endpoints. Use this page to
 | Admin API | `https://spore.<tailnet>:8445`, `GET /machines` | Tailnet logins in `ATTEST_APPROVERS` |
 | NetBox | A device's `desired_action` and `status` | The owner |
 
-`SPORE_IP` and `SPORE_BOOTSTRAP_IP` are in `clusters/folly/config/anchor-topology.json`. The anchors' CoreDNS answers the enrollment name with spore's bootstrap address, and a public certificate covers it, since Talos trusts only its bundled roots before it has a config.
+`SPORE_IP` and `SPORE_BOOTSTRAP_IP` are in `clusters/folly/config/anchor-topology.json`. The anchors' CoreDNS answers the enrollment name with spore's bootstrap address, and a public certificate covers it, since Talos trusts only its bundled roots before it has a config. The boot listener serves the device flow and the config alone; the lookups, renewal and metrics answer on 8444 and 8446. The Tink server at `enroll.lolwtf.ca:42113` presents the same certificate to HookOS's agent ([Tinkerbell](../../platform/nixos/tinkerbell.md)).
 
 
 ## Trust in the machine

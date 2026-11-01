@@ -19,7 +19,7 @@ The `decommissioning` status requests retirement separately from `desired_action
 
 Git owns the class table at `clusters/folly/fleet/classes.json`. fleetd reads it through `FLEET_CLASSES`.
 
-Each class declares its operating system, Workflow template, installer image, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior. Talos installer images come from `class-inputs.json`; other installer images use a digest.
+Each class declares its operating system, Workflow template, installer image, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior. Every installing class pins its installer image by digest. `.github/workflows/talos-images.yml` writes the Talos classes' pin after each build, and fleetd prefers it over the tag `class-inputs.json` carries for the Talos root.
 
 An unknown class is refused and journaled. The verifier also refuses a missing profile or a Secure Boot mismatch.
 
@@ -40,9 +40,10 @@ The Workflow carries the serial in `hardwareMap`. Before a write, the template r
 ## Retirement
 
 1. The retirement Workflow wipes and erases the disk, then powers off the machine.
-2. fleetd cordons the Kubernetes node and evicts its pods. It waits up to ten minutes for a PodDisruptionBudget.
-3. fleetd deletes the Node, kubelet certificate requests and bootstrap token.
-4. fleetd sets the device to `offline`.
+2. fleetd acts on the Workflow's success only once the BMC's Rufio `Machine` reports the machine off, since the agent's report alone is unauthenticated. It journals the wait once, and a `danger` line after 15 minutes. A device without a BMC proceeds on the agent's report, and the journal says so.
+3. fleetd cordons the Kubernetes node and evicts its pods. It waits up to ten minutes for a PodDisruptionBudget.
+4. fleetd deletes the Node, kubelet certificate requests and bootstrap token.
+5. fleetd sets the device to `offline`.
 
 If the Kubernetes API is unavailable, the device stays `decommissioning`. fleetd journals the fault once and retries each pass.
 
@@ -62,7 +63,7 @@ If retirement fails at the BMC Job, no disk action runs. fleetd journals the Job
 
 ## Configuration access
 
-Only a `planned` device can fetch its configuration. Leaving that state or disappearing from NetBox removes its unread configuration. A NetBox outage returns HTTP 503 so the node can retry.
+Only a `planned` device can fetch its configuration. Leaving that state, disappearing from NetBox, or the end of its Workflow without success removes its unread configuration. A NetBox outage returns HTTP 503 so the node can retry.
 
 ## Related
 
