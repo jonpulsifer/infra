@@ -41,6 +41,7 @@ WORKDIR /app
 COPY --from=deps --chmod=755 /app ./
 COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/server ./apps/kthx/server
 COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/cli ./apps/kthx/cli
+COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/scripts ./apps/kthx/scripts
 # `deps` has only the workspace manifests and symlinks. `pruner` supplies the
 # sources without a `node_modules`.
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive
