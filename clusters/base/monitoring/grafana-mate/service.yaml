@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana-mate
+  namespace: monitoring
+spec:
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/instance: prom-stack
+  ports:
+    - name: http
+      port: 8081
+      targetPort: mate-query

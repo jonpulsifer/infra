@@ -31,7 +31,7 @@ A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, 
 | --- | --- | --- | --- | --- | --- |
 | `operator` | interactive | The owner's mention | `mate-sandbox-admin` | Everything in [What the agent can do](#what-the-agent-can-do) | The process limits, and the shared interactive day |
 | `custodian` | job | The daily check | `mate-sandbox-admin` | As `operator` | 10 turns a UTC day of its own |
-| `investigator` | interactive | A mention starting `+investigator` | `mate-sandbox-reader`, read-only on both clusters | GET on Prometheus and Alertmanager, and the `weather_*` tools | 20-minute turns, 10 a thread, and the shared interactive day |
+| `investigator` | interactive | A mention starting `+investigator` | `mate-sandbox-reader`, read-only on both clusters | GET on Prometheus and Alertmanager, Grafana queries, and the `weather_*` tools | 20-minute turns, 10 a thread, and the shared interactive day |
 | `responder` | job | An Alertmanager notification | As `investigator` | As `investigator` | 20-minute turns, 10 a thread, 30 a UTC day of its own |
 | `dreamer` | job | The nightly dream | None | GitHub, to open one pull request, and the `recall_*` tools | 30-minute turns, 5 a thread, 5 a UTC day of its own |
 
@@ -114,7 +114,7 @@ The agent runs every command without approval. The allowlist in [Use it](#use-it
 - A turn runs at most 45 minutes. A thread has 30 turns, and all interactive threads share 120 in a rolling day. An investigator turn runs at most 20 minutes, with 10 per thread.
 - At most two interactive turns run at once, and other threads wait in a queue. Automation and job profiles run one turn at a time and have their own daily caps in `mate-db`.
 - At most two threads hold a sandbox at once. A turn that needs one takes the sandbox of a thread idle for 5 minutes, which deletes that thread's uncommitted work, or waits. An automation turn never takes an interactive thread's sandbox, but it can take a free one, so while the custodian runs the owner's threads share one fewer.
-- An investigator reads logs with `kubectl logs`; VictoriaLogs is not reachable from a read-only sandbox.
+- An investigator reads pod logs with `kubectl logs` and searches retained logs and metrics through [Grafana](../runbooks/query-grafana-as-mate.md). Direct VictoriaLogs access stays blocked.
 - Credentials and background processes last only for the turn. A [wake](#wakes) is the way back to a thread later.
 - After 30 quiet minutes, mate deletes the sandbox with any uncommitted work and archives the Discord thread. mate keeps the conversation, so a reply continues it in a new sandbox, across restarts too.
 - Slack retries a message for about six minutes, so one sent while mate is down for longer gets no answer.

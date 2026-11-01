@@ -1,5 +1,5 @@
 ---
-# The read-only Rowbutt sandbox account's GET on Prometheus and Alertmanager
+# The read-only Rowbutt sandbox account's monitoring query access
 # (clusters/base/monitoring/mate-sandbox-reader.yaml). Here, not beside the
 # account in apps/mate/, because offsite's `apps` does not wait for this
 # namespace and `apps/mate/`'s namespace transformer would move it into `mate`.

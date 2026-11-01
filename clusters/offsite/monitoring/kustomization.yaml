@@ -14,6 +14,8 @@ resources:
   - alertmanager-mate.yaml
   - alertmanager-network-policy.yaml
   - ../../base/monitoring
+components:
+  - ../../base/monitoring/grafana-mate
 patches:
   - target:
       group: helm.toolkit.fluxcd.io
