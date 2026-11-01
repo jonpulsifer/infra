@@ -1,5 +1,6 @@
 {{/*
-The public route: the apex, where sites are claimed, and every site host.
+The public route: the apex, where sites are claimed. Site hosts are served by nginx
+(clusters/offsite/apps/kthx-sites), which sends `/api` and `/files` back here.
 */}}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -18,10 +19,9 @@ spec:
   parentRefs:
     - name: {{ .Values.gateway.name }}
       namespace: {{ .Values.gateway.namespace }}
-  # A wildcard never matches the apex.
+  # The site hosts, `*.<zone>`, have their own route in the sites namespace.
   hostnames:
     - {{ .Values.zone | quote }}
-    - {{ printf "*.%s" .Values.zone | quote }}
   rules:
     - backendRefs:
         - name: {{ include "kthx.fullname" . }}

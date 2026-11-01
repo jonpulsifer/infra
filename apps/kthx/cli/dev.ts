@@ -1,12 +1,14 @@
 /**
- * `kthx dev`: serves a directory on :4321 as a release would, and proxies
- * `/api/*` and `/files/*` to the live site and its real database.
+ * `kthx dev`: serves a directory on :4321 as the site would be served, and
+ * proxies `/api/*` and `/files/*` to the live site and its real database.
  */
 import { readdirSync, statSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { lstat } from 'node:fs/promises';
+import { join, normalize, resolve } from 'node:path';
 import { ME_COOKIE } from '../server/me.ts';
-import { decodePath, notHere, staticResponse } from '../server/serve.ts';
-import { included } from './tar.ts';
+import { contentType } from '../server/mime.ts';
+import { decodePath, notHere } from '../server/pages.ts';
+import { included } from './files.ts';
 
 export const PORT = 4321;
 
@@ -18,8 +20,11 @@ const RESERVED = ['api', 'files', '_'];
 
 export interface Site {
   readonly name: string;
-  /** Sent on owner-scoped calls only; absent if this machine never claimed the name. */
-  readonly token?: string | undefined;
+  /**
+   * The owner's ID token, sent on owner-scoped calls only. Absent, or
+   * answering `null`, the loop is a visitor everywhere.
+   */
+  readonly authorization?: (() => Promise<string | null>) | undefined;
   /** `https://<name>.kthx.dev` */
   readonly site: string;
 }
@@ -68,17 +73,14 @@ export function dev(
           { status: 405, headers: { 'cache-control': 'no-store' } },
         );
       }
-      // Files an upload excludes, such as `.env`, are hidden here too.
+      // Files a deploy excludes, such as `.env`, are hidden here too.
       if (!included(path.slice(1))) {
         return notHere('localhost', 'kthx.dev', 404, 'dev');
       }
-      const answered = await staticResponse(request, root, 'dev', path);
-      if (answered === null)
-        return notHere('localhost', 'kthx.dev', 404, 'dev');
-      // The working directory changes under the loop, so nothing is cached.
-      answered.headers.delete('etag');
-      answered.headers.set('cache-control', 'no-store');
-      return answered;
+      return (
+        (await staticResponse(request, root, path)) ??
+        notHere('localhost', 'kthx.dev', 404, 'dev')
+      );
     },
     websocket: {
       open: pipe,
@@ -97,8 +99,10 @@ export function dev(
   console.log(
     `  /api and /files go to ${site.site} — this is ${site.name}'s live database, not a copy`,
   );
-  if (site.token === undefined) {
-    console.log('  no token here — /api/mcp and DELETE /api/db/:c answer 401');
+  if (site.authorization === undefined) {
+    console.log(
+      '  no ID token here — /api/mcp and DELETE /api/db/:c answer 401',
+    );
   }
   return server;
 }
@@ -118,8 +122,8 @@ const HOP = [
   'content-encoding',
 ];
 
-// Only these two carry the owner bearer; elsewhere the loop is a visitor, so
-// its rate limits match production.
+// Only these two carry the owner's ID token; elsewhere the loop is a visitor,
+// so its rate limits match production.
 function ownerScoped(method: string, path: string): boolean {
   return (
     path === '/api/mcp' ||
@@ -144,9 +148,11 @@ async function proxy(
   const cookie = visitorCookie(headers.get('cookie'));
   if (cookie === null) headers.delete('cookie');
   else headers.set('cookie', cookie);
-  if (site.token !== undefined && ownerScoped(request.method, path)) {
-    headers.set('authorization', `Bearer ${site.token}`);
-  }
+  const token =
+    site.authorization !== undefined && ownerScoped(request.method, path)
+      ? await site.authorization()
+      : null;
+  if (token !== null) headers.set('authorization', `Bearer ${token}`);
 
   const answer = await fetch(target, {
     method: request.method,
@@ -247,7 +253,61 @@ function pipe(socket: Bun.ServerWebSocket<SocketData>): void {
   if (socket.data.closed) socket.close();
 }
 
-/** A lone top-level directory is the site root, as a release unpack reads it. */
+/**
+ * The nginx contract: the path, then `<path>/index.html`, then the site's own
+ * `404.html` with a 404. `null` is the kthx 404 page. Nothing is cached: the
+ * working directory changes under the loop.
+ */
+async function staticResponse(
+  request: Request,
+  root: string,
+  path: string,
+): Promise<Response | null> {
+  const tries = path.endsWith('/')
+    ? [`${path}index.html`]
+    : [path, `${path}/index.html`];
+  for (const candidate of tries) {
+    const file = await fileAt(root, candidate);
+    if (file !== null) return served(request, candidate, file, 200);
+  }
+  const own = await fileAt(root, '/404.html');
+  return own === null ? null : served(request, '/404.html', own, 404);
+}
+
+function served(
+  request: Request,
+  path: string,
+  file: string,
+  status: number,
+): Response {
+  const bytes = Bun.file(file);
+  const headers = {
+    'content-type': contentType(path),
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+  };
+  if (request.method === 'HEAD') {
+    return new Response(null, {
+      status,
+      headers: { ...headers, 'content-length': String(bytes.size) },
+    });
+  }
+  return new Response(bytes, { status, headers });
+}
+
+async function fileAt(root: string, path: string): Promise<string | null> {
+  const resolved = normalize(join(root, path));
+  if (resolved !== root && !resolved.startsWith(`${root}/`)) return null;
+  try {
+    // `lstat`: a symlink is a miss, never a way out of the directory.
+    if (!(await lstat(resolved)).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return resolved;
+}
+
+/** A lone top-level directory is the site root, as a deploy reads it. */
 function unwrap(root: string): string {
   const entries = readdirSync(root).filter(included);
   const [only] = entries;

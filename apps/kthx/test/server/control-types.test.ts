@@ -12,7 +12,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tarGz } from '../../cli/tar.ts';
 import { ask, type Harness, withServer } from '../harness/server.ts';
 
 const CONTROL = 'ops.kthx-control-types.test';
@@ -31,10 +30,6 @@ interface Probe {
   readonly body?: Uint8Array | string;
   readonly headers?: Record<string, string>;
 }
-
-const SITE = tarGz([
-  { path: 'index.html', bytes: new TextEncoder().encode('<h1>hi</h1>') },
-]);
 
 const json = (
   method: string,
@@ -56,10 +51,6 @@ const page = (method: string, path: string): Probe => ({
 /** The owner routes come last: the final one deletes the site. */
 function probes(name: string): Probe[] {
   const site = `/api/sites/${name}`;
-  const upload = {
-    token: true,
-    headers: { 'content-type': 'application/gzip' },
-  };
   return [
     json('GET', '/api'),
     json('GET', '/api/sites'),
@@ -73,6 +64,7 @@ function probes(name: string): Probe[] {
     json('GET', '/api/build'),
     json('POST', '/api/build'),
     json('GET', '/api/build/anything'),
+    json('POST', '/api/build/publish'),
     json('GET', '/api/engine'),
     json('GET', '/api/engine/sites'),
     json('GET', '/api/engine/sites/anything'),
@@ -94,15 +86,8 @@ function probes(name: string): Probe[] {
     json('GET', `/api/sites/${name}-other`),
     json('GET', site),
     json('GET', site, { token: true, status: 200 }),
+    json('POST', site, { token: true }),
     json('GET', `${site}/releases`),
-    json('POST', `${site}/releases`, { ...upload, body: SITE, status: 201 }),
-    json('POST', `${site}/serve`, {
-      token: true,
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ n: 1 }),
-    }),
-    json('DELETE', `${site}/hold`, { token: true, status: 200 }),
     json('GET', `${site}/nothing`),
     json('POST', '/cli/kthx.tgz'),
     page('GET', '/cli'),
@@ -165,7 +150,7 @@ describe('the control host under /api and /cli', () => {
     if (Bun.file(TARBALL).size > 0) return;
     planted = existsSync(DIST) ? 'file' : 'dir';
     mkdirSync(DIST, { recursive: true });
-    writeFileSync(TARBALL, tarGz([]));
+    writeFileSync(TARBALL, Bun.gzipSync(new Uint8Array(1024)));
   });
   afterAll(() => {
     if (planted === 'dir') rmSync(DIST, { recursive: true, force: true });
@@ -173,18 +158,7 @@ describe('the control host under /api and /cli', () => {
   });
 
   test('answers every route in one of the allowed types, and nothing else', async () => {
-    const name = kthx().name('types');
-    const claimed = await kthx().fetch(
-      ask('/api/sites', {
-        method: 'POST',
-        host: CONTROL,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
-      }),
-    );
-    expect(claimed.status).toBe(201);
-    expect(mediaType(claimed)).toBe(TYPES.json);
-    const { token } = (await claimed.json()) as { token: string };
+    const { name, token } = await kthx().site('types');
 
     for (const probe of probes(name)) {
       const where = `${probe.method} ${probe.path}`;
@@ -230,14 +204,14 @@ describe('the control host under /api and /cli', () => {
   });
 
   test('is probed for every /api and /cli path the router names', async () => {
-    const [index, sites, engine] = await Promise.all(
-      ['index.ts', 'sites.ts', 'engine.ts'].map((file) =>
+    const [index, engine] = await Promise.all(
+      ['index.ts', 'engine.ts'].map((file) =>
         Bun.file(join(SERVER, file)).text(),
       ),
     );
     const apex = (index ?? '').slice(
       (index ?? '').indexOf('async function apex('),
-      (index ?? '').indexOf('interface Serving'),
+      (index ?? '').indexOf('async function site('),
     );
     const literal = (text: string, pattern: RegExp) =>
       [...text.matchAll(pattern)].map((hit) => hit[1] as string);
@@ -248,18 +222,12 @@ describe('the control host under /api and /cli', () => {
         /\bpath(?:\.startsWith\(|\s*===\s*)'(\/(?:api|cli)[^']*)'/g,
       ),
       ...literal(apex, /segments\[2\] === '(\w+)'/g).map((s) => `/api/${s}`),
-      ...literal(sites ?? '', /\btail === '(\w+)'/g).map((s) => `/${s}`),
       ...literal(engine ?? '', /\bcollection === '(\w+)'/g).map(
         (s) => `/api/engine/${s}`,
       ),
     ];
     // A scan that finds nothing would pass for the wrong reason.
-    for (const known of [
-      '/api/sites',
-      '/api/engine/sites',
-      '/serve',
-      '/cli/kthx.tgz',
-    ]) {
+    for (const known of ['/api/sites', '/api/engine/sites', '/cli/kthx.tgz']) {
       expect(routed).toContain(known);
     }
 

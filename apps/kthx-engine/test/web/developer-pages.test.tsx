@@ -75,10 +75,10 @@ describe('the CLI page', () => {
     expect(text).toContain(`https://<name>.${ZONE}`);
   });
 
-  test('covers sites.json, keyed by origin, and the update check', () => {
+  test('covers the Google credentials it deploys with, and the update check', () => {
     const text = words(cli(FULL));
-    expect(text).toContain('sites.json');
-    expect(text).toContain('keys tokens by origin');
+    expect(text).toContain('gcloud auth application-default login');
+    expect(text).toContain('Google ID token');
     expect(text).toContain('KTHX_NO_UPDATE_CHECK=1');
   });
 
@@ -176,7 +176,7 @@ describe('the MCP page', () => {
     const text = words(mcp(FULL));
     expect(text).toContain(`https://<site>.${ZONE}/api/mcp`);
     expect(text).toContain('kthx-<site>');
-    expect(text).toContain('sites.json');
+    expect(text).toContain('gcloud auth print-identity-token');
     expect(text).toContain('kthx mcp');
     for (const { name } of SITE_MCP_TOOLS) expect(text).toContain(name);
   });

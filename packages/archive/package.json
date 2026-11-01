@@ -7,6 +7,8 @@
     "./archive-format": "./archive-format.ts",
     "./bundle": "./bundle.ts",
     "./bytes": "./bytes.ts",
+    "./crc32c": "./crc32c.ts",
+    "./fake-gcs": "./fake-gcs.ts",
     "./federation": "./federation.ts",
     "./federation-credential": "./federation-credential.ts",
     "./gcs": "./gcs.ts"

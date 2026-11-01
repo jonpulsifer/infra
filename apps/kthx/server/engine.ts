@@ -368,15 +368,20 @@ export async function engineApi(
   return refuse('NOT_FOUND', ctx.id);
 }
 
+/**
+ * A site serves whatever its folder holds, so it is always release 1 and never
+ * held; `created` is the last deploy, the only time the bucket keeps.
+ */
 function listed(ctx: Ctx, row: EngineSite): Record<string, unknown> {
+  const at = row.deployed ?? new Date(0).toISOString();
   return {
     name: row.name,
     url: siteUrl(ctx.config.zone, row.name, ctx.port),
-    owner: row.owner_login,
-    serving: row.serving,
-    held: row.held,
-    created: row.created_at.toISOString(),
-    deployed: row.deployed?.toISOString() ?? null,
+    owner: row.owner === '' ? null : row.owner,
+    serving: 1,
+    held: false,
+    created: at,
+    deployed: row.deployed,
     provisioned: row.provisioned,
   };
 }
@@ -411,10 +416,17 @@ async function detail(ctx: Ctx, segment: string): Promise<Response> {
   } catch {
     return refuse('NO_SITE', ctx.id);
   }
-  const row = await siteForEngine(ctx, name);
-  if (row === undefined) return refuse('NO_SITE', ctx.id);
-  if (row.deleted_at !== null) return refuse('GONE', ctx.id);
-  return ok({ ...listed(ctx, row), ...(await report(ctx, row)) }, ctx.id);
+  if (nameProblem(name) !== null) return refuse('NO_SITE', ctx.id);
+  const found = await siteForEngine(ctx, name);
+  if (found === undefined) return refuse('NO_SITE', ctx.id);
+  return ok(
+    {
+      ...(await report(ctx, found.marker)),
+      ...listed(ctx, found.site),
+      releases: [],
+    },
+    ctx.id,
+  );
 }
 
 interface Taken {
@@ -458,14 +470,11 @@ async function reserve(request: Request, ctx: Ctx): Promise<Response> {
   const taken = await ctx.sql.begin(async (tx: SQL) => {
     const conflicts: Taken[] = [];
     for (const name of sorted) {
-      // Its own statement, so the reads after it see what a racing claim or
+      // Its own statement, so the reads after it see what a racing
       // reservation committed while this waited.
       await tx`select pg_advisory_xact_lock(${NAME_LOCK}::int, hashtext(${name}))`;
-      // A deleted site keeps its name until the nuke, so it conflicts too.
-      const [site] = (await tx`
-        select 1 as site from sites where name = ${name} limit 1
-      `) as { site: number }[];
-      if (site !== undefined) {
+      // Read past the cache: a site claimed seconds ago conflicts.
+      if ((await ctx.sites.marker(name, true)) !== null) {
         conflicts.push({ name, by: 'site' });
         continue;
       }

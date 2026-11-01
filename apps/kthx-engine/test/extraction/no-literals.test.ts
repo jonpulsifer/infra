@@ -59,6 +59,10 @@ const PROJECT_ID_ALLOWLIST = new Set<string>([
   'sha256',
   'sha256sum',
   'run-name',
+  // A GCS checksum, an HTTP header and a byte encoding.
+  'crc32c',
+  'content-type',
+  'latin1',
   // Supply-chain posture keys and signing tool vocabulary.
   'source-receipt',
   'backend-provenance',

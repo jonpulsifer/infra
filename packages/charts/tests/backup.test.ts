@@ -35,6 +35,7 @@ const CASES: Case[] = [
     values: {
       image: 'registry.example.test/kthx@sha256:feed',
       bucket: 'example-bucket',
+      sitesBucket: 'example-sites',
       envFromSecret: 'kthx-env',
     },
   },

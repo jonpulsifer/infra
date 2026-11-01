@@ -1,19 +1,30 @@
 /**
- * The real handler over a private schema in real Postgres and a private sites
- * directory. Site databases and roles are cluster-wide, so they carry a
- * per-file prefix and are dropped when the file is done.
+ * The real handler over a private schema in real Postgres, a private depot
+ * directory and a fake sites bucket. Site databases and roles are
+ * cluster-wide, so they carry a per-file prefix and are dropped when the file
+ * is done.
  */
 import { afterAll, afterEach, beforeEach } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type FakeGcs, fakeGcs } from '@repo/archive/fake-gcs';
 import { SQL } from 'bun';
+import { DEPLOYED_KEY, MARKER, OWNER_KEY } from '../../server/bucket.ts';
 import { migrate } from '../../server/db.ts';
 import { diskDepot } from '../../server/depot.ts';
 import type { Config } from '../../server/env.ts';
 import { handler, type Kthx } from '../../server/index.ts';
+import { Sites } from '../../server/markers.ts';
 import { Pg } from '../../server/pg.ts';
 import { websocket } from '../../server/realtime.ts';
+import { AUDIENCE, GCLOUD_AUDIENCE, idToken, JWKS_URL } from './identity.ts';
+
+/** The owner `site()` writes on a marker unless told otherwise. */
+export const OWNER = 'owner@example.com';
+
+/** One fake bucket server per test file; each test gets its own bucket. */
+let gcs: FakeGcs | null = null;
 
 export const ZONE = 'kthx.test';
 
@@ -62,14 +73,28 @@ async function dropPrefixed(prefix: string): Promise<void> {
   }
 }
 
+export interface Site {
+  readonly name: string;
+  readonly host: string;
+  /** An ID token for the owner. */
+  readonly token: string;
+  readonly owner: string;
+}
+
 export interface Harness {
   readonly schema: string;
   readonly sql: SQL;
   readonly pg: Pg;
-  readonly sitesDir: string;
+  readonly sites: Sites;
+  readonly gcs: FakeGcs;
+  readonly bucket: string;
+  /** Where the disk depot keeps `/api/files` objects. */
+  readonly depotDir: string;
   readonly config: Config;
   /** A site name only this file can claim. */
   name(label: string): string;
+  /** Writes the marker of a site, as `kthx deploy` does, and its index page. */
+  site(label: string, owner?: string, deployed?: string): Promise<Site>;
   fetch(request: Request, server?: Bun.Server<unknown>): Promise<Response>;
   /** The same server on a real port, for tests that need a socket. */
   listen(): Bun.Server<unknown>;
@@ -88,7 +113,10 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
     const sql = new SQL(url.toString(), { max: 2 });
     await migrate(sql);
 
-    const sitesDir = await mkdtemp(join(tmpdir(), 'kthx-sites-'));
+    const depotDir = await mkdtemp(join(tmpdir(), 'kthx-depot-'));
+    gcs ??= fakeGcs();
+    const fake = gcs;
+    const bucket = `sites-${schema}`;
     const config: Config = {
       zone: ZONE,
       controlHost: null,
@@ -96,7 +124,9 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
       identityHost: null,
       identityHeader: 'tailscale-user-login',
       bucket: null,
-      sitesDir,
+      sitesBucket: bucket,
+      idAudiences: [AUDIENCE, GCLOUD_AUDIENCE],
+      jwksUrl: JWKS_URL,
       databaseUrl: url.toString(),
       meKey: 'k'.repeat(32),
       mePreviousKey: null,
@@ -125,21 +155,43 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
     };
     const pg = new Pg(config, sql);
     await pg.bootstrap();
-    const fetch: Kthx = handler(
-      config,
-      sql,
-      diskDepot(join(sitesDir, '.depot')),
-      pg,
+    // No cache: a test writes a marker and asks at once.
+    const sites = new Sites(
+      { bucketName: bucket, auth: { token: () => 'test', endpoint: fake.url } },
+      0,
     );
+    const fetch: Kthx = handler(config, sql, diskDepot(depotDir), sites, pg);
     let server: Bun.Server<unknown> | null = null;
 
     current = {
       schema,
       sql,
       pg,
-      sitesDir,
+      sites,
+      gcs: fake,
+      bucket,
+      depotDir,
       config,
       name: (label) => `${prefix}-${label}`,
+      async site(label, owner = OWNER, deployed = new Date().toISOString()) {
+        const name = `${prefix}-${label}`;
+        fake.put(bucket, `${name}/index.html`, '<!doctype html><h1>hi</h1>', {
+          contentType: 'text/html; charset=utf-8',
+        });
+        fake.put(bucket, `${name}/${MARKER}`, '{}', {
+          contentType: 'application/json',
+          metadata: {
+            [OWNER_KEY]: owner,
+            [DEPLOYED_KEY]: deployed,
+          },
+        });
+        return {
+          name,
+          host: `${name}.${ZONE}`,
+          token: await idToken(owner),
+          owner,
+        };
+      },
       // `undefined` only answers an upgraded socket, which needs `listen()`.
       fetch: (request, on) =>
         fetch(request, on ?? server ?? undefined) as Promise<Response>,
@@ -160,7 +212,8 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
           await pg.drop(row.name).catch(() => {});
         }
         await sql.close();
-        await rm(sitesDir, { recursive: true, force: true });
+        fake.buckets.delete(bucket);
+        await rm(depotDir, { recursive: true, force: true });
         await adminSession().unsafe(
           `drop schema if exists "${schema}" cascade`,
         );
@@ -177,6 +230,8 @@ export function withServer(overrides: Partial<Config> = {}): () => Harness {
   // The template and group role outlive each test, so a claim stays cheap.
   afterAll(async () => {
     await dropPrefixed(prefix);
+    gcs?.stop();
+    gcs = null;
   });
 
   return () => {

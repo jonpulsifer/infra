@@ -5,7 +5,6 @@
  */
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { LANDING_PATH } from '@repo/kthx/assets';
-import { tarGz } from '../../cli/tar.ts';
 import { utcDay } from '../../server/ai.ts';
 import {
   documentIn,
@@ -279,31 +278,28 @@ async function spent(
   };
 }
 
+/** A marker owned by `login`, and nothing in the folder yet. */
 async function claimAs(login: string, label: string): Promise<string> {
   const name = kthx().name(label);
-  const claimed = await ontailnet('/api/sites', login, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name }),
+  kthx().gcs.put(kthx().bucket, `${name}/.kthx`, '{}', {
+    contentType: 'application/json',
+    metadata: {
+      'kthx-owner': login,
+      'kthx-deployed': new Date().toISOString(),
+    },
   });
-  expect(claimed.status).toBe(201);
   return name;
 }
 
+/** As `kthx deploy` leaves the folder: these files and no others. */
 async function publish(
-  login: string,
+  _login: string,
   name: string,
   files: { path: string; bytes: Uint8Array }[],
 ): Promise<void> {
-  const uploaded = await ontailnet(`/api/sites/${name}/releases`, login, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/gzip',
-      origin: `https://${IDENTITY}`,
-    },
-    body: tarGz(files),
-  });
-  expect(uploaded.status).toBe(201);
+  for (const file of files) {
+    kthx().gcs.put(kthx().bucket, `${name}/${file.path}`, file.bytes);
+  }
 }
 
 const bytes = (text: string) => new TextEncoder().encode(text);
@@ -434,13 +430,6 @@ describe('a page', () => {
 
   test('never offers this person their own address as somebody else’s', async () => {
     // The same description proposes the same name, so it must read as his.
-    const empty = await claimAs(DAD, 'his-own');
-    answers = [() => writes([`<!-- kthx-name: ${empty} -->\n${PAGE}`])];
-    expect(
-      done(await read(await post({ ask: 'my woodworking' }))),
-    ).toMatchObject({ name: empty, available: false, yours: 'empty' });
-
-    // An empty claim is finished by publishing; a live site needs a new name.
     const live = await claimAs(DAD, 'his-site');
     await publish(DAD, live, [{ path: 'index.html', bytes: bytes(PAGE) }]);
     answers = [() => writes([`<!-- kthx-name: ${live} -->\n${PAGE}`])];
@@ -454,6 +443,101 @@ describe('a page', () => {
     const all = await read(await post({ ask: 'a page' }));
     expect(failed(all)).toMatchObject({ code: 'NO_DOCUMENT' });
     expect(done(all)).toBeNull();
+  });
+});
+
+describe('publishing', () => {
+  const publishing = (
+    body: unknown,
+    login = DAD,
+    headers: Record<string, string> = {},
+  ) =>
+    ontailnet('/api/build/publish', login, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `https://${IDENTITY}`,
+        ...headers,
+      },
+      body: JSON.stringify(body),
+    });
+
+  test('claims a free name for the login and puts the page online', async () => {
+    const name = kthx().name('published');
+    const answer = await publishing({ name, document: PAGE });
+    expect(answer.status).toBe(201);
+    expect(await answer.json()).toEqual({
+      name,
+      url: `https://${name}.${ZONE}`,
+    });
+    const page = kthx().gcs.get(kthx().bucket, `${name}/index.html`);
+    expect(new TextDecoder().decode(page?.bytes)).toBe(PAGE);
+    expect(page?.contentType).toBe('text/html; charset=utf-8');
+    expect(page?.cacheControl).toBe('no-cache');
+    expect(kthx().gcs.get(kthx().bucket, `${name}/.kthx`)?.metadata).toEqual({
+      'kthx-owner': DAD,
+      'kthx-deployed': expect.any(String),
+    });
+  });
+
+  test('replaces a site of his, page and all, and leaves nothing else', async () => {
+    const name = await claimAs(DAD, 'replaced');
+    await publish(DAD, name, [
+      { path: 'index.html', bytes: bytes('<p>old</p>') },
+      { path: 'photo.png', bytes: bytes('png') },
+    ]);
+    const answer = await publishing({ name, document: PAGE });
+    expect(answer.status).toBe(201);
+    expect(kthx().gcs.names(kthx().bucket, `${name}/`)).toEqual([
+      `${name}/.kthx`,
+      `${name}/index.html`,
+    ]);
+    expect(kthx().gcs.text(kthx().bucket, `${name}/index.html`)).toBe(PAGE);
+  });
+
+  test("is refused on somebody else's site, a reserved name and an app's", async () => {
+    const hers = await claimAs(MOM, 'hers-to-keep');
+    expect((await publishing({ name: hers, document: PAGE })).status).toBe(409);
+    expect(
+      kthx().gcs.text(kthx().bucket, `${hers}/index.html`),
+    ).toBeUndefined();
+
+    expect(
+      (await (await publishing({ name: 'admin', document: PAGE })).json()).code,
+    ).toBe('RESERVED');
+
+    const app = kthx().name('apps-name');
+    await kthx().sql`
+      insert into reservations (name, holder) values (${app}, 'an-app')
+    `;
+    expect((await publishing({ name: app, document: PAGE })).status).toBe(409);
+    expect(kthx().gcs.names(kthx().bucket, `${app}/`)).toEqual([]);
+  });
+
+  test('needs a same-site origin, a page, and a page small enough', async () => {
+    const name = kthx().name('guarded');
+    const foreign = await publishing({ name, document: PAGE }, DAD, {
+      origin: 'https://evil.test',
+    });
+    expect(foreign.status).toBe(403);
+    expect((await publishing({ name, document: ' ' })).status).toBe(400);
+    const huge = `<html>${'x'.repeat(600 * 1024)}</html>`;
+    expect((await publishing({ name, document: huge })).status).toBe(413);
+    expect(kthx().gcs.names(kthx().bucket, `${name}/`)).toEqual([]);
+  });
+
+  test('is on the identity host only, for a login', async () => {
+    const name = kthx().name('doorless');
+    const control = await kthx().fetch(
+      ask('/api/build/publish', {
+        host: CONTROL,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name, document: PAGE }),
+      }),
+    );
+    expect(control.status).toBe(404);
+    expect((await publishing({ name, document: PAGE }, '')).status).toBe(401);
   });
 });
 
@@ -852,9 +936,10 @@ describe('the page every door serves', () => {
       expect(tag).not.toContain('data-identity');
       // No console is configured here, so no door links to one.
       expect(tag).not.toContain('data-console');
-      expect(html).toContain('<div class="deck">');
-      expect(html).toContain('Select a name');
-      expect(html).toContain('Drop a zip file or an index.html file');
+      expect(html).toContain('id="every"');
+      expect(html).toContain('gcloud auth application-default login');
+      expect(html).not.toContain('Drop a zip file');
+      expect(html).not.toContain('kthx.sites');
     }
   });
 
@@ -884,57 +969,74 @@ describe('the page every door serves', () => {
   });
 });
 
-describe('the whole road, as the page walks it', () => {
-  /** The page's own ZIP writer, lifted out, so the release route must read it. */
-  async function pageZip(): Promise<(name: string, bytes: Uint8Array) => Blob> {
-    const html = await Bun.file(LANDING_PATH).text();
-    const from = html.indexOf('let crcTable;');
-    const to = html.indexOf('/* upload */');
-    expect(from).toBeGreaterThan(0);
-    expect(to).toBeGreaterThan(from);
-    return new Function(`${html.slice(from, to)}; return zipOne;`)() as (
-      name: string,
-      bytes: Uint8Array,
-    ) => Blob;
-  }
+/** The page's `api` helper, against this server. */
+function apiAs(login: string) {
+  return async (
+    method: string,
+    path: string,
+    init: { json?: unknown } = {},
+  ): Promise<unknown> => {
+    const response = await ontailnet(path, login, {
+      method,
+      headers:
+        init.json === undefined
+          ? {}
+          : {
+              'content-type': 'application/json',
+              origin: `https://${IDENTITY}`,
+            },
+      body: init.json === undefined ? undefined : JSON.stringify(init.json),
+    });
+    if (response.status === 204) return null;
+    const data = (await response.json().catch(() => ({}))) as {
+      code?: string;
+      message?: string;
+    };
+    if (!response.ok) {
+      const refusal = new Error(data.message) as Error & {
+        code?: string;
+        status?: number;
+      };
+      refusal.code = data.code;
+      refusal.status = response.status;
+      throw refusal;
+    }
+    return data;
+  };
+}
 
-  test('writes, claims, publishes, rolls back and changes it again', async () => {
-    const zipOne = await pageZip();
+type Publish = (
+  name: string,
+  document: string,
+) => Promise<{ name: string; url: string }>;
+
+/** The page's own publish step, lifted out and run against this server. */
+async function pagePublish(api: ReturnType<typeof apiAs>): Promise<Publish> {
+  const html = await Bun.file(LANDING_PATH).text();
+  const from = html.indexOf('/* ---- publishing');
+  const to = html.indexOf('/* ---- screens');
+  expect(from).toBeGreaterThan(0);
+  expect(to).toBeGreaterThan(from);
+  return new Function('api', `${html.slice(from, to)}; return publishPage;`)(
+    api,
+  ) as Publish;
+}
+
+const indexOf = (name: string) =>
+  kthx().gcs.text(kthx().bucket, `${name}/index.html`);
+
+describe('the whole road, as the page walks it', () => {
+  test('writes, publishes, changes and publishes again', async () => {
+    const publishPage = await pagePublish(apiAs(DAD));
     const name = kthx().name('road');
 
     answers = [() => writes([`<!-- kthx-name: ${name} -->\n${PAGE}`])];
     const first = done(await read(await post({ ask: 'a page for my boats' })));
-    expect(first).toMatchObject({ name, available: true });
+    expect(first).toMatchObject({ name, available: true, yours: null });
 
-    // As the page does: claim, then publish through the release route.
-    const claimed = await ontailnet('/api/sites', DAD, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-    });
-    expect(claimed.status).toBe(201);
-    const published = await ontailnet(`/api/sites/${name}/releases`, DAD, {
-      method: 'POST',
-      headers: { origin: `https://${IDENTITY}` },
-      body: zipOne('index.html', bytes(first?.document as string)),
-    });
-    expect(published.status).toBe(201);
-    const site = await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }));
-    expect(await site.text()).toBe(PAGE);
-
-    // A rollback holds the site: later releases are stored but do not serve.
-    const second = await ontailnet(`/api/sites/${name}/releases`, DAD, {
-      method: 'POST',
-      headers: { origin: `https://${IDENTITY}` },
-      body: zipOne('index.html', bytes(PAGE.replace('Boards', 'Old Boards'))),
-    });
-    expect(second.status).toBe(201);
-    const rolled = await ontailnet(`/api/sites/${name}/serve`, DAD, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ n: 1 }),
-    });
-    expect(await rolled.json()).toMatchObject({ serving: 1, held: true });
+    const online = await publishPage(name, first?.document as string);
+    expect(online).toEqual({ name, url: expect.stringContaining(name) });
+    expect(indexOf(name)).toBe(PAGE);
 
     const greener = PAGE.replace('Boards', 'Green Boards');
     answers = [() => writes([greener])];
@@ -943,127 +1045,47 @@ describe('the whole road, as the page walks it', () => {
     );
     expect(changed).toMatchObject({ site: name, unchanged: false });
 
-    const again = await ontailnet(`/api/sites/${name}/releases`, DAD, {
-      method: 'POST',
-      headers: { origin: `https://${IDENTITY}` },
-      body: zipOne('index.html', bytes(changed?.document as string)),
-    });
-    const numbered = (await again.json()) as { n: number; serving: number };
-    // Not serving, so publishing must take the hold off, as the page does next.
-    expect(numbered.serving).not.toBe(numbered.n);
-    expect(
-      await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
-    ).toBe(PAGE);
-
-    const released = await ontailnet(`/api/sites/${name}/hold`, DAD, {
-      method: 'DELETE',
-      headers: { origin: `https://${IDENTITY}` },
-    });
-    expect(released.status).toBe(200);
-    expect(
-      await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
-    ).toBe(greener);
+    await publishPage(name, changed?.document as string);
+    expect(indexOf(name)).toBe(greener);
   });
 });
 
-describe('the page, when the upload half of publishing fails', () => {
-  /** The page's `api` helper, against this server. */
-  function apiAs(login: string) {
-    return async (
-      method: string,
-      path: string,
-      init: { json?: unknown } = {},
-    ): Promise<unknown> => {
-      const response = await ontailnet(path, login, {
-        method,
-        headers:
-          init.json === undefined
-            ? {}
-            : {
-                'content-type': 'application/json',
-                origin: `https://${IDENTITY}`,
-              },
-        body: init.json === undefined ? undefined : JSON.stringify(init.json),
-      });
-      if (response.status === 204) return null;
-      const data = (await response.json().catch(() => ({}))) as {
-        code?: string;
-        message?: string;
-      };
-      if (!response.ok) {
-        const refusal = new Error(data.message) as Error & {
-          code?: string;
-          status?: number;
-        };
-        refusal.code = data.code;
-        refusal.status = response.status;
-        throw refusal;
-      }
-      return data;
-    };
-  }
+describe('the page, when publishing is refused', () => {
+  test('replaces a website of his whole, which is what a name of his means', async () => {
+    const publishPage = await pagePublish(apiAs(DAD));
+    const name = await claimAs(DAD, 'standing');
+    await publish(DAD, name, [
+      { path: 'index.html', bytes: bytes('<p>old</p>') },
+      { path: 'logo.png', bytes: bytes('png') },
+    ]);
 
-  /**
-   * The page's own claim step, lifted out. A claim cannot be repeated, so the
-   * page's retry is tested against this server.
-   */
-  async function pageClaim(api: ReturnType<typeof apiAs>): Promise<{
-    claim: (name: string) => Promise<void>;
-    claimedEmpty: (name: string) => Promise<boolean>;
-  }> {
-    const html = await Bun.file(LANDING_PATH).text();
-    const from = html.indexOf('async function claim(');
-    const to = html.indexOf('/* ---- screens');
-    expect(from).toBeGreaterThan(0);
-    expect(to).toBeGreaterThan(from);
-    return new Function(
-      'api',
-      `${html.slice(from, to)}; return { claim, claimedEmpty };`,
-    )(api) as {
-      claim: (name: string) => Promise<void>;
-      claimedEmpty: (name: string) => Promise<boolean>;
-    };
-  }
+    await publishPage(name, PAGE);
 
-  test('finishes the claim it already made instead of taking a second name', async () => {
-    const { claim } = await pageClaim(apiAs(DAD));
-    const name = kthx().name('resume');
-
-    await claim(name);
-    // After a failed upload the second press comes back here, and his own
-    // claim must not read as taken.
-    await claim(name);
-
-    await publish(DAD, name, [{ path: 'index.html', bytes: bytes(PAGE) }]);
-    expect(
-      await (await kthx().fetch(ask('/', { host: `${name}.${ZONE}` }))).text(),
-    ).toBe(PAGE);
+    expect(indexOf(name)).toBe(PAGE);
+    expect(kthx().gcs.names(kthx().bucket, `${name}/`)).not.toContain(
+      `${name}/logo.png`,
+    );
   });
 
-  test('does not put a new page over one that is already online', async () => {
-    const { claim } = await pageClaim(apiAs(DAD));
-    const mine = await claimAs(DAD, 'standing');
-    await publish(DAD, mine, [{ path: 'index.html', bytes: bytes(PAGE) }]);
-    // His, with a page on it: a second press finishes, never overwrites.
-    await expect(claim(mine)).rejects.toMatchObject({ code: 'TAKEN' });
-
+  test('reads somebody else’s name as taken, and leaves their site alone', async () => {
+    const publishPage = await pagePublish(apiAs(DAD));
     const hers = await claimAs(MOM, 'hers');
-    await expect(claim(hers)).rejects.toMatchObject({ code: 'TAKEN' });
+    await publish(MOM, hers, [
+      { path: 'index.html', bytes: bytes('<p>hers</p>') },
+    ]);
+
+    await expect(publishPage(hers, PAGE)).rejects.toMatchObject({
+      code: 'TAKEN',
+      status: 409,
+    });
+    expect(indexOf(hers)).toBe('<p>hers</p>');
   });
 
-  test('reads an unreachable server as neither taken nor free', async () => {
-    const name = await claimAs(DAD, 'unreachable');
-    expect(await (await pageClaim(apiAs(DAD))).claimedEmpty(name)).toBe(true);
-
-    // A check that never arrived must not answer "not yours": a rejection
-    // with no status is rethrown.
-    const offline = await pageClaim(() => {
+  test('passes a dropped connection through as the page’s own code', async () => {
+    const publishPage = await pagePublish(() => {
       throw Object.assign(new Error('offline'), { code: 'OFFLINE' });
     });
-    await expect(offline.claimedEmpty(name)).rejects.toMatchObject({
-      code: 'OFFLINE',
-    });
-    await expect(offline.claim(name)).rejects.toMatchObject({
+    await expect(publishPage('anything', PAGE)).rejects.toMatchObject({
       code: 'OFFLINE',
     });
   });
@@ -1167,6 +1189,7 @@ describe('every refusal this page can meet has a sentence', () => {
       'MALFORMED_REQUEST',
       'NOT_FOUND',
       'NO_DOCUMENT',
+      'PRECONDITION_FAILED',
       'RATE_LIMITED',
       'RESERVED',
       'STORAGE_FAILURE',
@@ -1195,7 +1218,7 @@ describe('every refusal this page can meet has a sentence', () => {
   test('does not say good news in the colour kept for bad', async () => {
     const { SAYS, render } = await pageSays();
     // Reassurances, so never the red box kept for failures.
-    for (const code of ['PICKED_UP', 'CLAIMED', 'TYPED_BACK', 'PINNED']) {
+    for (const code of ['PICKED_UP', 'TYPED_BACK']) {
       expect(SAYS[code]).toBeString();
       const shown = render({ code });
       expect(shown.className).toContain('note');
@@ -1234,14 +1257,12 @@ describe('an address of his own, on the screens that offer it', () => {
     const src = await slice('function propose(done)', '/**\n * The proposal');
     const said: { code: string | null; lead: string }[] = [];
     const propose = new Function(
-      'pinned',
       'draft',
       'typed',
       'proposal',
       'hostOf',
       `let held = null; ${src} return (done) => { propose(done); return held; };`,
     )(
-      null,
       () => undefined,
       () => undefined,
       (err: { code: string } | null, lead: string) =>
@@ -1261,18 +1282,24 @@ describe('an address of his own, on the screens that offer it', () => {
     });
     expect(said.at(-1)).toEqual({ code: null, lead: expect.any(String) });
 
-    // His, with nothing on it: a stranded claim the green button finishes.
-    expect(
-      propose({ ...frame, available: false, yours: 'empty' }),
-    ).toMatchObject({ taken: false, yours: 'empty' });
-    expect(said.at(-1)?.code).toBe('CLAIMED');
-
-    // His, with a website on it: needs another name, but is not someone else's.
+    // His, with a website on it: publishing replaces it, and the screen says
+    // so, but it is not refused and not someone else's.
     expect(
       propose({ ...frame, available: false, yours: 'live' }),
-    ).toMatchObject({ taken: true, yours: 'live' });
+    ).toMatchObject({ taken: false, yours: 'live' });
     expect(said.at(-1)?.code).toBe('YOURS');
     expect(said.at(-1)?.lead).toContain('already your website');
+
+    // A change to his own site says nothing about replacing it.
+    expect(
+      propose({
+        ...frame,
+        site: 'dartmouth-boards',
+        available: false,
+        yours: 'live',
+      }),
+    ).toMatchObject({ taken: false, changing: true });
+    expect(said.at(-1)?.code).toBeNull();
 
     // Somebody else's: the only case that is taken.
     expect(propose({ ...frame, available: false, yours: null })).toMatchObject({
@@ -1281,9 +1308,52 @@ describe('an address of his own, on the screens that offer it', () => {
     expect(said.at(-1)?.code).toBe('TAKEN');
   });
 
-  test('is on the list, with the one thing left to do with it', async () => {
-    // Nothing reclaims a claim with no release, so "your websites" lists it.
-    const src = await slice('/**\n * Every address of his', '/* ---- the wait');
+  test('is on the list, with when it went online and what to do with it', async () => {
+    const src = await slice('/** Every site of his', '/* ---- the wait');
+    const page = screen();
+    const changed: string[] = [];
+    const list = new Function(
+      '$',
+      'document',
+      'api',
+      'hostOf',
+      'ago',
+      'askChange',
+      `${src}
+       return listMine;`,
+    )(
+      page.$,
+      { createElement: node },
+      async (_method: string, path: string) => {
+        expect(path).toBe('/api/sites?owner=me');
+        return {
+          items: [
+            { name: 'boats', url: 'x', deployed: '2026-10-01T00:00:00.000Z' },
+            { name: 'never', url: 'y', deployed: null },
+          ],
+        };
+      },
+      (name: string) => `${name}.${ZONE}`,
+      (iso: string | null) => `when:${iso}`,
+      (name: string) => changed.push(name),
+    ) as () => Promise<void>;
+
+    await list();
+    expect(page.el('b-mine').hidden).toBe(false);
+    const rows = page.el('b-minelist').children;
+    expect(rows).toHaveLength(2);
+    const boats = rows[0]?.children ?? [];
+    expect(boats[0]?.textContent).toBe(`boats.${ZONE}`);
+    expect(boats[1]?.textContent).toBe('when:2026-10-01T00:00:00.000Z');
+    const acts = boats[2]?.children ?? [];
+    expect(acts.map((act) => act.textContent)).toEqual(['Open', 'Change it']);
+
+    acts[1]?.onclick?.();
+    expect(changed).toEqual(['boats']);
+  });
+
+  test('hides the list when he has no sites', async () => {
+    const src = await slice('/** Every site of his', '/* ---- the wait');
     const page = screen();
     const list = new Function(
       '$',
@@ -1292,104 +1362,20 @@ describe('an address of his own, on the screens that offer it', () => {
       'hostOf',
       'ago',
       'askChange',
-      'draft',
-      'typed',
-      'typedBack',
-      'oops',
-      'show',
-      `let held = null; let pinned = null;
-       ${src}
-       return { listMine, usePinned, pinnedNow: () => pinned };`,
-    )(
-      page.$,
-      { createElement: node },
-      async () => ({
-        items: [
-          { name: 'stranded', url: 'x', serving: null, releases: 0 },
-          {
-            name: 'published',
-            url: 'y',
-            serving: 1,
-            releases: 1,
-            changed: null,
-          },
-        ],
-      }),
-      (name: string) => `${name}.${ZONE}`,
-      () => 'changed today',
-      () => undefined,
-      () => undefined,
-      () => undefined,
-      () => ({ ask: 'the sentence he typed' }),
-      () => undefined,
-      () => undefined,
-    ) as {
-      listMine: () => Promise<void>;
-      usePinned: (name: string) => void;
-      pinnedNow: () => string | null;
-    };
-
-    await list.listMine();
-    const rows = page.el('b-minelist').children;
-    expect(rows).toHaveLength(2);
-    const stranded = rows[0]?.children ?? [];
-    expect(stranded[0]?.textContent).toBe(`stranded.${ZONE}`);
-    const acts = stranded[2]?.children ?? [];
-    expect(acts).toHaveLength(1);
-    expect(acts[0]?.textContent).toBe('Put a page on it');
-
-    // Pressing it pins the next page to that address.
-    acts[0]?.onclick?.();
-    expect(list.pinnedNow()).toBe('stranded');
-  });
-
-  test('the address he picks does not cost him the sentence he typed', async () => {
-    // The tap usually follows typing into the box below, so picking an address
-    // keeps the sentence.
-    const src = await slice('/**\n * Every address of his', '/* ---- the wait');
-    const page = screen();
-    const ask = page.el('b-ask');
-    const lifted = new Function(
-      '$',
-      'document',
-      'api',
-      'hostOf',
-      'ago',
-      'askChange',
-      'draft',
-      'typed',
-      'typedBack',
-      'oops',
-      'show',
-      `let held = null; let pinned = null;
-       ${src}
-       return { usePinned };`,
+      `${src}
+       return listMine;`,
     )(
       page.$,
       { createElement: node },
       async () => ({ items: [] }),
       (name: string) => `${name}.${ZONE}`,
-      () => 'changed today',
+      () => '',
       () => undefined,
-      () => {
-        throw new Error('the draft is not this button to discard');
-      },
-      () => {
-        throw new Error('the backup is not this button to discard');
-      },
-      () => ({ ask: 'a page for my woodworking' }),
-      () => undefined,
-      () => undefined,
-    ) as { usePinned: (name: string) => void };
+    ) as () => Promise<void>;
 
-    ask.value = 'cutting boards and birdhouses in Dartmouth';
-    lifted.usePinned('stranded');
-    expect(ask.value).toBe('cutting boards and birdhouses in Dartmouth');
-
-    // A box a reload emptied is refilled from the backup.
-    ask.value = '';
-    lifted.usePinned('stranded');
-    expect(ask.value).toBe('a page for my woodworking');
+    await list();
+    expect(page.el('b-mine').hidden).toBe(true);
+    expect(page.el('b-minelist').children).toHaveLength(0);
   });
 
   test('leaves the name screen with something he can press', async () => {
@@ -1422,7 +1408,7 @@ describe('an address of his own, on the screens that offer it', () => {
     expect(page.el('b-keepname').hidden).toBe(false);
   });
 
-  test('is usable on the name screen when it is his and empty', async () => {
+  test('is usable on the name screen when it is his', async () => {
     const src = await slice('function paintName()', '/* ---- what the buttons');
     const answers: Record<string, unknown>[] = [];
     const page = screen({ 'b-name': 'his-own' });
@@ -1440,21 +1426,14 @@ describe('an address of his own, on the screens that offer it', () => {
       async () => answers.shift() ?? {},
     ) as () => void;
 
-    // Typing the stranded address back is the only way to it once the draft
-    // is gone, so it must not read as taken.
-    answers.push({ available: false, why: 'TAKEN', yours: 'empty' });
+    // A website of his is usable: publishing replaces it, and the sentence
+    // says so.
+    answers.push({ available: false, why: 'TAKEN', yours: 'live' });
     paintName();
     await Bun.sleep(400);
     expect(page.el('b-usename').disabled).toBe(false);
     expect(verdicts.at(-1)?.kind).toBe('yes');
-    expect(verdicts.at(-1)?.say).not.toContain('Somebody');
-
-    // A website of his is not usable here, and the sentence says why.
-    answers.push({ available: false, why: 'TAKEN', yours: 'live' });
-    paintName();
-    await Bun.sleep(400);
-    expect(page.el('b-usename').disabled).toBe(true);
-    expect(verdicts.at(-1)?.say).toContain('your website');
+    expect(verdicts.at(-1)?.say).toContain('replaces it');
 
     answers.push({ available: false, why: 'TAKEN', yours: null });
     paintName();
@@ -1617,6 +1596,7 @@ describe('the config', () => {
     DATABASE_URL: 'postgres://x',
     KTHX_ME_KEY: 'k'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_SITES_BUCKET: 'sites',
     KTHX_AI_MODEL: 'chat-model',
     KTHX_AI_MODELS: 'chat-model,writer',
   };

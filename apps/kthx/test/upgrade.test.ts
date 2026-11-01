@@ -277,15 +277,16 @@ describe('the CLI', () => {
     expect(err).toContain('usage: kthx');
   }, 30_000);
 
-  test('an apex that never answers does not change what ls exits with', async () => {
+  test('an apex that never answers does not change what rm exits with', async () => {
     const started = Date.now();
-    const child = run(['ls']);
-    const [code, out] = await Promise.all([
+    // No kthx.json here, so rm refuses before it needs credentials.
+    const child = run(['rm'], { GOOGLE_APPLICATION_CREDENTIALS: '' });
+    const [code, err] = await Promise.all([
       child.exited,
-      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
     ]);
-    expect(code).toBe(0);
-    expect(out).toContain('no tokens for');
+    expect(code).toBe(1);
+    expect(err).toContain('NO_NAME');
     // Over a pipe the check is skipped; the bound allows for process startup.
     expect(Date.now() - started).toBeLessThan(10_000);
   }, 30_000);

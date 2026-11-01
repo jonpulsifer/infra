@@ -3,6 +3,7 @@
  * boot. The cookie key and the Postgres password key are separate, so rotating
  * one leaves the other's output unchanged.
  */
+import { GOOGLE_JWKS } from './identity.ts';
 
 export class ConfigError extends Error {
   override readonly name = 'ConfigError';
@@ -23,10 +24,20 @@ export interface Config {
   readonly identityHost: string | null;
   /** The tailnet proxy replaces any client-sent copy of this header. */
   readonly identityHeader: string;
-  /** `null` uses the local-disk depot. */
+  /**
+   * The depot for `/api/files` objects; `null` keeps them in a directory under
+   * `TMPDIR`, for local runs.
+   */
   readonly bucket: string | null;
-  /** Where release directories are unpacked. */
-  readonly sitesDir: string;
+  /** The bucket whose `<name>/` folders are the sites, each with a marker. */
+  readonly sitesBucket: string;
+  /**
+   * The `aud` values a Google ID token may carry to open a site as its owner.
+   * Empty accepts no ID token.
+   */
+  readonly idAudiences: readonly string[];
+  /** Google's published keys; a test serves its own. */
+  readonly jwksUrl: string;
   readonly databaseUrl: string;
   /** Signs the visitor cookie. */
   readonly meKey: string;
@@ -237,7 +248,9 @@ export function readConfig(env: Env = Bun.env): Config {
     identityHeader:
       env.KTHX_IDENTITY_HEADER?.trim().toLowerCase() || 'tailscale-user-login',
     bucket: env.KTHX_BUCKET?.trim() || null,
-    sitesDir: env.KTHX_SITES_DIR?.trim() || '/sites',
+    sitesBucket: required(env, 'KTHX_SITES_BUCKET'),
+    idAudiences: peers(env.KTHX_ID_AUDIENCES),
+    jwksUrl: GOOGLE_JWKS,
     databaseUrl: required(env, 'DATABASE_URL'),
     meKey: longEnough('KTHX_ME_KEY', required(env, 'KTHX_ME_KEY')),
     mePreviousKey:

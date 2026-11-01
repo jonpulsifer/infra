@@ -1,5 +1,6 @@
 {{/*
-The kthx server process, its sites volume and its GCP identity.
+The kthx server process and its GCP identity. nginx serves the sites' files
+from the sites bucket; this process answers their `/api/*` and `/files/*`.
 */}}
 apiVersion: v1
 kind: ServiceAccount
@@ -40,29 +41,6 @@ data:
       }
     }
 ---
-{{/*
-Unpacked release directories. `keep`: the depot refills a lost claim only lazily,
-one request at a time.
-*/}}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "kthx.fullname" . }}-sites
-  namespace: {{ .Release.Namespace }}
-  labels:
-    {{- include "kthx.labels" . | nindent 4 }}
-  annotations:
-    helm.sh/resource-policy: keep
-spec:
-  accessModes:
-    - ReadWriteOnce
-  {{- with .Values.sites.storageClass }}
-  storageClassName: {{ . | quote }}
-  {{- end }}
-  resources:
-    requests:
-      storage: {{ .Values.sites.size }}
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -73,8 +51,7 @@ metadata:
 spec:
   replicas: 1
   {{/*
-  One pod at a time: the abuse buckets and realtime rooms are in-process, and the
-  sites volume is ReadWriteOnce.
+  One pod at a time: the abuse buckets and realtime rooms are in-process.
   */}}
   strategy:
     type: Recreate
@@ -92,11 +69,6 @@ spec:
     spec:
       serviceAccountName: {{ include "kthx.fullname" . }}
       automountServiceAccountToken: false
-      {{- with .Values.node }}
-      # The sites PVC is a local-path directory on this node.
-      nodeSelector:
-        kubernetes.io/hostname: {{ . | quote }}
-      {{- end }}
       securityContext:
         {{- include "kthx.podSecurityContext" . | nindent 8 }}
       containers:
@@ -107,7 +79,7 @@ spec:
             - containerPort: {{ .Values.port }}
               protocol: TCP
           env:
-            # The sites volume and /tmp are the only writable paths.
+            # /tmp is the only writable path.
             - name: TMPDIR
               value: /tmp
             - name: HOME
@@ -136,10 +108,15 @@ spec:
             {{- $_ := required "control.host is required with engine.issuer: the engine surface answers there only" $.Values.control.host }}
             {{- end }}
             - name: KTHX_BUCKET
-              # Empty means no depot: every release archive stays on the local volume, with no error.
-              value: {{ required "bucket is required: it is the depot every release archive is durable in" .Values.bucket | quote }}
-            - name: KTHX_SITES_DIR
-              value: {{ .Values.sites.mountPath | quote }}
+              # Empty keeps `/api/files` objects under /tmp, which a restart loses.
+              value: {{ required "bucket is required: it is the depot `/api/files` objects are durable in" .Values.bucket | quote }}
+            # A site is `<name>/` in this bucket while its marker `<name>/.kthx` exists.
+            - name: KTHX_SITES_BUCKET
+              value: {{ required "sitesBucket is required: it holds every site's files and marker" .Values.sitesBucket | quote }}
+            # The `aud` values a Google ID token may carry to open a site as its owner.
+            # Empty accepts no ID token, so only the tailnet login opens a site.
+            - name: KTHX_ID_AUDIENCES
+              value: {{ .Values.idAudiences | quote }}
             - name: KTHX_TRUSTED_PROXIES
               value: {{ .Values.trustedProxies | quote }}
             {{- with .Values.identity.host }}
@@ -207,8 +184,6 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: sites
-              mountPath: {{ .Values.sites.mountPath }}
             {{- include "kthx.gcpVolumeMount" . | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -217,9 +192,6 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: sites
-          persistentVolumeClaim:
-            claimName: {{ include "kthx.fullname" . }}-sites
         {{- include "kthx.gcpVolume" . | nindent 8 }}
 ---
 apiVersion: v1

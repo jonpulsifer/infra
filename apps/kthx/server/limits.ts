@@ -2,8 +2,8 @@
  * In-memory rate limits: a token bucket and a per-UTC-day counter. Per-site
  * quotas do the bounding; these decide how fast anyone reaches them.
  *
- * ponytail: per-replica, which holds while realtime and the sites volume
- * require one replica. Move to Postgres or edge limits before a second.
+ * ponytail: per-replica, which holds while realtime requires one replica.
+ * Move to Postgres or edge limits before a second.
  */
 
 export interface BucketSpec {
