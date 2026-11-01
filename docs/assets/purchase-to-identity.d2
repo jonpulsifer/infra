@@ -1,0 +1,14 @@
+vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
+direction: down
+receive: "1. Purchase + receiving\nOwner verifies chassis, TPM keys and disk\nIndependent evidence starts trust"
+declare: "2. Git -> Atlantis -> NetBox\nApproved device declaration\nOwner controls lifecycle requests"
+attest: "3. Signed boot + fleetd\nTPM possession and fresh boot evidence\nDeclaration and admission policy"
+install: "4. Tinkerbell -> Talos\nDisk gates and TPM-delivered install code\nHTTPS configuration release"
+identity: "5. Kubernetes + SPIRE\nNode join and workload credentials\nResource authorization remains separate"
+withdraw: "6. Recheck + retirement\nRestrict new scheduling and credentials\nExisting credentials expire separately"
+receive -> declare: reviewed binding
+declare -> attest: expected identity and intent
+attest -> install: authorized provision
+install -> identity: separate join and identity checks
+identity -> withdraw: ongoing lifecycle
+**.style.font-size: 20

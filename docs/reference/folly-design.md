@@ -86,7 +86,7 @@ For an eligible provision, fleetd renders the config and returns a random instal
 
 The Talos installer writes the code to META. At first boot, Talos sends the UUID and code over HTTPS. This request uses a bearer credential. It does not produce a new TPM proof.
 
-Only one fetch can claim the config at a time. A complete response burns the code. A partial response permits a retry. Config expiry bounds the waiting period. A new render invalidates the earlier code.
+Only one fetch can claim the config at a time. TCP acknowledgement of the complete response burns the code; it does not prove durable storage by Talos. A partial response permits a retry. Config expiry bounds the waiting period. A new render invalidates the earlier code.
 
 After config release, fleetd attempts to set the device active. A failed NetBox update waits for a retry. Active records config release; it does not mean that Kubernetes reports the node Ready.
 
@@ -102,11 +102,13 @@ The running node sends daily LAK-signed boot evidence to fleetd. Renewal also re
 
 A cordon prevents new scheduling. It does not stop existing pods or isolate the network. Transport failure is not evidence of an unacceptable boot, so it does not trigger the same quarantine decision.
 
-fleetd exports eligible devices, and the retired ones it holds records of, for the SPIRE registration service. That service removes a node's registrations and bans its agent when the node leaves the export, and bans a retired node's agents on sight. spore declares no static entry. Its EK allow list admits an agent and issues it nothing. A ban stops a new attestation and a renewal, but it does not invalidate an SVID that a consumer already holds before that SVID expires.
+fleetd exports eligible devices, and the retired ones it holds records of, for the SPIRE registration service. That service removes fleet-owned registrations when a node leaves the export. It bans the agent unless another registration still carries its selector. Explicitly retired nodes' agents are banned on sight, subject to the withdrawal safeguard below. spore declares no static entry. Its EK allow list admits an agent and issues it nothing. A ban stops a new attestation and a renewal, but it does not invalidate an SVID that a consumer already holds before that SVID expires.
 
 An empty NetBox device list preserves the export. A malformed export preserves SPIRE entries. An export that would withdraw or ban more than one node at once changes nothing until the owner allows it. These safeguards avoid accidental mass withdrawal, but they can retain stale access during a fault.
 
 ## 5. Design choices and tradeoffs
+
+[From purchase to workload identity](purchase-to-identity.md#off-the-shelf-building-blocks-and-tradeoffs) compares raw PXE, iPXE, UEFI HTTP boot, BMC control and stock workflows with the lab's integration layer.
 
 “Better suited” means a better fit for a stated requirement. It does not mean that one component replaces every function of another.
 
@@ -193,6 +195,6 @@ Identity withdrawal needs an exercise with both registration owners and both nod
 
 An operating-system class, new signing authority or broader renewal policy changes the trust boundary. Such a change needs its own negative tests and target-hardware evidence. A simulator result can establish feasibility without authorizing deployment.
 
-The most important open design decisions are independent EK binding, exact-image policy, complete credential withdrawal and management-host recovery. Their acceptance conditions are concrete: reject a substitute TPM at first admission, reject an unacceptable signed image, demonstrate bounded withdrawal, and restore without folly.
+Independent EK binding is an admission requirement; its assurance depends on receiving evidence. Open design decisions include exact-image policy, complete credential withdrawal and management-host recovery. Acceptance requires rejection of a substitute TPM and an unacceptable signed image, bounded withdrawal, and restoration without folly.
 
 The owner controls lifecycle policy, explicit actions and infrastructure deployment. Enabled auto-provision authorizes an eligible worker's first installation. Git remains the source of desired state. [How changes ship](../platform/how-changes-ship.md) defines which controller applies each layer.
