@@ -429,8 +429,9 @@ describe('the tailnet identity host', () => {
     expect(
       from.some(
         (entry: any) =>
-          entry.namespaceSelector?.matchLabels['kubernetes.io/metadata.name'] ===
-          'tailscale',
+          entry.namespaceSelector?.matchLabels[
+            'kubernetes.io/metadata.name'
+          ] === 'tailscale',
       ),
     ).toBe(false);
   });
