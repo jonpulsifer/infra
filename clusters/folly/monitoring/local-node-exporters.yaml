@@ -16,8 +16,6 @@ endpoints:
     nodeName: cloudpi4
   - addresses: ["${CAPSULE_IP}"]
     nodeName: capsule
-  - addresses: ["${RADIOPI0_IP}"]
-    nodeName: radiopi0
   - addresses: ["${SPORE_IP}"]
     nodeName: spore
   - addresses: ["${FORGE_IP}"]
