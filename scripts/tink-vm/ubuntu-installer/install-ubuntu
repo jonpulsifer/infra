@@ -1,9 +1,15 @@
 #!/bin/sh
-# Writes this image's Ubuntu cloud image to DISK as it is (its GPT, its ESP with shim and GRUB, its
-# ext4 root), moves the GPT's backup header to the disk's end, makes the NoCloud seed in the root
+# Writes this image's Ubuntu cloud image to DISK (its GPT, its ESP with shim and GRUB, its ext4 root
+# and /boot), moves the GPT's backup header to the disk's end, makes the NoCloud seed in the root
 # from NODE_HOSTNAME (meta-data) and PAYLOAD (a tarball of the node's files, user-data among them),
 # and adds a firmware boot entry named Ubuntu for shim. cloud-init grows the root to the disk on
 # first boot. It runs with /dev and efivarfs from HookOS and no network.
+#
+# Every copy of the cloud image has the same disk and partition GUIDs, filesystem UUIDs and labels,
+# and its boot chain finds its partitions by them, so with a second such disk present it boots or
+# mounts from either. The install gives the disk, its partitions and their filesystems new random
+# identities, removes the labels, and points the ESP's GRUB, /boot's grub.cfg, fstab and the
+# firmware entry at the new ones.
 set -eu
 log() {
   echo "install-ubuntu: $*"
@@ -31,24 +37,80 @@ case $DISK in
   *[0-9]) part=${DISK}p ;;
   *) part=$DISK ;;
 esac
+root=${part}1 esp=${part}15 boot=${part}16
 
 log "writing the image to $DISK"
 qemu-img convert -n -f qcow2 -O raw -t none /ubuntu-cloudimg.img "$DISK"
-sgdisk -e "$DISK" >/dev/null
+sgdisk -e -G "$DISK" >/dev/null
 blockdev --rereadpt "$DISK" || partx -u "$DISK" || true
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  [ -b "${part}15" ] && [ -b "${part}1" ] && break
+  [ -b "$root" ] && [ -b "$esp" ] && [ -b "$boot" ] && break
   sleep 1
 done
-[ -b "${part}15" ] || {
-  log "${part}15, the image's ESP, did not appear"
+for p in "$root" "$esp" "$boot"; do
+  [ -b "$p" ] || {
+    log "$p, a partition of the image, did not appear"
+    exit 1
+  }
+done
+
+tag() {
+  v=$(blkid -p -o value -s "$1" "$2") && [ -n "$v" ] || {
+    log "$2 has no filesystem $1" >&2
+    exit 1
+  }
+  echo "$v"
+}
+old_root=$(tag UUID "$root")
+old_boot=$(tag UUID "$boot")
+old_esp=$(tag UUID "$esp")
+root_label=$(tag LABEL "$root")
+boot_label=$(tag LABEL "$boot")
+esp_label=$(tag LABEL "$esp")
+log "giving the filesystems new identities"
+for p in "$root" "$boot"; do
+  # The image's ext4 has metadata_csum without metadata_csum_seed, so a new UUID rewrites every
+  # checksum, which tune2fs does only on a freshly checked filesystem.
+  e2fsck -fp "$p" >/dev/null || [ $? -eq 1 ]
+  tune2fs -U random -L '' "$p" >/dev/null </dev/null
+done
+fatlabel -i -r "$esp" >/dev/null
+fatlabel -r "$esp" >/dev/null
+new_root=$(tag UUID "$root")
+new_boot=$(tag UUID "$boot")
+new_esp=$(tag UUID "$esp")
+
+mnt=$(mktemp -d)
+bootmnt=$(mktemp -d)
+espmnt=$(mktemp -d)
+mount "$root" "$mnt"
+trap 'umount "$espmnt" "$bootmnt" "$mnt" 2>/dev/null || true' EXIT
+mount "$boot" "$bootmnt"
+mount "$esp" "$espmnt"
+[ -f "$espmnt/EFI/ubuntu/shimx64.efi" ] || {
+  log "the image's ESP has no EFI/ubuntu/shimx64.efi"
   exit 1
 }
 
-mnt=$(mktemp -d)
-esp=$(mktemp -d)
-mount "${part}1" "$mnt"
-trap 'umount "$esp" 2>/dev/null || true; umount "$mnt" 2>/dev/null || true' EXIT
+log "pointing the boot chain at the new identities"
+set -- "$mnt/etc/fstab" "$bootmnt/grub/grub.cfg" "$espmnt/EFI/ubuntu/grub.cfg"
+sed -i -e "s/LABEL=$root_label\([[:space:]]\)/UUID=$new_root\1/; s/LABEL=$boot_label\([[:space:]]\)/UUID=$new_boot\1/" \
+  -e "s/LABEL=$esp_label\([[:space:]]\)/UUID=$new_esp\1/; s/$old_root/$new_root/g; s/$old_boot/$new_boot/g" "$@"
+for id in "$old_root" "$old_boot" "$old_esp" "LABEL=$root_label" "LABEL=$boot_label" "LABEL=$esp_label"; do
+  if grep -Fq -- "$id" "$@"; then
+    log "the boot chain still names the image's $id"
+    exit 1
+  fi
+done
+if ! grep -Eq "^UUID=${new_root}[[:space:]]+/[[:space:]]" "$mnt/etc/fstab" \
+  || ! grep -q "root=UUID=$new_root " "$bootmnt/grub/grub.cfg" \
+  || ! grep -q "search.fs_uuid $new_boot " "$espmnt/EFI/ubuntu/grub.cfg"; then
+  log "the boot chain does not name the new root and /boot"
+  exit 1
+fi
+# update-grub writes root=UUID= for a root with a UUID unless this is turned off.
+printf 'GRUB_DISABLE_LINUX_UUID=false\n' >"$mnt/etc/default/grub.d/90-install-ubuntu.cfg"
+
 log "writing the cloud-init seed"
 tar -C "$mnt" -xzpf "$PAYLOAD" --no-overwrite-dir
 seed=$mnt/var/lib/cloud/seed/nocloud
@@ -59,13 +121,8 @@ printf 'instance-id: %s-1\nlocal-hostname: %s\n' "$NODE_HOSTNAME" "$NODE_HOSTNAM
   exit 1
 }
 release=$(sed -n 's/^VERSION="\(.*\)"$/\1/p' "$mnt/etc/os-release")
-mount "${part}15" "$esp"
-[ -f "$esp/EFI/ubuntu/shimx64.efi" ] || {
-  log "the image's ESP has no EFI/ubuntu/shimx64.efi"
-  exit 1
-}
 sync
-umount "$esp" "$mnt"
+umount "$espmnt" "$bootmnt" "$mnt"
 trap - EXIT
 
 if ! mountpoint -q /sys/firmware/efi/efivars; then
@@ -75,4 +132,4 @@ for n in $(efibootmgr | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} Ubuntu\([[:
   efibootmgr -q -b "$n" -B
 done
 efibootmgr -q -c -d "$DISK" -p 15 -L Ubuntu -l '\EFI\ubuntu\shimx64.efi'
-log "installed Ubuntu $release to $DISK"
+log "installed Ubuntu $release to $DISK: root $new_root, /boot $new_boot, ESP $new_esp"
