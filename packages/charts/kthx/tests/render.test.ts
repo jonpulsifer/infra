@@ -23,6 +23,7 @@ interface Rendered {
 const VALUES = {
   image: 'ghcr.io/jonpulsifer/kthx@sha256:feed',
   bucket: 'bluenose-kthx',
+  sitesBucket: 'bluenose-kthx-sites',
   envFromSecret: 'kthx-env',
   node: 'oldschool',
   gcp: {
@@ -177,7 +178,7 @@ describe('the readiness probe', () => {
 });
 
 describe('the load-bearing values', () => {
-  test.each(['bucket', 'image', 'envFromSecret'])(
+  test.each(['bucket', 'sitesBucket', 'image', 'envFromSecret'])(
     'refuses to render without %s',
     async (key) => {
       const values = { ...VALUES, [key]: '' };
