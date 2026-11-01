@@ -590,3 +590,199 @@ func TestNextBootSetsAndVerifiesTheBootEntry(t *testing.T) {
 		t.Error("next-boot still tolerates an EFI failure")
 	}
 }
+
+// fakeEFI is a disk's GPT for a fake sgdisk and a firmware's boot entries for
+// a fake efibootmgr, which records deletions, BootOrder and BootNext.
+type fakeEFI struct {
+	table   string
+	parts   map[string]string
+	entries []string
+	order   string
+	failOn  string
+}
+
+const (
+	espType     = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B"
+	talosESP    = "8E70B06A-7E39-4DAF-B175-0BB9DD0A9F73"
+	ubuntuESP   = "6EC49856-4F1B-4B8F-9E3B-1C2B6E5E0F15"
+	otherESP    = "1D0C2B6E-0000-4000-8000-0000000000AA"
+	windowsESP  = "2E1D3C7F-0000-4000-8000-0000000000BB"
+	pxeEntry    = "Boot0003* UEFI PXEv4 (MAC:5254007E0001)\tPciRoot(0x0)/Pci(0x3,0x0)/MAC(5254007E0001,0x1)/IPv4(0.0.0.0,0x0,DHCP,0.0.0.0,0.0.0.0,0.0.0.0)"
+	windowsBoot = "Boot000A* Windows Boot Manager\tHD(1,GPT," + windowsESP + ",0x800,0x32000)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi"
+	lowerUbuntu = "Boot000B* ubuntu\tHD(1,GPT," + otherESP + ",0x800,0x32000)/\\EFI\\ubuntu\\shimx64.efi"
+)
+
+func talosEntry(n, guid string) string {
+	return "Boot" + n + "* Talos Linux UKI\tHD(1,GPT," + guid + ",0x800,0x41a800)/\\EFI\\boot\\BOOTX64.efi"
+}
+
+func ubuntuEntry(n, guid string) string {
+	return "Boot" + n + "* Ubuntu\tHD(15,GPT," + guid + ",0x2800,0x35000)/\\EFI\\ubuntu\\shimx64.efi"
+}
+
+func partInfo(typeGUID, unique, name string) string {
+	return "Partition GUID code: " + typeGUID + " (type)\nPartition unique GUID: " + unique + "\nFirst sector: 2048\nPartition name: '" + name + "'\n"
+}
+
+var talosDisk = fakeEFI{
+	table: "Disk /dev/nvme0n1: 16777216 sectors, 8.0 GiB\nNumber  Start (sector)    End (sector)  Size       Code  Name\n" +
+		"   1            2048         4306943   2.1 GiB     EF00  EFI\n   2         4306944         4308991   1024.0 KiB  8300  META\n   3         4308992         4513791   100.0 MiB   8300  STATE\n",
+	parts: map[string]string{
+		"1": partInfo(espType, talosESP, "EFI"),
+		"2": partInfo("0FC63DAF-8483-4772-8E79-3D69D8477DE4", "11111111-0000-4000-8000-000000000002", "META"),
+		"3": partInfo("0FC63DAF-8483-4772-8E79-3D69D8477DE4", "11111111-0000-4000-8000-000000000003", "STATE"),
+	},
+}
+
+// Ubuntu's cloud image puts its ESP at 15 and names it nothing.
+var ubuntuDisk = fakeEFI{
+	table: "Disk /dev/nvme0n1: 16777216 sectors, 8.0 GiB\nNumber  Start (sector)    End (sector)  Size       Code  Name\n" +
+		"   1         2099200        16777182   7.0 GiB     8300  \n  14            2048           10239   4.0 MiB     EF02  \n  15           10240          227327   106.0 MiB   EF00  \n  16          227328         2097152   913.0 MiB   EA00  \n",
+	parts: map[string]string{
+		"1":  partInfo("0FC63DAF-8483-4772-8E79-3D69D8477DE4", "22222222-0000-4000-8000-000000000001", ""),
+		"14": partInfo("21686148-6449-6E6F-744E-656564454649", "22222222-0000-4000-8000-000000000014", ""),
+		"15": partInfo(espType, ubuntuESP, ""),
+		"16": partInfo("BC13C2FF-59E6-4262-A352-B275FD6F7172", "22222222-0000-4000-8000-000000000016", ""),
+	},
+}
+
+type nextBootResult struct {
+	out, next, order string
+	deleted, entries []string
+	err              error
+}
+
+// runNextBoot runs next-boot's shell against a mount that does nothing and
+// fake sgdisk and efibootmgr tools.
+func runNextBoot(t *testing.T, install, wipe, retire string, efi fakeEFI) nextBootResult {
+	t.Helper()
+	wf := renderTemplate(t, provisionMap(t))
+	script := actionScripts(t)["next-boot"]
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	dir := t.TempDir()
+	script = strings.ReplaceAll(script, "/dev/tty0 /dev/ttyS0", filepath.Join(dir, "console"))
+	bin, state := filepath.Join(dir, "bin"), filepath.Join(dir, "state")
+	for _, d := range []string{bin, state} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write := func(path, s string, mode os.FileMode) {
+		if err := os.WriteFile(path, []byte(s), mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(state, "table"), efi.table, 0o644)
+	for n, info := range efi.parts {
+		write(filepath.Join(state, "part"+n), info, 0o644)
+	}
+	write(filepath.Join(state, "entries"), strings.Join(efi.entries, "\n")+"\n", 0o644)
+	write(filepath.Join(state, "order"), efi.order, 0o644)
+	write(filepath.Join(state, "deleted"), "", 0o644)
+	write(filepath.Join(bin, "sgdisk"), "#!/bin/sh\nS="+state+"\ncase \"$1\" in -p) cat $S/table ;; -i) cat $S/part$2 ;; esac\n", 0o755)
+	write(filepath.Join(bin, "efibootmgr"), `#!/bin/sh
+S=`+state+`
+case "$*" in
+  ""|-v)
+    [ -s $S/next ] && echo "BootNext: $(cat $S/next)"
+    echo "BootCurrent: 0003"
+    echo "BootOrder: $(cat $S/order)"
+    cat $S/entries ;;
+  "-q -b "*" -B")
+    if [ "$3" = "`+efi.failOn+`" ]; then echo "Could not delete variable: Read-only file system" >&2; exit 5; fi
+    grep -v "^Boot$3" $S/entries >$S/e; mv $S/e $S/entries; echo "$3" >>$S/deleted ;;
+  "-q -o "*) echo "$3" >$S/order ;;
+  "-q -n "*) echo "$3" >$S/next ;;
+  *) exit 2 ;;
+esac
+`, 0o755)
+	// Some sh wrappers put setuid wrappers such as mount ahead of PATH, and
+	// functions win over both.
+	cmd := exec.Command(sh, "-c", "mount() { :; }\nmountpoint() { :; }\n"+script)
+	cmd.Env = []string{"PATH=" + bin + ":" + os.Getenv("PATH")}
+	for k, v := range wf.Tasks[0].Environment {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+	cmd.Env = append(cmd.Env, "INSTALL="+install, "WIPE="+wipe, "RETIRE="+retire)
+	out, err := cmd.CombinedOutput()
+	read := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(state, name))
+		return strings.TrimSpace(string(b))
+	}
+	var r nextBootResult
+	r.out, r.err, r.next, r.order = string(out), err, read("next"), read("order")
+	r.deleted = strings.Fields(read("deleted"))
+	for _, line := range strings.Split(read("entries"), "\n") {
+		if len(line) >= 8 {
+			r.entries = append(r.entries, line[4:8])
+		}
+	}
+	return r
+}
+
+// next-boot keeps the one fleet OS entry on this install's EFI system
+// partition, found by its type, and deletes every other entry a fleet OS
+// made: after an OS change, a retirement or a wipe, none of another disk's or
+// an erased one's stays. Entries no fleet OS made stay.
+func TestNextBootKeepsOnlyThisInstallsFleetEntry(t *testing.T) {
+	if got := renderTemplate(t, provisionMap(t)).Tasks[0].Environment["FLEET_OS_ENTRIES"]; got != "Talos Linux UKI|Ubuntu" {
+		t.Fatalf("FLEET_OS_ENTRIES %q", got)
+	}
+	mixed := []string{pxeEntry, talosEntry("0007", talosESP), ubuntuEntry("0008", ubuntuESP), talosEntry("0009", otherESP), windowsBoot, lowerUbuntu,
+		"Boot000C* Ubuntu-rescue\tHD(1,GPT," + otherESP + ",0x800,0x32000)/\\EFI\\rescue.efi"}
+	order := "0003,0008,0007,0009,000A,000B,000C"
+	for _, c := range []struct {
+		name                  string
+		install, wipe, retire string
+		disk                  fakeEFI
+		next                  string
+		deleted, kept         []string
+		ok                    bool
+		want                  string
+	}{
+		{"talos after ubuntu", "true", "true", "false", talosDisk, "0007", []string{"0008", "0009"}, []string{"0003", "0007", "000A", "000B", "000C"}, true, "Boot0007 (the installed disk) is the next boot"},
+		{"ubuntu after talos", "true", "true", "false", ubuntuDisk, "0008", []string{"0007", "0009"}, []string{"0003", "0008", "000A", "000B", "000C"}, true, "Boot0008 (the installed disk) is the next boot"},
+		{"wipe", "false", "true", "false", talosDisk, "0003", []string{"0007", "0008", "0009"}, []string{"0003", "000A", "000B", "000C"}, true, "Boot0003 (IPv4 network) is the next boot"},
+		{"retire", "false", "true", "true", talosDisk, "", []string{"0007", "0008", "0009"}, []string{"0003", "000A", "000B", "000C"}, true, "a retired node powers off; no next boot"},
+		{"attest", "false", "false", "false", talosDisk, "", nil, []string{"0003", "0007", "0008", "0009", "000A", "000B", "000C"}, true, "nothing installed or wiped"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			c.disk.entries, c.disk.order = mixed, order
+			r := runNextBoot(t, c.install, c.wipe, c.retire, c.disk)
+			if (r.err == nil) != c.ok || !strings.Contains(r.out, c.want) {
+				t.Fatalf("%v %q, want %q", r.err, r.out, c.want)
+			}
+			if strings.Join(r.deleted, ",") != strings.Join(c.deleted, ",") || strings.Join(r.entries, ",") != strings.Join(c.kept, ",") {
+				t.Errorf("deleted %v, left %v; want deleted %v, left %v", r.deleted, r.entries, c.deleted, c.kept)
+			}
+			if r.next != c.next || (c.next != "" && !strings.HasPrefix(r.order, c.next+",")) {
+				t.Errorf("BootNext %q, BootOrder %q; want %s first", r.next, r.order, c.next)
+			}
+		})
+	}
+	// An install whose ESP no entry names fails before it deletes anything.
+	disk := talosDisk
+	disk.entries, disk.order = []string{pxeEntry, talosEntry("0009", otherESP), ubuntuEntry("0008", ubuntuESP)}, "0003,0008,0009"
+	if r := runNextBoot(t, "true", "true", "false", disk); r.err == nil || !strings.Contains(r.out, "no boot entry names") || len(r.deleted) != 0 {
+		t.Errorf("an install without its entry: %v %q, deleted %v", r.err, r.out, r.deleted)
+	}
+	// A disk with no EFI system partition fails the install.
+	disk = ubuntuDisk
+	disk.parts = map[string]string{"1": ubuntuDisk.parts["1"], "14": ubuntuDisk.parts["14"], "15": ubuntuDisk.parts["16"], "16": ubuntuDisk.parts["16"]}
+	disk.entries, disk.order = mixed, order
+	if r := runNextBoot(t, "true", "true", "false", disk); r.err == nil || !strings.Contains(r.out, "has no EFI system partition; the run fails") {
+		t.Errorf("a disk without an ESP: %v %q", r.err, r.out)
+	}
+	// A refused deletion fails an install, and a retirement still powers off.
+	disk = talosDisk
+	disk.entries, disk.order, disk.failOn = mixed, order, "0008"
+	if r := runNextBoot(t, "true", "true", "false", disk); r.err == nil || !strings.Contains(r.out, "the stale entry Boot0008 cannot be deleted") || r.next != "" {
+		t.Errorf("an install whose stale entry stays: %v %q", r.err, r.out)
+	}
+	if r := runNextBoot(t, "false", "true", "true", disk); r.err != nil || !strings.Contains(r.out, "the retired node powers off with its boot entries as they are") {
+		t.Errorf("a retirement whose stale entry stays: %v %q", r.err, r.out)
+	}
+}
