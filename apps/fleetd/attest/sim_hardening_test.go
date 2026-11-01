@@ -92,7 +92,7 @@ func TestJunkStartsSpendNothing(t *testing.T) {
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 	for i := 0; i < 10; i++ {
 		c := simClaim
-		c.Serial, c.Hostname, c.MAC = fmt.Sprintf("JUNK-%d", i), "", ""
+		c.Serial, c.Hostname, c.MAC = fmt.Sprintf("JUNK-%d", i), "", "02:00:00:00:99:99"
 		// With an EK the claim waits for the owner; without one it is refused. Neither writes a record.
 		want := `"verdict":"refused"`
 		if i%2 == 0 {
@@ -141,7 +141,7 @@ func TestClaimedHostnameNeverOverwritesARecord(t *testing.T) {
 	f.settled(t, simSerial, 2)
 	f.set(simSerial, func(d *fakeDevice) { d.Name = "testbox2" })
 	c := simClaim
-	c.Serial, c.Hostname, c.MAC = "EVIL-1", "testbox", ""
+	c.Serial, c.Hostname, c.MAC = "EVIL-1", "testbox", "02:00:00:00:99:99"
 	code, body := junkStart(t, h, c, true)
 	if code != http.StatusForbidden || !strings.Contains(body, protocol.VerdictPending) {
 		t.Fatalf("junk start: %d %s", code, body)

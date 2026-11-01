@@ -168,9 +168,21 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 	h.v.NetBox = nb
 	h.v.Recorders = append(h.v.Recorders, nb)
 	h.srv = &Server{V: h.v, Log: h.v.Log, Approvers: map[string]bool{"owner@example.com": true}}
-	h.ts = httptest.NewServer(h.tamperEvidence(h.srv.Public()))
+	h.ts = httptest.NewServer(h.tamperEvidence(bothListeners(h.srv)))
 	t.Cleanup(h.ts.Close)
 	return h
+}
+
+// bothListeners serves the boot listener's routes and the DevID listener's on
+// one address, as the tests' single base URL needs.
+func bothListeners(s *Server) http.Handler {
+	mux := http.NewServeMux()
+	mux.Handle("/", s.DevIDHandler())
+	boot := s.Public()
+	for _, p := range []string{protocol.PathStart, protocol.PathEvidence, protocol.PathConfirm} {
+		mux.Handle("POST "+p, boot)
+	}
+	return mux
 }
 
 func writeSimNV(t *testing.T, rw io.ReadWriter, index uint32, data []byte) {

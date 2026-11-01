@@ -161,7 +161,7 @@ func newRetiredTest(t *testing.T, class string) (*Reconciler, *fakeNetBox, *fake
 		cf["talos_class"] = class
 	}
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", cf)}, ifaces: riptideIfaces()}
-	kube := &fakeKube{objects: map[string]Object{wfBase + retireWF: workflowObject(retireWF, "riptide", "retire", testNow.UTC().Format(time.RFC3339), "STATE_SUCCESS")}}
+	kube := &fakeKube{power: "off", objects: map[string]Object{wfBase + retireWF: workflowObject(retireWF, "riptide", "retire", testNow.UTC().Format(time.RFC3339), "STATE_SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	t.Cleanup(done)
 	api := &fakeClusterAPI{

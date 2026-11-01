@@ -113,12 +113,60 @@ func TestLoadInstallerTakesAClassImageFromTheTable(t *testing.T) {
 	t.Setenv("FLEET_INSTALLS", "true")
 	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", "")
 
-	cfg := Config{Classes: testClasses}
+	cfg := Config{Classes: pinnedTalosClasses()}
 	if _, err := LoadInstaller(&cfg, nil, nil, NewMetrics()); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Installs["ubuntu"] != ubuntuImage || cfg.Installs["worker-g5"] == "" || cfg.Installs["worker-g5"] == ubuntuImage {
+	if cfg.Installs["ubuntu"] != ubuntuImage || cfg.Installs["worker-g5"] != talosImage || cfg.Installs["worker-g5"] == ubuntuImage {
 		t.Fatalf("installs %v", cfg.Installs)
+	}
+}
+
+const talosImage = "ghcr.io/jonpulsifer/talos-installer-folly@sha256:cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34cd34"
+
+// pinnedTalosClasses is testClasses with the Talos classes pinned by digest
+// in the table, over the tag the class inputs carry.
+func pinnedTalosClasses() classes.Table {
+	t := classes.Table{}
+	for name, c := range testClasses {
+		if c.OS == "talos" {
+			c.InstallerImage = talosImage
+		}
+		t[name] = c
+	}
+	return t
+}
+
+func loadInstallsFrom(t *testing.T, table classes.Table) (Config, error) {
+	t.Helper()
+	dir := t.TempDir()
+	inputs := filepath.Join(dir, "class-inputs.json")
+	raw, _ := json.Marshal(riptideInputs())
+	_ = os.WriteFile(inputs, raw, 0o600)
+	workers := filepath.Join(dir, "worker-secrets")
+	_ = os.WriteFile(workers, []byte(fakeBundle("A")), 0o600)
+	t.Setenv("FLEET_CLASS_INPUTS", inputs)
+	t.Setenv("FLEET_WORKER_SECRETS", workers)
+	t.Setenv("FLEET_TALOSCTL", "/bin/false")
+	t.Setenv("FLEET_INSTALLS", "true")
+	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", "")
+	cfg := Config{Classes: table}
+	_, err := LoadInstaller(&cfg, nil, nil, NewMetrics())
+	return cfg, err
+}
+
+func TestInstallerImageMustBePinnedByDigest(t *testing.T) {
+	tagged := classes.Table{"worker-g5": {OS: "talos", Template: "provision", PolicyProfile: "talos"}}
+	if _, err := loadInstallsFrom(t, tagged); err == nil || !strings.Contains(err.Error(), "worker-g5") || !strings.Contains(err.Error(), "classes.json") {
+		t.Fatalf("a class inputs tag with no table pin: %v", err)
+	}
+	pinned := pinnedTalosClasses()
+	cfg, err := loadInstallsFrom(t, pinned)
+	if err != nil || cfg.Installs["worker-g5"] != talosImage {
+		t.Fatalf("a table digest over the inputs tag: %v %v", err, cfg.Installs)
+	}
+	if _, err := loadInstallsFrom(t, classes.Table{"worker-g5": {OS: "talos", Template: "provision", PolicyProfile: "talos", InstallerImage: talosImage}}); err != nil {
+		t.Fatalf("a table digest alone: %v", err)
 	}
 }
 

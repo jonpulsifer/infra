@@ -224,3 +224,60 @@ func retryAt(wf Object) time.Time {
 	}
 	return endedAt(wf).Add(wait)
 }
+
+// PowerOffWait bounds how long a retirement whose Workflow reported success
+// waits for the BMC to report the machine off before it gives up to the
+// owner. Rufio refreshes a Machine's power status on its own schedule.
+const PowerOffWait = 15 * time.Minute
+
+// PowerWaitAnnotation marks a retirement Workflow with the time fleetd first
+// found the BMC not reporting the machine off after the Workflow's success,
+// so the wait holds across a restart.
+const PowerWaitAnnotation = "lolwtf.ca/power-wait-started-at"
+
+// machinePower is the power state Rufio's Machine reports: status.power, "on",
+// "off" or "unknown", empty before Rufio has read it.
+func machinePower(m Object) string {
+	st, _ := m["status"].(map[string]any)
+	p, _ := st["power"].(string)
+	return strings.ToLower(p)
+}
+
+// corroborated says whether the BMC agrees with a retirement Workflow's
+// success. The Tinkerbell channel is unauthenticated and the agent's identity
+// is its MAC, so a SUCCESS state alone is a report any host on the network can
+// make; the Machine's power status, which Rufio reads from the BMC, is not.
+// A machine the BMC reports on, or does not answer for, waits: journaled once,
+// and past PowerOffWait journaled once more as danger. Later passes read it
+// again. The caller asks only for a device with a BMC.
+func (r *Reconciler) corroborated(ctx context.Context, d Device, wf Object) (bool, error) {
+	m, err := r.Kube.Get(ctx, MachineResource, d.Name)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return false, fmt.Errorf("read Machine %s: %w", d.Name, err)
+	}
+	power := machinePower(m)
+	if err == nil && power == "off" {
+		return true, nil
+	}
+	report := "reports the machine " + power
+	if power == "" {
+		report = "has not reported the machine's power state"
+	}
+	started, perr := time.Parse(time.RFC3339, wf.Annotations()[PowerWaitAnnotation])
+	if perr != nil {
+		started = r.Now().UTC()
+		err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{PowerWaitAnnotation: started.Format(time.RFC3339)})
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return false, fmt.Errorf("mark the power-off wait on %s: %w", wf.Name(), err)
+		}
+	}
+	why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC %s (Machine status.power); fleetd waits for the power-off before it takes the node out of the cluster", wf.Name(), report)
+	if err := r.journalOnce(ctx, "power-waits/"+wf.Name(), d, "info", why); err != nil {
+		return false, err
+	}
+	if r.Now().Sub(started) >= PowerOffWait {
+		why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC has not reported %s off for %s (it %s). The success may not be the agent's: the device stays decommissioning, and fleetd keeps reading the BMC. Check the machine and its Machine %s; power it off by hand, or move the device to offline after you have wiped it", wf.Name(), d.Name, PowerOffWait, strings.TrimPrefix(report, "reports "), d.Name)
+		return false, r.journalOnce(ctx, "power-gaveup/"+wf.Name(), d, "danger", why)
+	}
+	return false, nil
+}

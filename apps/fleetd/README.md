@@ -24,7 +24,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | Variable | Default | Serves |
 | --- | --- | --- |
 | `FLEETD_BOOT_ADDR` | `:8443` | The device flow under `/attest/` and `GET /talos/config`, with TLS when `FLEETD_TLS_CERT` and `FLEETD_TLS_KEY` name the enrollment name's certificate and key, which fleetd reads again when the certificate file changes. Until the certificate reads and the address binds, fleetd tries again every 10 seconds; the other listeners bind on their own |
-| `ATTEST_DEVID_ADDR` | `:8444` | `GET /devid/`, `GET /verdict/` and the renewal routes, for the cluster's nodes |
+| `ATTEST_DEVID_ADDR` | `:8444` | `GET /devid/`, `GET /verdict/` and the renewal routes, for the cluster's nodes. The boot listener serves none of them |
 | `ATTEST_ADMIN_ADDR` | `:8445` | The admin API. `unix:<path>` makes a socket with mode 0600 |
 | `FLEET_WEBHOOK_ADDR` | `:8446` | `POST /webhook`, `GET /healthz` and `GET /metrics` |
 
@@ -39,19 +39,19 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the site each audit line names |
 | `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
 | `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the directory of event-log policy profiles, one `<name>.yaml` each |
-| `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, waiting claims and `verdicts.jsonl` |
+| `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, waiting claims and `verdicts.jsonl`, which rotates once to `verdicts.jsonl.1` at 64 MiB |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
 | `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE` | required, `/run/credentials/fleetd.service/netbox-token` | NetBox, the only source of machines and of each one's approved EK binding. A serial it lacks waits for its node entry, and a NetBox that does not answer refuses every request |
 | `ATTEST_PENDING_MAX` | `50` | How many claims wait at once for an approved EK binding |
 | `ATTEST_BINDING_AUTHOR` | none | The NetBox user Terraform writes as. A binding counts only when NetBox's changelog shows this user made its newest change; unset, no binding counts |
-| `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten on each change |
+| `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten at most every 5 seconds after a change |
 
 ### Fleet
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `FLEET_SITE`, `FLEET_NAMESPACE` | `folly`, `tinkerbell` | The NetBox site and Tinkerbell's namespace |
-| `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind |
+| `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind. A class's `installer_image` wins over the class inputs' image, and fleetd refuses to start while an installing class's image is not pinned by digest |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
 | `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, a quarantine is journaled for the owner to cordon, and a retirement leaves the Node to the owner |
@@ -78,15 +78,22 @@ unknown or mismatched EK, a failed activation, a quote the LAK did not sign, a q
 `decommissioning` or `offline` device, is `refused`: counted, audited and journaled, and recorded
 against no machine. An intake that fails after the TPM's proof while no run expects the machine in
 HookOS, a device that is not `planned` with no unfinished Workflow, is `refused` with the reason
-`unattended-boot`: it records nothing and journals the device. A serial is 1 to 64 printable ASCII characters, else 400. With NetBox configured
-and not answering, every request is 503 `refused`.
+`unattended-boot`: it records nothing and journals the device. A serial is 1 to 64 printable ASCII
+characters, a MAC parses and is at most 17, a UUID at most 36, a hostname at most 253, and the
+manufacturer, model, SKU and BIOS version at most 128 each; anything else is a bounded 400 that is
+counted and neither logged, audited nor journaled. A claimed string in a log, audit or journal line
+is cut at 128 bytes. With NetBox configured and not answering, every request is 503 `refused`.
+
+A session is displaced only by a newer request for the same machine from the same remote address;
+a machine keeps its newest four open sessions, and a passed session awaiting its confirm is never
+dropped. So a request that proves nothing cannot end a node's open renewal.
 
 | Route | Does |
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding waits; [Approved EK binding](#approved-ek-binding) has the rules |
-| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class and issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
+| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class: every PCR the profile names must have an event in the log or still read all zeros, and a profile that pins `boot_applications` needs a boot application after PCR 4's separator. Issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
-| `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
+| `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | On the DevID listener only, as are the two routes below. The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
 | `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the daily check, from the running node |
 
@@ -101,7 +108,9 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   activates its credential, and the quote and the boot policy pass. Another EK passes the usual
   checks and authorizes nothing. A manufacturer certificate admits no device on its own.
 - A `planned` device without a binding, and a serial NetBox lacks, wait as a claim in
-  `pending/`, which authorizes nothing and creates no device.
+  `pending/`, which authorizes nothing and creates no device. A claim is rewritten only when it
+  changes, its journal line and NetBox note come at most every ten minutes per serial, and claims
+  for serials NetBox lacks have their own quota of 10, so junk serials evict no known device's claim.
 - EKs that are not the binding are refused at the start. fleetd writes nothing, quarantines nothing
   and journals the device at most every ten minutes.
 - A binding counts only when `ATTEST_BINDING_AUTHOR` made its newest change. fleetd reads the
@@ -119,8 +128,10 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   change to the binding in the nodes file.
 - A renewal and the daily check prove the LAK on file and read no EK. A `planned` device gets no
   renewal, since its identity comes from an intake pass; it is refused and journaled. A HookOS
-  attestation of a device past `planned` without a binding is held to its `ek_hash` pins, and gets
-  no install code.
+  attestation of a device past `planned` without a binding is held to the EK hashes fleetd's own
+  record proved at its intake pass, and gets no install code. `ek_hash` and `ek_hash_ecc` only note
+  what a pass proved and authorize nothing: a device whose record holds no proof, or a retired one,
+  is refused as `ek-binding-removed` and journaled, and nothing is recorded or quarantined.
 
 A planned stub binds to the first box that passes for its serial: fleetd puts the claimed MAC on
 the stub's interface. `mise run attest:approve <serial>` prints the nodes-file lines for a waiting
@@ -232,7 +243,9 @@ answers, a fetch reads the device from NetBox, and serves the config only while 
 dropped, burned and journaled, and the fetch gets 404. So does a device NetBox no longer holds,
 without a journal. When NetBox does not answer within ten seconds, the fetch gets 503 and the
 config stays for the node's next try. Each reconcile pass also drops the unread config of a device
-that is not `planned`, or that NetBox no longer lists as live. The TTL bounds when a fetch may
+that is not `planned`, or that NetBox no longer lists as live, and of a Workflow that is gone or
+ended without success, counted in `fleet_install_config_ended_total` and journaled once. The TTL
+bounds when a fetch may
 start: a pass never expires a config a fetch holds, and expires it on a later pass if the fetch
 gives it back. A pass that withdraws a config a fetch holds marks it withdrawn and journals that a
 fetch was writing it, so the node may have it. The fetch's end settles it: when the node
@@ -363,7 +376,11 @@ A node retired mid-install never fetches its config: [Config](#config) drops it.
 ## Retirement and the cluster
 
 Once the retirement Workflow succeeds, before the device goes `offline`, fleetd takes the node out
-of the cluster (`fleet/drain.go`). It cordons the node and evicts each pod bound to it but a
+of the cluster (`fleet/drain.go`). The Workflow's state is the agent's report over a channel in
+which the agent holds no credential, so with a BMC fleetd first needs the Rufio Machine's
+`status.power` to read `off` (`fleet/bmcjob.go`): it journals the wait once, and a `danger` line
+after `PowerOffWait`, 15 minutes, while it keeps reading the BMC. Without a BMC it proceeds, and the
+journal, the `offline` comment and the audit line say the success is uncorroborated. It cordons the node and evicts each pod bound to it but a
 DaemonSet's, a static pod's mirror and one already terminating, as `kubectl drain` does. An
 eviction a PodDisruptionBudget refuses holds the next step for up to `DrainTimeout`, ten minutes
 from the first refusal, which the Workflow's annotation `lolwtf.ca/drain-started-at` keeps across

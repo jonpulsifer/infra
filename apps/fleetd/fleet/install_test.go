@@ -725,7 +725,7 @@ func TestLoadInstallerGatesControlPlanes(t *testing.T) {
 	}
 	t.Setenv("FLEET_CONFIG_TTL", "4h")
 
-	cfg := Config{}
+	cfg := Config{Classes: pinnedTalosClasses()}
 	in, err := LoadInstaller(&cfg, nil, nil, NewMetrics())
 	if err != nil || in.ControlPlanes || cfg.Installs["controlplane"] != "" || cfg.Installs["worker-g5"] == "" || cfg.Bootstrap != "" {
 		t.Fatalf("without the bundle: %v %+v", err, cfg.Installs)
@@ -736,7 +736,7 @@ func TestLoadInstallerGatesControlPlanes(t *testing.T) {
 		t.Fatal("the bundle loaded without the bootstrap address")
 	}
 	t.Setenv("FLEET_BOOTSTRAP_ADDRESS", "10.3.0.10")
-	cfg = Config{}
+	cfg = Config{Classes: pinnedTalosClasses()}
 	in, err = LoadInstaller(&cfg, nil, nil, NewMetrics())
 	if err != nil || !in.ControlPlanes || in.ControlPlaneTTL != 30*time.Minute || cfg.Installs["controlplane"] == "" || cfg.Bootstrap != "10.3.0.10" {
 		t.Fatalf("with the bundle: %v %+v", err, cfg)

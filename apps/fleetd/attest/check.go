@@ -119,7 +119,7 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	if err != nil {
 		return protocol.Renewed{}, err
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, policy.EvaluateRenewal)
+	events, err := v.replayBoot(pcrs, req.EventLog, policy, policy.EvaluateRenewal)
 	if err != nil {
 		if s.machine.controlPlane() {
 			return protocol.Renewed{}, v.failInPlace(ctx, s, err, true)

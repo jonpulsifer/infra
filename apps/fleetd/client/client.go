@@ -214,8 +214,8 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		}
 		logf("certificates stored at NV %#x and %#x", protocol.NVLDevIDCert, protocol.NVLAKCert)
 	}
-	// The device flow is plain HTTP: the AK's signature is what lets this
-	// machine, and no one who saw the session, confirm it.
+	// The AK's signature, not the transport, is what lets this machine, and
+	// no one who saw the session, confirm it.
 	rawConfirmSig, err := akSign(rw, ak, scheme, append(append([]byte{}, started.Nonce...), protocol.ConfirmLabel...))
 	if err != nil {
 		return res, fmt.Errorf("sign the confirm: %w", err)

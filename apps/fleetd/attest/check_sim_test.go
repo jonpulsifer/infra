@@ -52,7 +52,7 @@ func activeNode(t *testing.T) (*harness, *fakeNetBox) {
 	t.Helper()
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"], "approved_ek_hash": h.hashes["rsa"], "approved_ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -574,7 +574,7 @@ func TestDailyCheckAgainstAnOlderService(t *testing.T) {
 			r.Body = io.NopCloser(bytes.NewReader(b))
 			r.ContentLength = int64(len(b))
 		}
-		h.srv.Public().ServeHTTP(w, r)
+		bothListeners(h.srv).ServeHTTP(w, r)
 	}))
 	defer old.Close()
 	first := nvLDevID(t, h)

@@ -248,6 +248,9 @@ type fakeKube struct {
 	// once, "refuse" fails its first Task as a BMC that answers 500 does, and
 	// "down" leaves it running.
 	bmc string
+	// power is the status.power Rufio reports for a Machine fleetd applies;
+	// "" leaves the status as it stands.
+	power string
 }
 
 // runJob plays Rufio for a Job fleetd created. The caller holds mu.
@@ -316,6 +319,12 @@ func (f *fakeKube) handler() http.Handler {
 					}
 				}
 				o.metadata()["resourceVersion"] = bumped(old)
+				if st, ok := old["status"]; ok {
+					o["status"] = st
+				}
+				if f.power != "" && strings.Contains(r.URL.Path, "/machines/") {
+					o["status"] = map[string]any{"power": f.power}
+				}
 				f.objects[r.URL.Path] = o
 			case "application/merge-patch+json":
 				if !exists {
@@ -1133,7 +1142,7 @@ func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
 // names it, its success takes the device offline.
 func TestFailedNetBoxWriteRetiresOnce(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", nil)}, ifaces: riptideIfaces(), failPatch: true, apply: true}
-	kube := &fakeKube{}
+	kube := &fakeKube{power: "off"}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	for range 2 {
@@ -1194,7 +1203,7 @@ func TestRetirement(t *testing.T) {
 	d := device("riptide", "decommissioning", "none", map[string]any{"last_workflow": "wipe-riptide-1"})
 	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
 	// An earlier owner-asked wipe succeeded within the TTL. It is no retirement.
-	kube := &fakeKube{objects: map[string]Object{wfBase + "wipe-riptide-1": workflowObject("wipe-riptide-1", "riptide", "wipe", old, "SUCCESS")}}
+	kube := &fakeKube{power: "off", objects: map[string]Object{wfBase + "wipe-riptide-1": workflowObject("wipe-riptide-1", "riptide", "wipe", old, "SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	var retired []string

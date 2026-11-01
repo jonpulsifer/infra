@@ -25,6 +25,7 @@ type Metrics struct {
 	RenderFailed     atomic.Int64
 	Released         atomic.Int64
 	Expired          atomic.Int64
+	ConfigEnded      atomic.Int64
 	AutoProvisioned  atomic.Int64
 	ConfigMissing    atomic.Int64
 	ConfigRefetched  atomic.Int64
@@ -106,6 +107,7 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_renders_failed_total", "Renders fleetd could not do.", m.RenderFailed.Load())
 	counter("fleet_install_released_total", "Devices set active after their config was served.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
+	counter("fleet_install_config_ended_total", "Unread configs dropped because their Workflow was deleted or ended without success.", m.ConfigEnded.Load())
 	counter("fleet_install_config_missing_total", "Config fetches by a planned device's node after its provision that fleetd holds no config for.", m.ConfigMissing.Load())
 	counter("fleet_install_config_refetched_total", "Config fetches with a code whose config fleetd already served: the node did not keep it.", m.ConfigRefetched.Load())
 	counter("fleet_hookos_after_success_total", "Provision runs that succeeded and whose node then booted HookOS instead of its install.", m.HookOSAfter.Load())

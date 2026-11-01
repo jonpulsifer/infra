@@ -197,7 +197,7 @@ func TestDeclaredStubWithAMAC(t *testing.T) {
 	if !strings.Contains(h.audit.String(), "bound to the declared stub; MAC already on file") {
 		t.Fatalf("no attest.intake line for the binding:\n%s", h.audit.String())
 	}
-	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", "not-a-mac"); return err }()); r.Verdict.Reason != reasonMACMismatch {
+	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", "not-a-mac"); return err }()); r.Verdict.Reason != reasonMACInvalid {
 		t.Fatalf("a claim that is no MAC: %+v", r.Verdict)
 	}
 }
@@ -411,12 +411,20 @@ func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 func TestABindingAddedDuringTheSessionRefuses(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "active", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	if _, err := h.run(simSerial, simMAC); err != nil {
+		t.Fatal(err)
+	}
+	f.settled(t, simSerial, 2)
+	issued := strings.Count(h.audit.String(), `"event":"attest.issue"`)
+	f.set(simSerial, func(d *fakeDevice) {
+		d.CustomFields["approved_ek_hash"], d.CustomFields["approved_ek_hash_ecc"] = nil, nil
+	})
 	h.tamper = func(*protocol.EvidenceRequest) {
 		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = strings.Repeat("ab", 32) })
 	}
 	r := refusal(t, func() error { _, err := h.run(simSerial, simMAC); return err }())
-	if r.Verdict.Reason != reasonBinding || r.Verdict.Verdict != protocol.VerdictRefused || h.issued() {
+	if r.Verdict.Reason != reasonBinding || r.Verdict.Verdict != protocol.VerdictRefused || strings.Count(h.audit.String(), `"event":"attest.issue"`) != issued {
 		t.Fatalf("a session the binding changed under: %+v", r.Verdict)
 	}
 	h.tamper = nil
