@@ -1,0 +1,141 @@
+---
+# Serves every quick site: nginx over a read-only gcsfuse mount of the sites
+# bucket, where a site is the folder `<name>/` and `<name>/.kthx` is its
+# ownership marker. `/api` and `/files` go to the kthx server.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kthx-sites
+  labels:
+    app.kubernetes.io/name: kthx-sites
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kthx-sites
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kthx-sites
+    spec:
+      serviceAccountName: kthx-sites
+      automountServiceAccountToken: false
+      # Without the unmount on stop, a deletion leaves the mount on the node's
+      # volume path and the kubelet retries the teardown forever.
+      terminationGracePeriodSeconds: 30
+      # /dev/fuse and the privileged mount were measured on this node.
+      nodeSelector:
+        kubernetes.io/hostname: oldschool
+      containers:
+        - name: gcsfuse
+          # CD rewrites this digest (`.github/containers.json`) by matching the
+          # full `ghcr.io/…/gcsfuse…@sha256:` string, so keep it one literal.
+          # The zeros stand until the first build stamps it.
+          image: ghcr.io/jonpulsifer/gcsfuse:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          env:
+            - name: BUCKET
+              value: bluenose-kthx-sites
+            - name: MOUNT
+              value: /sites
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/run/secrets/gcp/gcp-credentials.json
+          securityContext:
+            privileged: true
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - |
+                    for i in 1 2 3 4 5 6 7 8 9 10; do
+                      fusermount3 -u /sites && exit 0
+                      sleep 2
+                    done
+                    fusermount3 -uz /sites
+          startupProbe:
+            exec:
+              command: [mountpoint, -q, /sites]
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: [mountpoint, -q, /sites]
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /sites
+              mountPropagation: Bidirectional
+            - name: gcp-federation
+              mountPath: /var/run/secrets/gcp
+              readOnly: true
+        - name: nginx
+          image: nginxinc/nginx-unprivileged:1.31.7-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 2
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: sites
+              mountPath: /sites
+              readOnly: true
+              mountPropagation: HostToContainer
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: nginx-conf
+              mountPath: /etc/nginx/proxy.conf
+              subPath: proxy.conf
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: sites
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: nginx-conf
+          configMap:
+            name: kthx-sites-nginx
+        - name: gcp-federation
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+                  expirationSeconds: 3600
+                  path: gcp-token
+              - configMap:
+                  name: kthx-sites-gcp

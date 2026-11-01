@@ -1,5 +1,5 @@
 {{/*
-Default-deny ingress to the server except from this namespace and the tailnet proxy, so
+Default-deny ingress to the server except from this namespace, the site server and the tailnet proxy, so
 no other pod can skip the edge's rate limits, cache rules and `Origin` guard. Postgres is
 not selected: the CNPG operator, the scrape and its probes all need to reach it.
 */}}
@@ -19,6 +19,16 @@ spec:
   ingress:
     - from:
         - podSelector: {}
+        {{/*
+        The site server in kthx-sites proxies `/api` and `/files` here. Namespace and pod
+        are one entry: two entries are an OR, admitting every pod of that namespace.
+        */}}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kthx-sites
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: kthx-sites
       {{- with .Values.identity.host }}
       {{/*
       The tailnet Ingress proxy runs in the tailscale namespace. Namespace and pod are

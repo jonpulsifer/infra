@@ -1,0 +1,22 @@
+---
+# Cilium's host-networked gateway Envoy reaches the pod as the `ingress` identity, which
+# no NetworkPolicy selector matches; without this the listener answers 503. Selecting the
+# pods also denies every other ingress.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kthx-sites-gateway
+spec:
+  endpointSelector:
+    matchLabels:
+      app.kubernetes.io/name: kthx-sites
+  ingress:
+    - fromEntities:
+        - ingress
+        # The kubelet's readiness probe. Cilium's default `allow-localhost=auto` admits it;
+        # `allow-localhost=policy` does not.
+        - host
+      toPorts:
+        - ports:
+            - port: "8080"
+              protocol: TCP

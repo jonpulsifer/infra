@@ -1,0 +1,23 @@
+---
+# Every site host. The apex stays on the kthx chart's route, because a wildcard
+# never matches it. `/api` and `/files` on a site host go back to kthx inside nginx.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: kthx-sites
+  annotations:
+    # Keeps external-dns from overwriting Terraform's tunnel records with the gateway's
+    # private address. Both prefixes: external-dns v0.22.0 moved the default one.
+    external-dns.alpha.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+    external-dns.kubernetes.io/controller: lolwtf.ca/kthx-dnsendpoint
+spec:
+  # No `sectionName`: Cloudflare terminates TLS and the tunnel reaches the HTTP listener.
+  parentRefs:
+    - name: kthx-apps
+      namespace: kthx-apps
+  hostnames:
+    - "*.kthx.dev"
+  rules:
+    - backendRefs:
+        - name: kthx-sites
+          port: 8080

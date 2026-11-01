@@ -186,6 +186,29 @@ describe('the load-bearing values', () => {
   );
 });
 
+describe('the site hosts', () => {
+  test('are served by the sites namespace, not this route', async () => {
+    const zone = (await render({ ...VALUES, zone: 'example.test' })).find(
+      (o) => o.kind === 'HTTPRoute',
+    ) as Rendered;
+    // A wildcard here would split `*.zone` with the sites route.
+    expect(zone.spec.hostnames).toEqual(['example.test']);
+  });
+
+  test('may proxy to the server from the site pods only', async () => {
+    const from = one(await render(), 'NetworkPolicy').spec.ingress[0].from;
+    const sites = from.find(
+      (entry: any) =>
+        entry.namespaceSelector?.matchLabels['kubernetes.io/metadata.name'] ===
+        'kthx-sites',
+    );
+    // Namespace and pod in one entry: two entries are an OR.
+    expect(sites.podSelector.matchLabels['app.kubernetes.io/name']).toBe(
+      'kthx-sites',
+    );
+  });
+});
+
 describe('the private host', () => {
   const CONTROL = { host: 'kthx.lab.test', listener: 'lab-tls' };
 
@@ -401,7 +424,14 @@ describe('the tailnet identity host', () => {
 
     // A clause for a proxy that does not exist would admit a pod label anyone may set.
     const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
-    expect(from).toHaveLength(1);
+    expect(from).toHaveLength(2);
+    expect(
+      from.some(
+        (entry: any) =>
+          entry.namespaceSelector?.matchLabels['kubernetes.io/metadata.name'] ===
+          'tailscale',
+      ),
+    ).toBe(false);
   });
 
   test('serves the label the server is told to expect, not the fqdn', async () => {
@@ -454,7 +484,11 @@ describe('the tailnet identity host', () => {
       },
     });
     const from = one(objects, 'NetworkPolicy').spec.ingress[0].from;
-    const proxy = from.find((entry: any) => entry.namespaceSelector);
+    const proxy = from.find(
+      (entry: any) =>
+        entry.namespaceSelector?.matchLabels['kubernetes.io/metadata.name'] ===
+        'tailscale',
+    );
 
     // Namespace and pod in one entry: two entries are an OR, and the namespace alone
     // admits every proxy the operator runs.

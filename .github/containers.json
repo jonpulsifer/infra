@@ -35,6 +35,9 @@
     "flameboss": [
       "clusters/folly/monitoring/flameboss.yaml"
     ],
+    "gcsfuse": [
+      "clusters/offsite/apps/kthx-sites/deployment.yaml"
+    ],
     "hub": [
       "clusters/offsite/apps/hub/helm-release.yaml"
     ],
