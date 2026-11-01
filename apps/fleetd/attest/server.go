@@ -27,13 +27,16 @@ type Server struct {
 
 const maxBody = 1 << 20
 
+// Public is the boot listener's handler. It serves the device flow and nothing
+// else, since HookOS and Talos reach it before they have an identity: the
+// lookups and the renewals are on the DevID listener, and the metrics on the
+// admin one.
 func (s *Server) Public() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("POST "+protocol.PathStart, s.start)
 	mux.HandleFunc("POST "+protocol.PathEvidence, s.evidence)
 	mux.HandleFunc("POST "+protocol.PathConfirm, s.confirm)
-	s.devIDRoutes(mux)
-	mux.HandleFunc("GET /metrics", s.metrics)
 	return mux
 }
 
@@ -112,7 +115,7 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		code, verdict = http.StatusNotFound, ""
 	case f.Reason == reasonNetBox:
 		code, verdict = http.StatusServiceUnavailable, protocol.VerdictRefused
-	case f.Reason == reasonSerial:
+	case f.Reason == reasonSerial || f.Reason == reasonField || f.Reason == reasonMACInvalid:
 		code, verdict = http.StatusBadRequest, protocol.VerdictRefused
 	case f.Unauthenticated:
 		verdict = protocol.VerdictRefused
@@ -129,7 +132,7 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	resp, err := s.V.Start(r.Context(), req)
+	resp, err := s.V.Start(r.Context(), req, clientAddress(r))
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -438,7 +441,7 @@ func (s *Server) renewStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, protocol.Verdict{Reason: reasonUnknownMachine, Detail: []string{"no LDevID on file for serial " + req.Serial + "; attest from HookOS first"}})
 		return
 	}
-	resp, err := s.V.RenewStart(r.Context(), req.Serial, d, req.Check)
+	resp, err := s.V.RenewStart(r.Context(), req.Serial, d, req.Check, clientAddress(r))
 	if err != nil {
 		s.writeError(w, err)
 		return

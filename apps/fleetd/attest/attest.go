@@ -2,6 +2,7 @@ package attest
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto"
 	"crypto/ecdsa"
@@ -55,8 +56,14 @@ type Verifier struct {
 	// binding counts only when NetBox's changelog shows that this user made
 	// its newest change; with none set, no binding counts.
 	BindingAuthor string
-	// OnChange runs after any record changes, to refresh the metrics file.
+	// OnChange runs after records change, to refresh the metrics file: once
+	// ChangeEvery after the first change since its last run, however many
+	// follow.
 	OnChange func()
+	// ChangeEvery is that delay; 5 seconds when zero. AfterFunc schedules it,
+	// time.AfterFunc when nil.
+	ChangeEvery time.Duration
+	AfterFunc   func(d time.Duration, f func())
 	// Installer, when set, renders an intake pass's Talos config under an
 	// install code that the confirm answers, and starts its install.
 	Installer Installer
@@ -72,6 +79,12 @@ type Verifier struct {
 	verdicts map[[2]string]uint64
 	checks   map[[2]string]checkCount
 	claims   map[int]time.Time
+	// pendNotes is when each waiting serial last wrote its journal line and
+	// NetBox note.
+	pendNotes map[string]time.Time
+
+	changeMu      sync.Mutex
+	changePending bool
 }
 
 type session struct {
@@ -104,6 +117,10 @@ type session struct {
 	// the binding wrote the stub's MAC.
 	bind       bool
 	macWritten bool
+	// remote is the peer that opened the session; opened orders a machine's
+	// sessions.
+	remote string
+	opened time.Time
 }
 
 func (v *Verifier) random(n int) []byte {
@@ -114,12 +131,47 @@ func (v *Verifier) random(n int) []byte {
 	return b
 }
 
+// claimLimits are the longest values a claim may hold, in bytes, before
+// anything is logged or journaled: the claim is unauthenticated input.
+var claimLimits = []struct {
+	name string
+	max  int
+	of   func(protocol.Machine) string
+}{
+	{"MAC", 17, func(m protocol.Machine) string { return m.MAC }},
+	{"UUID", 36, func(m protocol.Machine) string { return m.UUID }},
+	{"hostname", 253, func(m protocol.Machine) string { return m.Hostname }},
+	{"manufacturer", 128, func(m protocol.Machine) string { return m.Manufacturer }},
+	{"model", 128, func(m protocol.Machine) string { return m.Model }},
+	{"SKU", 128, func(m protocol.Machine) string { return m.SKU }},
+	{"BIOS version", 128, func(m protocol.Machine) string { return m.BIOS }},
+}
+
+// checkClaim errs for a serial that is not 1 to 64 printable ASCII
+// characters, a MAC that does not read as a MAC, or a field over its limit.
+// The detail never repeats the claim.
+func checkClaim(c protocol.Machine) error {
+	if !validSerial(c.Serial) {
+		return fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters")
+	}
+	for _, l := range claimLimits {
+		if len(l.of(c)) > l.max {
+			return fail(reasonField, "the %s is longer than %d bytes", l.name, l.max)
+		}
+	}
+	if !validMAC(c.MAC) {
+		return fail(reasonMACInvalid, "the MAC does not read as six colon-separated hex bytes")
+	}
+	return nil
+}
+
 // Start checks the machine's claims and EKs and answers with one
-// credential challenge per EK and the quote nonce.
-func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protocol.StartResponse, error) {
+// credential challenge per EK and the quote nonce. remote is the peer's
+// address, which bounds how one caller's sessions displace another's.
+func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest, remote string) (protocol.StartResponse, error) {
 	now := v.Now()
-	if !validSerial(req.Machine.Serial) {
-		return protocol.StartResponse{}, v.reject(nil, req.Machine, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters"))
+	if err := checkClaim(req.Machine); err != nil {
+		return protocol.StartResponse{}, v.reject(nil, protocol.Machine{}, err)
 	}
 	req.Machine.Serial = serialKey(req.Machine.Serial)
 	m, ok, err := v.lookupMachine(ctx, req.Machine.Serial)
@@ -139,10 +191,6 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 	}
 	if m.MAC != "" && normalMAC(req.Machine.MAC) != normalMAC(m.MAC) {
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACMismatch, "MAC %q is not %s's", req.Machine.MAC, m.Name))
-	}
-	// A binding writes the claimed MAC to NetBox, so it needs one that reads as a MAC.
-	if mac := req.Machine.MAC; bind && !validMAC(mac) {
-		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonMACInvalid, "MAC %q does not read as six colon-separated hex bytes", mac))
 	}
 	if len(req.EKs) == 0 || len(req.EKs) > 2 {
 		return protocol.StartResponse{}, v.reject(&m, req.Machine, fail(reasonEKMissing, "%d EKs; send the RSA EK, the ECC EK or both", len(req.EKs)))
@@ -178,6 +226,7 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest) (protoc
 		nonce:    v.random(32),
 		secrets:  map[string][]byte{},
 		expires:  now.Add(v.SessionTTL),
+		remote:   remote,
 
 		bind: bind,
 	}
@@ -213,53 +262,106 @@ func (v *Verifier) pend(ctx context.Context, m Machine, claim protocol.Machine, 
 	if !errors.As(err, &f) {
 		return err
 	}
-	p := Pending{Serial: m.Serial, Machine: m.Name, MAC: normalMAC(claim.MAC), UUID: claim.UUID, EKHashes: map[string]string{}, Detail: f.Detail, UpdatedAt: v.Now()}
+	p := Pending{Serial: m.Serial, Machine: m.Name, MAC: normalMAC(claim.MAC), UUID: claim.UUID, EKHashes: map[string]string{}, Detail: f.Detail, Unknown: m.NetBoxID == 0, UpdatedAt: v.Now()}
 	for _, e := range eks {
 		p.EKHashes[e.Alg] = e.Hash
 		if e.Issuer != "" && !slices.Contains(p.EKIssuers, e.Issuer) {
 			p.EKIssuers = append(p.EKIssuers, e.Issuer)
 		}
 	}
-	if serr := v.Store.SavePending(p); serr != nil {
-		v.Log.Error("record pending claim", "serial", m.Serial, "err", serr)
+	// A claim that says what the stored one says is not written again.
+	if old, found, _ := v.Store.Pending(m.Serial); !found || !old.sameClaim(p) {
+		if serr := v.Store.SavePending(p); serr != nil {
+			v.Log.Error("record pending claim", "serial", m.Serial, "err", serr)
+		}
 	}
 	v.Log.Warn("intake waits for an approved binding", "machine", m.Name, "serial", m.Serial, "eks", ekSummary(eks))
 	v.count(protocol.VerdictPending, f.Reason)
 	v.Audit.Emit(AuditEntry{Event: auditVerdict, Node: m.Name, Serial: m.Serial, Class: m.Class, Status: protocol.VerdictPending, Reason: f.Error()})
-	if jerr := v.Store.Journal(map[string]any{"time": v.Now(), "machine": m.Name, "serial": m.Serial, "mac": claim.MAC, "verdict": protocol.VerdictPending, "reason": f.Reason, "detail": f.Detail, "ek_hashes": p.EKHashes}); jerr != nil {
-		v.Log.Error("journal", "err", jerr)
-	}
-	if v.NetBox != nil && m.NetBoxID != 0 {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-		if nerr := v.NetBox.MarkPending(ctx, m.Serial, f.Detail); nerr != nil {
-			v.Log.Warn("NetBox pending note", "serial", m.Serial, "err", nerr)
+	if v.notePending(m.Serial) {
+		if jerr := v.Store.Journal(map[string]any{"time": v.Now(), "machine": m.Name, "serial": m.Serial, "mac": claim.MAC, "verdict": protocol.VerdictPending, "reason": f.Reason, "detail": f.Detail, "ek_hashes": p.EKHashes}); jerr != nil {
+			v.Log.Error("journal", "err", jerr)
 		}
-		cancel()
+		if v.NetBox != nil && m.NetBoxID != 0 {
+			ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			if nerr := v.NetBox.MarkPending(ctx, m.Serial, f.Detail); nerr != nil {
+				v.Log.Warn("NetBox pending note", "serial", m.Serial, "err", nerr)
+			}
+			cancel()
+		}
 	}
 	v.changed()
 	return f
+}
+
+// maxPendNotes bounds the serials whose last pending note is remembered.
+const maxPendNotes = 1024
+
+// notePending says whether a waiting claim for serial may write its journal
+// line and its NetBox note now, at most every claimEvery for a serial.
+func (v *Verifier) notePending(serial string) bool {
+	now := v.Now()
+	key := serialKey(serial)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if last, seen := v.pendNotes[key]; seen && now.Sub(last) < claimEvery {
+		return false
+	}
+	if v.pendNotes == nil {
+		v.pendNotes = map[string]time.Time{}
+	}
+	if len(v.pendNotes) >= maxPendNotes {
+		for k, t := range v.pendNotes {
+			if now.Sub(t) >= claimEvery {
+				delete(v.pendNotes, k)
+			}
+		}
+		if len(v.pendNotes) >= maxPendNotes {
+			return false
+		}
+	}
+	v.pendNotes[key] = now
+	return true
 }
 
 // confirmWindow is how long a passed session outlives a newer session of the
 // same machine, so a fresh start cannot take a pass's confirm away.
 const confirmWindow = 5 * time.Minute
 
-// open registers a session under a fresh id, dropping expired ones and any
-// older session of the same machine, except one that passed within
-// confirmWindow and waits for its confirm.
+// sessionsPerMachine bounds the open sessions of one machine name.
+const sessionsPerMachine = 4
+
+// open registers a session under a fresh id and drops expired ones. A request
+// proved nothing yet, so it displaces an older session of the same machine
+// only when it comes from the same remote address; the machine keeps its
+// newest sessionsPerMachine otherwise. A session that passed within
+// confirmWindow and waits for its confirm is never displaced.
 func (v *Verifier) open(s *session) string {
 	id := hex.EncodeToString(v.random(16))
 	now := v.Now()
+	s.opened = now
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	if v.sessions == nil {
 		v.sessions = map[string]*session{}
 	}
+	var same []string
 	for old, o := range v.sessions {
 		waiting := o.passed && now.Sub(o.passedAt) < confirmWindow
-		if now.After(o.expires) || (o.machine.Name == s.machine.Name && !waiting) {
+		switch {
+		case now.After(o.expires):
 			delete(v.sessions, old)
+		case o.machine.Name != s.machine.Name || waiting:
+		case o.remote == s.remote:
+			delete(v.sessions, old)
+		default:
+			same = append(same, old)
 		}
+	}
+	slices.SortFunc(same, func(a, b string) int { return v.sessions[a].opened.Compare(v.sessions[b].opened) })
+	for len(same) >= sessionsPerMachine {
+		delete(v.sessions, same[0])
+		same = same[1:]
 	}
 	v.sessions[id] = s
 	return id
@@ -271,16 +373,40 @@ func (v *Verifier) open(s *session) string {
 // planned device or a serial NetBox lacks waits without one, whatever
 // certificates its EKs carry, since a manufacturer's certificate never names
 // the machine its TPM sits in. A device past planned without a binding is
-// held to the pins its earlier passes proved, so a reboot into HookOS needs
-// no new approval.
-func checkPinned(m Machine, eks []VerifiedEK) error {
+// held to proven, the EKs fleetd's own record of the serial proved in an
+// earlier pass, so a reboot into HookOS needs no new approval. NetBox's
+// ek_hash pins are a note and never authorize: anyone who can write NetBox
+// can write them. Such a device with no proof on file is refused, unless it
+// has no pins either and waits like any unbound claim.
+func checkPinned(m Machine, proven map[string]string, eks []VerifiedEK) error {
 	switch {
 	case len(m.Approved) > 0:
 		return matchPins(m, m.Approved, "approved", eks)
-	case len(m.Pins) == 0 || strings.EqualFold(m.Status, statusPlanned):
+	case m.NetBoxID == 0 || strings.EqualFold(m.Status, statusPlanned) || (len(proven) == 0 && len(m.Pins) == 0):
 		return fail(reasonEKPending, "%s has no approved EK binding; its entry in the nodes file names its EKs once the owner checks %s against independent evidence", m.Name, ekSummary(eks))
+	case len(proven) == 0:
+		return fail(reasonBindingRemoved, "%s has no approved EK binding and no earlier pass of fleetd proved an EK for it; NetBox's ek_hash pins authorize nothing", m.Name)
 	}
-	return matchPins(m, m.Pins, "pinned", eks)
+	if err := matchPins(m, proven, "proven", eks); err != nil {
+		return fail(reasonBindingRemoved, "%s has no approved EK binding, and these EKs are not the ones fleetd proved for it: %s", m.Name, err.(*Failure).Detail)
+	}
+	return nil
+}
+
+// pinned is checkPinned against the EKs the store's record of the device's
+// serial proved.
+func (v *Verifier) pinned(m Machine, eks []VerifiedEK) error {
+	var proven map[string]string
+	if len(m.Approved) == 0 {
+		rec, found, err := v.Store.RecordBySerial(m.Serial)
+		if err != nil {
+			return err
+		}
+		if found {
+			proven = rec.provenHashes()
+		}
+	}
+	return checkPinned(m, proven, eks)
 }
 
 // admitPins applies checkPinned, keeping an unbound intake's wait apart
@@ -288,7 +414,7 @@ func checkPinned(m Machine, eks []VerifiedEK) error {
 // these refusals came from the machine, so none touches a record or a
 // binding; a claim against an approved binding is journaled on the device.
 func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Machine, eks []VerifiedEK) error {
-	err := checkPinned(m, eks)
+	err := v.pinned(m, eks)
 	if err == nil {
 		return nil
 	}
@@ -297,6 +423,8 @@ func (v *Verifier) admitPins(ctx context.Context, m Machine, claim protocol.Mach
 	}
 	if len(m.Approved) > 0 {
 		v.journalClaim(ctx, m, fmt.Sprintf("fleetd: refused a claim of this serial by EKs that are not its approved binding; nothing was recorded, and the binding stands (MAC %s, %s): %s", claim.MAC, ekSummary(eks), err))
+	} else if reasonOf(err) == reasonBindingRemoved {
+		v.journalClaim(ctx, m, fmt.Sprintf("fleetd: refused a claim of this serial: the device has no approved binding, and these EKs are not the ones an earlier pass proved; nothing was recorded (MAC %s, %s): %s", claim.MAC, ekSummary(eks), err))
 	}
 	return v.reject(&m, claim, err)
 }
@@ -448,7 +576,7 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	if err != nil {
 		return refuse(err)
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, policy.Evaluate)
+	events, err := v.replayBoot(pcrs, req.EventLog, policy, policy.Evaluate)
 	if err != nil {
 		return refuse(err)
 	}
@@ -476,6 +604,7 @@ func (v *Verifier) Evidence(ctx context.Context, id string, req protocol.Evidenc
 	rec := v.baseRecord(s.machine, s.claim, s.eks)
 	rec.Status = StatusAttested
 	rec.EKProven = true
+	rec.ProvenEKs = maps.Clone(rec.EKHashes)
 	rec.LDevIDSerial = serialHex(ldevidCert)
 	rec.LDevIDNotAfter = ldevidCert.NotAfter
 	rec.LDevIDNotBefore = ldevidCert.NotBefore
@@ -596,7 +725,7 @@ func (v *Verifier) confirmBinding(ctx context.Context, s *session) (Machine, err
 	if err := v.bindingAuthored(ctx, m); err != nil {
 		return Machine{}, err
 	}
-	if err := checkPinned(m, s.eks); err != nil {
+	if err := v.pinned(m, s.eks); err != nil {
 		return Machine{}, err
 	}
 	if m.MAC != "" && normalMAC(m.MAC) != normalMAC(s.claim.MAC) {
@@ -690,10 +819,11 @@ func (v *Verifier) issue(ldevid, ak crypto.PublicKey, m Machine, now time.Time) 
 	return ldevidCert, lakCert, nil
 }
 
-// replayBoot replays the event log to the quoted PCRs and applies the policy
+// replayBoot replays the event log to the quoted PCRs, requires that it
+// accounts for each PCR the profile covers, and applies the policy
 // through evaluate. The PCRs come from quotedPCRs, so the log is the TPM's
 // own statement about the boot.
-func (v *Verifier) replayBoot(pcrs []attest.PCR, eventLog []byte, evaluate func([]attest.Event) []string) ([]attest.Event, error) {
+func (v *Verifier) replayBoot(pcrs []attest.PCR, eventLog []byte, policy *Policy, evaluate func([]attest.Event) []string) ([]attest.Event, error) {
 	log, err := attest.ParseEventLog(eventLog)
 	if err != nil {
 		return nil, fail(reasonEventLog, "%v", err)
@@ -701,6 +831,9 @@ func (v *Verifier) replayBoot(pcrs []attest.PCR, eventLog []byte, evaluate func(
 	events, err := log.Verify(pcrs)
 	if err != nil {
 		return nil, fail(reasonEventLog, "the event log does not replay to the quoted PCRs: %v", err)
+	}
+	if err := policy.coverage(pcrs, events); err != nil {
+		return nil, err
 	}
 	if violations := evaluate(events); len(violations) > 0 {
 		return nil, &Failure{Reason: reasonPolicy, Detail: strings.Join(violations, "; ")}
@@ -842,7 +975,7 @@ func confirmSigned(s *session, raw []byte) error {
 // RenewStart opens a renewal, or with check the daily check: a quote nonce
 // for the machine whose LAK is on file. The caller resolves the DevID, from
 // the store.
-func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID, check bool) (protocol.RenewStart, error) {
+func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID, check bool, remote string) (protocol.RenewStart, error) {
 	m, ok, err := v.lookupMachine(ctx, serial)
 	if err != nil {
 		return protocol.RenewStart{}, v.reject(nil, protocol.Machine{Serial: serial}, err)
@@ -894,9 +1027,9 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		// hashes were proven elsewhere and never become pins from here. A check
 		// issues nothing, so it keeps the verified DevID's certificates and
 		// blobs as the record's files.
-		uuid := rec.UUID
+		uuid, proven := rec.UUID, rec.ProvenEKs
 		rec = Record{
-			UUID:    uuid,
+			UUID: uuid, ProvenEKs: proven,
 			Machine: m.Name, Serial: m.Serial, RSAEKCert: d.RSAEKCert, Confirmed: d.Confirmed, EKHashes: hashesByAlg(d),
 			Status: StatusAttested, Class: m.Class, AttestedAt: d.AttestedAt,
 			LDevIDSerial: serialHex(checked.LDevID), LDevIDNotAfter: checked.LDevID.NotAfter, LDevIDNotBefore: checked.LDevID.NotBefore, LAKSerial: serialHex(checked.LAK),
@@ -923,6 +1056,7 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		devidFiles:   devidFiles,
 		lifted:       lifted,
 	}
+	s.remote = remote
 	id := v.open(s)
 	v.Log.Info("renewal started", "machine", m.Name, "class", m.Class, "check", check)
 	return protocol.RenewStart{Session: id, Nonce: s.nonce, Check: check}, nil
@@ -992,7 +1126,7 @@ func (v *Verifier) VerifyDevID(d protocol.DevID, machine, serial string) (Checke
 // answered before any DevID is looked up, so a blocked machine gets 403.
 func (v *Verifier) RenewAllowed(ctx context.Context, serial string) error {
 	if !validSerial(serial) {
-		return v.reject(nil, protocol.Machine{Serial: serial}, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters"))
+		return v.reject(nil, protocol.Machine{}, fail(reasonSerial, "the serial must be 1 to 64 printable ASCII characters"))
 	}
 	m, ok, err := v.lookupMachine(ctx, serial)
 	if err != nil {
@@ -1067,7 +1201,7 @@ func (v *Verifier) RenewEvidence(ctx context.Context, id string, req protocol.Re
 	if err != nil {
 		return refuse(err)
 	}
-	events, err := v.replayBoot(pcrs, req.EventLog, policy.EvaluateRenewal)
+	events, err := v.replayBoot(pcrs, req.EventLog, policy, policy.EvaluateRenewal)
 	if err != nil {
 		return refuse(err)
 	}
@@ -1142,13 +1276,20 @@ func (v *Verifier) reject(m *Machine, claim protocol.Machine, err error) error {
 		return err
 	}
 	f.Unauthenticated = true
-	entry := map[string]any{"time": v.Now(), "serial": claim.Serial, "mac": claim.MAC, "verdict": protocol.VerdictRefused, "reason": f.Reason, "detail": f.Detail}
-	audit := AuditEntry{Event: auditVerdict, Serial: claim.Serial, Status: protocol.VerdictRefused, Reason: f.Error()}
+	if f.Reason == reasonSerial || f.Reason == reasonField || f.Reason == reasonMACInvalid {
+		// Junk input: it is counted and answered, and leaves no line anywhere.
+		v.count(protocol.VerdictRefused, f.Reason)
+		v.changed()
+		return f
+	}
+	serial, mac, detail := clip(claim.Serial), clip(claim.MAC), clip(f.Detail)
+	entry := map[string]any{"time": v.Now(), "serial": serial, "mac": mac, "verdict": protocol.VerdictRefused, "reason": f.Reason, "detail": detail}
+	audit := AuditEntry{Event: auditVerdict, Serial: serial, Status: protocol.VerdictRefused, Reason: clip(f.Reason + ": " + f.Detail)}
 	if m != nil {
 		entry["machine"] = m.Name
 		audit.Node, audit.Class = m.Name, m.Class
 	}
-	v.Log.Warn("request refused", "machine", audit.Node, "serial", claim.Serial, "mac", claim.MAC, "reason", f.Reason, "err", f.Detail)
+	v.Log.Warn("request refused", "machine", audit.Node, "serial", serial, "mac", mac, "reason", f.Reason, "err", detail)
 	v.count(protocol.VerdictRefused, f.Reason)
 	v.Audit.Emit(audit)
 	if jerr := v.Store.Journal(entry); jerr != nil {
@@ -1156,6 +1297,18 @@ func (v *Verifier) reject(m *Machine, claim protocol.Machine, err error) error {
 	}
 	v.changed()
 	return f
+}
+
+// maxEcho is the longest claimed string a refusal repeats in the journal, the
+// log or the audit stream.
+const maxEcho = 128
+
+// clip bounds a string that came from the wire, marking the cut.
+func clip(s string) string {
+	if len(s) <= maxEcho {
+		return s
+	}
+	return strings.ToValidUTF8(s[:maxEcho], "") + "..."
 }
 
 // refuse records a failed check against the machine as its quarantine, and
@@ -1180,6 +1333,7 @@ func (v *Verifier) quarantine(ctx context.Context, m *Machine, claim protocol.Ma
 			// the record a lifted quarantine restores carries it.
 			rec.UUID, rec.EKHashes, rec.EKIssuers, rec.RSAEKCert, rec.Confirmed = prev.UUID, prev.EKHashes, prev.EKIssuers, prev.RSAEKCert, prev.Confirmed
 		}
+		rec.ProvenEKs, rec.EKProven = prev.ProvenEKs, prev.EKProven
 	}
 	rec.Status = StatusQuarantined
 	rec.Reason = reason
@@ -1244,10 +1398,31 @@ func (v *Verifier) count(verdict, reason string) {
 	v.verdicts[[2]string{verdict, reason}]++
 }
 
+// changed asks for OnChange, coalesced: the run trails the first change by
+// ChangeEvery and covers every change before it. Unauthenticated requests
+// call it, so the metrics file is not rewritten once for each.
 func (v *Verifier) changed() {
-	if v.OnChange != nil {
+	if v.OnChange == nil {
+		return
+	}
+	v.changeMu.Lock()
+	if v.changePending {
+		v.changeMu.Unlock()
+		return
+	}
+	v.changePending = true
+	v.changeMu.Unlock()
+	run := func() {
+		v.changeMu.Lock()
+		v.changePending = false
+		v.changeMu.Unlock()
 		v.OnChange()
 	}
+	after := v.AfterFunc
+	if after == nil {
+		after = func(d time.Duration, f func()) { time.AfterFunc(d, f) }
+	}
+	after(cmp.Or(v.ChangeEvery, 5*time.Second), run)
 }
 
 // Verdicts returns the verdict counts by verdict and reason.

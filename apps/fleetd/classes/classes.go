@@ -44,6 +44,9 @@ type Table map[string]Class
 
 var digestRE = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 
+// PinnedByDigest says whether an image reference ends in a sha256 digest.
+func PinnedByDigest(image string) bool { return digestRE.MatchString(image) }
+
 // Load reads and checks a class table.
 func Load(path string) (Table, error) {
 	raw, err := os.ReadFile(path)

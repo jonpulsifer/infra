@@ -203,6 +203,7 @@ const (
 	reasonEKPending      = "ek-pending-approval"
 	reasonBinding        = "ek-binding-changed"
 	reasonBindingAuthor  = "ek-binding-unauthored"
+	reasonBindingRemoved = "ek-binding-removed"
 	reasonAK             = "ak-invalid"
 	reasonSession        = "session"
 	reasonConfirm        = "confirm-signature"
@@ -216,6 +217,7 @@ const (
 	reasonUnattended     = "unattended-boot"
 	reasonNetBox         = "netbox-unavailable"
 	reasonSerial         = "invalid-serial"
+	reasonField          = "invalid-field"
 	reasonInternal       = "internal"
 )
 

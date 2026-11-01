@@ -48,6 +48,11 @@ let
       '';
 
   credentials = "/run/credentials/tinkerbell.service";
+  # The enrollment name's public certificate (./fleetd.nix): the Tink server presents it to
+  # HookOS's agent, whose signed command line names it and sets tinkerbell_tls=true, so a host on
+  # the Kubernetes network cannot stand in for the server and hand the agent actions.
+  enrollHost = "enroll.${(import ../lib/fleet.nix).dnsZone}";
+  acmeDir = config.security.acme.certs.${enrollHost}.directory;
   secrets = [
     "ca-crt"
     "server-crt"
@@ -60,9 +65,10 @@ let
   # Flux on folly applies the objects in clusters/folly/tinkerbell/ to this namespace, as the client
   # certificate CN that scripts/tinkerbell-certs.sh --client issues. RBAC cannot be bootstrapped by
   # the identity it authorizes, so tinkerbell-rbac applies it with the admin certificate. Git holds
-  # the Template and the BMC Secrets; fleetd (./fleetd.nix) owns the Hardware,
-  # Machine and Workflow objects with the admin certificate. Flux keeps its verbs on those kinds so
-  # that it can prune the ones it applied before fleetd existed.
+  # the Template and the BMC Secrets, so those are the kinds Flux may write; fleetd (./fleetd.nix)
+  # owns the Hardware, Machine and Workflow objects with the admin certificate, and Flux only reads
+  # them. A Template decides what HookOS runs as root, so a compromise of folly reaches that far and
+  # no further.
   namespace = "tinkerbell";
   fluxUser = "folly-flux";
   manage = [
@@ -94,22 +100,29 @@ let
           rules = [
             {
               apiGroups = [ "tinkerbell.org" ];
-              resources = [
-                "hardware"
-                "templates"
-                "workflows"
-              ];
-              verbs = manage;
-            }
-            {
-              apiGroups = [ "bmc.tinkerbell.org" ];
-              resources = [ "machines" ];
+              resources = [ "templates" ];
               verbs = manage;
             }
             {
               apiGroups = [ "" ];
               resources = [ "secrets" ];
               verbs = manage;
+            }
+            {
+              apiGroups = [
+                "tinkerbell.org"
+                "bmc.tinkerbell.org"
+              ];
+              resources = [
+                "hardware"
+                "workflows"
+                "machines"
+              ];
+              verbs = [
+                "get"
+                "list"
+                "watch"
+              ];
             }
           ];
         }
@@ -212,6 +225,12 @@ let
     "--anonymous-auth=false"
     "--authorization-mode=RBAC"
 
+    # TLS on the Tink server's gRPC port. The same flags start an HTTPS copy of Smee's HTTP on
+    # 7443, which no firewall rule admits.
+    "--tls-cert-file=%d/tls-crt"
+    "--tls-key-file=%d/tls-key"
+    "--ipxe-script-tink-server-use-tls=true"
+
     "--enable-ui=false"
     "--enable-tootles=false"
     "--enable-secondstar=false"
@@ -284,8 +303,12 @@ in
     after = [
       "network-online.target"
       "sys-subsystem-net-devices-${iface}.device"
+      "acme-${enrollHost}.service"
     ];
-    wants = [ "network-online.target" ];
+    wants = [
+      "network-online.target"
+      "acme-${enrollHost}.service"
+    ];
     # Tinkerbell exits when its apiserver is not healthy within 20s; keep retrying until it is.
     startLimitIntervalSec = 0;
     environment.HOME = "%S/tinkerbell";
@@ -293,7 +316,10 @@ in
       ExecStart = "${lib.getExe tinkerbell} ${lib.concatStringsSep " " flags}";
       Restart = "on-failure";
       RestartSec = "15s";
-      LoadCredential = map (name: "${name}:${config.sops.secrets."tinkerbell/${name}".path}") secrets;
+      LoadCredential = map (name: "${name}:${config.sops.secrets."tinkerbell/${name}".path}") secrets ++ [
+        "tls-crt:${acmeDir}/fullchain.pem"
+        "tls-key:${acmeDir}/key.pem"
+      ];
       DynamicUser = true;
       StateDirectory = "tinkerbell";
       StateDirectoryMode = "0700";

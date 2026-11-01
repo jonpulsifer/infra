@@ -1,6 +1,7 @@
 package attest
 
 import (
+	"cmp"
 	"crypto/sha1"
 	"crypto/x509"
 	"encoding/hex"
@@ -11,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -43,6 +45,11 @@ type Record struct {
 	// in EKHashes: the only hashes that become pins. A renewal or a record
 	// written before EKProven existed carries hashes it may not have proved.
 	EKProven bool `json:"ek_proven,omitempty"`
+	// ProvenEKs are the EK hashes by algorithm that an intake pass proved by
+	// activating a credential. They stay on the record through renewals, checks
+	// and quarantines, and a device past planned that has no approved binding
+	// is held to them: NetBox's ek_hash is only a note of what a pass proved.
+	ProvenEKs map[string]string `json:"proven_eks,omitempty"`
 	// RSAEKCert is whether the TPM holds an RSA EK certificate, the only
 	// one SPIRE's tpm_devid agent reads.
 	RSAEKCert    bool   `json:"rsa_ek_cert"`
@@ -101,6 +108,22 @@ const (
 	StatusRetired = "retired"
 )
 
+// provenHashes are the EK hashes an intake pass proved, or none. A record
+// from before ProvenEKs was kept still holds them in EKHashes while it stands
+// on an intake pass.
+func (r Record) provenHashes() map[string]string {
+	if r.Status == StatusRetired {
+		return nil
+	}
+	if len(r.ProvenEKs) > 0 {
+		return r.ProvenEKs
+	}
+	if r.EKProven {
+		return r.EKHashes
+	}
+	return nil
+}
+
 // Issued reports whether the record's LDevID may be served.
 func (r Record) Issued() bool { return r.Status == StatusAttested }
 
@@ -113,7 +136,21 @@ type Store struct {
 	// PendingMax caps the claims that wait; the oldest give way.
 	// 50 when zero.
 	PendingMax int
+	// UnknownMax caps the claims for serials NetBox lacks, apart from
+	// PendingMax so junk serials cannot evict a known device's claim.
+	// 10 when zero.
+	UnknownMax int
+	// JournalMax is the size at which verdicts.jsonl moves to
+	// verdicts.jsonl.1, replacing the one before. 64 MiB when zero; negative
+	// never rotates.
+	JournalMax int64
 }
+
+const (
+	defaultPendingMax = 50
+	defaultUnknownMax = 10
+	defaultJournalMax = 64 << 20
+)
 
 // Files a machine directory holds after a pass.
 const (
@@ -308,7 +345,15 @@ type Pending struct {
 	EKHashes  map[string]string `json:"ek_hashes"`
 	EKIssuers []string          `json:"ek_issuers,omitempty"`
 	Detail    string            `json:"detail,omitempty"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	// Unknown marks a claim for a serial NetBox lacks.
+	Unknown   bool      `json:"unknown,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// sameClaim is whether two claims say the same, whenever they were made.
+func (p Pending) sameClaim(o Pending) bool {
+	p.UpdatedAt, o.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(p, o)
 }
 
 func (s *Store) pendingPath(serial string) string {
@@ -323,12 +368,13 @@ func (s *Store) SavePending(p Pending) error {
 		return err
 	}
 	p.Serial = serialKey(p.Serial)
-	// The store holds at most PendingMax claims: anyone can make one, so the
-	// oldest give way to the newest, and this serial's own file is the one
-	// it replaces.
-	limit := s.PendingMax
-	if limit <= 0 {
-		limit = 50
+	// The store holds at most PendingMax claims for known serials and
+	// UnknownMax for the rest: anyone can make one, so the oldest of a kind
+	// give way to the newest, and this serial's own file is the one it
+	// replaces.
+	limit := cmp.Or(s.PendingMax, defaultPendingMax)
+	if p.Unknown {
+		limit = cmp.Or(s.UnknownMax, defaultUnknownMax)
 	}
 	existing, err := s.pendings()
 	if err != nil {
@@ -336,7 +382,7 @@ func (s *Store) SavePending(p Pending) error {
 	}
 	others := existing[:0]
 	for _, e := range existing {
-		if serialKey(e.Serial) != p.Serial {
+		if serialKey(e.Serial) != p.Serial && e.Unknown == p.Unknown {
 			others = append(others, e)
 		}
 	}
@@ -538,7 +584,8 @@ func (s *Store) Identities() ([]Identity, error) {
 	return out, nil
 }
 
-// Journal appends a verdict to verdicts.jsonl.
+// Journal appends a verdict to verdicts.jsonl. A line that would take the file
+// past JournalMax moves it to verdicts.jsonl.1 first.
 func (s *Store) Journal(entry any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -546,11 +593,20 @@ func (s *Store) Journal(entry any) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, "verdicts.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	b = append(b, '\n')
+	path := filepath.Join(s.dir, "verdicts.jsonl")
+	if limit := cmp.Or(s.JournalMax, defaultJournalMax); limit > 0 {
+		if fi, err := os.Stat(path); err == nil && fi.Size() > 0 && fi.Size()+int64(len(b)) > limit {
+			if err := os.Rename(path, path+".1"); err != nil {
+				return err
+			}
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	if _, err := f.Write(b); err != nil {
 		f.Close()
 		return err
 	}

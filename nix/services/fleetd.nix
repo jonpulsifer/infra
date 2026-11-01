@@ -7,10 +7,11 @@
 # Its listeners:
 # - HTTPS on spore's bootstrap address, port 443, for the enrollment name, whose public certificate
 #   HookOS and Talos trust before either has a config: the device flow under /attest/ and the
-#   one-time config at /talos/config. The anchors' CoreDNS answers the name with this address
-#   (./coredns-sinkhole.nix), and a node on the Kubernetes network reaches it through the gateway.
-# - HTTP on port 8444 of the Anchor network for folly's nodes and pods: the DevID lookups, the
-#   renewal and the daily check.
+#   one-time config at /talos/config, and nothing else. The anchors' CoreDNS answers the name with
+#   this address (./coredns-sinkhole.nix), and a node on the Kubernetes network reaches it through
+#   the gateway. The Tink server presents the same certificate on 42113 (./tinkerbell.nix).
+# - HTTP on port 8444 for folly's nodes and pods (the firewall admits the node and pod CIDRs): the
+#   DevID lookups, the renewal and the daily check.
 # - HTTP on port 8446 of the Anchor network for NetBox's event-rule webhook, and /metrics.
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
 #
@@ -113,7 +114,11 @@ in
   options.homelab.fleetd = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = sealed "netbox-token" && yubikey.enable && yubikey.serial != null && builtins.pathExists hardwareCert;
+      default =
+        sealed "netbox-token"
+        && yubikey.enable
+        && yubikey.serial != null
+        && builtins.pathExists hardwareCert;
       defaultText = "spore's sops file holds fleetd/netbox-token, its YubiKey has a serial and terraform/pki/certs/folly-devid-ca-spore.pem exists";
       description = "Run fleetd. It needs the NetBox token and the DevID CA on spore's YubiKey.";
     };
@@ -159,6 +164,13 @@ in
       {
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
         message = "homelab.fleetd.controlPlanes needs installs, fleetd/worker-secrets and fleetd/bundle in spore's sops file.";
+      }
+      {
+        # The full bundle holds the cluster's CA keys. Sealed to spore's host key while nothing
+        # loads it, it only widens what a spore compromise takes (scripts/talos-worker-secrets.sh
+        # drop-bundle removes it).
+        assertion = cfg.controlPlanes || !sealed "bundle";
+        message = "fleetd/bundle is in spore's sops file while homelab.fleetd.controlPlanes is off; run scripts/talos-worker-secrets.sh drop-bundle spore.";
       }
       {
         assertion = !workerSecrets || cordon;
@@ -209,6 +221,9 @@ in
         dnsResolver = "1.1.1.1:53";
         credentialFiles.CLOUDFLARE_DNS_API_TOKEN_FILE = config.sops.secrets."acme/cloudflare-token".path;
         group = "fleetd";
+        # The Tink server serves the same certificate to HookOS's agent (./tinkerbell.nix) and reads
+        # it once, at start. fleetd watches the file itself.
+        reloadServices = [ "tinkerbell.service" ];
       };
     };
 

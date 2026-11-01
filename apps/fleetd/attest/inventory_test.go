@@ -84,7 +84,9 @@ func (inv *Inventory) Lookup(_ context.Context, serial string) (Machine, bool, e
 }
 
 // seed enters each machine into the fake NetBox as the device its
-// pins, class and status would come from.
+// approved binding, class and status would come from. The fixture's EK
+// hashes are the binding, which only the owner changes, and the pins a pass
+// proved.
 func (inv *Inventory) seed(f *fakeNetBox) {
 	for _, m := range inv.bySerial {
 		status := m.Status
@@ -93,10 +95,10 @@ func (inv *Inventory) seed(f *fakeNetBox) {
 		}
 		fields := map[string]any{"talos_class": m.Class}
 		if m.EKHash != "" {
-			fields["ek_hash"] = m.EKHash
+			fields["ek_hash"], fields["approved_ek_hash"] = m.EKHash, m.EKHash
 		}
 		if m.EKHashECC != "" {
-			fields["ek_hash_ecc"] = m.EKHashECC
+			fields["ek_hash_ecc"], fields["approved_ek_hash_ecc"] = m.EKHashECC, m.EKHashECC
 		}
 		f.add(m.Name, m.Serial, status, m.MAC, fields)
 	}

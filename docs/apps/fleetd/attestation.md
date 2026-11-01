@@ -9,7 +9,7 @@ fleetd checks machine identity before installation and boot evidence throughout 
 
 HookOS checks its identity on every boot, before tink-agent waits for work. The entrypoint in `images/tink-agent-autoid` sets the clock from `fleet_ntp_server`. It then calls `tink-attest` at `fleet_attest_url`.
 
-The SMBIOS serial identifies the NetBox device. Admission requires a `planned` device and an approved endorsement-key (EK) binding.
+The SMBIOS serial identifies the NetBox device. Admission requires a `planned` device and an approved endorsement-key (EK) binding. A device past `planned` that boots HookOS again, for `attest` or a reprovision, needs no new approval: its EKs must match the hashes fleetd's own store holds from its earlier pass, and nothing in NetBox stands in for them.
 
 The nodes file declares that binding. `terraform/netbox/folly` writes it to `approved_ek_hash` and `approved_ek_hash_ecc`. NetBox's latest binding change must come from Terraform's user, configured by `homelab.fleetd.bindingAuthor` in `nix/services/fleetd.nix`.
 
@@ -22,11 +22,13 @@ fleetd checks the evidence in this order:
 
 1. Check each EK certificate against `apps/fleetd/attest/roots/`.
 2. Activate a credential to prove possession of the key.
-3. Replay the quoted event log against the class's boot-policy profile.
+3. Replay the quoted event log against the class's boot-policy profile. The log must hold at least one event for every PCR the profile quotes, or that PCR must still read its initial value; a profile that pins `boot_applications` also needs a boot application after the separator. A log with no events for a quoted PCR says nothing about it.
 4. Read the device and binding changelog again.
 5. Issue both certificates only if the binding still matches the session's initial binding.
 
-fleetd alone writes `ek_hash` and `ek_hash_ecc`. These pins record the approved binding.
+fleetd alone writes `ek_hash` and `ek_hash_ecc`. They record what a pass proves, for the owner and for SPIRE. They authorize nothing: fleetd holds a device to its own store.
+
+A request that proves nothing writes no verdict. fleetd caps every claimed field before it logs it, counts an invalid request instead of journaling it, rotates `verdicts.jsonl`, and lets no unproven request displace a machine's open session.
 
 Only TPM-authenticated evidence becomes a verdict. Transport errors, timeouts, a missing TPM and evidence without TPM proof cause no quarantine or verdict write.
 
@@ -47,7 +49,7 @@ A provision starts when either condition holds:
 
 A control plane requires the owner's request. The Workflow needs no boot mode because the machine already waits in HookOS.
 
-fleetd renders the configuration with talosctl, `clusters/folly/fleet/class-inputs.json` and the worker secrets. It returns a 32-byte random code wrapped to the TPM.
+fleetd renders the configuration with talosctl, `clusters/folly/fleet/class-inputs.json` and the worker secrets. The installer image is the digest `clusters/folly/fleet/classes.json` pins for the class, which `.github/workflows/talos-images.yml` writes after each build; fleetd refuses to start while an installing class has no digest. It returns a 32-byte random code wrapped to the TPM.
 
 ## Join Kubernetes
 
@@ -71,7 +73,7 @@ The first fully acknowledged GET consumes the code. fleetd then requests the dev
 
 An incomplete response leaves the configuration available for retry. This includes a closed connection or an expired write deadline. HEAD and conditional requests are refused.
 
-Unread worker configurations expire after two hours. Control-plane configurations expire after 30 minutes.
+Unread worker configurations expire after two hours. Control-plane configurations expire after 30 minutes. A configuration whose Workflow is deleted, or ends without success, is dropped at the next pass and its code burned.
 
 ## Check the running node
 

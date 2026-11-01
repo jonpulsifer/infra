@@ -178,17 +178,17 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	if in.TTL, err = time.ParseDuration(env("FLEET_CONFIG_TTL", "2h")); err != nil || in.TTL <= 0 {
 		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be a positive duration")
 	}
-	classes, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
-	if classes == "" && workers == "" && bin == "" {
+	inputsFile, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
+	if inputsFile == "" && workers == "" && bin == "" {
 		return in, nil
 	}
-	if classes == "" || workers == "" || bin == "" {
+	if inputsFile == "" || workers == "" || bin == "" {
 		return nil, fmt.Errorf("FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL go together")
 	}
 	if in.TTL+JoinTokenGrace > JoinTokenMaxLifetime {
 		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be at most %s: a worker's bootstrap token lives for it plus %s, and the cluster admits none for more than %s", JoinTokenMaxLifetime-JoinTokenGrace, JoinTokenGrace, JoinTokenMaxLifetime)
 	}
-	inputs, err := LoadClassInputs(classes)
+	inputs, err := LoadClassInputs(inputsFile)
 	if err != nil {
 		return nil, err
 	}
@@ -230,9 +230,20 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 			cfg.Installs[class] = ci.InstallerImage
 		}
 	}
+	// The class table pins its images by digest, so its image wins over the
+	// class inputs', which carry the Talos root's mutable tag. A class the
+	// inputs render but leave out, such as a control plane without the
+	// bundle, stays out.
 	for class, c := range cfg.Classes {
-		if _, ok := cfg.Installs[class]; !ok && c.InstallerImage != "" {
+		_, rendered := inputs[class]
+		_, installs := cfg.Installs[class]
+		if c.InstallerImage != "" && (installs || !rendered) {
 			cfg.Installs[class] = c.InstallerImage
+		}
+	}
+	for class, image := range cfg.Installs {
+		if !classes.PinnedByDigest(image) {
+			return nil, fmt.Errorf("class %s installs %q, which is not pinned by digest: pin installer_image in classes.json", class, image)
 		}
 	}
 	return in, nil

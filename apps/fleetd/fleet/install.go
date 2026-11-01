@@ -646,11 +646,13 @@ func (i *Installer) missing(ctx context.Context, uuid string, now time.Time) err
 	return nil
 }
 
-// Tick expires the configs nobody fetched within their TTL, retries the
+// Tick withdraws the configs whose Workflow ended without success, expires
+// the configs nobody fetched within their TTL, retries the
 // releases NetBox refused, and refreshes the metrics. Each reconcile pass
 // runs it.
 func (i *Installer) Tick(ctx context.Context) {
 	now := i.Now()
+	i.withdrawEnded(ctx)
 	for _, p := range i.Configs.Expire(now) {
 		if err := i.expire(ctx, p); err != nil {
 			log.Printf("expire %s: %v", p.Node, err)
@@ -767,6 +769,58 @@ func (i *Installer) Withdraw(ctx context.Context, d Device) error {
 	Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn: the device is "+d.Status)
 	comment := fmt.Sprintf("fleetd: the device is %s, so fleetd dropped the Talos config rendered at %s for Workflow %s before the node fetched it; the node gets no config", d.Status, timestamp(p.Rendered), p.Workflow)
 	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
+}
+
+// withdrawEnded drops each unread config whose Workflow is gone, or ended
+// without success: its install will not fetch the config, and the cluster's
+// secrets in it are not left to wait out the TTL. A Workflow still going, or
+// one that succeeded, keeps its config. A config a fetch holds is marked
+// withdrawn, as Withdraw does.
+func (i *Installer) withdrawEnded(ctx context.Context) {
+	if i.Kube == nil {
+		return
+	}
+	for _, p := range i.Configs.Unread() {
+		var ended string
+		wf, err := i.Kube.Get(ctx, WorkflowResource, p.Workflow)
+		switch {
+		case errors.Is(err, ErrNotFound):
+			ended = "was deleted"
+		case err != nil:
+			log.Printf("talos-config: read Workflow %s for %s's config: %v", p.Workflow, p.Node, err)
+			continue
+		case Finished(wf.State()) && !Succeeded(wf.State()):
+			ended = "ended " + stateWord(wf)
+		default:
+			continue
+		}
+		i.dropEnded(ctx, p, ended)
+	}
+}
+
+// dropEnded drops p, whose Workflow ended as the sentence says, and journals it.
+func (i *Installer) dropEnded(ctx context.Context, p Pending, ended string) {
+	_, fetching, ok := i.Configs.Drop(p.Serial, i.Now())
+	if !ok {
+		return
+	}
+	i.pending()
+	i.Metrics.ConfigEnded.Add(1)
+	d := Device{Serial: p.Serial, Name: p.Node, Class: p.Class}
+	reason := fmt.Sprintf("withdrawn: Workflow %s %s", p.Workflow, ended)
+	comment := fmt.Sprintf("fleetd dropped the unread config of %s: Workflow %s %s", p.Node, p.Workflow, ended)
+	if fetching {
+		reason += " while a fetch writes the config"
+		comment += "; a fetch was writing it, so the node may have it. fleetd journals the fetch's end if the node got all of it"
+	}
+	Audit("fleet.expire", i.Site, d, p.Workflow, reason)
+	found, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
+	if err == nil {
+		err = i.NetBox.Update(ctx, found, "", nil, "warning", comment)
+	}
+	if err != nil {
+		log.Printf("talos-config: journal the withdrawal of %s's config: %v", p.Node, err)
+	}
 }
 
 // pending refreshes the counts and oldest times of the unread configs and
