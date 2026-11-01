@@ -1,0 +1,22 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kthx-sites
+# The pod projects its own GCP token and never calls the Kubernetes API.
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kthx-sites
+  labels:
+    app.kubernetes.io/name: kthx-sites
+spec:
+  selector:
+    app.kubernetes.io/name: kthx-sites
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
