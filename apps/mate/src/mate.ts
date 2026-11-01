@@ -22,7 +22,6 @@ import { Custodian, PostgresCustodianLedger } from './custodian.ts';
 import { DREAMER_PROFILE, Dreams, PostgresDreamsLedger } from './dreams.ts';
 import { GithubApp } from './github-app.ts';
 import type { Routes } from './http.ts';
-import { KthxSites } from './kthx-sites.ts';
 import { Kube, type KubeConfig } from './kube.ts';
 import { type KubeHandsDeps, WORKSPACE } from './lease.ts';
 import { type Log, plain } from './log.ts';
@@ -286,7 +285,6 @@ export class Mate {
         clock,
         metrics,
         githubApp,
-        kthxSites: this.openKthxSites(kube),
         clusterCa: this.edges.kube.ca ?? null,
         sshKey: await this.readSshKey(config.sshKeyFile),
         talosconfig: await this.readTalosconfig(config.talosconfigFile),
@@ -606,23 +604,6 @@ export class Mate {
       });
       return null;
     }
-  }
-
-  // The ledger lives in mate's own namespace, whichever one holds the sandboxes.
-  private openKthxSites(kube: Kube): KthxSites | null {
-    const { config, log } = this.edges;
-    const { kthx } = config.sandbox;
-    if (!kthx.origin) return null;
-    log.info('kthx sites ledger on', {
-      origin: kthx.origin,
-      secret: kthx.sitesSecret,
-    });
-    return new KthxSites({
-      kube,
-      namespace: kube.namespace,
-      secret: kthx.sitesSecret,
-      log,
-    });
   }
 
   private openMcp(): McpBridge | null {

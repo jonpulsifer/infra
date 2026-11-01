@@ -158,13 +158,25 @@ export interface SandboxConfig {
 
 /**
  * The `kthx` CLI in the sandbox, off on a `null` origin: it runs against the
- * private claiming host and keeps its site tokens in a Secret across
- * sandboxes. Names only, never a token, so `sandboxManifest` may read it.
+ * private claiming host. Names only, never a token, so `sandboxManifest` may
+ * read it.
  */
 export interface KthxConfig {
   readonly origin: string | null;
-  /** The Secret whose `sites.json` is the CLI's token file, kept between sandboxes. */
-  readonly sitesSecret: string;
+  /** How the CLI signs in to Google, or `null` for no credential. */
+  readonly gcp: KthxGcpConfig | null;
+}
+
+/**
+ * Keyless Google federation for a sandbox with the kthx grant: its pod runs as
+ * `serviceAccount` and holds a projected token for `audience` beside the
+ * `external_account` document in `credentialsConfigMap`.
+ */
+export interface KthxGcpConfig {
+  readonly audience: string;
+  readonly serviceAccount: string;
+  /** The ConfigMap whose `gcp-credentials.json` names the token file `gcp-token`. */
+  readonly credentialsConfigMap: string;
 }
 
 // Switchboard fixes the number and the caps server-side; the sandbox holds a
@@ -417,7 +429,21 @@ export function readBrainConfig(env: Env): BrainConfig {
 function kthx(env: Env): KthxConfig {
   return {
     origin: httpUrl(env, 'MATE_KTHX_ORIGIN')?.replace(/\/+$/, '') ?? null,
-    sitesSecret: text(env, 'MATE_KTHX_SITES_SECRET', 'mate-kthx-sites'),
+    gcp: kthxGcp(env),
+  };
+}
+
+function kthxGcp(env: Env): KthxGcpConfig | null {
+  const audience = env.MATE_KTHX_GCP_AUDIENCE?.trim();
+  if (!audience) return null;
+  return {
+    audience,
+    serviceAccount: text(
+      env,
+      'MATE_KTHX_GCP_SERVICE_ACCOUNT',
+      'mate-sandbox-kthx',
+    ),
+    credentialsConfigMap: text(env, 'MATE_KTHX_GCP_CONFIGMAP', 'mate-kthx-gcp'),
   };
 }
 

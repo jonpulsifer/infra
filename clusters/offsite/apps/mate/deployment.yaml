@@ -225,10 +225,18 @@ spec:
             # any other role, and reads a missing one as none.
             - name: MATE_TALOSCONFIG_FILE
               value: /var/run/mate/talos/config
-            # The private claiming host, which a sandbox reaches; its site tokens
-            # are kept in the mate-kthx-sites Secret between sandboxes.
+            # The private claiming host, which a sandbox reaches.
             - name: MATE_KTHX_ORIGIN
               value: https://kthx.${SECRET_DOMAIN}
+            # A sandbox with the kthx grant deploys with Google credentials
+            # federated from its ServiceAccount (kthx-deployer.yaml). The audience
+            # is the token's, and matches the credential document's.
+            - name: MATE_KTHX_GCP_AUDIENCE
+              value: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite
+            - name: MATE_KTHX_GCP_SERVICE_ACCOUNT
+              value: mate-sandbox-kthx
+            - name: MATE_KTHX_GCP_CONFIGMAP
+              value: mate-kthx-gcp
             # mate bridges the engine's MCP tools into the agent as `kthx_*`
             # tools. The engine's Service, because mate's egress reaches its web
             # pods and not the public hostname.

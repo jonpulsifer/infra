@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Message } from '@earendil-works/pi-ai';
 import {
@@ -18,7 +18,6 @@ import type { Server } from 'bun';
 import type { McpServerConfig } from '../src/config.ts';
 import { HANDS_BINARY } from '../src/hands.ts';
 import { Epochs } from '../src/hands-env.ts';
-import { serialize } from '../src/kthx-sites.ts';
 import { Mate } from '../src/mate.ts';
 import { HARNESS_FAILED, RESUMING, RUNS_AS } from '../src/notices.ts';
 import {
@@ -592,8 +591,6 @@ describe('Stop', () => {
 
 describe('profiles', () => {
   const ORIGIN = 'https://kthx.example.test';
-  const SITES_SECRET = 'mate-kthx-sites';
-  const LEDGER = serialize({ [ORIGIN]: { blog: 'tok-blog' } });
   const BASE = ['bash', 'edit', 'read', 'write'];
 
   /** The tool names pi sent the model, replayed from the system messages in order. */
@@ -640,7 +637,6 @@ describe('profiles', () => {
       const github = new FakeGitHub();
       servers.push(github);
       const r = rig();
-      r.fake.putSecret(SITES_SECRET, { 'sites.json': LEDGER });
       const heard: string[][] = [];
       const discord = new SnowflakeDiscord(ME);
       const mate = await boot(
@@ -653,7 +649,7 @@ describe('profiles', () => {
               'bash',
               {
                 command:
-                  'env; cat ~/.github-token ~/.kube/config ~/.ssh/id_ed25519 ~/.config/kthx/sites.json',
+                  'env; cat ~/.github-token ~/.kube/config ~/.ssh/id_ed25519',
               },
               'c-look',
             );
@@ -671,7 +667,7 @@ describe('profiles', () => {
             github: true,
             kubeServiceAccount: 'mate-sandbox-admin',
             kubeReaderServiceAccount: 'mate-sandbox-reader',
-            kthx: { origin: ORIGIN, sitesSecret: SITES_SECRET },
+            kthx: { origin: ORIGIN, gcp: null },
           },
           brain: {
             mcpServers: [
@@ -745,13 +741,9 @@ describe('profiles', () => {
       expect(said).toContain('sa-token-1');
       expect(said).not.toContain('ghs-token');
       expect(said).not.toContain('OPENSSH PRIVATE KEY');
-      expect(said).not.toContain('tok-blog');
       for (const file of ['.github-token', '.ssh/id_ed25519', '.ssh/config']) {
         expect(readFileSync(join(r.home, file), 'utf8')).toBe('');
       }
-      expect(existsSync(join(r.home, '.config/kthx/sites.json'))).toBe(false);
-      expect(r.fake.patches.filter((p) => p.name === SITES_SECRET)).toEqual([]);
-      expect(r.fake.secretValue(SITES_SECRET, 'sites.json')).toBe(LEDGER);
       expect(heard[0]).toEqual([...BASE, 'weather_now'].sort());
 
       const fix = mate.discord.say(investigating.threadId, '+operator do it');

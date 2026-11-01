@@ -66,7 +66,6 @@ export class RecordingHandsInstruments implements HandsInstruments {
   readonly drops: HandsDropReason[] = [];
   readonly tokenMints: string[] = [];
   readonly tokenStamps: string[] = [];
-  readonly siteSyncs: string[] = [];
   readonly teardowns: TeardownReason[] = [];
   readonly turnSandboxes: TurnSandboxSource[] = [];
 
@@ -98,9 +97,6 @@ export class RecordingHandsInstruments implements HandsInstruments {
   }
   githubTokenStamped(result: string): void {
     this.tokenStamps.push(result);
-  }
-  kthxSitesSynced(result: string): void {
-    this.siteSyncs.push(result);
   }
   teardown(reason: TeardownReason): void {
     this.teardowns.push(reason);
@@ -317,7 +313,7 @@ export const SANDBOX_CONFIG: SandboxConfig = {
   github: false,
   kthx: {
     origin: null,
-    sitesSecret: 'mate-kthx-sites',
+    gcp: null,
   },
   switchboard: null,
 };

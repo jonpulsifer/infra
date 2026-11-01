@@ -1,0 +1,42 @@
+---
+# The identity a sandbox with the kthx grant deploys as. Its pod runs as this
+# account with a projected token for the `fml-pool` provider, which Google
+# exchanges for `kthx-deployer@bluenose.iam.gserviceaccount.com`; the binding is
+# in terraform/. The API token stays off: the projected one opens Google only.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mate-sandbox-kthx
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+automountServiceAccountToken: false
+---
+# The kthx CLI reads this as Application Default Credentials. The organization
+# policy forbids service-account keys, so the document holds no secret: it names
+# the token file that sandboxes.ts projects at /var/run/kthx/gcp-token. The
+# audience matches MATE_KTHX_GCP_AUDIENCE on the Deployment.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mate-kthx-gcp
+  namespace: mate
+  labels:
+    app.kubernetes.io/name: mate-sandbox
+    app.kubernetes.io/part-of: mate
+data:
+  gcp-credentials.json: |-
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/offsite",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "service_account_impersonation_url": "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/kthx-deployer@bluenose.iam.gserviceaccount.com:generateAccessToken",
+      "credential_source": {
+        "file": "/var/run/kthx/gcp-token",
+        "format": {
+          "type": "text"
+        }
+      }
+    }

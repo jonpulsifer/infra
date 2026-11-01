@@ -82,8 +82,8 @@ On the bridge in that mode, `engine.ts` is the conversation with ElevenLabs Spee
 
 1. The model streams its answer. A turn that calls no tool ends here, and no sandbox exists for it.
 2. The first tool call leases the thread's sandbox: its own, else the ready spare, else a new one. mate moves the Sandbox's `spec.shutdownTime` two hours ahead.
-3. mate opens one `pods/exec` stream to `mate-hands` with a new epoch, which kills any command an earlier stream left running. It writes the turn's credentials and the kthx sites file, from Secret `mate-kthx-sites`, as files with mode 0600. Every later tool call in the turn uses the same stream.
-4. At turn end, mate reads the kthx sites file back into the Secret, empties the credential files, and revokes the GitHub token. It then shuts `mate-hands` down, which ends every process the turn started, and moves `shutdownTime` two hours ahead.
+3. mate opens one `pods/exec` stream to `mate-hands` with a new epoch, which kills any command an earlier stream left running. It writes the turn's credentials as files with mode 0600. Every later tool call in the turn uses the same stream.
+4. At turn end, mate empties the credential files, and revokes the GitHub token. It then shuts `mate-hands` down, which ends every process the turn started, and moves `shutdownTime` two hours ahead.
 
 If the sandbox dies mid-turn, the tool call fails, and the next call starts a new sandbox.
 
@@ -123,18 +123,18 @@ A request leaves out the other model's reasoning where it sits beside an answer 
 | Cluster token (read-only) | `$KUBECONFIG`, with the contexts `offsite` and `folly` | ServiceAccount `mate-sandbox-reader`: `view` plus `clusters/base/apps/mate-sandbox-reader/` on both clusters, and GET on Prometheus and Alertmanager through the API server's service proxy (`clusters/base/monitoring/mate-sandbox-reader.yaml`), for 20 minutes plus 5 |
 | SSH key | `/home/agent/.ssh/id_ed25519`, from Secret `mate-sandbox-ssh` | `rowbutt` on every host that `github.com/rowbutt.keys` authorizes, with passwordless sudo |
 | talosconfig | `/home/agent/.talos/config`, from Secret `mate-sandbox-talos`, absent until the `talos-rowbutt-reader` 1Password item exists | `os:reader` on the Talos API of each cluster's nodes, which reads no file contents and changes nothing. mate refuses a file with another role. |
-| kthx site bearers | `/home/agent/.config/kthx/sites.json`, from Secret `mate-kthx-sites` | Every quick site Rowbutt claims |
+| kthx deployer | `$GOOGLE_APPLICATION_CREDENTIALS`, a projected ServiceAccount token for the `fml-pool` workload identity pool beside the `external_account` document in ConfigMap `mate-kthx-gcp` | Google service account `kthx-deployer@bluenose.iam.gserviceaccount.com`, which the `kthx` CLI deploys quick sites as. The token expires after an hour and the pod's own API token stays off. |
 | Ring token | Sandbox environment, from Secret `mate-switchboard`, absent until the `switchboard` 1Password item exists | `POST /ring` on [Switchboard](../switchboard.md), which rings one fixed number |
 
 The model key, the kthx agent token, the database role and the App key stay in mate's pod. mate reads and refreshes the ChatGPT sign-in only while `MATE_MODEL` is a ChatGPT model and mate-db has a URL and a CA. The ChatGPT sign-in stays in mate-db, which an operator sandbox reaches through Secret `mate-db-app`, so the agent can use the owner's ChatGPT account. [Sign Rowbutt in to ChatGPT](../../runbooks/sign-rowbutt-in-to-chatgpt.md#sign-out) has the kill switch. The files in the sandbox exist from the turn's first tool call to its end. An operator sandbox is `cluster-admin`, so it can still read every Secret in `mate`.
 
-`MATE_CONNECT_SECRET` is unset, so a sandbox has no 1Password token. A read-only sandbox gets no GitHub token, SSH key, talosconfig, kthx sites file, ring token or Connect token.
+`MATE_CONNECT_SECRET` is unset, so a sandbox has no 1Password token. A read-only sandbox gets no GitHub token, SSH key, talosconfig, kthx deployer identity, ring token or Connect token.
 
 The token's audience is `api`. offsite admits it for `mate-sandbox-admin` and `mate-sandbox-reader`, and folly admits the same token as `federated:system:serviceaccount:mate:<account>` through the allow-list in `clusters/<site>/talos/patches.tf`. `clusters/folly/apps/mate-sandbox/` binds the admin user to `cluster-admin` and the reader user to `view` and `mate-sandbox-reader`, and `clusters/folly/monitoring/mate-sandbox-reader.yaml` gives the reader user its proxy GET. mate writes a context for each cluster in `MATE_SANDBOX_KUBE_PEERS` from the sandbox's checkout: the API server in `clusters/<cluster>/config/cluster-topology.json` and the CA in `clusters/<cluster>/config/kubernetes-ca.pem`.
 
 The 1Password item `SSH: rowbutt` holds the key as PKCS#8, and `apps/mate/src/ssh-key.ts` rewrites it in OpenSSH format when mate starts. The SSH client config, `sshClientConfig` in `apps/mate/src/credentials.ts`, completes a short host name with `lolwtf.ca` and reaches folly's Anchor network hosts through `MATE_SANDBOX_LAB_JUMP`. The Deployment leaves it unset, so the sandbox jumps through mate's default, capsule. folly's firewall policy `nest_k8s_to_capsule_ssh` admits the sandbox on capsule's port 22 and nowhere else on the Anchor network. See [Routing and firewall](../../platform/network/routing-and-firewall.md).
 
-mate's Role reads and patches one Secret, `mate-kthx-sites`. `apps/mate/src/kthx-sites.ts` keeps that ledger, and `apps/mate/src/credentials.ts` writes the file into the sandbox and reads it back.
+An operator sandbox runs as ServiceAccount `mate-sandbox-kthx`, declared in `clusters/offsite/apps/mate/kthx-deployer.yaml`, through `serviceAccountName` in `apps/mate/src/sandboxes.ts`. The `MATE_KTHX_GCP_*` variables on the Deployment name the token's audience, the account and the ConfigMap. A sandbox without the kthx grant runs as the namespace default and gets none of this. The sandbox network reaches `sts.googleapis.com`, `iamcredentials.googleapis.com`, `oauth2.googleapis.com` and `storage.googleapis.com` through its web-port rule.
 
 `clanky-bot[bot]` is in `atlantis_users` in `clusters/offsite/apps/atlantis/policies/only-me.rego` and in `atlantis_appliers` in `clusters/offsite/apps/atlantis/policies/appliers.rego`, so its comments can plan and apply.
 
@@ -199,7 +199,6 @@ A `ValidatingAdmissionPolicy` in `clusters/offsite/apps/mate/fence/` denies `mat
 - `apps/mate/src/profiles.ts`: the profiles, their grants, budgets and overrides
 - `apps/mate/src/profile.ts`: the system prompt, its persona, the owner's instructions and the memory
 - `apps/mate/src/mcp.ts`: the kthx MCP bridge
-- `apps/mate/src/kthx-sites.ts`: the ledger of kthx site bearers
 - `packages/pi-store-postgres/`: pi's session storage on Postgres
 - `packages/mate-hands/`: the `mate-hands` daemon, and the protocol that `apps/mate/src/hands.ts` speaks to it
 - `images/mate-sandbox/Dockerfile`: the sandbox image

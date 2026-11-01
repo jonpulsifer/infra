@@ -48,17 +48,6 @@ rules:
     verbs:
       - get
       - create
-  # The kthx CLI's token file, kept across sandboxes (kthx-sites-secret.yaml).
-  # By name: the App key and the provider key are Secrets here too.
-  - apiGroups:
-      - ""
-    resources:
-      - secrets
-    resourceNames:
-      - mate-kthx-sites
-    verbs:
-      - get
-      - patch
   # Only for the sandbox accounts; without resourceNames mate could mint a
   # token for any ServiceAccount here, its own included.
   - apiGroups:

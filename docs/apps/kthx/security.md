@@ -25,7 +25,7 @@ The engine deletes only namespaces labelled `app.kubernetes.io/managed-by: spind
 | kthx on GitHub | The private GitHub App `kthx-bot` (ID `4576122`), installed on `jonpulsifer` only | Push branches, open pull requests and run workflows in connected repositories |
 | A quick-site owner | Write access to the sites bucket, and a Google ID token or tailnet login that the site's marker names | Deploy and delete that site, and call its owner routes |
 | The engine, at quick sites | A projected ServiceAccount token with audience `kthx`, sent to `/api/engine/*` on the control host | List and read every quick site with its owner login, and reserve and release names under the quick-site zone. It carries no login, so it opens no site and cannot delete every site. |
-| [Rowbutt](../mate.md) | An agent token from Secret `mate-kthx-agent`, which mate's pod holds | What an agent on `/mcp` can, without approval |
+| [Rowbutt](../mate.md) | An agent token from Secret `mate-kthx-agent`, which mate's pod holds, and a sandbox's federated token for `kthx-deployer@bluenose.iam.gserviceaccount.com` | What an agent on `/mcp` can, without approval, and every quick site it deploys |
 
 ## Secrets
 
