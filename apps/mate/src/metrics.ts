@@ -216,7 +216,6 @@ export function getInstruments(): Instruments {
   const teardowns = meter.createCounter('mate_teardowns_total');
   const tokenMints = meter.createCounter('mate_github_token_mints_total');
   const tokenStamps = meter.createCounter('mate_github_token_stamps_total');
-  const siteSyncs = meter.createCounter('mate_kthx_sites_syncs_total');
   const connects = meter.createCounter('mate_hands_connects_total');
   const drops = meter.createCounter('mate_hands_drops_total');
   const turnSandboxes = meter.createCounter('mate_turn_sandboxes_total');
@@ -275,7 +274,6 @@ export function getInstruments(): Instruments {
     },
     githubTokenMinted: (result) => tokenMints.add(1, { result }),
     githubTokenStamped: (result) => tokenStamps.add(1, { result }),
-    kthxSitesSynced: (result) => siteSyncs.add(1, { result }),
     minted: (result: MintResult, sample?: MintSample) => {
       mints.add(1, { result });
       if (typeof sample?.mintMs === 'number') {
@@ -356,7 +354,6 @@ export function lazyInstruments(): Instruments {
     githubAppReady: (ready) => getInstruments().githubAppReady(ready),
     githubTokenMinted: (result) => getInstruments().githubTokenMinted(result),
     githubTokenStamped: (result) => getInstruments().githubTokenStamped(result),
-    kthxSitesSynced: (result) => getInstruments().kthxSitesSynced(result),
     teardown: (reason) => getInstruments().teardown(reason),
     turnSandbox: (source) => getInstruments().turnSandbox(source),
     mcpUp: (server, up) => getInstruments().mcpUp(server, up),

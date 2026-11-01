@@ -166,7 +166,7 @@ describe('config from the environment', () => {
         labJump: 'capsule.lolwtf.ca',
         kthx: {
           origin: null,
-          sitesSecret: 'mate-kthx-sites',
+          gcp: null,
         },
         switchboard: null,
       },
@@ -344,7 +344,7 @@ describe('config from the environment', () => {
       return { cli: config.sandbox.kthx, mcp: config.brain.mcpServers };
     };
     expect(halves(minimal)).toEqual({
-      cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
+      cli: { origin: null, gcp: null },
       mcp: [],
     });
 
@@ -353,11 +353,32 @@ describe('config from the environment', () => {
       halves({
         ...minimal,
         MATE_KTHX_ORIGIN: ' https://kthx.example.test/// ',
-        MATE_KTHX_SITES_SECRET: 'other-sites',
       }),
     ).toEqual({
-      cli: { origin: 'https://kthx.example.test', sitesSecret: 'other-sites' },
+      cli: { origin: 'https://kthx.example.test', gcp: null },
       mcp: [],
+    });
+
+    // Google federation is its own switch, with names that default.
+    expect(
+      halves({ ...minimal, MATE_KTHX_GCP_AUDIENCE: ' //iam/pool/provider ' })
+        .cli.gcp,
+    ).toEqual({
+      audience: '//iam/pool/provider',
+      serviceAccount: 'mate-sandbox-kthx',
+      credentialsConfigMap: 'mate-kthx-gcp',
+    });
+    expect(
+      halves({
+        ...minimal,
+        MATE_KTHX_GCP_AUDIENCE: '//iam/pool/provider',
+        MATE_KTHX_GCP_SERVICE_ACCOUNT: 'other-sa',
+        MATE_KTHX_GCP_CONFIGMAP: 'other-cm',
+      }).cli.gcp,
+    ).toEqual({
+      audience: '//iam/pool/provider',
+      serviceAccount: 'other-sa',
+      credentialsConfigMap: 'other-cm',
     });
 
     // The MCP half alone: mate holds the token, and the sandbox sees none of it.
@@ -368,7 +389,7 @@ describe('config from the environment', () => {
         KTHX_AGENT_TOKEN: 'kthx_a',
       }),
     ).toEqual({
-      cli: { origin: null, sitesSecret: 'mate-kthx-sites' },
+      cli: { origin: null, gcp: null },
       mcp: [{ name: 'kthx', url, token: 'kthx_a' }],
     });
 

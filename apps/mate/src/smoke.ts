@@ -126,9 +126,8 @@ function smokeConfig(env: Record<string, string | undefined>): Config {
     maxConcurrent: 1,
     maxSandboxes: 1,
     port: 0,
-    // A fresh sandbox every run, and no kthx sites ledger, whose Secret is the
-    // running mate's.
-    sandbox: { ...sandbox, spares: 0, kthx: { ...sandbox.kthx, origin: null } },
+    // A fresh sandbox every run, with no kthx deployer identity.
+    sandbox: { ...sandbox, spares: 0, kthx: { origin: null, gcp: null } },
     // The retention sweep is the running mate's to run.
     voice: readVoiceConfig(env),
     brain: {

@@ -54,7 +54,7 @@ export interface Grants {
   readonly ssh: boolean;
   /** The `os:reader` talosconfig for the nodes' Talos API, when MATE_TALOSCONFIG_FILE names one. */
   readonly talos: boolean;
-  /** Stamps the kthx sites file and folds it back into the ledger: both or neither. */
+  /** Runs the sandbox as the kthx deployer: a service account, a projected token and a Google credential file. */
   readonly kthxSites: boolean;
   /** Pod env for the sandbox's life: the ring token. */
   readonly switchboard: boolean;
