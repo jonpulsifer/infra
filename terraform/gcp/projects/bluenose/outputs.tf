@@ -11,3 +11,8 @@ output "kthx_bucket" {
   description = "The kthx depot bucket — KTHX_BUCKET on the kthx server."
   value       = google_storage_bucket.kthx.name
 }
+
+output "kthx_sites_bucket" {
+  description = "The kthx quick-site bucket, one folder per site."
+  value       = google_storage_bucket.kthx_sites.name
+}
