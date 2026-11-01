@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# Checks kthx in production end to end on a throwaway site, then deletes it; a
-# kthx name is never freed, so each run uses one up. Usage: kthx-verify.sh [name].
-# Needs curl, jq, bun, kubectl with cnpg, zip or python3, and the kthx CLI
-# (`bun add -g https://kthx.dev/cli/kthx.tgz`).
+# Checks kthx in production end to end on a throwaway site, then deletes it and
+# frees its name. Usage: kthx-verify.sh [name].
+# Needs curl, jq, bun, kubectl with cnpg, the kthx CLI
+# (`bun add -g https://kthx.dev/cli/kthx.tgz`), and Application Default
+# Credentials that may write the sites bucket.
 set -euo pipefail
 
 ZONE=${KTHX_ZONE:-kthx.dev}
@@ -10,11 +11,11 @@ CONTEXT=${KTHX_CONTEXT:-offsite}
 NAMESPACE=${KTHX_NAMESPACE:-kthx}
 CLUSTER=${KTHX_CLUSTER:-kthx-db}
 DATABASE=${KTHX_DATABASE:-kthx}
+# How long a deploy may take to show: the bucket mount caches each file's
+# metadata for about ten seconds.
+FRESH_SECONDS=${KTHX_FRESH_SECONDS:-30}
 
 APEX="https://$ZONE"
-# Claims and site control answer on the private host when there is one, else on
-# the apex. `KTHX_ORIGIN` is the CLI's name for it.
-CONTROL="${KTHX_ORIGIN:-$APEX}"
 NAME=${1:-smoke-$(date -u +%s)}
 SITE="https://$NAME.$ZONE"
 
@@ -28,13 +29,13 @@ for tool in curl jq bun kthx kubectl; do
 done
 
 tmp=$(mktemp -d)
-TOKEN=""
+deployed=no
 cleanup() {
   local code=$?
-  # Harmless after the final delete: a deleted name answers 410.
-  [[ -z $TOKEN ]] \
-    || curl -sS -o /dev/null -X DELETE "$CONTROL/api/sites/$NAME" \
-      -H "authorization: Bearer $TOKEN" || true
+  # Harmless after the final delete: a missing site deletes nothing.
+  if [[ $deployed == yes ]]; then
+    (cd "$tmp/v1" && printf '%s\n' "$NAME" | kthx rm --force) >/dev/null 2>&1 || true
+  fi
   rm -rf "$tmp"
   exit "$code"
 }
@@ -61,12 +62,23 @@ check() {
   fi
 }
 
-# A unique query string misses any edge cache after a release change or a
-# delete. The server dispatches on the path alone.
+# A unique query string misses any edge cache after a deploy or a delete.
 nonce=0
 fresh() {
   nonce=$((nonce + 1))
   printf '%s?cachebust=%s-%s' "$1" "$$" "$nonce"
+}
+
+# Polls a path until its body holds the text, for at most FRESH_SECONDS.
+shows() {
+  local url=$1 text=$2 waited=0
+  while ((waited < FRESH_SECONDS)); do
+    req GET "$(fresh "$url")" >/dev/null || true
+    grep -qF "$text" "$body" && echo yes && return
+    sleep 2
+    waited=$((waited + 2))
+  done
+  echo no
 }
 
 site_psql() {
@@ -74,61 +86,49 @@ site_psql() {
     "$CLUSTER" -- -d "$DATABASE" -Atq -v ON_ERROR_STOP=1 -c "$1"
 }
 
-zip_dir() {
-  if command -v zip >/dev/null; then
-    (cd "$1" && zip -qr "$2" .)
-  elif command -v python3 >/dev/null; then
-    python3 -c 'import shutil,sys; shutil.make_archive(sys.argv[1][:-4], "zip", sys.argv[2])' "$2" "$1"
-  else
-    die "neither zip nor python3 is on PATH, and release 1 is uploaded as a zip"
-  fi
-}
-
-# Release 1 has a `404.html` and release 2 a `200.html` SPA fallback, so the
-# status of an unknown path shows from outside which release serves.
+# Deploy 1 has a `404.html` and deploy 2 deletes it, so the status of an
+# unknown path shows from outside which deploy serves.
 mkdir -p "$tmp/v1/about" "$tmp/v2/about"
-echo '<!doctype html><title>smoke</title>release one' >"$tmp/v1/index.html"
+echo '<!doctype html><title>smoke</title>deploy one' >"$tmp/v1/index.html"
 echo '<!doctype html>about one' >"$tmp/v1/about/index.html"
 echo '<!doctype html>no such page' >"$tmp/v1/404.html"
-echo '<!doctype html><title>smoke</title>release two' >"$tmp/v2/index.html"
+echo '<!doctype html><title>smoke</title>deploy two' >"$tmp/v2/index.html"
 echo '<!doctype html>about two' >"$tmp/v2/about/index.html"
-echo '<!doctype html>spa fallback' >"$tmp/v2/200.html"
-zip_dir "$tmp/v1" "$tmp/v1.zip"
+echo 'console.log("two")' >"$tmp/v2/app.js"
+
+# The CLI's update check writes under XDG_CONFIG_HOME, so this run stays out of
+# the operator's own config.
+export XDG_CONFIG_HOME="$tmp/config"
+export KTHX_ORIGIN="${KTHX_ORIGIN:-$APEX}"
 
 echo "kthx: $SITE"
 
 echo
-echo "claim"
-check 'POST /api/sites' 201 "$(req POST "$CONTROL/api/sites" \
-  -H 'content-type: application/json' -d "{\"name\":\"$NAME\"}")"
-TOKEN=$(jq -r '.token // empty' <"$body")
-[[ -n $TOKEN ]] || die "the claim returned no token: $(cat "$body")"
-
-# The CLI takes its token store and origin from the environment, so this run
-# stays out of the operator's own config.
-export XDG_CONFIG_HOME="$tmp/config"
-export KTHX_ORIGIN="$CONTROL"
-mkdir -p "$XDG_CONFIG_HOME/kthx"
-jq -n --arg o "$CONTROL" --arg n "$NAME" --arg t "$TOKEN" '{($o): {($n): $t}}' \
-  >"$XDG_CONFIG_HOME/kthx/sites.json"
-printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
-
-echo
-echo "release 1 (zip, curl)"
-check 'POST /api/sites/:name/releases' 201 "$(req POST "$CONTROL/api/sites/$NAME/releases" \
-  -H "authorization: Bearer $TOKEN" -H 'x-filename: site.zip' \
-  --data-binary "@$tmp/v1.zip")"
-check '  serving' 1 "$(jq -r '.serving // empty' <"$body")"
-
-check 'GET /' 200 "$(req GET "$SITE/")"
-check '  is release one' yes "$(grep -qF 'release one' "$body" && echo yes || echo no)"
-check 'GET /about' 200 "$(req GET "$SITE/about")"
-check 'GET /nope falls to 404.html' 404 "$(req GET "$SITE/nope")"
+echo "deploy 1"
+if (cd "$tmp/v1" && kthx deploy --name "$NAME") >"$tmp/deploy.log" 2>&1; then
+  deployed=yes
+  check 'kthx deploy' ok ok
+else
+  check 'kthx deploy' ok "failed: $(tail -1 "$tmp/deploy.log")"
+  die "the first deploy failed: $(cat "$tmp/deploy.log")"
+fi
+check 'GET / shows deploy one' yes "$(shows "$SITE/" 'deploy one')"
+check 'GET /about' 200 "$(req GET "$(fresh "$SITE/about")")"
+check 'GET /nope falls to 404.html' 404 "$(req GET "$(fresh "$SITE/nope")")"
 check '  is the site 404 page' yes "$(grep -qF 'no such page' "$body" && echo yes || echo no)"
+check 'GET /.kthx is hidden' 404 "$(req GET "$(fresh "$SITE/.kthx")")"
 
 req GET "$SITE/" >/dev/null
 etag=$(grep -i '^etag:' "$head" | head -1 | sed 's/^[^:]*: *//' | tr -d '\r')
 check 'GET / with if-none-match' 304 "$(req GET "$SITE/" -H "if-none-match: $etag")"
+
+echo
+echo "owner"
+check 'kthx ls names the owner' yes \
+  "$( (cd "$tmp/v1" && kthx ls) 2>&1 | grep -q 'owned by' && echo yes || echo no)"
+check 'GET /api/names/:name is taken' false \
+  "$(req GET "$APEX/api/names/$NAME" >/dev/null; jq -r '.available' <"$body")"
+check 'GET /api/sites/:name with no token' 401 "$(req GET "$APEX/api/sites/$NAME")"
 
 echo
 echo "visitor"
@@ -206,38 +206,29 @@ console.log(announced === (await wrote.json()).id ? "yes" : "wrong id");
 check 'a subscriber sees the write' yes "$saw"
 
 echo
-echo "releases"
-if kthx deploy "$tmp/v2" >"$tmp/deploy.log" 2>&1; then
+echo "deploy 2"
+printf '{"name":"%s"}\n' "$NAME" >"$tmp/v2/kthx.json"
+if (cd "$tmp/v2" && kthx deploy) >"$tmp/deploy.log" 2>&1; then
   check 'kthx deploy' ok ok
 else
   check 'kthx deploy' ok "failed: $(tail -1 "$tmp/deploy.log")"
 fi
-req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
-check '  serving' 2 "$(jq -r '.serving // empty' <"$body")"
-check '  /nope is now the SPA fallback' 200 "$(req GET "$(fresh "$SITE/nope")")"
-
-# `kthx rollback` and `kthx release` read `kthx.json` from the working directory.
-(cd "$tmp/v2" && kthx rollback 1) >"$tmp/rollback.log" 2>&1 \
-  || cat "$tmp/rollback.log"
-req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
-check 'kthx rollback 1 serves' 1 "$(jq -r '.serving // empty' <"$body")"
-check '  and holds' true "$(jq -r '.held' <"$body")"
-check '  release 1 answers 404 again' 404 "$(req GET "$(fresh "$SITE/nope")")"
-
-(cd "$tmp/v2" && kthx release) >"$tmp/release.log" 2>&1 || cat "$tmp/release.log"
-req GET "$CONTROL/api/sites/$NAME" -H "authorization: Bearer $TOKEN" >/dev/null
-check 'kthx release drops the hold' false "$(jq -r '.held' <"$body")"
-check '  the newest release serves' 2 "$(jq -r '.serving // empty' <"$body")"
+check '  uploads only what changed' yes \
+  "$(grep -q '3 uploaded' "$tmp/deploy.log" && echo yes || echo no)"
+check 'GET / shows deploy two' yes "$(shows "$SITE/" 'deploy two')"
+check 'GET /app.js' 200 "$(req GET "$(fresh "$SITE/app.js")")"
+check 'GET /404.html is deleted' 404 "$(req GET "$(fresh "$SITE/404.html")")"
 
 echo
 echo "delete"
-check 'a bearer that is not this site' 403 "$(req GET "$CONTROL/api/sites/$NAME" \
-  -H 'authorization: Bearer not-this-sites-token')"
-check 'DELETE /api/sites/:name' 204 "$(req DELETE "$CONTROL/api/sites/$NAME" \
-  -H "authorization: Bearer $TOKEN")"
-check '  the apex answers 410' 410 "$(req GET "$CONTROL/api/sites/$NAME" \
-  -H "authorization: Bearer $TOKEN")"
-check '  the site host answers 410' 410 "$(req GET "$(fresh "$SITE/")")"
+if (cd "$tmp/v2" && printf '%s\n' "$NAME" | kthx rm) >"$tmp/rm.log" 2>&1; then
+  check 'kthx rm' ok ok
+else
+  check 'kthx rm' ok "failed: $(tail -1 "$tmp/rm.log")"
+fi
+check '  the name is free' true \
+  "$(req GET "$APEX/api/names/$NAME" >/dev/null; jq -r '.available' <"$body")"
+check '  the site API answers 404' 404 "$(req GET "$(fresh "$SITE/api")")"
 check '  the site database is dropped' 0 \
   "$(site_psql "select count(*) from pg_database where datname = '$NAME'")"
 check '  the site role is dropped' 0 \

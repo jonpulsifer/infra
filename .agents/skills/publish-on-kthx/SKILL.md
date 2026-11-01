@@ -3,7 +3,7 @@ name: publish-on-kthx
 description: >-
   Put a directory on the internet as a kthx quick site with the kthx CLI, or
   drive kthx built apps through the kthx MCP tools. Use when asked to publish,
-  list, roll back or delete a site on kthx.dev, or to build and deploy an app
+  list, restore or delete a site on kthx.dev, or to build and deploy an app
   through kthx.
 metadata:
   wiki: https://wiki.lolwtf.ca/apps/kthx/sites/
@@ -20,24 +20,28 @@ is the API reference a quick site's own code uses: `window.kthx`, `/api/db`,
 
 ## Quick sites
 
-In a Rowbutt sandbox, `KTHX_ORIGIN` is preset and `kthx` is on `PATH`. Bearers
-persist across sandboxes: mate keeps `$XDG_CONFIG_HOME/kthx/sites.json` in
-Secret `mate-kthx-sites` and stamps it in at the start of each turn, so
-`kthx ls` lists every site Rowbutt has claimed. Elsewhere, such as the owner's
-workstation, set `KTHX_ORIGIN=https://kthx.lolwtf.ca`, which answers on the
-lab, the offsite LAN or the tailnet.
+A site is the folder `<name>/` in the `bluenose-kthx-sites` bucket, and the CLI
+writes it with the caller's Google Application Default Credentials. Their
+email owns the site. On the owner's workstation that is
+`gcloud auth application-default login`. A Rowbutt sandbox needs an
+`external_account` file for the `kthx-deployer` service account in
+`GOOGLE_APPLICATION_CREDENTIALS`, and its sites are owned by that account.
 
 ```bash
 kthx init --name <name> <dir>   # claims the name; writes <dir>/kthx.json
-kthx deploy <dir>               # uploads a release and serves it
-kthx ls                         # every site of yours; in a site's dir, its releases
-kthx rollback                   # serves the previous release and holds it
-printf '%s\n' <name> | kthx rm  # deletes the site; the name stays taken
+kthx deploy <dir>               # syncs the directory: changed files, HTML last
+kthx ls                         # every site of yours; in a site's dir, its owner
+printf '%s\n' <name> | kthx rm  # deletes the site and frees the name
 ```
 
+- A site someone else owns: `kthx deploy` and `kthx rm` ask first, and with no
+  terminal they refuse with `NOT_YOURS`. Pass `--force` only when the owner
+  asked for the change. Ownership is a courtesy, not a lock.
+- `RACED` means another deploy rewrote the site while yours ran. Deploy again.
+- There is no rollback. `docs/runbooks/restore-a-site.md` copies files back
+  from the bucket's noncurrent versions, for 30 days.
+- A deploy shows within about 10 seconds, and is not atomic.
 - `kthx rm` asks for the site's name on stdin and deletes nothing without it.
-  A bare `kthx rm` in a sandbox, which has no terminal, exits 0 and keeps the
-  site.
 - Run `kthx init` first, or run `kthx deploy` from inside the directory.
   `kthx deploy` on a directory with no `kthx.json` writes one to the current
   directory, not the target.
@@ -45,7 +49,6 @@ printf '%s\n' <name> | kthx rm  # deletes the site; the name stays taken
   installs a second copy the sandbox's `kthx` never runs.
 - Never commit a site's `kthx.json` or `SKILL.md` into this repository unless
   the site's source lives here.
-- A lost bearer is a lost site. Do not edit `sites.json` by hand.
 
 ## Built apps
 

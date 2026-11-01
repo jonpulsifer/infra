@@ -19,7 +19,7 @@ oldschool is the worker node of the offsite [Kubernetes](../platform/kubernetes.
 
 ## What it runs
 
-- Pods. The `data` volume at `/var/mnt/data` holds the `local-path` volumes on oldschool, including the [kthx](../apps/kthx.md) sites volume. `KthxSitesDiskFilling` fires when it has less than 25% free.
+- Pods. The `data` volume at `/var/mnt/data` holds the `local-path` volumes on oldschool, including the [kthx](../apps/kthx.md) Postgres volume.
 - offsite's [backup](../platform/backups.md) Garage store, a StatefulSet in `clusters/offsite/garage/` on the host network, with data in `/var/mnt/data/garage`.
 
 ## Reach
