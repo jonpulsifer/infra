@@ -127,7 +127,10 @@ echo "owner"
 check 'kthx ls names the owner' yes \
   "$( (cd "$tmp/v1" && kthx ls) 2>&1 | grep -q 'owned by' && echo yes || echo no)"
 check 'GET /api/names/:name is taken' false \
-  "$(req GET "$APEX/api/names/$NAME" >/dev/null; jq -r '.available' <"$body")"
+  "$(
+    req GET "$APEX/api/names/$NAME" >/dev/null
+    jq -r '.available' <"$body"
+  )"
 check 'GET /api/sites/:name with no token' 401 "$(req GET "$APEX/api/sites/$NAME")"
 
 echo
@@ -227,7 +230,10 @@ else
   check 'kthx rm' ok "failed: $(tail -1 "$tmp/rm.log")"
 fi
 check '  the name is free' true \
-  "$(req GET "$APEX/api/names/$NAME" >/dev/null; jq -r '.available' <"$body")"
+  "$(
+    req GET "$APEX/api/names/$NAME" >/dev/null
+    jq -r '.available' <"$body"
+  )"
 check '  the site API answers 404' 404 "$(req GET "$(fresh "$SITE/api")")"
 check '  the site database is dropped' 0 \
   "$(site_psql "select count(*) from pg_database where datname = '$NAME'")"
