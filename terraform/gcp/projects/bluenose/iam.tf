@@ -192,3 +192,30 @@ resource "google_service_account_iam_member" "kthx_workload_identity" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:kthx:kthx"
 }
+
+# The quick-site file server: nginx and a gcsfuse sidecar in the `kthx-sites`
+# namespace on offsite. It only reads the sites bucket.
+resource "google_service_account" "kthx_sites" {
+  account_id   = "kthx-sites"
+  display_name = "kthx quick-site file server"
+}
+
+resource "google_service_account_iam_member" "kthx_sites_workload_identity" {
+  service_account_id = google_service_account.kthx_sites.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:kthx-sites:kthx-sites"
+}
+
+# What a mate sandbox deploys quick sites as. Its sites are owned by this
+# account's email. `workloadIdentityUser` also carries `getOpenIdToken`, which
+# the CLI uses to prove ownership to the kthx server.
+resource "google_service_account" "kthx_deployer" {
+  account_id   = "kthx-deployer"
+  display_name = "kthx quick-site deployer for mate sandboxes"
+}
+
+resource "google_service_account_iam_member" "kthx_deployer_workload_identity" {
+  service_account_id = google_service_account.kthx_deployer.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principal://${local.fml_pool}/subject/offsite:system:serviceaccount:mate:mate-sandbox-kthx"
+}
