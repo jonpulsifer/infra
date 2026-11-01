@@ -55,4 +55,11 @@ beyond them.
 - Postgres is CloudNativePG. Reach a database with
   `kubectl cnpg psql <cluster> -n <namespace> --context <site>`.
   `docs/runbooks/operate-postgres.md` has the rest.
+- For a failed Velero backup, name its resource explicitly:
+  `kubectl --context <site> -n velero get backups.velero.io`.
+  An unqualified `get backups` can select CloudNativePG backups instead.
+  If the reader account cannot list Velero backups, read the Velero server
+  and node-agent logs. For pod-volume failures, check the node agent's
+  `csidrivers.storage.k8s.io` access in
+  `clusters/base/platform/velero/node-agent-rbac.yaml`.
 - For a change under `clusters/base/`, also use the `multi-cluster` skill.
