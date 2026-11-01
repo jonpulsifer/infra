@@ -54,6 +54,25 @@ Reviewers reject the patterns below. Only this page may quote them.
 | No intensifiers or stock frames | "whole", "exactly", "actually", "simply", "deliberately", "on purpose", "honest", "load-bearing", "fully capable", "self-healing", "entirely", "is what makes", "never … only …" |
 | "Owner" is the human, and each controller has its own name | "The operator applies it" for Flux |
 
+## Make pages easy to read
+
+Use the simplified-English rules below throughout the wiki, as guidance rather than a claim of certified ASD-STE100 compliance.
+Keep technical names, commands and safety conditions precise.
+
+- Give each paragraph one topic. Use two to four short sentences.
+- Put the normal behavior before exceptions and recovery details.
+- Use numbered lists for sequences and bullets for independent rules.
+- Use tables to compare parts, states or failure cases. Keep each cell short.
+- Add a descriptive heading when the topic changes. Do not use bold text as a heading.
+- Define an unfamiliar abbreviation before using it in an explanation.
+- Link to a runbook for commands and recovery steps. Keep the app page focused on purpose, behavior and limits.
+- Put detailed protocols and security analysis on reference pages. Link to them from the overview.
+- Use a diagram when readers need to follow a flow or understand relationships. Explain its result in nearby text.
+
+The wiki supports Markdown images, tables, notices and headings with a page contents list.
+Store images under `docs/assets/`. Run `mise run docs:diagrams` to render D2 sources as SVG images.
+Use descriptive image text so the diagram has a useful text alternative.
+
 ## Page templates
 
 Copy the skeleton, replace each `<placeholder>`, and leave out empty sections. The runbook skeleton is under [Runbooks](#runbooks).

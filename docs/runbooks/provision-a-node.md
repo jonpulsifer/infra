@@ -19,7 +19,18 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 
 ## Declare the node
 
-1. On a branch, add an entry under `nodes` in `clusters/folly/inventory/nodes.yaml` with `<node>`, its model, `<serial>`, its class, its switch port, `<addr>`, its BMC type, its install disk's serial as `disk_serial`, and its approved EK binding from your evidence, `approved_ek_rsa2048` and `approved_ek_eccp256`. Add the model under `models` if it is new. [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
+1. On a branch, add the machine under `nodes` in `clusters/folly/inventory/nodes.yaml`.
+
+   Include these fields:
+
+   - Host name, model, SMBIOS serial and Talos class.
+   - Switch port, address and BMC type.
+   - Install disk serial as `disk_serial`.
+   - Approved EK binding from independent evidence: `approved_ek_rsa2048` and `approved_ek_eccp256`.
+
+   If the model is new, add it under `models`.
+   [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
+
 2. Open a pull request and comment `atlantis plan -d terraform/netbox/folly`, then `atlantis plan -d terraform/network/unifi/folly`.
 
    Result: the plans create the device, its address and its cable, the node's DNS record, and its switch port's name. They fail on an unknown model or class, an address, port, serial, disk serial or approved EK another node holds, or an approved EK hash that is not 64 lowercase hex characters.
@@ -53,7 +64,16 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 1. Make sure that `nix/hosts/spore.nix` sets `homelab.fleetd.controlPlanes = true` and that spore runs it from `main`. Otherwise the run wipes the disk and installs nothing, and spore holds no bundle with the cluster's CA keys.
 2. [Declare the node](#declare-the-node) with the class `controlplane`.
-3. Follow [Plug a machine in](#plug-a-machine-in). An admitted control plane is never auto-provisioned: its attestation passes and the machine waits in HookOS. Set `desired_action` to `provision` in NetBox; fleetd starts the run, and Rufio power-cycles the machine so that its next attestation takes the code. In the pull request of step 5, also run `mise run render-class-inputs` and commit the result: the API server's SANs now name the node. The spore deploy at step 6 gives fleetd the new class inputs for the next control plane.
+3. Follow [Plug a machine in](#plug-a-machine-in), with these control-plane requirements.
+
+   An admitted control plane waits in HookOS after attestation. fleetd does not provision it automatically.
+
+   - Set `desired_action` to `provision` in NetBox.
+   - In the pull request of step 5, run `mise run render-class-inputs` and commit the result.
+
+   Result: fleetd starts the run. Rufio power-cycles the machine so its next attestation receives the install code.
+   The rendered API server SANs include the node. The spore deploy at step 6 supplies the next control plane's class inputs.
+
 4. After the `clusters/folly/talos` apply, make sure that the node is an etcd member:
 
    ```sh

@@ -16,7 +16,17 @@ Print the keys and values of a file with `jq .data <file>`.
 
 ## Format
 
-Each file is a Kubernetes ConfigMap in the `flux-system` namespace, written as JSON, which is also valid YAML. Flux applies the file as it is. Its `data` is a flat map of string keys to string values, because Flux substitution accepts only strings. A list is a comma-separated string, as in `CLUSTER_DNS`, a number is a quoted string, as in `API_SERVER_PORT`, and a map is a JSON object in a string, as in offsite's `NODE_ADDRESSES`, which maps each node's hostname to its address. Each reader parses these values back.
+Each file is a Kubernetes ConfigMap in the `flux-system` namespace.
+It uses JSON, which is also valid YAML. Flux applies it without conversion.
+
+The `data` field is a flat map. Both keys and values must be strings because Flux substitution accepts only strings.
+Readers parse the values into the types they need:
+
+| Type | Encoding | Example key |
+| --- | --- | --- |
+| List | Comma-separated string | `CLUSTER_DNS` |
+| Number | Quoted string | `API_SERVER_PORT` |
+| Map | JSON object inside a string | offsite's `NODE_ADDRESSES`, which maps host names to addresses |
 
 ## Readers
 

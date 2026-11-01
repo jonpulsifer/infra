@@ -35,11 +35,17 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 ## Garage cluster
 
-folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only. Every anchor serves S3, and clients name `s3.lolwtf.ca`, the S3 VIP (`S3_VIP` in `clusters/folly/config/anchor-topology.json`). keepalived from `nix/services/anchor-vips.nix` holds the VIP on capsule, then forge, then spore, and moves it off an anchor whose Garage loses its quorum or stops answering S3. `AnchorS3VipDown` fires when no anchor holds the VIP and serves. A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
+folly's Garage runs at replication factor 3 on the anchors: spore, capsule and forge. Each node stores every object and is its own zone. The cluster holds as much as the smallest node, so the layout gives each node 80 GB. RPC uses port 3901 on the Anchor network, and the firewall opens it to the other anchors only.
+
+Every anchor serves S3, and clients name `s3.lolwtf.ca`, the S3 VIP (`S3_VIP` in `clusters/folly/config/anchor-topology.json`). keepalived from `nix/services/anchor-vips.nix` holds the VIP on capsule, then forge, then spore, and moves it off an anchor whose Garage loses its quorum or stops answering S3. `AnchorS3VipDown` fires when no anchor holds the VIP and serves.
+
+A node with `homelab.garage.clustered` unset is a standalone store with replication factor 1. spore keeps its old standalone store in `/nfs/data/garage` as the rollback of [Migrate Garage to three nodes](../runbooks/migrate-garage-to-three-nodes.md).
 
 ## Credentials
 
 1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
+
+### Velero permissions
 
 Velero's server runs as `velero-server`, which the chart binds to `cluster-admin`. The node agents, one on every node, run as `velero-node-agent` instead. Its role in `clusters/base/platform/velero/node-agent-rbac.yaml` reads pods, claims and volumes, and works only on Velero's own objects in the `velero` namespace, so a token read from a node is not a cluster-admin token. The chart has no value for a second account, so a post-renderer on the HelmRelease sets the DaemonSet's `serviceAccountName`. The server keeps `cluster-admin` because the chart offers no narrower binding.
 
