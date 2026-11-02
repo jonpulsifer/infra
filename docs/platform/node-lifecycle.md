@@ -7,16 +7,20 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 
 ## At a glance
 
-1. The owner adds the node to the nodes file in a pull request. Atlantis creates a `planned` device with no MAC address.
-2. The owner connects the machine to its node port. Firmware PXE loads signed iPXE from spore, then signed HookOS.
-3. HookOS proves its TPM identity and boot state to fleetd. fleetd records the MAC against the device's serial.
-4. fleetd checks every approved EK, then issues the LDevID and LAK certificates. Without an approved binding, the machine waits.
-5. The signed confirmation triggers admission. fleetd checks the reported switch port, starts a Tinkerbell `provision` Workflow and renders the Talos configuration.
-6. fleetd returns an install code wrapped to the TPM. The Workflow wipes the system disk, installs Talos and stores the code in META.
-7. Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address.
-8. After the complete response, fleetd deletes the configuration and sets the device `active`.
-9. fleetd approves the worker's initial kubelet certificate only when its per-node bootstrap token and requested node name match. Kubernetes readiness remains separate.
-10. fleetd lists the `active`, attested node in `spire-nodes.json`, and spore's `spire-server-fleet-entries` registers the node's SPIRE entry, `spiffe://lolwtf.ca/node/<name>`, from it. The SPIRE agent then attests by LDevID and serves SVIDs, since each workload entry is parented to that node entry. [Identity](identity.md#fleetd-entries) has the entries.
+The owner acts twice, at the start and when a machine first attests. Everything after that is a component reacting to the one before it.
+
+| Step | Who | What happens |
+| --- | --- | --- |
+| 1 | The owner, then Atlantis | The owner adds the node to the nodes file in a pull request, with the EK hashes from independent evidence as its approved binding. Atlantis applies `terraform/netbox/folly`, which creates a `planned` device with no MAC address. |
+| 2 | The owner, then the firmware and spore's boot plane | The owner connects the machine to its node port and powers it on. Firmware PXE loads signed iPXE from spore, then signed HookOS. |
+| 3 | HookOS and fleetd | HookOS runs `tink-attest`, which proves the TPM identity and boot state to fleetd. fleetd records the MAC against the device's serial. |
+| 4 | fleetd | fleetd checks every approved EK, then issues the LDevID and LAK certificates. Without an approved binding, the machine waits, and the owner's only move is to [approve its EKs](../runbooks/provision-a-node.md#approve-a-machines-eks) in the nodes file. |
+| 5 | fleetd and Tinkerbell | The signed confirmation triggers admission. fleetd checks the reported switch port, starts a Tinkerbell `provision` Workflow and renders the Talos configuration. |
+| 6 | fleetd, then the Workflow in HookOS | fleetd returns an install code wrapped to the TPM. The Workflow wipes the system disk, installs Talos and stores the code in META. |
+| 7 | Talos and fleetd | Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address. |
+| 8 | fleetd | After the complete response, fleetd deletes the configuration and sets the device `active` in NetBox. |
+| 9 | The kubelet and fleetd | fleetd approves the worker's initial kubelet certificate only when its per-node bootstrap token and requested node name match. Kubernetes readiness remains separate. |
+| 10 | fleetd, spore's SPIRE entries sync, the SPIRE agent | fleetd lists the `active`, attested node in `spire-nodes.json`, and spore's `spire-server-fleet-entries` registers the node's SPIRE entry, `spiffe://lolwtf.ca/node/<name>`, from it. The SPIRE agent then attests by LDevID and serves SVIDs, since each workload entry is parented to that node entry. [Identity](identity.md#fleetd-entries) has the entries. |
 
 An unknown serial also waits. A machine must prove every EK that its inventory entry approves before fleetd issues an identity.
 
