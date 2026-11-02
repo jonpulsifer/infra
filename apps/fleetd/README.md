@@ -147,7 +147,7 @@ session's SMBIOS UUID lower-cased, and must read as 8-4-4-4-12 hex. `Admit`:
 1. Refuses a device that is not `planned`, that lacks a declared field (`class`, `install_disk`,
    `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port`
    or `primary_ip4`), or whose attested LLDP port, from the last hour, is not its `expected_port`;
-   nothing is written and the journal says why. During the rename from `talos_class`, fleetd reads `talos_class` when `class` is empty. `terraform/netbox/folly` declares every one of them
+   nothing is written and the journal says why. `terraform/netbox/folly` declares every one of them
    from the nodes file, and fleetd fills in none.
 2. Starts the provision Workflow, with no boot mode, unless one is running: when `desired_action` is
    `provision`, or when the device never ran a Workflow, auto-provision is on, and it is a worker.

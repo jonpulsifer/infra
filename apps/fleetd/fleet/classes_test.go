@@ -185,14 +185,3 @@ func TestLoadConfigNeedsTheClassTable(t *testing.T) {
 		t.Fatalf("%v %+v", err, cfg.Classes)
 	}
 }
-
-func TestParseDeviceReadsTalosClassWhenClassIsEmpty(t *testing.T) {
-	d, err := parseDevice([]byte(`{"id":1,"name":"n","custom_fields":{"talos_class":"worker-g5"}}`))
-	if err != nil || d.Class != "worker-g5" {
-		t.Fatalf("%v %q", err, d.Class)
-	}
-	d, err = parseDevice([]byte(`{"id":1,"name":"n","custom_fields":{"class":"controlplane","talos_class":"worker-g5"}}`))
-	if err != nil || d.Class != "controlplane" {
-		t.Fatalf("%v %q", err, d.Class)
-	}
-}
