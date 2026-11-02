@@ -91,8 +91,7 @@ The root creates each device with status `planned`. It declares:
 - The serial, device type, site, role and platform.
 - The address on the interface from the device type's template, and that address as the primary IPv4.
 - A cable to the switch port.
-- The fields `class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt` and `secure_boot_expected`. `talos_class`, the class field's old name, is written beside `class` until fleetd on spore reads `class`.
-- `expected_port`, which identifies the switch port.
+- The fields `class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt` and `secure_boot_expected`.- `expected_port`, which identifies the switch port.
 
 fleetd does not write these fields. It refuses installation when a required field is empty.
 A missing `disk_serial` produces a null `install_disk_serial`.

@@ -622,12 +622,3 @@ func TestSetMACRefusesASharedInterface(t *testing.T) {
 		t.Fatalf("an interface another anchor wrote: %v", err)
 	}
 }
-
-func TestNetBoxLookupFallsBackToTalosClass(t *testing.T) {
-	f := newFakeNetBox(t)
-	f.add("riptide", "MXL0172Q6L", "active", "38:22:E2:2D:96:44", map[string]any{"talos_class": "worker-g5"})
-	m, ok, err := f.client().Lookup(context.Background(), "MXL0172Q6L")
-	if err != nil || !ok || m.Class != "worker-g5" {
-		t.Fatalf("lookup: %+v %v %v", m, ok, err)
-	}
-}
