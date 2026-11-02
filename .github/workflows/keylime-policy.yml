@@ -1,0 +1,28 @@
+name: keylime-policy
+
+# The fleetd-profile measured-boot policy for Keylime, in Python with the
+# standard library only. Its cases are shared with apps/fleetd's Go tests,
+# which go.yml runs on the same paths.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'apps/keylime-policy/**'
+      - 'clusters/folly/apps/keylime/policies/**'
+      - '.github/workflows/keylime-policy.yml'
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keylime-policy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: python3 -m unittest discover -s apps/keylime-policy -v
