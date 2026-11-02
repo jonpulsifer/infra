@@ -19,5 +19,6 @@ runtime: "Runtime services" {
 issuer: "Trusted DevID issuer\nProtected signing key"
 provision.tool -> issuer: enrollment
 runtime.identity -> issuer: renewal
+provision.tool -> runtime.identity: authenticated enrollment record
 provision.target -> runtime.node: install and persist key package
 **.style.font-size: 20
