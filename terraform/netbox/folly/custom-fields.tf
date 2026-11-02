@@ -1,5 +1,8 @@
 resource "netbox_custom_field_choice_set" "fleet" {
   for_each = {
+    class = local.classes
+    # The class field's old name. It goes, with its field, once fleetd on
+    # spore reads class.
     talos-class    = local.classes
     bmc-type       = ["none", "amt", "redfish"]
     desired-action = ["none", "provision", "attest", "wipe"]
@@ -10,7 +13,7 @@ resource "netbox_custom_field_choice_set" "fleet" {
 }
 
 locals {
-  # Every custom field on dcim.device. Git declares talos_class, bmc_type,
+  # Every custom field on dcim.device. Git declares class, bmc_type,
   # install_disk, install_disk_serial, tpm_version, amt, secure_boot_expected,
   # expected_port and the approved EK binding (devices.tf); the owner sets
   # desired_action; talos-attest and
@@ -42,7 +45,8 @@ locals {
     attested_switch      = { type = "text", label = "Attested switch", group = "Identity", weight = 292, description = "The LLDP chassis ID of the switch the node reported at its last intake pass, signed by its AK" }
     attested_switch_port = { type = "text", label = "Attested switch port", group = "Identity", weight = 293, description = "The LLDP port ID the node reported at its last intake pass, signed by its AK; fleet-controller cables the node to it" }
     attested_network_at  = { type = "datetime", label = "Attested network at", group = "Identity", weight = 294, description = "When talos-attest recorded the attested address and switch port" }
-    talos_class          = { type = "select", label = "Talos class", group = "Fleet", weight = 300, choice_set = "talos-class", description = "The class git declares for the node: its role and patches" }
+    class                = { type = "select", label = "Class", group = "Fleet", weight = 300, choice_set = "class", description = "The class git declares for the node, a key of clusters/folly/fleet/classes.json: its OS, its workload, and the attestation profile and install that follow" }
+    talos_class          = { type = "select", label = "Class (old)", group = "Fleet", weight = 301, choice_set = "talos-class", description = "The class field's old name, written alongside class until fleetd on spore reads class; then it goes" }
     bmc_type             = { type = "select", label = "BMC type", group = "Fleet", weight = 310, choice_set = "bmc-type", description = "The out-of-band management the node has" }
     desired_action       = { type = "select", label = "Desired action", group = "Fleet", weight = 320, choice_set = "desired-action", default = "none", description = "What the fleet controller does next: provision (attest, wipe, install), attest, or wipe" }
     last_workflow        = { type = "text", label = "Last workflow", group = "Fleet", weight = 330, description = "The newest Workflow the fleet controller made" }

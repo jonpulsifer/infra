@@ -2,6 +2,7 @@
   "controlplane": {
     "description": "A Talos control plane. .github/workflows/talos-images.yml pins its installer here by digest. Boots the lab's signed UKI; the control plane at the API server's address installs from the Talos root, not from here.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
     "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:770049bdcb725f985c3b684229a59e736255544132a130ae26e116b03aa1188b",
     "policy_profile": "talos",
@@ -12,6 +13,7 @@
   "worker-g5": {
     "description": "A Talos worker on a G5 desktop. .github/workflows/talos-images.yml pins its installer here by digest. Boots only the lab's signed UKI.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
     "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:770049bdcb725f985c3b684229a59e736255544132a130ae26e116b03aa1188b",
     "policy_profile": "talos",
@@ -22,6 +24,7 @@
   "worker-g2": {
     "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. .github/workflows/talos-images.yml pins its installer here by digest.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
     "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:770049bdcb725f985c3b684229a59e736255544132a130ae26e116b03aa1188b",
     "policy_profile": "talos",
@@ -32,6 +35,7 @@
   "ubuntu": {
     "description": "Ubuntu Server from Canonical's cloud image. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA at the CA level, with no shim or GRUB digest pins. dbx and SBAT are read at attestation and alert on a change. The installer image is set once CI builds it.",
     "os": "ubuntu",
+    "workload": "general",
     "template": "provision-ubuntu",
     "policy_profile": "ubuntu",
     "secure_boot": true,

@@ -95,7 +95,8 @@ type netboxDevice struct {
 		// The approved binding, which Terraform projects from the nodes file.
 		ApprovedEKHash    string   `json:"approved_ek_hash"`
 		ApprovedEKHashECC string   `json:"approved_ek_hash_ecc"`
-		Class             nbSelect `json:"talos_class"`
+		Class             nbSelect `json:"class"`
+		TalosClass        nbSelect `json:"talos_class"`
 		Verdict           string   `json:"attest_verdict"`
 		LastAttested      string   `json:"last_attested"`
 		ConsumedAt        string   `json:"attest_consumed_at"`
@@ -247,7 +248,7 @@ func (n *NetBox) nic(ctx context.Context, deviceID int) (netboxInterface, bool, 
 }
 
 func (d netboxDevice) machine(mac string) Machine {
-	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: string(d.CustomFields.Class), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true,
+	m := Machine{Name: d.Name, Serial: d.Serial, MAC: normalMAC(mac), Class: d.classValue(), Status: d.Status.Value, NetBoxID: d.ID, FromNetBox: true,
 		Pins:        byAlg(d.CustomFields.EKHash, d.CustomFields.EKHashECC),
 		Approved:    byAlg(d.CustomFields.ApprovedEKHash, d.CustomFields.ApprovedEKHashECC),
 		Quarantined: strings.HasPrefix(d.CustomFields.Verdict, StatusQuarantined)}
@@ -801,7 +802,7 @@ func (n *NetBox) Verdict(ctx context.Context, serial string) (protocol.Status, b
 	case statusDecommissioning, statusOffline:
 		return protocol.Status{}, false, nil
 	}
-	st := protocol.Status{Node: d.Name, Class: string(d.CustomFields.Class), Site: d.Site.Slug, UpdatedAt: d.LastUpdated, LDevIDSerial: strings.ToLower(d.CustomFields.LDevIDSerial)}
+	st := protocol.Status{Node: d.Name, Class: d.classValue(), Site: d.Site.Slug, UpdatedAt: d.LastUpdated, LDevIDSerial: strings.ToLower(d.CustomFields.LDevIDSerial)}
 	switch v := d.CustomFields.Verdict; {
 	case v == StatusAttested, strings.HasPrefix(v, protocol.VerdictFailedNoQuarantine):
 		// A control-plane node that failed in place keeps its identity.
@@ -814,4 +815,13 @@ func (n *NetBox) Verdict(ctx context.Context, serial string) (protocol.Status, b
 	st.AttestedAt, _ = time.Parse(time.RFC3339, d.CustomFields.LastAttested)
 	st.ConsumedAt, _ = time.Parse(time.RFC3339, d.CustomFields.ConsumedAt)
 	return st, true, nil
+}
+
+// classValue is the device's class: NetBox's class, else talos_class until
+// that field is removed.
+func (d netboxDevice) classValue() string {
+	if d.CustomFields.Class != "" {
+		return string(d.CustomFields.Class)
+	}
+	return string(d.CustomFields.TalosClass)
 }

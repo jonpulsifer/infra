@@ -214,7 +214,7 @@ func parseDevice(raw json.RawMessage) (Device, error) {
 		Status:             selectValue(r.Status),
 		Disk:               cf("install_disk"),
 		DiskSerial:         cf("install_disk_serial"),
-		Class:              cf("talos_class"),
+		Class:              firstNonEmpty(cf("class"), cf("talos_class")),
 		TPM:                cf("tpm_version"),
 		EKHash:             cf("ek_hash"),
 		EKHashECC:          cf("ek_hash_ecc"),
@@ -429,3 +429,10 @@ func (n *NetBox) Update(ctx context.Context, d Device, status string, fields map
 }
 
 func timestamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}

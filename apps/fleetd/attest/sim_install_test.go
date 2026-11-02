@@ -92,7 +92,7 @@ func (h *harness) watchConfirm(t *testing.T, cw *confirmWire) *confirmWire {
 func TestIntakePassGetsAnInstallCode(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5", "smbios_uuid": nil}))
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5", "smbios_uuid": nil}))
 	c := newFakeInstaller(nil)
 	h.v.Installer = c
 	wire := h.watchConfirm(t, &confirmWire{})
@@ -186,7 +186,7 @@ func TestUnsignedConfirmPassesWithoutACode(t *testing.T) {
 func TestSMBIOSUUIDWaitsForTheField(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -204,9 +204,9 @@ func TestPassRecordsTPMVersionOnlyWhenEmpty(t *testing.T) {
 		fields map[string]any
 		want   any
 	}{
-		{name: "empty", fields: map[string]any{"talos_class": "worker-g5", "tpm_version": nil}, want: "2.0"},
-		{name: "owner value", fields: map[string]any{"talos_class": "worker-g5", "tpm_version": "1.2"}, want: "1.2"},
-		{name: "undefined", fields: map[string]any{"talos_class": "worker-g5"}, want: nil},
+		{name: "empty", fields: map[string]any{"class": "worker-g5", "tpm_version": nil}, want: "2.0"},
+		{name: "owner value", fields: map[string]any{"class": "worker-g5", "tpm_version": "1.2"}, want: "1.2"},
+		{name: "undefined", fields: map[string]any{"class": "worker-g5"}, want: nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeNetBox(t)

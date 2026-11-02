@@ -94,7 +94,7 @@ func TestPlannedMachineNeedsAnApprovedBinding(t *testing.T) {
 	t.Run("pinned by the pass", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-		f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+		f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 		res, err := h.run(simSerial, simMAC)
 		if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 			t.Fatalf("planned machine: %v", err)
@@ -108,7 +108,7 @@ func TestPlannedMachineNeedsAnApprovedBinding(t *testing.T) {
 	t.Run("certified but unbound", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-		f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+		f.add("testbox", simSerial, "planned", simMAC, map[string]any{"class": "worker-g5"})
 		h.pending(t, simSerial)
 		if d := f.bySerial(simSerial); d.CustomFields["ek_hash"] != nil || h.issued() {
 			t.Fatalf("an unbound planned machine was admitted: %+v", d.CustomFields)
@@ -231,7 +231,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatalf("after the pass: %s %+v (%d devices)", d.Status, d.CustomFields, f.count())
 	}
 	// The LDevID carries the class NetBox holds, once the owner sets one.
-	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "worker-g5" })
+	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["class"] = "worker-g5" })
 	res, err = h.run(simSerial, simMAC)
 	if err != nil {
 		t.Fatalf("with a class: %v", err)
@@ -316,7 +316,7 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 	}
 
 	// A planned device NetBox holds without a binding waits.
-	f.add("swell", "SW-PLANNED", "planned", "", map[string]any{"talos_class": "worker-g5"})
+	f.add("swell", "SW-PLANNED", "planned", "", map[string]any{"class": "worker-g5"})
 	h.pending(t, "SW-PLANNED")
 	if d := f.bySerial("SW-PLANNED"); d.CustomFields["ek_hash"] != nil {
 		t.Fatalf("an unbound planned device was pinned: %+v", d.CustomFields)

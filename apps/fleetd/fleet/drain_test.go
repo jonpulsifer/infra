@@ -158,7 +158,7 @@ func newRetiredTest(t *testing.T, class string) (*Reconciler, *fakeNetBox, *fake
 	t.Helper()
 	cf := map[string]any{"last_workflow": retireWF}
 	if class != "" {
-		cf["talos_class"] = class
+		cf["class"] = class
 	}
 	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", cf)}, ifaces: riptideIfaces()}
 	kube := &fakeKube{power: "off", objects: map[string]Object{wfBase + retireWF: workflowObject(retireWF, "riptide", "retire", testNow.UTC().Format(time.RFC3339), "STATE_SUCCESS")}}

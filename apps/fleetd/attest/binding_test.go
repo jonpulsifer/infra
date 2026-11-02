@@ -27,7 +27,7 @@ func TestBindingCountsOnlyFromTerraform(t *testing.T) {
 		}},
 		{"another field edited by another user after Terraform", "", fakeTerraform, fakeTerraform, func(f *fakeNetBox) {
 			f.author = "owner"
-			f.set("SER-1", func(d *fakeDevice) { d.CustomFields["talos_class"] = "worker-g2" })
+			f.set("SER-1", func(d *fakeDevice) { d.CustomFields["class"] = "worker-g2" })
 		}},
 		{"changelog unreadable", "counts for nothing", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.failChanges = true }},
 		{"changelog pruned", "pruned", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.changes = nil }},
@@ -35,7 +35,7 @@ func TestBindingCountsOnlyFromTerraform(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeNetBox(t)
-			f.add("one", "SER-1", statusPlanned, "", map[string]any{"talos_class": "worker-g5"})
+			f.add("one", "SER-1", statusPlanned, "", map[string]any{"class": "worker-g5"})
 			f.author = c.writer
 			f.set("SER-1", func(d *fakeDevice) { d.CustomFields["approved_ek_hash"] = h })
 			if c.edit != nil {

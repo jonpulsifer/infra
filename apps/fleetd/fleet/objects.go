@@ -213,8 +213,8 @@ func (c Config) Installer(d Device, action string) string {
 	return c.Installs[d.Class]
 }
 
-// ControlPlaneClass is the control plane's Talos class: NetBox's talos_class
-// choice, the model map's and the class inputs' key.
+// ControlPlaneClass is the control plane's Talos class: NetBox's class
+// choice (talos_class until that field is removed), the model map's and the class inputs' key.
 const ControlPlaneClass = "controlplane"
 
 // IsControlPlane says whether a class is a control plane's: ControlPlaneClass,

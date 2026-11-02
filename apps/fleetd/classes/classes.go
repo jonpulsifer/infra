@@ -15,6 +15,8 @@ import (
 const (
 	PayloadTalosConfig = "talos-machineconfig"
 	PayloadCloudInit   = "cloud-init-nocloud"
+	PayloadNixOSImage  = "nixos-image"
+	PayloadAlpineImage = "alpine-image"
 )
 
 // Class is one entry of the table.
@@ -22,6 +24,8 @@ type Class struct {
 	// Description says what the class trusts, for the next reader of the file.
 	Description string `json:"description"`
 	OS          string `json:"os"`
+	// Workload is what the machine is for; general today.
+	Workload string `json:"workload"`
 	// Template names the Tinkerbell Template every Workflow of the class runs.
 	Template string `json:"template"`
 	// InstallerImage is the image the install action runs, pinned by digest.
@@ -41,6 +45,8 @@ type Class struct {
 
 // Table maps a class name, NetBox's class field, to its record.
 type Table map[string]Class
+
+var workloadRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 var digestRE = regexp.MustCompile(`@sha256:[0-9a-f]{64}$`)
 
@@ -72,12 +78,15 @@ func Load(path string) (Table, error) {
 
 func (c Class) validate() error {
 	switch c.OS {
-	case "talos", "ubuntu":
+	case "talos", "nixos", "alpine", "ubuntu":
 	default:
-		return fmt.Errorf("os %q is neither talos nor ubuntu", c.OS)
+		return fmt.Errorf("os %q is not talos, nixos, alpine or ubuntu", c.OS)
+	}
+	if !workloadRE.MatchString(c.Workload) {
+		return fmt.Errorf("workload %q is required and must match %s", c.Workload, workloadRE)
 	}
 	switch c.PayloadKind {
-	case PayloadTalosConfig, PayloadCloudInit:
+	case PayloadTalosConfig, PayloadCloudInit, PayloadNixOSImage, PayloadAlpineImage:
 	default:
 		return fmt.Errorf("payload_kind %q is unknown", c.PayloadKind)
 	}

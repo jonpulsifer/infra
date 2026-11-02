@@ -91,7 +91,7 @@ dropped. So a request that proves nothing cannot end a node's open renewal.
 | Route | Does |
 | --- | --- |
 | `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding waits; [Approved EK binding](#approved-ek-binding) has the rules |
-| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class: every PCR the profile names must have an event in the log or still read all zeros, and a profile that pins `boot_applications` needs a boot application after PCR 4's separator. Issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
+| `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class: every PCR the profile names must have an event in the log or still read all zeros, and a profile that pins `boot_applications` needs a boot application after PCR 4's separator. Issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
 | `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | On the DevID listener only, as are the two routes below. The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
@@ -144,10 +144,10 @@ The signed confirm of an intake pass, never of a renewal, mints 32 random bytes 
 calls the fleet's `Admit` in process with `{serial, uuid, node, class, code}`. `uuid` is the
 session's SMBIOS UUID lower-cased, and must read as 8-4-4-4-12 hex. `Admit`:
 
-1. Refuses a device that is not `planned`, that lacks a declared field (`talos_class`, `install_disk`,
+1. Refuses a device that is not `planned`, that lacks a declared field (`class`, `install_disk`,
    `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port`
    or `primary_ip4`), or whose attested LLDP port, from the last hour, is not its `expected_port`;
-   nothing is written and the journal says why. `terraform/netbox/folly` declares every one of them
+   nothing is written and the journal says why. During the rename from `talos_class`, fleetd reads `talos_class` when `class` is empty. `terraform/netbox/folly` declares every one of them
    from the nodes file, and fleetd fills in none.
 2. Starts the provision Workflow, with no boot mode, unless one is running: when `desired_action` is
    `provision`, or when the device never ran a Workflow, auto-provision is on, and it is a worker.
@@ -286,7 +286,7 @@ Workflow with `lolwtf.ca/hookos-after-journaled` so a restart does not repeat it
 
 Devices with role `kubernetes-node` and status `planned`, `active`, `failed` or `decommissioning`.
 fleetd reads the name, serial, status, `primary_ip4`, `oob_ip`, the first physical interface's
-`primary_mac_address`, and the custom fields `install_disk`, `install_disk_serial`, `talos_class`,
+`primary_mac_address`, and the custom fields `install_disk`, `install_disk_serial`, `class`,
 `tpm_version`, `bmc_type`, `amt`, `secure_boot_expected`, `desired_action`, `last_workflow`,
 `expected_port`, `smbios_uuid`, `attest_verdict`, `approved_ek_hash`, `approved_ek_hash_ecc` and the attested network fields. It writes the verdict fields, the
 observed EK hashes, the SMBIOS facts, `pcr0_by_bios`, `desired_action` back to `none`,

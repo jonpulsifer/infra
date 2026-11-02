@@ -21,11 +21,11 @@ For folly nodes, we enter the static details in `clusters/folly/inventory/nodes.
 
 Suppose the device is a supported Talos worker and we request `desired_action=provision`. NetBox sends fleetd a webhook, which prompts fleetd to reread the inventory. fleetd also reconciles periodically, so a webhook is a notification, not an executable job description.
 
-The device's `talos_class` selects an entry in `clusters/folly/fleet/classes.json`. That entry chooses the workflow template, installer image and boot policy. The requested action determines whether this run attests, wipes or installs; the device's disk and identity fields constrain where that work may happen.
+The device's `class` selects an entry in `clusters/folly/fleet/classes.json`. That entry chooses the workflow template, installer image and boot policy. The requested action determines whether this run attests, wipes or installs; the device's disk and identity fields constrain where that work may happen.
 
 | NetBox value | How fleetd uses it |
 | --- | --- |
-| `talos_class` | Selects the class's template, pinned installer and verification policy. |
+| `class` | Selects the class's OS, workload, template, pinned installer and verification policy. |
 | `desired_action` | Requests provision, attest or wipe. The `decommissioning` status separately requests retirement. |
 | MAC address | Connects the machine to its Tinkerbell Hardware record and boot script. |
 | `install_disk`, `install_disk_serial` | Select the intended disk and require its serial to match before destructive work. |

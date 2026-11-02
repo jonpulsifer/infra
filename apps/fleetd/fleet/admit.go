@@ -215,7 +215,7 @@ func (d Device) missing() []string {
 		name string
 		ok   bool
 	}{
-		{"talos_class", d.Class != ""},
+		{"class", d.Class != ""},
 		{"install_disk", d.Disk != ""},
 		{"install_disk_serial", d.DiskSerial != ""},
 		{"bmc_type", d.BMCType != ""},
