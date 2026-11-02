@@ -19,27 +19,6 @@ export function renderBrief(page: Page, revision: string): string {
     `${canonical}/assets/purchase-to-identity.svg`,
     'purchase-to-identity.svg',
   );
-  const table = body.match(
-    /<div class="table"><table>[\s\S]*?<\/table><\/div>/,
-  );
-  if (!table) throw new Error('The lifecycle table is missing');
-  const rows = [...table[0].matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1);
-  const stages = rows.map((row, index) => {
-    const cells = [...row[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(
-      (cell) => cell[1],
-    );
-    if (cells.length !== 3)
-      throw new Error('Each lifecycle stage needs three columns');
-    return `<details class="stage"${index === 0 ? ' open' : ''}>
-      <summary><span class="stage-number">${String(index + 1).padStart(2, '0')}</span><span>${cells[0]}</span><span class="toggle" aria-hidden="true">+</span></summary>
-      <div class="stage-body"><div><h3>Authority &amp; evidence</h3><p>${cells[1]}</p></div><div><h3>Result &amp; limit</h3><p>${cells[2]}</p></div></div>
-    </details>`;
-  });
-  if (stages.length === 0) throw new Error('The lifecycle has no stages');
-  body = body.replace(
-    table[0],
-    `<div class="stages">${stages.join('\n')}</div>`,
-  );
   body = body.replace(
     /<p>(<a[^>]*>)?<img [^>]*purchase-to-identity\.svg[^>]*>(<\/a>)?<\/p>/,
     (diagram) =>
@@ -93,8 +72,8 @@ export function renderBrief(page: Page, revision: string): string {
   <header class="masthead"><a class="wordmark" href="#top"><span class="mark" aria-hidden="true">f.</span> FOLLY <span class="edition">/ SYSTEMS NOTES</span></a><a class="wiki-link" href="${canonical}${page.url}">Read the wiki <span aria-hidden="true">↗</span></a></header>
   <main id="main">
     <div class="hero" id="top"><div class="eyebrow">SECURITY ENGINEERING / ARCHITECTURE BRIEF</div><h1>From purchase<br>to <em>workload identity.</em></h1><div class="hero-bottom"><p>A machine arrives.<br>What makes it trusted enough to join?</p><a class="start" href="#${escapeHtml(headings[0]?.id ?? '')}">Follow the machine <span aria-hidden="true">↓</span></a></div></div>
-    <div class="scope"><span class="scope-label">SCOPE OF ASSURANCE</span><span>Repository design. Conditional trust. Evidence and limits at every step.</span><a href="${sourceUrl}" title="Canonical content revision">SOURCE ${revision.slice(0, 8)} ↗</a></div>
-    <div class="layout"><aside><nav class="brief-nav" aria-label="In this brief"><p class="nav-label">IN THIS BRIEF</p>${navigation}</nav><div class="margin-note">An inventory record expresses intent.<br>A TPM quote supplies evidence.<br>Policy decides admission.</div></aside><article><div class="introduction">${body}</section></article></div>
+    <div class="scope"><span class="scope-label">SCOPE OF ASSURANCE</span><span>How inventory becomes an installation, and what we gain or lose by simplifying it.</span><a href="${sourceUrl}" title="Canonical content revision">SOURCE ${revision.slice(0, 8)} ↗</a></div>
+    <div class="layout"><aside><nav class="brief-nav" aria-label="In this brief"><p class="nav-label">IN THIS BRIEF</p>${navigation}</nav><div class="margin-note">NetBox records the machine and the requested action. fleetd turns that record into an authorized job. Tinkerbell runs the job.</div></aside><article><div class="introduction">${body}</section></article></div>
   </main>
   <footer class="site-footer"><a class="wordmark" href="#top">FOLLY / SYSTEMS NOTES</a><p>Canonical content from the <a href="${canonical}${page.url}">infrastructure wiki</a>.<br><a href="${sourceUrl}">Inspect the source revision</a> · <a href="${canonical}/reference/folly-design/">Detailed trust design</a></p><span>END OF BRIEF <a href="#top" aria-label="Back to top">↑</a></span></footer>
 </body>
@@ -124,7 +103,15 @@ if (import.meta.main) {
   const page = result.pages.find((page) => page.file === source);
   if (!page) throw new Error(`Missing canonical page: ${source}`);
   const revision = Bun.spawnSync(
-    ['git', 'log', '-1', '--format=%H', '--', `docs/${source}`],
+    [
+      'git',
+      'log',
+      '-1',
+      '--format=%H',
+      '--',
+      `docs/${source}`,
+      'docs/assets/purchase-to-identity.svg',
+    ],
     { cwd: options.repo },
   );
   if (revision.exitCode)

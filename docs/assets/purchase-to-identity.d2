@@ -1,14 +1,16 @@
 vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
 direction: down
-receive: "1. Purchase + receiving\nOwner verifies chassis, TPM keys and disk\nIndependent evidence starts trust"
-declare: "2. Git -> Atlantis -> NetBox\nApproved device declaration\nOwner controls lifecycle requests"
-attest: "3. Signed boot + fleetd\nTPM possession and fresh boot evidence\nDeclaration and admission policy"
-install: "4. Tinkerbell -> Talos\nDisk gates and TPM-delivered install code\nHTTPS configuration release"
-identity: "5. Kubernetes + SPIRE\nNode join and workload credentials\nResource authorization remains separate"
-withdraw: "6. Recheck + retirement\nRestrict new scheduling and credentials\nExisting credentials expire separately"
-receive -> declare: reviewed binding
-declare -> attest: expected identity and intent
-attest -> install: authorized provision
-install -> identity: separate join and identity checks
-identity -> withdraw: ongoing lifecycle
+receive: "Receive the machine\nCheck chassis, intended disk and TPM keys"
+record: "Record the intended machine\nGit review -> Atlantis -> planned NetBox device\nClass and action describe the intended installation"
+boot: "Start the first PXE boot\nSigned iPXE -> signed HookOS\nNo MAC or runnable Workflow yet"
+admit: "HookOS proves identity and boot state to fleetd\nRecord the MAC and check admission policy"
+choose: "fleetd creates the first-install Workflow\nClass selects template and installer\nDevice fields select disk and configuration\nAdmission supplies the install code"
+install: "The machine executes the workflow\nCheck disk -> wipe -> install Talos -> reboot"
+finish: "Talos fetches configuration from fleetd\nNetBox becomes active after delivery\nCluster join, readiness and SPIRE follow separately"
+receive -> record
+record -> boot
+boot -> admit
+admit -> choose
+choose -> install
+install -> finish
 **.style.font-size: 20

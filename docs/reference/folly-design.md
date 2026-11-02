@@ -108,7 +108,7 @@ An empty NetBox device list preserves the export. A malformed export preserves S
 
 ## 5. Design choices and tradeoffs
 
-[From purchase to workload identity](purchase-to-identity.md#off-the-shelf-building-blocks-and-tradeoffs) compares raw PXE, iPXE, UEFI HTTP boot, BMC control and stock workflows with the lab's integration layer.
+[From purchase to workload identity](purchase-to-identity.md#what-removing-tinkerbell-would-look-like) follows NetBox through workflow selection and compares Tinkerbell with manual Talos installation and a custom executor.
 
 “Better suited” means a better fit for a stated requirement. It does not mean that one component replaces every function of another.
 
