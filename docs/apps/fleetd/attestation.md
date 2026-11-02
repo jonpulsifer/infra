@@ -38,7 +38,7 @@ An unexpected HookOS boot can fail intake without losing the node's identity. fl
 
 A signed confirmation admits the device in the same process after fleetd reads the binding again.
 
-fleetd requires every field that `terraform/netbox/folly` declares: `talos_class`, `install_disk`, `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` and the primary address.
+fleetd requires every field that `terraform/netbox/folly` declares: `class`, `install_disk`, `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` and the primary address.
 
 The attested LLDP port must match `expected_port`. Missing fields or a port mismatch cause refusal and a journal entry. fleetd does not fill in missing declarations.
 

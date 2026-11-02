@@ -11,8 +11,8 @@
 # boots in. A node may set disk, tpm, amt or secure_boot to override its model.
 #
 # nodes holds one entry per node, keyed by its name: model is a key of models,
-# serial the serial on its label, class its Talos class (controlplane,
-# worker-g5 or worker-g2), switch_port the switch port its cable reaches,
+# serial the serial on its label, class a key of ../fleet/classes.json (the
+# OS and workload it runs), switch_port the switch port its cable reaches,
 # address its IPv4 address inside K8S_NODE_CIDR in ../config/cluster-topology.json,
 # and bmc its out-of-band management (amt or none).
 #

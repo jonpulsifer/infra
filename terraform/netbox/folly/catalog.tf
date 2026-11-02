@@ -10,7 +10,7 @@ data "netbox_site" "folly" {
     }
     precondition {
       condition     = alltrue([for n in values(local.nodes) : contains(local.classes, n.class)])
-      error_message = "Every node's class must be controlplane, worker-g5 or worker-g2."
+      error_message = "Every node's class must be a key of clusters/folly/fleet/classes.json."
     }
     precondition {
       condition     = alltrue([for n in values(local.nodes) : contains(local.bmc_types, n.bmc)])

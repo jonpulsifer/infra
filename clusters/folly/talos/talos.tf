@@ -55,6 +55,10 @@ locals {
   # rebooting a node already on the version: Create upgrades only a node
   # whose running version differs. fleet-controller renders a node of a class from the
   # class_inputs output below.
+  # The class table fleetd reads, every class with its os and workload. This
+  # root holds the Talos role and patches of each class whose os is talos;
+  # the check below keeps the two in step.
+  fleet_classes = jsondecode(file("${path.module}/../fleet/classes.json"))
   classes = {
     controlplane = {
       role      = "controlplane"
@@ -77,11 +81,12 @@ locals {
   # and the root applies none until NetBox holds the node active, so its
   # talos_machine is planned away and back across a reinstall, by design. A
   # control plane installs as a worker does, and joins the cluster. The
-  # install disk is the nodes file's.
+  # install disk is the nodes file's. A node of a class whose os is not
+  # talos is not this root's.
   nodes = { for name, m in local.machines : name => {
     class = m.class
     role  = local.classes[m.class].role
-  } if contains(["active", "failed"], m.status) }
+  } if contains(["active", "failed"], m.status) && lookup(local.fleet_classes, m.class, { os = "" }).os == "talos" }
 
   # The TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
@@ -125,6 +130,17 @@ locals {
     tpm_labels    = module.talos.render_inputs.tpm_labels
     node_network  = module.talos.render_inputs.node_network
   } }
+}
+
+# Every talos class in the class table has its role here, and every class
+# here is a talos class there.
+check "classes" {
+  assert {
+    condition = (
+      sort([for class, c in local.fleet_classes : class if c.os == "talos"]) == sort(keys(local.classes))
+    )
+    error_message = "The talos classes in clusters/folly/fleet/classes.json and local.classes in talos.tf must name the same classes."
+  }
 }
 
 module "talos" {
