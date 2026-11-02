@@ -72,7 +72,7 @@ A build adds nothing to the PR if its filesystem and configuration match every p
 
 Renovate merges stable npm minor and patch updates as one weekly PR, so the Bun images rebuild once a week for them. Majors and 0.x updates arrive as their own PRs.
 
-Chainguard node base digests (`:latest` and `:latest-dev`) move together in one PR each Monday and Thursday, so a base-image fix reaches the images within about four days. The kthx CLI pin in `images/mate-sandbox/Dockerfile` and the verifier pin in `apps/kthx-engine/Dockerfile` move weekly, and the owner reviews each.
+Chainguard node base digests (`:latest` and `:latest-dev`) move together in one PR each Monday and Thursday, so a base-image fix reaches the images within about four days. The kthx CLI pin in `images/mate-sandbox/Dockerfile` and the verifier pin in `apps/kthx-engine/Dockerfile` move weekly, and the owner reviews each. The Fedora base digest in `images/keylime-server/Dockerfile` and the rust-keylime commit and base digests in `images/keylime-agent/Dockerfile` move by hand.
 
 Renovate rebases a PR only when it conflicts with `main`. Terraform and Talos PRs rebase whenever they fall behind, because Atlantis applies the PR's own plan.
 
