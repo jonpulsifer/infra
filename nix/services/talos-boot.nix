@@ -2,8 +2,8 @@
 # netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed image
 # against its committed signing cert, and keeps the previous release as prev. dnsmasq serves the
 # iPXE over TFTP and nginx serves the rest at spore's bootstrap address, which the Kubernetes
-# network's DHCP names (terraform/network/unifi/folly/k8s.tf). Smee (./tinkerbell.nix) answers PXE
-# on the VLAN, and fleetd (./fleetd.nix) serves the enrollment name's HTTPS at the same address.
+# network's DHCP names (terraform/network/unifi/folly/k8s.tf). fleetd (./fleetd.nix) serves the
+# enrollment name's HTTPS at the same address, and ./hookos-syslog.nix receives HookOS's syslog there.
 {
   config,
   lib,
@@ -27,7 +27,7 @@ let
   # Signed with the UKI key; the bootstrap network's DHCP names talos/folly/<this> under dnsmasq's
   # TFTP root.
   ipxe = "ipxe-amd64-secureboot.efi";
-  # Signed with the HookOS key; iPXE fetches it over HTTP, from Smee's script or its own menu.
+  # Signed with the HookOS key; iPXE's menu fetches it over HTTP.
   hookos = "hookos-amd64-secureboot-uki.efi";
   signingCert = ../../clusters/${site}/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/${site}/talos/secureboot/hookos-signing-cert.pem;

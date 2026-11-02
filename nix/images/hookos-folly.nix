@@ -16,8 +16,8 @@ let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
   pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
-  # Tink server and syslog are Tinkerbell's on spore's bootstrap address, at its default ports;
-  # chrony and fleetd's enrollment name answer there too.
+  # The Tink server, the syslog receiver (../services/hookos-syslog.nix, or Smee's), chrony and
+  # fleetd's enrollment name all answer at spore's bootstrap address, at the default ports.
   tink = lab.bootstrap.hosts.spore;
   cmdline = lib.concatStringsSep " " [
     "facility="

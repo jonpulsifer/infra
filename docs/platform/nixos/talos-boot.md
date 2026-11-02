@@ -13,8 +13,9 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | --- | --- | --- |
 | `bootstrap` VLAN interface | Gives spore its `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | spore |
-| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC NetBox holds, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not). [fleetd](../../apps/fleetd.md) makes and removes them under `/var/lib/tftpboot` on each reconcile pass, so a new node or NIC needs no commit | spore |
+| `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC NetBox holds, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not). Smee is off on spore, so nothing asks for them; [fleetd](../../apps/fleetd.md) still makes and removes them under `/var/lib/tftpboot` on each reconcile pass | spore |
 | nginx `talos-boot` | Serves the ISO and HookOS on port 80 at `SPORE_BOOTSTRAP_IP` | spore |
+| HookOS syslog | rsyslog on UDP 514 at `SPORE_BOOTSTRAP_IP`, into spore's journal under the identifier `hookos` (`hookos-syslog.nix`). [Tinkerbell](tinkerbell.md#logs-and-pxe-state) says how to read it | spore |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 | fleetd's boot listener | Serves `enroll.lolwtf.ca` on port 443 at `SPORE_BOOTSTRAP_IP` with a Let's Encrypt certificate from DNS-01: the device flow under `/attest/` and a node's first config at `/talos/config`. The anchors' CoreDNS answers the name with `SPORE_BOOTSTRAP_IP` | spore |
 | `talos-boot-check` | Exports whether spore serves the boot files and the enrollment name, each minute | spore |
@@ -23,19 +24,17 @@ The boot check passes when dnsmasq is active and nginx serves HookOS at spore's 
 
 ## Boot path
 
-UniFi's DHCP on the Kubernetes network names `SPORE_BOOTSTRAP_IP` as the TFTP and boot server, so every machine on a node port netboots there, known or not. Firmware PXE loads the signed iPXE from it, and iPXE fetches the node's script from Smee at the same address. The script chains HookOS from nginx. When Smee has no script for the MAC, iPXE shows its own menu, whose default chains the same HookOS. HookOS attests against fleetd before its agent waits for a Workflow. [Tinkerbell](tinkerbell.md#boot-path) has the details. HookOS is about 200 MB, too large for TFTP, so it goes over HTTP.
+UniFi's DHCP on the Kubernetes network names `SPORE_BOOTSTRAP_IP` as the TFTP and boot server, so every machine on a node port netboots there, known or not. Firmware PXE loads the signed iPXE from it, and iPXE shows its menu, whose default chains HookOS from nginx at the same address. HookOS attests against fleetd before its agent waits for a Workflow. [Tinkerbell](tinkerbell.md#boot-path) has the details. HookOS is about 200 MB, too large for TFTP, so it goes over HTTP.
 
 The bootstrap network has no DHCP: it holds spore's boot address. The Kubernetes network's DHCP names the anchors' DNS addresses, and folly's Talos nodes take time from them. CoreDNS and chrony answer on every interface of each anchor.
 
 ## Netboot images
 
-iPXE is about 1.2 MB. Its embedded script runs DHCP and sets `boot-url` to `http://<SPORE_BOOTSTRAP_IP>/talos/folly`.
+iPXE is about 1.2 MB. Its embedded script runs DHCP, sets `boot-url` to `http://<SPORE_BOOTSTRAP_IP>/talos/folly` and asks Smee for nothing: with Smee on, Smee's per-MAC script boots the same HookOS the menu boots.
 
-It requests Smee's script for the booting MAC at `http://<SPORE_BOOTSTRAP_IP>:7080/ipxe/script/${net0/mac}/auto.ipxe`.
+### Menu
 
-### Fallback menu
-
-If the request fails, iPXE displays a menu with a 10-second timeout.
+iPXE displays a menu with a 10-second timeout.
 
 | Item | Action |
 | --- | --- |
@@ -86,19 +85,20 @@ The cluster cannot reach the bootstrap VLAN, so spore's node exporter carries `t
 
 ## Rules
 
-- spore's switch port must carry the bootstrap VLAN tagged, for Smee's DHCP answers and the boot address. capsule's and forge's ports do not carry it.
+- spore's switch port must carry the bootstrap VLAN tagged, for the boot address. capsule's and forge's ports do not carry it.
 - `talos-uki-verify.sh` runs `sbverify --cert` and also requires exactly one signature. sbverify alone passes a file with several signatures when any one of them verifies.
-- A machine on the bootstrap VLAN reaches spore directly, where the UniFi firewall cannot filter it. spore's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP, HTTP, HTTPS, Smee and the Tink server), DNS, NTP and ping, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `boot-plane` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API, or if a host other than spore joins the VLAN.
+- A machine on the bootstrap VLAN reaches spore directly, where the UniFi firewall cannot filter it. spore's `nixos-fw-bootstrap` chain, from `talos-boot.nix`, runs before the ports the NixOS firewall opens on every interface. Over IPv4 it admits the ports declared for `bootstrap` (TFTP, HTTP, HTTPS, HookOS's syslog and the Tink server, and Smee's while Smee is on), DNS, NTP and ping, and drops the rest. Over IPv6 it admits only ICMPv6. Declare a new bootstrap service in `networking.firewall.interfaces.bootstrap`, or the chain drops it. The `boot-plane` check fails if the chain admits ssh, NFS, Garage, an exporter or the Tinkerbell API, or if a host other than spore joins the VLAN.
 - Traffic from spore's bootstrap address takes the routing table numbered `BOOTSTRAP_VLAN`, through a policy rule that systemd-networkd sets on the `bootstrap` interface from `talos-boot.nix`. The table holds the VLAN's own route and a default via the gateway, the first host in `BOOTSTRAP_CIDR`. A request that the gateway routes onto the VLAN from another network therefore passes the NixOS firewall's strict reverse-path filter, and its reply leaves on `bootstrap`.
 - dnsmasq sends each TFTP transfer's data from port 69 (`tftp-single-port`), so a transfer is one UDP flow. A gateway reply rule matches only the request's port, so a transfer from a server-chosen port would not cross the gateway. The `boot-plane` and `spore-reliability` checks fail without the setting.
-- A node on the Kubernetes network reaches spore through the gateway, whose policies `kubernetes_to_boot` admit `SPORE_BOOTSTRAP_IP` on TCP 80, 443, 7080 (Smee) and 42113 (the Tink server), and UDP 69, 123 and 514 (HookOS's syslog).
+- A node on the Kubernetes network reaches spore through the gateway, whose policies `kubernetes_to_boot` admit `SPORE_BOOTSTRAP_IP` on TCP 80, 443, 7080 (Smee's script port, which spore's own firewall closes while Smee is off) and 42113 (the Tink server), and UDP 69, 123 and 514 (HookOS's syslog).
 - The `boot-plane` and `spore-reliability` checks in `nix/lib/checks.nix` fail if dnsmasq could lease addresses or answer DHCP.
 
 ## Where it lives
 
 - `nix/services/talos-boot.nix`: the VLAN, firewall, dnsmasq, nginx paths, the checks and the mirror
-- `nix/services/fleetd.nix`: the enrollment name's listener and certificate
-- `nix/services/tinkerbell.nix`: Smee, the rest of Tinkerbell and the `netboot-not-allowed` links
+- `nix/services/fleetd.nix`: the enrollment name's listener and certificate, and the `netboot-not-allowed` links
+- `nix/services/hookos-syslog.nix`: HookOS's syslog receiver
+- `nix/services/tinkerbell.nix`: Tinkerbell, with Smee behind `homelab.tinkerbell.smee.enable`
 - `clusters/folly/config/anchor-topology.json`: `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN`, `SPORE_BOOTSTRAP_IP`
 - `terraform/network/unifi/folly/bootstrap.tf`: the bootstrap network, the boot option and the switch ports
 - `terraform/network/unifi/folly/k8s.tf`: the Kubernetes network's DHCP

@@ -38,6 +38,7 @@ in
       probe = spore.systemd.services.spore-native-boot-artifact-check;
       fetchScript = rackpi5.boot.initrd.systemd.services.fetch-nix-store.script;
       smee = "${spore.systemd.services.tinkerbell.serviceConfig.ExecStart} ";
+      smeeOn = spore.homelab.tinkerbell.smee.enable;
       failures = lib.filter (failure: failure != null) [
         (
           if lib.hasInfix "/$expected.squashfs" fetchScript then
@@ -98,11 +99,18 @@ in
           if !(spore.services.dnsmasq.settings ? "dhcp-range") then
             null
           else
-            "dnsmasq could hand out leases or answer DHCP beside Smee"
+            "dnsmasq could hand out leases or answer DHCP beside UniFi's"
+        )
+        (
+          if lib.hasInfix " --enable-smee=${lib.boolToString smeeOn} " smee then
+            null
+          else
+            "Tinkerbell's flags disagree with homelab.tinkerbell.smee.enable"
         )
         (
           if
-            lib.all (flag: lib.hasInfix flag smee) [
+            !smeeOn
+            || lib.all (flag: lib.hasInfix flag smee) [
               " --dhcp-mode=proxy "
               " --dhcp-bind-interface=bootstrap "
             ]
@@ -112,10 +120,16 @@ in
             "Smee could hand out leases or answer DHCP beyond the bootstrap VLAN"
         )
         (
-          if lib.hasInfix " --tftp-server-enabled=false " smee then
+          if !smeeOn || lib.hasInfix " --tftp-server-enabled=false " smee then
             null
           else
             "Smee's TFTP listener would collide with dnsmasq's"
+        )
+        (
+          if smeeOn != spore.homelab.hookosSyslog.enable then
+            null
+          else
+            "HookOS's syslog has ${if smeeOn then "two receivers" else "no receiver"} on the bootstrap VLAN"
         )
         (
           if
@@ -136,8 +150,8 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
-  # spore alone serves TFTP on the bootstrap VLAN. A DHCP answer from it would race UniFi's and
-  # Smee's offers. The VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage,
+  # spore alone serves TFTP on the bootstrap VLAN. A DHCP answer from it would race UniFi's offer.
+  # The VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage,
   # the exporters and the Tinkerbell API, which the global allowed ports open on every other
   # interface.
   boot-plane =
@@ -202,8 +216,7 @@ in
         || firewallBroken c
       ) anchors;
     in
-    require "boot-plane"
-      (lib.attrNames anchors == [ "spore" ] && broken == [ ])
+    require "boot-plane" (lib.attrNames anchors == [ "spore" ] && broken == [ ])
       "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
   # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. The
