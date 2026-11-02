@@ -2,7 +2,7 @@
 
 This static presentation reads the canonical page at
 `docs/reference/purchase-to-identity.md` through the wiki renderer. Edit that
-page for content changes. `build.ts` adds expandable lifecycle stages, section
+page for content changes. `build.ts` preserves the narrative, and adds section
 navigation and a source revision. `style.css` supplies responsive and print
 layouts. The output uses no client JavaScript or backend.
 

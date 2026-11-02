@@ -1,105 +1,124 @@
 ---
 title: From purchase to workload identity
-description: A security engineering brief on folly's receiving, inventory, provisioning and identity controls, their evidence and their tradeoffs.
+description: Follow a machine from receiving through NetBox and installation, then weigh Tinkerbell, direct BMC operation and simpler TPM enrollment.
 ---
 
-This brief explains how a purchased machine becomes a folly Kubernetes node and receives workload credentials. Security engineers use it to assess authority, evidence and residual risk. It describes the repository's design; it is not a live attestation report.
+When we accept a machine into folly, we decide what it is, what it should run and whether we trust it with cluster credentials. We record that decision in inventory. The provisioning system then turns the record into an installation and reports the result back.
 
-The design gates installation on an approved device identity, acceptable boot evidence and lifecycle authorization. Its assurance depends on receiving evidence and the management plane. It does not establish complete supply-chain integrity or continuous runtime integrity.
+NetBox is the record that fleetd reads. fleetd chooses and authorizes the work; Tinkerbell supplies the boot and workflow machinery that carries it out. This distinction matters when deciding whether Tinkerbell earns its operational cost: most of the lab's admission policy lives in fleetd.
+
+This brief follows a TPM 2.0 worker through the current path, then examines two alternatives. The alternatives and enrollment improvements are proposals, not enabled provisioning paths. Security engineers can use the linked source and tests to assess the design; this page does not certify a running machine.
 
 ## Follow one machine
 
-![Purchase, receiving, declaration, attestation, installation and identity, with the authority at each boundary](../assets/purchase-to-identity.svg)
+### Receive it and create its record
 
-| Stage | Authority and evidence | Result and limit |
+We begin with the delivered chassis. We check its label and hardware, identify the disk we intend to erase, and obtain its TPM endorsement-key hashes through a trusted receiving scan or supplier record. An endorsement key, or EK, identifies the Trusted Platform Module; it does not by itself tell us which chassis contains it.
+
+For folly nodes, we enter the static details in `clusters/folly/inventory/nodes.yaml` through a pull request. Atlantis applies those values into NetBox as a device with status `planned`. This is how we populate the NetBox record today; lifecycle requests then come from the owner in NetBox. The [inventory contract](inventory.md) describes which fields Git owns and which observations fleetd adds.
+
+### Choose what the machine should do
+
+Suppose the device is a supported Talos worker and we request `desired_action=provision`. NetBox sends fleetd a webhook, which prompts fleetd to reread the inventory. fleetd also reconciles periodically, so a webhook is a notification, not an executable job description.
+
+The device's `talos_class` selects an entry in `clusters/folly/fleet/classes.json`. That entry chooses the workflow template, installer image and boot policy. The requested action determines whether this run attests, wipes or installs; the device's disk and identity fields constrain where that work may happen.
+
+| NetBox value | How fleetd uses it |
+| --- | --- |
+| `talos_class` | Selects the class's template, pinned installer and verification policy. |
+| `desired_action` | Requests provision, attest or wipe. The `decommissioning` status separately requests retirement. |
+| MAC address | Connects the machine to its Tinkerbell Hardware record and boot script. |
+| `install_disk`, `install_disk_serial` | Select the intended disk and require its serial to match before destructive work. |
+| `bmc_type`, management address | Select the power-control connection; the implemented provider here is Intel AMT. |
+| Approved EK hashes | Constrain which TPM may enroll as this planned device. |
+| Primary address, `expected_port` | Supply the node address and the expected connection used in admission checks. |
+
+A new device has no recorded MAC yet, so the inventory alone is not enough to submit a runnable workflow. fleetd waits for the first HookOS boot to identify the machine. An explicit request can remain pending while we prepare and boot it.
+
+### Boot into the installation environment
+
+For the first installation, we prepare firmware and start the machine's PXE boot. PXE leads to signed iPXE and then signed HookOS from spore. HookOS is the temporary Linux environment that can inspect hardware, wipe disks and run the Talos installer. Its successful attestation lets fleetd record the machine's MAC in NetBox.
+
+On a later explicit run, when the MAC and AMT connection are known, fleetd can submit the workflow first and have Rufio request power and one-time PXE boot operations. AMT gets the machine into the installation environment; the disk actions still run on the machine itself.
+
+HookOS contacts fleetd before its Tinkerbell agent executes the installation. fleetd checks that the TPM matches the approved inventory binding, proves possession of its keys, and supplies fresh, acceptable boot evidence. It also checks the declaration and a signed report of the observed switch port. The signature protects the report; LLDP does not authenticate the physical switch or cable location. If admission fails, a provision receives no install code and its disk wipe cannot proceed.
+
+A first installation can also start without an explicit action: an eligible planned worker can boot HookOS, pass admission and trigger auto-provision when enabled. That path requires no earlier workflow and no conflicting request. Control planes do not automatically provision. [The provisioning runbook](../runbooks/provision-a-node.md) gives the operating steps and exceptions.
+
+### Run the job and bring the node into service
+
+For an admitted first installation, fleetd creates the Tinkerbell Workflow from the class and device inputs, then records its name in NetBox's `last_workflow`. The machine is already in HookOS, so this path needs no second boot request. fleetd allows one unfinished run per device and adopts an existing run if its NetBox record needs a retry.
+
+fleetd renders the Talos configuration and delivers an install code to the proven TPM. The workflow checks the disk serial and the current boot's authorization before wiping, installing Talos and arranging the next disk boot. Tinkerbell records action progress while fleetd watches for completion and failures.
+
+Talos boots from disk and exchanges the code for its configuration over HTTPS. fleetd consumes the code after the response is acknowledged and marks the NetBox device `active`. That records configuration delivery; Kubernetes readiness is checked separately. Workers provisioned by fleetd also pass a node-name check when fleetd approves their initial kubelet certificate request.
+
+Once the node is eligible, SPIRE can issue identity credentials to its registered workloads. Later boot checks and NetBox lifecycle changes can restrict future issuance. Retirement coordinates disk erasure, power state and cluster cleanup, although credentials already issued can remain valid until expiry.
+
+![Receiving creates a declared NetBox device; fleetd selects and authorizes a workflow; Tinkerbell boots and installs it; fleetd records configuration release and identity eligibility](../assets/purchase-to-identity.svg)
+
+## What Tinkerbell contributes
+
+Tinkerbell gives us a common way to boot a machine, deliver ordered actions, record progress and control power. Here it also brings an embedded Kubernetes API and etcd, Smee for boot scripts, Tink's controller and server, a node agent, and Rufio for AMT. The [Tinkerbell page](../platform/nixos/tinkerbell.md) shows the deployed components.
+
+The complete lifecycle still needs substantial lab code. fleetd handles admission, conflicting requests, workflow adoption, timeouts, configuration delivery and NetBox updates. Our template supplies disk checks, installer preparation and boot handling. Keeping Tinkerbell means maintaining these integrations as well as the upstream services; removing it means deciding which responsibilities become manual and which need replacement code.
+
+Raw PXE or native UEFI HTTP boot changes how an image reaches the machine. Direct AMT calls change who requests power and boot operations. Neither supplies the executor that runs disk actions or the controller that decides whether a failed installation is safe to retry. iPXE can also provide HTTPS and image verification when configured, while UEFI HTTPS boot depends on the target firmware's support. See [iPXE cryptography](https://ipxe.org/crypto) and [UEFI network boot](https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html).
+
+## What removing Tinkerbell would look like
+
+### A manual Talos path
+
+The shortest alternative keeps the inventory and signed boot artifacts, uses AMT to request a network boot, and starts Talos in maintenance mode. The owner verifies the target, supplies its machine configuration through the Talos API, watches installation and records the result in NetBox. Later maintenance uses Talos's API; an unresponsive machine still needs AMT or physical access.
+
+This removes the workflow services and their private Kubernetes API. It also makes the owner responsible for selecting the disk, sequencing destructive actions, resolving interrupted installs and recording completion. A small wrapper can generate the command inputs from inventory, but a wrapper with persistent jobs, cancellation and recovery is a controller again.
+
+The security contract changes if we go straight to Talos: that path does not perform today's HookOS attestation and TPM-delivered install-code exchange. Talos's maintenance API accepts an initial configuration without client authentication, so the receiving network must restrict who can reach it. Verifying a console fingerprint can help identify the server; it does not prevent another reachable client from submitting a configuration. [Sidero's installation guide](https://docs.siderolabs.com/talos/v1.14/getting-started/getting-started) describes the maintenance-mode boundary.
+
+This also needs an explicit integration plan for fleetd's per-node join approval and SPIRE eligibility. Completing a direct installation does not automatically satisfy the existing verdict and lifecycle requirements. We should not carry the automated path's assurance claims into a manual run without deciding which checks replace them.
+
+### Keep attestation and replace the executor
+
+A second alternative keeps signed HookOS and fleetd's admission checks, but replaces Tinkerbell with direct AMT control and a small installer agent. NetBox still drives the desired action. After successful admission, fleetd gives that agent a job for this machine and boot, and the agent returns authenticated progress and completion reports.
+
+That preserves the main security decisions, but it is a software project. The replacement needs durable job state, one-run exclusion, timeouts, safe cancellation, restart recovery and rules against replaying a wipe. It must retain disk-identity checks, installer preflight and retirement handling. Configuration delivery is currently tied to Workflow state, so that coupling also needs replacement.
+
+| Choice | What becomes simpler | What we take responsibility for |
 | --- | --- | --- |
-| Purchase and receive | The owner checks the delivered chassis, its TPM endorsement keys and install disk serial against independent receiving evidence. | A candidate inventory binding. An invoice or a self-reported serial alone cannot authenticate a TPM. |
-| Declare | The owner reviews `clusters/folly/inventory/nodes.yaml` through Git. Atlantis applies `terraform/netbox/folly`. | A planned NetBox device with approved keys, disk and expected port. A record expresses intent, not physical proof. |
-| Prepare and boot | The owner prepares firmware and Secure Boot keys. Boot services on spore supply signed iPXE and HookOS, the installation environment. | Firmware accepts signed boot code. This does not authorize configuration release. |
-| Attest and admit | fleetd checks TPM possession, a fresh quote, the boot event log, approved keys and a signed network report. | An eligible machine can receive device certificates and installation authorization. Reported switch location is not authenticated physical location. |
-| Install and configure | Tinkerbell executes the workflow. Disk checks, the current boot's pass marker and a TPM-delivered code gate the provision's wipe. | Talos installs and fetches configuration over HTTPS. After unwrapping, the code is a bearer secret. |
-| Join and identify | fleetd approves the node's matching bootstrap certificate request. SPIRE admits an agent and issues credentials for registered workloads. | Cluster membership and workload identity. Each service still needs its own authorization policy. |
-| Recheck and retire | fleetd evaluates later boot evidence and reconciles owner actions in NetBox. | Quarantine or retirement restricts future access. Existing credentials and copies of disk data need separate accounting. |
+| Keep Tinkerbell | Reuse its workflow execution, records and BMC controller. | More services, integration code and an agent protocol whose completion reports need stronger authentication. |
+| Direct AMT plus manual Talos | Fewer provisioning services and a short Talos-specific operating path. | Human sequencing, recovery and audit records; a different initial-admission boundary. |
+| Direct AMT plus a custom HookOS executor | A narrower stack with control over job authentication. | A durable destructive-job controller and its failure cases. This is more than replacing Rufio with a power command. |
 
-NetBox `active` records configuration release. Kubernetes readiness is a separate observation. The [lifecycle overview](../platform/node-lifecycle.md) and [provisioning runbook](../runbooks/provision-a-node.md) describe the operating sequence.
+For a small Talos-only fleet with infrequent reinstalls, the manual path is a reasonable candidate if attended recovery is acceptable. If unattended reinstall and retirement are requirements, keeping Tinkerbell is the lower implementation-risk choice until a replacement demonstrates those behaviors. Rebuilding a general workflow engine offers little simplification.
 
-## Receiving is the first trust decision
+A useful pilot uses a spare worker and exercises a normal install, a power cut after wiping, a duplicate request and retirement. Compare the owner interventions and recovery behavior, not just the number of services. These are proposed decision criteria, not completed acceptance results.
 
-A Trusted Platform Module (TPM) protects device keys. Its endorsement key (EK) identifies the TPM; a manufacturer certificate does not bind that TPM to the purchased chassis.
+## Make EK enrollment easier
 
-The owner needs a receiving scan or an authenticated supplier record that ties the chassis serial to its EKs. A validated platform certificate counts only when it establishes that relationship. The repository defines this prerequisite; it does not implement purchase-order verification or a supplier provenance service.
+Reading an EK is already automated. HookOS discovers the keys, and `tink-attest inspect` can print a local TPM report without contacting fleetd. `mise run attest:approve <serial>` formats a waiting claim as candidate inventory entries. The missing convenience is a trusted receiving workflow that joins those observations to the machine in front of us.
 
-Unknown machines and planned devices without an approved binding wait as claims. A claim supplies candidate hashes for comparison and authorizes nothing. Approving those hashes from the claim alone defeats the independent receiving check.
+The strongest practical improvement is to make receiving a single guided operation. A proposed receiving tool boots a trusted local image, collects the EKs and disk identity, and asks the owner to check the chassis label. It exports a report, perhaps with a QR code or short comparison digest, to an authenticated workstation that prepares the inventory pull request. The receiving report stays in private records; the pull request carries the required binding fields and an evidence reference. Atlantis remains the writer of the approved NetBox binding.
 
-fleetd accepts a binding only when NetBox's changelog attributes its latest change to the configured Terraform user. This gives an accountable writer, not tamper-proof provenance. NetBox administrators and the Terraform credential remain trusted. The Terraform user can manage permissions, including its own.
+This removes hash transcription without relaxing admission. The independent observation comes from the receiving process and its trusted console or report transfer. A QR code generated from a remote pending claim alone adds no trust. Pending claims currently precede proof of TPM possession, so even calling one an attested machine would overstate the evidence.
 
-The [inventory contract](inventory.md#approved-tpm-keys) defines the binding. [NetBox permissions](../platform/netbox.md#users-and-tokens) define who can change it.
+A remote pairing flow could also collect possession and boot evidence while withholding credentials, then ask the owner to confirm a session-bound code on a trusted console. That requires a new enrollment-only protocol: the present verifier requires the approved binding before it challenges the TPM. The console confirmation must identify the exact candidate and key set, not whichever claim happens to be pending for that serial.
 
-fleetd reads NetBox over HTTP on the Anchor management network. Binding provenance therefore also trusts that network path; the changelog is not an end-to-end signed record.
+A constrained first-boot enrollment mode is another possible design. The owner opens a short enrollment window for one expected machine on an isolated receiving connection; the system requires a manufacturer-certified TPM, verifies possession, pins its EKs and closes enrollment. That is trust on first use: it accepts the risk that an attacker can substitute a machine during that window. Port checks, short expiry and owner confirmation reduce exposure but do not recreate independent chassis-to-key evidence. This policy is not implemented today.
 
-## What the checks establish
+Supplier-signed platform records can avoid a local scan when they bind the chassis identity to the TPM and we validate their issuer and contents. A TPM manufacturer's EK certificate alone is insufficient. The [TCG platform-certificate profile](https://www.trustedcomputinggroup.org/resources/documents/tcg-platform-certificate-profile) defines the richer relationship, but we cannot assume every purchased machine supplies it. AMT can help boot and view a receiving program, but this fleet has no implemented AMT API for reading an authenticated chassis-to-EK binding. Its current HTTP digest transport also needs review before treating remote console receiving as an independently protected channel.
 
-Secure Boot checks signatures before execution. Measured boot records events in platform configuration registers (PCRs). fleetd verifies a fresh TPM quote and replays the event log against those registers. Credential activation binds the attestation key to the EK's TPM.
+The first improvement to make is automated receiving and PR preparation. Changing the enrollment trust policy should be a separate decision from removing Tinkerbell.
 
-The intake policy requires the HookOS signing authority. The accepted authority policy does not impose an exact boot-image version: `boot_applications` is empty. A correctly signed older image can therefore remain acceptable. Measurement also depends on firmware measuring the relevant events correctly.
+## Which security gaps matter to this decision
 
-The Local Device Identity (LDevID) certificate identifies a TPM key. A locally certified attestation key (LAK) signs later boot evidence. Neither certificate alone authorizes a wipe. Admission checks the declaration and lifecycle state separately.
+The controls make the most sense against two everyday risks: provisioning the wrong machine or disk, and letting an untrusted network client claim a legitimate machine's identity. Inventory checks, disk serial matching, approved EKs and fresh TPM evidence address those risks. Removing Tinkerbell while retaining those checks need not weaken that admission model.
 
-The signed network report protects the reported observation. Link Layer Discovery Protocol (LLDP) does not authenticate the switch. Disk serial matching limits accidental selection of the wrong disk; it does not cryptographically authenticate storage hardware.
+There are also concrete gaps worth prioritizing. Tink authenticates its server to the agent, but the agent has no client credential and identifies itself by MAC. A client can forge progress or completion reports. fleetd corroborates retirement with AMT power state where available, but an off machine is not proof of an erased disk. An authenticated replacement executor could improve this; merely issuing the same work manually over AMT does not authenticate the disk result.
 
-The install code reaches the approved TPM through credential activation. Talos later presents the unwrapped code over HTTPS without a fresh TPM proof. A complete response consumes it; an incomplete response permits retry until expiry. Theft before consumption remains a risk.
+The boot policy accepts signing authorities without an exact-image version floor, so an older accepted signed image can pass. The install code becomes a bearer secret after TPM unwrapping, and acknowledging its delivery does not prove Talos persists the configuration. Power loss in that gap requires a new provision. These are separate image-policy and delivery issues; choosing a workflow engine does not resolve them.
 
-Consumption follows TCP acknowledgement, not proof that Talos persists the configuration. Power loss in that gap requires a new provision.
+Management-plane compromise is a broader limit. fleetd, the NetBox administrators and the Terraform credential can influence admission. NetBox's HTTP management path also needs trust. Shared age keys and vault access connect cluster administration to management secrets, so running spore outside folly provides recovery independence without complete security isolation. A YubiKey limits private-key extraction but cannot prevent a compromised authorized host from requesting signatures.
 
-Workers provisioned by fleetd receive per-node bootstrap tokens. fleetd checks the requested node name before approving the initial kubelet certificate, then deletes the token. Compromise of fleetd's approval credential bypasses that application-level restriction.
+Finally, stopping new issuance does not end every existing session. A cordon leaves running workloads in place, issued SPIRE credentials need to expire, and a saved disk can retain a kubelet certificate. Withdrawal safeguards and other registration owners can delay removal too. Those limits require a credential and incident-response policy under either provisioning approach.
 
-SPIRE issues SPIFFE Verifiable Identity Documents (SVIDs) for registered identities. Its node attestors do not repeat fleetd's boot-policy evaluation. Workload selectors and resource authorization remain separate checks. [The detailed design](folly-design.md) maps these controls to source and tests.
-
-## Off-the-shelf building blocks and tradeoffs
-
-PXE, UEFI HTTP boot and BMC control occupy different layers. Firmware and management controllers are not necessarily open source. The open-source stack composes these interfaces with inventory and workflow services. The comparisons below assess what each building block contributes, not a benchmark of competing products.
-
-| Approach | Useful capability | Cost or missing assurance | Position at folly |
-| --- | --- | --- | --- |
-| Raw PXE with DHCP/TFTP and an installer | Broad network-boot support and a small initial service set. | Boot selection alone supplies no independent chassis-to-TPM binding or per-device secret-release policy. Scripts must supply lifecycle decisions. | PXE starts the current path; signed iPXE and HookOS add boot verification. |
-| iPXE with HTTPS and image verification | Scriptable boot, authenticated server transport and signed-image enforcement when configured. | Embedded trust roots, build options and scripts need maintenance. Server authentication does not authenticate the client machine. | Folly builds signed iPXE; fleetd supplies device admission. |
-| Native UEFI HTTP/HTTPS boot | Firmware fetches the boot image directly; compatible machines can avoid an iPXE stage. | Firmware support, certificate provisioning and recovery need target-hardware validation. HTTP alone provides no TLS protection; Secure Boot remains a separate check. | An alternative boot transport, not the declared folly path. |
-| BMC or AMT power and boot control | Remote reset and boot selection when the installed OS cannot respond. | A privileged management interface adds credentials, firmware and network exposure. Control of power does not prove an acceptable boot. | Rufio drives AMT for lifecycle actions. |
-| Stock Tinkerbell workflows | Reusable boot, power and installation orchestration. | A workflow needs an admission decision and trusted inputs. Merely completing a workflow establishes no independent receiving provenance. | fleetd creates the authorized workflow and gates configuration delivery. |
-| Direct Talos installation | A shorter installation path for a Talos-only fleet. | Receiving, remote recovery, authorization and identity withdrawal still need owners. | An operational alternative; it does not supply the current fleet contract. |
-| NetBox plus fleetd policy | Joins declared inventory, observed evidence and lifecycle actions in an auditable path. | Custom security code, policy maintenance, privileged credentials and integration tests become the owner's responsibility. | The lab's integration layer over the reusable components. |
-
-[iPXE cryptography](https://ipxe.org/crypto) documents its configurable transport and image checks. [UEFI network protocols](https://uefi.org/specs/UEFI/2.11/24_Network_Protocols_SNP_PXE_BIS.html) describe firmware HTTP boot. [Rufio](https://tinkerbell.org/docs/v0.22/services/rufio/) documents power and boot control. These capabilities do not certify the lab's configuration.
-
-## Security and availability tradeoffs
-
-| Decision | Benefit | Accepted cost |
-| --- | --- | --- |
-| Independent EK approval before first admission | A copied serial or MAC cannot alone win enrollment. | Receiving and board replacement need trustworthy human evidence. |
-| Signing-authority policy | Signed releases can change without a PCR allow list for every image. | No exact-image version floor; an older accepted image remains possible. |
-| TPM delivery followed by a bearer config code | Works with Talos's config-fetch interface. | The unwrapped code needs protection until consumption or expiry. |
-| One fleetd process and an external anchor | Admission and installation share policy; boot services remain available while folly is down. | spore and fleetd concentrate authority. Worker token creation still requires the Kubernetes API. |
-| YubiKey device-identity signer | The private signing key stays outside ordinary host storage. | An authorized compromised host can still request signatures. |
-| Refuse admission when inventory is unavailable | Missing evidence cannot authorize a new install. | A NetBox outage blocks provisioning. |
-| Preserve registrations on malformed or unexpectedly broad withdrawal | Reduces accidental fleet-wide loss of identity. | Stale access can persist during faults until the owner intervenes. |
-| Cordon on an authenticated worker policy failure | Prevents new scheduling without automatically terminating workloads. | Existing pods continue; cordon is not network isolation. |
-
-Explicit wipe and retirement actions have their own authorization paths. The attestation gates above describe provisioning; they are not a claim that every destructive action requires a successful boot check.
-
-Recovery outside folly does not imply security isolation from either cluster. Shared operator age keys and vault access let cluster administrators reach management secrets. The [detailed threat model](folly-design.md#7-threat-model) describes that path to signing and binding authority.
-
-## How much confidence the evidence supports
-
-Source review establishes intended control flow. Simulator tests exercise protocol rejection and state transitions. Integration tests exercise cooperating services. A hardware fixture checks a specific input; it is not current evidence from a running node.
-
-| Review question | Evidence to inspect | Remaining acceptance work |
-| --- | --- | --- |
-| Can a substitute TPM enroll? | Binding and intake tests under `apps/fleetd/attest/`, plus the independent receiving record. | Challenge first admission on target hardware with the wrong EK. |
-| Can replay or a spent code release configuration? | Attestation simulator cases and `apps/fleetd/fleet/install_test.go`. | Exercise interrupted delivery and recovery on the actual boot path. |
-| Does a machine join under its own name? | `apps/fleetd/fleet/joincsr.go` and the cluster's bootstrap approval policy. | Attempt a mismatched node name and observe rejection. |
-| Does retirement end access? | SPIRE export tests, registration applier tests and the retirement workflow. | Observe both node attestors, all registration owners and credential expiry. |
-| Can management recover independently? | Anchor configuration and provisioning runbooks. | Restore the management dependencies while folly is unavailable. |
-
-Withdrawal removes fleet-owned registrations. Another registration owner can retain a withdrawn agent; explicit retirement bans matching agents on sight, subject to the bulk-withdrawal safeguard. Issued SVIDs persist until expiry. A disk copy can retain a kubelet client certificate that Kubernetes cannot revoke individually. Wipe completion and canary checks do not prove physical sanitization or erase backups.
-
-The [threat model](folly-design.md#7-threat-model) records assumptions and attack boundaries. The [acceptance criteria](folly-design.md#8-failure-behavior-and-acceptance) require deliberate rejection tests and a separate readiness observation. A production assurance claim needs those observations alongside the repository evidence.
+The [detailed threat model](folly-design.md#7-threat-model) maps these claims to source, and its [acceptance criteria](folly-design.md#8-failure-behavior-and-acceptance) distinguish tests from hardware evidence. The decision is whether we want automated lifecycle recovery enough to maintain its machinery, and which first-enrollment authority we are willing to trust.

@@ -16,36 +16,39 @@ beforeAll(async () => {
   html = renderBrief(page, revision);
 });
 
-test('preserves every lifecycle cell in accessible disclosure elements', () => {
-  const lifecycle = page.html.match(/<tbody>([\s\S]*?)<\/tbody>/)![1];
-  const cells = [...lifecycle.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)];
-  expect(cells.length).toBeGreaterThan(0);
-  expect([...html.matchAll(/<details class="stage"/g)]).toHaveLength(
-    cells.length / 3,
-  );
-  for (const cell of cells) expect(html).toContain(cell[1]);
+test('preserves every narrative paragraph and comparison cell', () => {
+  const contents = [
+    ...page.html.matchAll(/<(p|td|th)\b[^>]*>([\s\S]*?)<\/\1>/g),
+  ];
+  expect(contents.length).toBeGreaterThan(0);
+  for (const [, , content] of contents) {
+    const resolved = content
+      .replaceAll(/(href|src)="(\/[^"]*)"/g, '$1="https://wiki.lolwtf.ca$2"')
+      .replaceAll(
+        'https://wiki.lolwtf.ca/assets/purchase-to-identity.svg',
+        'purchase-to-identity.svg',
+      );
+    expect(html).toContain(resolved);
+  }
+  expect(html).not.toContain('<details class="stage"');
   expect(html).not.toContain('<script');
 });
 
-test('keeps canonical headings, caveats and wiki links', () => {
+test('keeps canonical headings, evidence links and responsive table labels', () => {
   for (const heading of page.headings)
     expect(html).toContain(`id="${heading.id}"`);
-  expect(html).toContain(
-    'does not establish complete supply-chain integrity or continuous runtime integrity',
-  );
-  expect(html).toContain('Power loss in that gap requires a new provision');
   expect(html).toContain('https://wiki.lolwtf.ca/runbooks/provision-a-node/');
   expect(html).not.toMatch(/(?:href|src)="\//);
   expect(html).toContain('src="purchase-to-identity.svg"');
   expect(html).toContain(
     `/blob/${revision}/docs/reference/purchase-to-identity.md`,
   );
-  expect(html).toContain('data-label="Accepted cost"');
+  expect(html).toContain('data-label="How fleetd uses it"');
 });
 
-test('refuses a misleading source revision or missing lifecycle structure', () => {
+test('refuses a misleading source revision or missing section structure', () => {
   expect(() => renderBrief(page, 'main')).toThrow('Invalid source revision');
-  expect(() =>
-    renderBrief({ ...page, html: '<p>No stages</p>' }, revision),
-  ).toThrow('lifecycle table');
+  expect(() => renderBrief({ ...page, headings: [] }, revision)).toThrow(
+    'section headings',
+  );
 });
