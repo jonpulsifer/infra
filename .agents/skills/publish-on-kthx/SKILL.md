@@ -37,7 +37,13 @@ printf '%s\n' <name> | kthx rm  # deletes the site and frees the name
 - A site someone else owns: `kthx deploy` and `kthx rm` ask first, and with no
   terminal they refuse with `NOT_YOURS`. Pass `--force` only when the owner
   asked for the change. Ownership is a courtesy, not a lock.
-- `RACED` means another deploy rewrote the site while yours ran. Deploy again.
+- `kthx deploy` syncs the entire directory and deletes remote files absent from
+  it. To edit an existing site, start from its complete source, including its
+  `SKILL.md` if it serves one. Compare the files before deploying; a downloaded
+  page alone is not the site's source. If a partial deploy removes a file, use
+  `docs/runbooks/restore-a-site.md` to recover its prior object version.
+- `RACED` means another deploy rewrote the site while yours ran. Compare its
+  current files with your source before deploying again.
 - There is no rollback. `docs/runbooks/restore-a-site.md` copies files back
   from the bucket's noncurrent versions, for 30 days.
 - A deploy shows within about 10 seconds, and is not atomic.
