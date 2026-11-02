@@ -605,16 +605,18 @@ resource "unifi_firewall_policy" "bootstrap_block_lb" {
 
 # A node netboots and runs its Tinkerbell Workflows on the Kubernetes network,
 # so Lab reaches spore's boot services on its bootstrap address. TCP: 80 for
-# nginx's UKI and HookOS, 443 for fleetd's enroll.lolwtf.ca, 7080 for Smee's
-# per-MAC iPXE script and 42113 for the Tink server that HookOS's agent polls.
-# UDP: 69 for the signed iPXE over TFTP, 123 for chrony, and 514 for HookOS's
-# syslog. Lab and
+# nginx's UKI and HookOS, 443 for fleetd's enroll.lolwtf.ca and 42113 for the
+# Tink server that HookOS's agent polls. UDP: 69 for the signed iPXE over
+# TFTP, 123 for chrony, and 514 for HookOS's syslog, which rsyslog on spore
+# receives. Smee is off (nix/services/tinkerbell.nix), so its script port
+# 7080 is not here; add it back with Smee. DHCP needs no rule: the gateway
+# relays it onto the bootstrap VLAN itself (k8s.tf). Lab and
 # Bootstrap are custom zones, so the controller creates each reply rule. A reply
 # rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
 # (tftp-single-port in nix/services/talos-boot.nix).
 resource "unifi_firewall_policy" "kubernetes_to_boot" {
   for_each = {
-    tcp = "80,443,7080,42113"
+    tcp = "80,443,42113"
     udp = "69,123,514"
   }
 

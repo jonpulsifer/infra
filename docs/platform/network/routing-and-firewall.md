@@ -34,13 +34,13 @@ Quarantine cordons the node and restricts its identity. It does not move the nod
 
 `K8S_DHCP_CIDR` in `clusters/folly/config/cluster-topology.json` excludes static node addresses. Its pool serves firmware PXE, HookOS and Talos before the first configuration applies.
 
-The DHCP offer supplies:
+The gateway relays the Kubernetes network's DHCP to [Kea](../nixos/kea.md) on spore's bootstrap address (`dhcp_relay` in `k8s.tf`); the gateway's own DHCP for the network stays declared and disabled there, the rollback. Kea's offer supplies:
 
 - The anchors' DNS addresses. CoreDNS resolves `enroll.lolwtf.ca` to `SPORE_BOOTSTRAP_IP`.
 - `SPORE_BOOTSTRAP_IP` as the TFTP server.
-- The signed iPXE boot file, through `boot_option` in `bootstrap.tf`.
+- The signed iPXE boot file.
 
-[Talos boot](../nixos/talos-boot.md) serves iPXE. [Kea](../nixos/kea.md) on spore holds the same offer, and takes over when the Kubernetes network relays its DHCP to spore's bootstrap address in `k8s.tf`.
+[Talos boot](../nixos/talos-boot.md) serves iPXE. The relay is gateway-originated traffic onto the bootstrap VLAN, so no policy admits it.
 
 ### Bootstrap network
 
