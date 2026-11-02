@@ -378,7 +378,7 @@ A node retired mid-install never fetches its config: [Config](#config) drops it.
 Once the retirement Workflow succeeds, before the device goes `offline`, fleetd takes the node out
 of the cluster (`fleet/drain.go`). The Workflow's state is the agent's report over a channel in
 which the agent holds no credential, so with a BMC fleetd first needs the Rufio Machine's
-`status.power` to read `off` (`fleet/bmcjob.go`): it journals the wait once, and a `danger` line
+`status.powerState` to read `off` (`fleet/bmcjob.go`): it journals the wait once, and a `danger` line
 after `PowerOffWait`, 15 minutes, while it keeps reading the BMC. Without a BMC it proceeds, and the
 journal, the `offline` comment and the audit line say the success is uncorroborated. It cordons the node and evicts each pod bound to it but a
 DaemonSet's, a static pod's mirror and one already terminating, as `kubectl drain` does. An
