@@ -25,6 +25,7 @@ sections:
           - apps/netbench.md
           - path: apps/fleetd.md
             children: [apps/fleetd/lifecycle.md, apps/fleetd/attestation.md, apps/fleetd/operations.md]
+          - apps/keylime.md
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform
