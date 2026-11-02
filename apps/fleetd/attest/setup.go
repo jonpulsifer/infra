@@ -41,9 +41,9 @@ func loadCA(chainPath string, validity time.Duration) (*CA, error) {
 // the handlers.
 func FromEnv(log *slog.Logger) (*Server, error) {
 	site := env("ATTEST_SITE", "folly")
-	// 90 days: the running node renews from 30 days out, and a machine
+	// A year: the running node renews from 30 days out, and a machine
 	// that stops renewing loses its identity, which is the revocation.
-	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "2160h"))
+	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "8760h"))
 	if err != nil {
 		return nil, fmt.Errorf("ATTEST_CERT_VALIDITY: %w", err)
 	}

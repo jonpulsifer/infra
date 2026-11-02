@@ -77,7 +77,7 @@ Unread worker configurations expire after two hours. Control-plane configuration
 
 ## Check the running node
 
-On a running node, `tpm-reattest` sends a LAK-signed quote each day. This check needs no approved binding. Certificate renewal starts 30 days before expiry. A `planned` device cannot renew.
+On a running node, `tpm-reattest` sends a LAK-signed quote each hour. This check needs no approved binding. Certificate renewal starts 30 days before expiry. A `planned` device cannot renew.
 
 An authenticated boot-policy failure quarantines a worker, blocks renewal and requests a cordon through `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`.
 

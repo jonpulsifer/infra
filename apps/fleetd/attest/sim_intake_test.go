@@ -375,7 +375,7 @@ func TestABindingChangeReplacesTheTPM(t *testing.T) {
 }
 
 // Once a node runs, neither a reboot into HookOS nor a renewal nor the
-// daily check needs its binding: an unbound active node keeps working on
+// hourly check needs its binding: an unbound active node keeps working on
 // the pins its passes proved.
 func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 	f := newFakeNetBox(t)
@@ -395,7 +395,7 @@ func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 		t.Fatalf("renewal: %v", err)
 	}
 	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
-		t.Fatalf("daily check: %v", err)
+		t.Fatalf("hourly check: %v", err)
 	}
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("reboot into HookOS: %v", err)
@@ -470,7 +470,7 @@ func TestABoundPassPinsTheBindingAlone(t *testing.T) {
 }
 
 // A planned device gets its identity only from an intake pass: a renewal
-// is refused and journaled, and quarantines nothing. The daily check, which
+// is refused and journaled, and quarantines nothing. The hourly check, which
 // issues nothing, still runs, and an active node renews with no binding.
 func TestRenewalRefusedWhilePlanned(t *testing.T) {
 	f := newFakeNetBox(t)
@@ -489,7 +489,7 @@ func TestRenewalRefusedWhilePlanned(t *testing.T) {
 	}
 	waitFor(t, "the renewal journal entry", func() bool { return f.journaled("refused a renewal while the device is planned") })
 	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
-		t.Fatalf("daily check while planned: %v", err)
+		t.Fatalf("hourly check while planned: %v", err)
 	}
 	f.set(simSerial, func(d *fakeDevice) {
 		d.Status = "active"

@@ -14,7 +14,7 @@
 // expires within -renew-before, it has the service certify the LDevID key
 // again on the strength of a LAK-signed quote, stores the new certificate in
 // NV and restarts the pods -restart-selector picks on the node. When none is
-// due, with -check (the default), it runs the daily check: the same LAK-signed
+// due, with -check (the default), it runs the hourly check: the same LAK-signed
 // quote and event log, which the service judges and records, and no new
 // certificate. It exits 0 when the node has no LDevID.
 //

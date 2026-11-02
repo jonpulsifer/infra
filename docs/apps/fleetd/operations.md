@@ -11,7 +11,7 @@ fleetd exposes device, administration and monitoring endpoints. Use this page to
 | --- | --- | --- |
 | Device flow | `https://enroll.lolwtf.ca/attest/v1/attest` and the session routes under it | HookOS on a netbooting machine, at spore's bootstrap address |
 | Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` | A node's first boot from disk |
-| LDevID and verdict lookups, renewal and daily check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
+| LDevID and verdict lookups, renewal and hourly check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
 | Webhook and metrics | `http://<SPORE_IP>:8446/webhook`, `/healthz`, `/metrics` | NetBox's event rule and the Anchor network |
 | Admin API | `https://spore.<tailnet>:8445`, `GET /machines` | Tailnet logins in `ATTEST_APPROVERS` |
 | NetBox | A device's `desired_action` and `status` | The owner |
@@ -87,8 +87,8 @@ The disk check trusts the serial that the disk reports. Duplicate serials cause 
 | `FleetNodeBootedHookOSAfterInstall` | A planned device attested from HookOS after its provision succeeded, so its firmware did not boot the disk | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestQuarantined` | A node's newest verdict is a quarantine | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestWaitingForApproval` | An intake waits for an approved EK binding | [Provision a node](../../runbooks/provision-a-node.md#approve-a-machines-eks) |
-| `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's daily quote or renewal fails | [Add a TPM node to SPIRE](../../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
-| `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A daily check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
+| `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's hourly quote or renewal fails | [Add a TPM node to SPIRE](../../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
+| `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A hourly check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
 | `KubeletCSRPending` | A kubelet's first certificate request has waited an hour | [Install Talos on a node](../../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate) |
 | `NodeClientApprovalBindingRestored` | The controller manager's approval binding has subjects again, as after a Talos Kubernetes upgrade, or fleetd cannot read it | Reconcile Flux's `tinkerbell-access` |
 

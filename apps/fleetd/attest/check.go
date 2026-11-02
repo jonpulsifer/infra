@@ -91,7 +91,7 @@ func (v *Verifier) notePCR0(rec *Record, seen *pcr0Seen, known bool) {
 	}
 }
 
-// check is the daily check: a running node's quote judged by the renewal
+// check is the hourly check: a running node's quote judged by the renewal
 // policy, recorded as a pass or a quarantine, with nothing issued. The proof
 // comes first. The LAK on file must sign the quote over this session's
 // nonce, and certify with the same nonce the LDevID key on file; until both
@@ -170,7 +170,7 @@ func (v *Verifier) check(ctx context.Context, s *session, req protocol.RenewEvid
 	return protocol.Renewed{Checked: true, AttestedAt: now}, nil
 }
 
-// checkCount is how many daily checks of a machine ended in one verdict
+// checkCount is how many hourly checks of a machine ended in one verdict
 // since the service started, and when the newest did.
 type checkCount struct {
 	N    uint64
@@ -178,7 +178,7 @@ type checkCount struct {
 }
 
 // failInPlace records a control-plane node's failed running quote, from a
-// daily check or a renewal, after the TPM's proof: the reason goes on the
+// hourly check or a renewal, after the TPM's proof: the reason goes on the
 // record and on NetBox's attest_verdict as failed-no-quarantine, the device
 // is journaled and talos_attest_failed_no_quarantine alerts, and its status
 // and LDevID stay. Quarantining it would revoke the identity of the node
@@ -216,7 +216,7 @@ func (v *Verifier) failInPlace(ctx context.Context, s *session, err error, check
 	return err
 }
 
-// countCheck counts a daily check's verdict for the machine.
+// countCheck counts a hourly check's verdict for the machine.
 func (v *Verifier) countCheck(machine, verdict string) {
 	now := v.Now()
 	v.mu.Lock()
@@ -230,7 +230,7 @@ func (v *Verifier) countCheck(machine, verdict string) {
 	v.checks[[2]string{machine, verdict}] = c
 }
 
-// Checks returns the daily checks' counts by machine and verdict.
+// Checks returns the hourly checks' counts by machine and verdict.
 func (v *Verifier) Checks() map[[2]string]checkCount {
 	v.mu.Lock()
 	defer v.mu.Unlock()

@@ -6,7 +6,7 @@ status: live
 
 fleetd controls how a machine becomes a folly Kubernetes node. It runs on spore and uses NetBox for device state and owner requests.
 
-It checks the machine's identity, authorizes installation, and checks the running node each day. [Tinkerbell](../platform/nixos/tinkerbell.md) runs the installation actions.
+It checks the machine's identity, authorizes installation, and checks the running node each hour. [Tinkerbell](../platform/nixos/tinkerbell.md) runs the installation actions.
 
 ## Start here
 
@@ -25,7 +25,7 @@ It checks the machine's identity, authorizes installation, and checks the runnin
 4. fleetd issues device certificates and authorizes an eligible installation.
 5. Tinkerbell wipes the declared disk and installs Talos.
 6. Talos fetches its configuration once. fleetd then marks the device `active`.
-7. The running node sends a signed boot check each day.
+7. The running node sends a signed boot check each hour.
 
 The device certificates are the Local Device Identity (LDevID) and Local Attestation Key (LAK) certificates. The LAK signs later boot checks.
 

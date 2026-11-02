@@ -104,7 +104,7 @@ func run(log *slog.Logger) error {
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute,
 		}
 	}
-	// The DevID listener, which every node's renewal and daily check reach,
+	// The DevID listener, which every node's renewal and hourly check reach,
 	// and the others bind first and on their own: the boot listener's
 	// certificate or address never takes them down.
 	listeners := []struct {

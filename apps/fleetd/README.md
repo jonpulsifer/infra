@@ -37,7 +37,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_CA_CHAIN` | `/etc/fleetd/devid-ca-chain.pem` | The DevID CA first, then each issuer up to the self-signed root |
 | `ATTEST_CA_BUNDLE` | none | Every issuing CA of the site. A leaf another CA issued verifies only when its CA is here, and each must chain to the chain's root |
 | `ATTEST_SITE` | `folly` | The O of every certificate, and the site each audit line names |
-| `ATTEST_CERT_VALIDITY` | `2160h` | LDevID and LAK lifetime, capped at the CA's |
+| `ATTEST_CERT_VALIDITY` | `8760h` | LDevID and LAK lifetime, capped at the CA's |
 | `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the directory of event-log policy profiles, one `<name>.yaml` each |
 | `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, waiting claims and `verdicts.jsonl`, which rotates once to `verdicts.jsonl.1` at 64 MiB |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
@@ -95,7 +95,7 @@ dropped. So a request that proves nothing cannot end a node's open renewal.
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
 | `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | On the DevID listener only, as are the two routes below. The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
 | `GET /verdict/{serial}` | `{status, attested_at, node, uuid, rsa_ek_cert, updated_at, class, site, consumed_at, ldevid_serial}`, NetBox's when it answers |
-| `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the daily check, from the running node |
+| `POST /v1/renew`, `POST /v1/renew/{session}/evidence` | The renewal, and with `"check": true` the hourly check, from the running node |
 
 ## Approved EK binding
 
@@ -126,7 +126,7 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   algorithm the binding leaves out, journaled, so neither a removed TPM's EK nor an extra EK the
   pass sent stays a pin. Without a binding only an empty pin is written. A replaced TPM needs a
   change to the binding in the nodes file.
-- A renewal and the daily check prove the LAK on file and read no EK. A `planned` device gets no
+- A renewal and the hourly check prove the LAK on file and read no EK. A `planned` device gets no
   renewal, since its identity comes from an intake pass; it is refused and journaled. A HookOS
   attestation of a device past `planned` without a binding is held to the EK hashes fleetd's own
   record proved at its intake pass, and gets no install code. `ek_hash` and `ek_hash_ecc` only note

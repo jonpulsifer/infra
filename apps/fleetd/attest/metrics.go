@@ -80,7 +80,7 @@ func (v *Verifier) Metrics() (string, error) {
 			live = append(live, r)
 		}
 	}
-	head("talos_attest_last_checked_timestamp_seconds", "gauge", "When each running node's quote last passed, from the daily check or a renewal.")
+	head("talos_attest_last_checked_timestamp_seconds", "gauge", "When each running node's quote last passed, from the hourly check or a renewal.")
 	for _, r := range live {
 		if !r.CheckedAt.IsZero() {
 			fmt.Fprintf(&b, "talos_attest_last_checked_timestamp_seconds{machine=%q} %d\n", r.Machine, r.CheckedAt.Unix())
@@ -104,7 +104,7 @@ func (v *Verifier) Metrics() (string, error) {
 		}
 		fmt.Fprintf(&b, "talos_attest_failed_no_quarantine{machine=%q} %d\n", r.Machine, val)
 	}
-	head("talos_attest_checks_total", "counter", "Daily checks since the service started, by machine and verdict: pass, quarantine, or refused before the TPM's proof.")
+	head("talos_attest_checks_total", "counter", "Hourly checks since the service started, by machine and verdict: pass, quarantine, or refused before the TPM's proof.")
 	checks := v.Checks()
 	checkKeys := make([][2]string, 0, len(checks))
 	for k := range checks {
@@ -118,7 +118,7 @@ func (v *Verifier) Metrics() (string, error) {
 	}
 	// A counter born at its first refusal shows no increase() to alert on,
 	// so the time of the newest one is exported beside it.
-	head("talos_attest_check_last_timestamp_seconds", "gauge", "When each machine's newest daily check with each verdict ended, since the service started.")
+	head("talos_attest_check_last_timestamp_seconds", "gauge", "When each machine's newest hourly check with each verdict ended, since the service started.")
 	for _, k := range checkKeys {
 		fmt.Fprintf(&b, "talos_attest_check_last_timestamp_seconds{machine=%q,verdict=%q} %d\n", k[0], k[1], checks[k].Last.Unix())
 	}
