@@ -11,7 +11,7 @@
 #   this address (./coredns-sinkhole.nix), and a node on the Kubernetes network reaches it through
 #   the gateway. The Tink server presents the same certificate on 42113 (./tinkerbell.nix).
 # - HTTP on port 8444 for folly's nodes and pods (the firewall admits the node and pod CIDRs): the
-#   DevID lookups, the renewal and the daily check.
+#   DevID lookups, the renewal and the hourly check.
 # - HTTP on port 8446 of the Anchor network for NetBox's event-rule webhook, and /metrics.
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
 #
@@ -412,7 +412,7 @@ in
     # fleetd's /metrics, for node-exporter's textfile collector (../profiles/anchor.nix), since its port
     # admits only the Anchor network. A fleetd that does not answer leaves the file empty, so its
     # series go absent. fleetd_devid_serving probes the DevID listener on its own, since every
-    # node's renewal and daily check reach it there.
+    # node's renewal and hourly check reach it there.
     systemd.services.fleetd-metrics = {
       description = "Export fleetd's metrics through node-exporter";
       serviceConfig = {

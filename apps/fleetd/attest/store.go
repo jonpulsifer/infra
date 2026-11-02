@@ -73,7 +73,7 @@ type Record struct {
 	Boot      bootFacts `json:"boot,omitzero"`
 	UpdatedAt time.Time `json:"updated_at"`
 	// CheckedAt is the running node's newest passing quote,
-	// from a daily check or a renewal.
+	// from a hourly check or a renewal.
 	CheckedAt time.Time `json:"checked_at,omitzero"`
 	// PCR0Changed is whether that quote's PCR 0 differs from the one NetBox
 	// holds for the BIOS version the node reported.
@@ -85,7 +85,7 @@ type Record struct {
 
 	// unquarantined marks the record of such a failure for NetBox.
 	unquarantined bool
-	// check marks a daily check's pass, which NetBox records as a verdict
+	// check marks a hourly check's pass, which NetBox records as a verdict
 	// and a time without touching the certificate fields; pcr0 is what the
 	// quote showed for PCR 0. Neither is kept on disk.
 	check bool

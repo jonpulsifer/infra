@@ -1,6 +1,6 @@
 //go:build cgo
 
-// The daily check on the software TPM: a running node's LAK-signed quote,
+// The hourly check on the software TPM: a running node's LAK-signed quote,
 // judged by the renewal policy, recorded in NetBox as a verdict and a time,
 // with nothing issued. Each case below says whether it may quarantine.
 package attest
@@ -290,7 +290,7 @@ func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
 // folly's only control plane would move the cluster's API to the bootstrap
 // VLAN. Its failure is recorded, journaled and alerts; status and LDevID stay.
 func TestControlPlaneFailsInPlace(t *testing.T) {
-	t.Run("daily check", func(t *testing.T) {
+	t.Run("hourly check", func(t *testing.T) {
 		h, f := activeNode(t)
 		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
 		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities

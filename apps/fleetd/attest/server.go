@@ -178,7 +178,7 @@ func (s *Server) localDevID(serial string) (protocol.DevID, bool, error) {
 // liftedDevID is the DevID the service keeps for a machine it quarantined,
 // once NetBox answers that the owner cleared the quarantine: the device is
 // known, blocked by no status, and its attest_verdict is no quarantine. It
-// gives the node its key blobs and opens a renewal or a daily check, whose
+// gives the node its key blobs and opens a renewal or a hourly check, whose
 // LAK signature, LDevID certification and boot policy decide before anything
 // is written; the record stays quarantined until such a check
 // passes. Without NetBox no owner lifts a quarantine, so there is none.
@@ -294,7 +294,7 @@ func (s *Server) status(ctx context.Context, serial string) (protocol.Status, bo
 }
 
 // sameAttestation is whether the service's record and NetBox's verdict stand
-// on the same LDevID: by its serial when both name one, since a daily check
+// on the same LDevID: by its serial when both name one, since a hourly check
 // moves attested_at without issuing, else by attested_at to the second, as
 // NetBox keeps it.
 func sameAttestation(mine, nb protocol.Status) bool {

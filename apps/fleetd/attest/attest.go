@@ -103,7 +103,7 @@ type session struct {
 	renew   *Record
 	akBlobs protocol.Blobs
 	ldBlobs protocol.Blobs
-	// check is a renewal session opened for the daily check, which issues
+	// check is a renewal session opened for the hourly check, which issues
 	// nothing; ldevidIssued is the LDevID on file's CA-signed issue time;
 	// devidFiles are the verified DevID's files, set when the store holds
 	// no record under the machine's name or holds it quarantined; lifted is
@@ -972,7 +972,7 @@ func confirmSigned(s *session, raw []byte) error {
 	return nil
 }
 
-// RenewStart opens a renewal, or with check the daily check: a quote nonce
+// RenewStart opens a renewal, or with check the hourly check: a quote nonce
 // for the machine whose LAK is on file. The caller resolves the DevID, from
 // the store.
 func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID, check bool, remote string) (protocol.RenewStart, error) {
@@ -987,7 +987,7 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.lifecycle()))
 	}
 	// A planned device gets its identity from an intake pass against its
-	// approved binding, never from a renewal. The daily check issues
+	// approved binding, never from a renewal. The hourly check issues
 	// nothing and still runs.
 	if !check && strings.EqualFold(m.Status, statusPlanned) {
 		if v.NetBox != nil && m.NetBoxID != 0 {
@@ -1318,7 +1318,7 @@ func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machin
 	return v.quarantine(ctx, m, claim, eks, err, false)
 }
 
-// quarantine is refuse, with check marking a daily check's quarantine.
+// quarantine is refuse, with check marking a hourly check's quarantine.
 func (v *Verifier) quarantine(ctx context.Context, m *Machine, claim protocol.Machine, eks []VerifiedEK, err error, check bool) error {
 	reason := reasonOf(err)
 	if reason == reasonInternal || reason == reasonSession {

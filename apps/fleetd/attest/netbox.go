@@ -501,7 +501,7 @@ func plain(s string) string {
 // device's custom fields before the machine gets its answer. Only a pass
 // whose session proved the EKs writes the pins: the approved binding it
 // matched, or else only an empty pin, and only a pass refreshes
-// sku and bios_version. A daily check's pass writes only the verdict, its
+// sku and bios_version. A hourly check's pass writes only the verdict, its
 // time and what the quote showed for PCR 0. A quarantine writes only its
 // verdict, which revokes the identity and which fleetd cordons the
 // node on; the status stays. A pass leaves the status alone too. The
@@ -524,7 +524,7 @@ func (n *NetBox) Record(ctx context.Context, r Record) error {
 		fields["attest_verdict"] = fmt.Sprintf("%s: %s", protocol.VerdictFailedNoQuarantine, r.CheckFailed)
 		kind, comment = "danger", fmt.Sprintf("fleetd: failed attestation (%s) and not quarantined, since %s is a control-plane node: %s", r.CheckFailed, d.Name, plain(strings.Join(r.Detail, "; ")))
 	case r.Status == StatusAttested && r.check:
-		// A daily check issues nothing: the verdict and its time are all it
+		// A hourly check issues nothing: the verdict and its time are all it
 		// writes, besides what the quote showed for PCR 0. A routine pass
 		// leaves no journal entry. A device quarantined since the check
 		// started stays as it is.

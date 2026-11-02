@@ -35,7 +35,7 @@ type Class struct {
 	SecureBoot  bool   `json:"secure_boot"`
 	PayloadKind string `json:"payload_kind"`
 	// Reattest is whether the running node renews its identity and runs the
-	// daily check.
+	// hourly check.
 	Reattest bool `json:"reattest"`
 }
 

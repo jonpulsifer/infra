@@ -50,7 +50,7 @@ func renew(args []string) error {
 	fs.StringVar(&o.serial, "serial", env("SERIAL", readTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
 	fs.StringVar(&o.bios, "bios", env("BIOS_VERSION", readTrim("/sys/class/dmi/id/bios_version")), "SMBIOS BIOS version, under which the service records PCR 0")
 	fs.DurationVar(&o.before, "renew-before", 30*24*time.Hour, "renew when the LDevID expires within this long")
-	fs.BoolVar(&o.check, "check", env("CHECK", "true") == "true", "when no renewal is due, run the daily check: a quote the service judges and records, with no new certificate")
+	fs.BoolVar(&o.check, "check", env("CHECK", "true") == "true", "when no renewal is due, run the hourly check: a quote the service judges and records, with no new certificate")
 	fs.StringVar(&o.namespace, "restart-namespace", env("RESTART_NAMESPACE", ""), "namespace of the pods to restart after a renewal")
 	fs.StringVar(&o.selector, "restart-selector", env("RESTART_SELECTOR", ""), "label selector of the pods to restart after a renewal; empty restarts none")
 	fs.StringVar(&o.node, "node", env("NODE_NAME", ""), "this node's Kubernetes name")
