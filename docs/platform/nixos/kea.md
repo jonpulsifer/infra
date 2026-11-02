@@ -3,7 +3,7 @@ title: Kea
 description: The DHCP server on spore for folly's Kubernetes network, which leases the netboot pool and names the signed iPXE, through the gateway's relay.
 ---
 
-Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes network. It leases the netboot pool and tells PXE firmware where the signed iPXE is, the offer the UDM's own DHCP makes today. The UDM does not yet relay the network to it: Kea runs and passes its checks, and the cutover is one change to `terraform/network/unifi/folly/k8s.tf`. Smee's proxy offer, which raced the UDM's, is off.
+Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes network. The UDM relays the network's DHCP to it (`dhcp_relay` in `terraform/network/unifi/folly/k8s.tf`), and it leases the netboot pool and tells PXE firmware where the signed iPXE is. The UDM's own DHCP for the network stays declared and disabled in the same file, the rollback. Smee's proxy offer, which raced the UDM's, is off.
 
 ## Parts
 
@@ -18,7 +18,7 @@ Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes
 
 ## Boot path
 
-Today the UDM leases the Kubernetes network and names the iPXE, as [Talos boot](talos-boot.md#boot-path) describes. Once the network relays to Kea, the UDM forwards each request to spore's bootstrap address with the network's router as the relay address, Kea picks the subnet from it, and the answer goes back through the UDM. The rest of the path is unchanged: PXE firmware fetches the iPXE over TFTP, the iPXE fetches HookOS over HTTP, and HookOS attests against [fleetd](../../apps/fleetd.md).
+A machine on a node port broadcasts a DHCP request. The UDM forwards it to spore's bootstrap address with the network's router as the relay address, Kea picks the subnet from that address, and the answer goes back through the UDM: a pool address, the anchors' resolvers, and `SPORE_BOOTSTRAP_IP` with the signed iPXE as the boot file. The rest of the path is [Talos boot](talos-boot.md#boot-path): PXE firmware fetches the iPXE over TFTP, the iPXE fetches HookOS over HTTP, and HookOS attests against [fleetd](../../apps/fleetd.md).
 
 ## Rules
 
@@ -45,7 +45,7 @@ Today the UDM leases the Kubernetes network and names the iPXE, as [Talos boot](
 - `nix/lib/checks.nix`: the `boot-plane` and `spore-reliability` assertions
 - `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `K8S_DHCP_CIDR`, `ROUTER_IP`
 - `clusters/folly/config/anchor-topology.json`: `SPORE_BOOTSTRAP_IP`, `NS1_IP`, `NS2_IP`
-- `terraform/network/unifi/folly/k8s.tf`: the Kubernetes network's DHCP, until the relay
+- `terraform/network/unifi/folly/k8s.tf`: the relay, and the UDM's disabled DHCP for the network
 
 ## Related
 

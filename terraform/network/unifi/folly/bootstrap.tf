@@ -1,12 +1,15 @@
 locals {
   bootstrap_cidr = "${cidrhost(local.anchor_topology.BOOTSTRAP_CIDR, 1)}/${split("/", local.anchor_topology.BOOTSTRAP_CIDR)[1]}"
 
-  # spore's bootstrap address, where it serves TFTP, the boot files, Smee,
-  # Tink and fleetd (nix/services/talos-boot.nix, nix/services/fleetd.nix).
+  # spore's bootstrap address, where it serves TFTP, the boot files, Kea,
+  # Tink and fleetd (nix/services/talos-boot.nix, nix/services/kea.nix,
+  # nix/services/fleetd.nix). The Kubernetes network relays its DHCP here.
   boot_server = local.anchor_topology.SPORE_BOOTSTRAP_IP
 
-  # The Kubernetes network's DHCP boot option: the signed iPXE that dnsmasq
-  # serves over TFTP on spore.
+  # The boot option the gateway's own DHCP named while it leased the
+  # Kubernetes network: the signed iPXE that dnsmasq serves over TFTP on
+  # spore. Kea makes the same offer now; k8s.tf keeps this disabled in place
+  # for the rollback.
   boot_option = {
     enabled  = true
     server   = local.boot_server

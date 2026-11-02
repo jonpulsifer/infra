@@ -51,7 +51,7 @@ The firmware verifies each image against `db`. Between runs, `allowPXE` is off o
 
 ## Rules
 
-- Smee is off on spore. The Kubernetes network's DHCP names the iPXE itself (`boot_option` in `terraform/network/unifi/folly/bootstrap.tf`) and iPXE's menu boots HookOS, so any MAC on a node port that PXE-boots reaches the same place, and the boot has no 7080 request to fail. To switch back, set `homelab.tinkerbell.smee.enable` on and `homelab.hookosSyslog.enable` off, and keep `homelab.tinkerbell.smee.dhcp` off while [Kea](kea.md) is on; the `spore-reliability` check then holds Smee to `proxy` mode, which HP's PXE ignores, to TFTP off, which would collide with dnsmasq's, and to one DHCP server on the VLAN.
+- Smee is off on spore. [Kea](kea.md) names the iPXE in its offer and iPXE's menu boots HookOS, so any MAC on a node port that PXE-boots reaches the same place, and the boot has no 7080 request to fail. To switch back, set `homelab.tinkerbell.smee.enable` on and `homelab.hookosSyslog.enable` off, and keep `homelab.tinkerbell.smee.dhcp` off while [Kea](kea.md) is on; the `spore-reliability` check then holds Smee to `proxy` mode, which HP's PXE ignores, to TFTP off, which would collide with dnsmasq's, and to one DHCP server on the VLAN.
 - Keep namespaces out of `clusters/folly/tinkerbell/`. The API runs no namespace controller, so a deleted namespace stays `Terminating`.
 - Keep `Hardware`, `Machine` and `Workflow` objects out of the repo. fleetd owns them, and deletes an object when NetBox stops exporting its device.
 - Name a BMC Secret `bmc-<bmc_type>`, the NetBox field's value.
