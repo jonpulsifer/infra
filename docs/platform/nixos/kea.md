@@ -13,7 +13,7 @@ Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes
 | The pool | `K8S_DHCP_CIDR`, the first host to the last host but one, with a one-day lease: firmware PXE, HookOS and a fresh install's first boot | Kea |
 | The boot file | `next-server` is spore's bootstrap address and `boot-file-name` is the signed iPXE under dnsmasq's TFTP root, for every client | Kea |
 | Reservations | `/var/lib/kea/fleet/reservations.json`, a JSON array Kea splices into its subnet with an include directive. [fleetd](../../apps/fleetd.md) writes it each pass | spore |
-| Control socket | `/var/lib/kea/fleet/kea-dhcp4.socket`, for `config-reload` and statistics, beside the reservations file so group `kea` can connect | spore |
+| Control socket | `/run/kea/kea-dhcp4.socket`, for `config-reload` and statistics. Kea 3 accepts no other directory; the unit's umask and a tmpfiles rule on the directory let group `kea` connect | spore |
 | `kea-check` | Exports `kea_dhcp4_serving` and `kea_dhcp4_acks_total` to the node exporter each minute | spore |
 
 ## Boot path
