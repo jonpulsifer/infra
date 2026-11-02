@@ -17,6 +17,8 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "gcsfuse",
+    "keylime-agent",
+    "keylime-server",
     "switchboard",
     "tally",
     "tally-ocr",
