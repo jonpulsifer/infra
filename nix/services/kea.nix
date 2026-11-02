@@ -25,7 +25,11 @@ let
   # is seeded so Kea starts before fleetd has written one.
   fleetDir = "${stateDir}/fleet";
   reservationsFile = "${fleetDir}/reservations.json";
-  socket = "/run/kea/kea-dhcp4.socket";
+  # The control socket lives beside the reservations file, not under /run/kea: systemd's
+  # dynamic-user release left that directory owned by nobody when the unit moved to its static
+  # user, and nothing re-owns it, so a socket there admits no other user. Here the setgid directory
+  # and the unit's umask give the socket kea:kea 0770.
+  socket = "${fleetDir}/kea-dhcp4.socket";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   # Under dnsmasq's TFTP root (./talos-boot.nix), the name UniFi's boot option carries today.
   ipxe = "talos/${site}/ipxe-amd64-secureboot.efi";
@@ -174,8 +178,7 @@ in
       after = [ "sys-subsystem-net-devices-${iface}.device" ];
       serviceConfig = {
         DynamicUser = lib.mkForce false;
-        # The control socket takes the umask, so group kea (fleetd) can connect to it; nobody else
-        # enters /run/kea.
+        # The control socket takes the umask, so group kea (fleetd) can connect to it.
         UMask = lib.mkForce "0007";
         RuntimeDirectoryMode = "0750";
         NoNewPrivileges = true;

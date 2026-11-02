@@ -300,7 +300,7 @@ in
         # Kea's reservations: each NetBox device's MAC gets its address, and the signed iPXE as
         # its boot file while the device has an unfinished Workflow (./kea.nix).
         FLEET_KEA_FILE = lib.mkIf keaOn "${keaFleetDir}/reservations.json";
-        FLEET_KEA_SOCKET = lib.mkIf keaOn "/run/kea/kea-dhcp4.socket";
+        FLEET_KEA_SOCKET = lib.mkIf keaOn "${keaFleetDir}/kea-dhcp4.socket";
         FLEET_KEA_BOOT_FILE = lib.mkIf keaOn "talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
         FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
