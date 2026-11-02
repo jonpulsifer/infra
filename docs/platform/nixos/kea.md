@@ -1,0 +1,53 @@
+---
+title: Kea
+description: The DHCP server on spore for folly's Kubernetes network, which leases the netboot pool and names the signed iPXE, through the gateway's relay.
+---
+
+Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes network. It leases the netboot pool and tells PXE firmware where the signed iPXE is, the offer the UDM's own DHCP makes today. The UDM does not yet relay the network to it: Kea runs and passes its checks, and the cutover is one change to `terraform/network/unifi/folly/k8s.tf`. Smee's proxy offer, which raced the UDM's, is off.
+
+## Parts
+
+| Part | Job | Where it runs |
+| --- | --- | --- |
+| `kea-dhcp4-server` | Answers relayed DHCP on `SPORE_BOOTSTRAP_IP`, from a UDP socket, so a machine on the bootstrap VLAN itself hears nothing from it | spore |
+| The pool | `K8S_DHCP_CIDR`, the first host to the last host but one, with a one-day lease: firmware PXE, HookOS and a fresh install's first boot | Kea |
+| The boot file | `next-server` is spore's bootstrap address and `boot-file-name` is the signed iPXE under dnsmasq's TFTP root, for every client | Kea |
+| Reservations | `/var/lib/kea/reservations.json`, a JSON array Kea splices into its subnet with an include directive. It is empty until fleetd writes it | spore |
+| Control socket | `/run/kea/kea-dhcp4.socket`, for `config-reload` and statistics | spore |
+| `kea-check` | Exports `kea_dhcp4_serving` and `kea_dhcp4_acks_total` to the node exporter each minute | spore |
+
+## Boot path
+
+Today the UDM leases the Kubernetes network and names the iPXE, as [Talos boot](talos-boot.md#boot-path) describes. Once the network relays to Kea, the UDM forwards each request to spore's bootstrap address with the network's router as the relay address, Kea picks the subnet from it, and the answer goes back through the UDM. The rest of the path is unchanged: PXE firmware fetches the iPXE over TFTP, the iPXE fetches HookOS over HTTP, and HookOS attests against [fleetd](../../apps/fleetd.md).
+
+## Rules
+
+- Keep `dhcp-socket-type` at `udp`. A raw socket would answer a machine on the bootstrap VLAN directly, and the `boot-plane` check in `nix/lib/checks.nix` fails.
+- Keep Kea on spore alone. The same check fails if another host enables it.
+- Smee is off on spore. If it is turned back on while Kea is on, keep `homelab.tinkerbell.smee.dhcp` off: two servers would both answer the relay, and the `spore-reliability` check fails otherwise.
+- Read the pool, the router and the DNS addresses from the topology files. The module computes the pool from `K8S_DHCP_CIDR` the way `k8s.tf` does.
+- A broken `reservations.json` stops Kea from starting. The file is a JSON array; the module seeds `[]` when it is missing.
+
+## Alerts
+
+| Alert | Meaning |
+| --- | --- |
+| `SporeKeaDown` | `kea-dhcp4-server` is not active on spore |
+
+`clusters/folly/monitoring/spore.yaml` declares it.
+
+## Where it lives
+
+- `nix/services/kea.nix`: the module, the config, the check and the firewall port
+- `nix/hosts/spore.nix`: `homelab.kea.enable`
+- `nix/services/tinkerbell.nix`: Smee's DHCP switch
+- `nix/lib/checks.nix`: the `boot-plane` and `spore-reliability` assertions
+- `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `K8S_DHCP_CIDR`, `ROUTER_IP`
+- `clusters/folly/config/anchor-topology.json`: `SPORE_BOOTSTRAP_IP`, `NS1_IP`, `NS2_IP`
+- `terraform/network/unifi/folly/k8s.tf`: the Kubernetes network's DHCP, until the relay
+
+## Related
+
+- [Talos boot](talos-boot.md)
+- [Tinkerbell](tinkerbell.md)
+- [Routing and firewall](../network/routing-and-firewall.md#dhcp-for-installation)

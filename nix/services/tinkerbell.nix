@@ -3,7 +3,8 @@
 # proxy DHCP server on the bootstrap VLAN only, names the signed iPXE that dnsmasq serves over TFTP
 # (./talos-boot.nix), serves each MAC's iPXE script on port 7080 and receives HookOS's syslog. With
 # it off, UniFi's DHCP alone names the iPXE, the iPXE's own menu boots HookOS, and
-# ./hookos-syslog.nix receives the syslog.
+# ./hookos-syslog.nix receives the syslog. With it on, homelab.tinkerbell.smee.dhcp turns the proxy
+# offer off on its own, for a VLAN where Kea (./kea.nix) answers the relayed DHCP.
 {
   config,
   lib,
@@ -250,6 +251,7 @@ let
     "--syslog-bind-port=${toString syslogPort}"
 
     # proxy answers only MACs that have a Hardware object; UniFi leases the address.
+    "--dhcp-enabled=${lib.boolToString cfg.smee.dhcp}"
     "--dhcp-mode=proxy"
     "--dhcp-bind-interface=${iface}"
     # A Smee TFTP listener collides with dnsmasq's and stops Smee answering at all.
@@ -262,10 +264,17 @@ let
   ];
 in
 {
-  options.homelab.tinkerbell.smee.enable = lib.mkOption {
-    type = lib.types.bool;
-    default = true;
-    description = "Run Smee: the proxy DHCP offer, the per-MAC iPXE script on port 7080 and the syslog receiver on the bootstrap VLAN.";
+  options.homelab.tinkerbell.smee = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Run Smee: the proxy DHCP offer, the per-MAC iPXE script on port 7080 and the syslog receiver on the bootstrap VLAN.";
+    };
+    dhcp = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Whether a running Smee answers PXE on the bootstrap VLAN as a proxy DHCP server. Off where Kea (./kea.nix) answers the Kubernetes network's DHCP, so one server names the boot file.";
+    };
   };
 
   config = {
@@ -289,10 +298,8 @@ in
     networking.firewall.interfaces = {
       ${iface} = {
         allowedTCPPorts = lib.optional cfg.smee.enable httpPort ++ [ tinkServerPort ];
-        allowedUDPPorts = lib.optionals cfg.smee.enable [
-          67
-          syslogPort
-        ];
+        allowedUDPPorts =
+          lib.optional (cfg.smee.enable && cfg.smee.dhcp) 67 ++ lib.optional cfg.smee.enable syslogPort;
       };
       end0.allowedTCPPorts = [ apiPort ];
       tailscale0.allowedTCPPorts = [ apiPort ];
