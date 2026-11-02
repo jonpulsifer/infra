@@ -27,6 +27,7 @@ Today the UDM leases the Kubernetes network and names the iPXE, as [Talos boot](
 - Smee is off on spore. If it is turned back on while Kea is on, keep `homelab.tinkerbell.smee.dhcp` off: two servers would both answer the relay, and the `spore-reliability` check fails otherwise.
 - Read the pool, the router and the DNS addresses from the topology files. The module computes the pool from `K8S_DHCP_CIDR` the way `k8s.tf` does.
 - A broken `reservations.json` stops Kea from starting. The file is a JSON array; the module seeds `[]` when it is missing.
+- Kea runs as the static user `kea`, not the NixOS module's dynamic one, so `/var/lib/kea` and `/run/kea` are plain directories that a process in group `kea` reaches. A dynamic user puts them behind `/var/lib/private`, which only root traverses.
 
 ## Alerts
 
