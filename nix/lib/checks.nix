@@ -120,6 +120,12 @@ in
             "Smee could hand out leases or answer DHCP beyond the bootstrap VLAN"
         )
         (
+          if spore.homelab.kea.enable && smeeOn && lib.hasInfix " --dhcp-enabled=true " smee then
+            "Smee and Kea would both answer the relay's DHCP on the bootstrap VLAN"
+          else
+            null
+        )
+        (
           if !smeeOn || lib.hasInfix " --tftp-server-enabled=false " smee then
             null
           else
@@ -150,13 +156,25 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
-  # spore alone serves TFTP on the bootstrap VLAN. A DHCP answer from it would race UniFi's offer.
-  # The VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage,
-  # the exporters and the Tinkerbell API, which the global allowed ports open on every other
-  # interface.
+  # spore alone serves TFTP on the bootstrap VLAN, and alone runs Kea, which answers the gateway's
+  # relayed requests only: a UDP socket on the bootstrap address hears no broadcast from a machine
+  # on the VLAN, so dnsmasq and Kea together still lease nothing there. The VLAN holds unenrolled
+  # machines, so its chain must refuse ssh, NFS, Garage, the exporters and the Tinkerbell API,
+  # which the global allowed ports open on every other interface.
   boot-plane =
     let
       anchors = lib.filterAttrs (_: c: c.networking.vlans ? bootstrap) configs;
+      keaHosts = namesWhere (c: c.services.kea.dhcp4.enable) configs;
+      keaBroken =
+        c:
+        c.services.kea.dhcp4.enable
+        && (
+          let
+            text = c.services.kea.dhcp4.configFile.text;
+          in
+          !(lib.hasInfix ''"dhcp-socket-type":"udp"'' text)
+          || !(lib.hasInfix ''"interfaces":["bootstrap/'' text)
+        );
       refused = [
         22
         111
@@ -214,10 +232,12 @@ in
         || dnsmasq.port != [ 0 ]
         || dnsmasq."tftp-single-port" or [ ] != [ true ]
         || firewallBroken c
+        || keaBroken c
       ) anchors;
     in
-    require "boot-plane" (lib.attrNames anchors == [ "spore" ] && broken == [ ])
-      "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
+    require "boot-plane"
+      (lib.attrNames anchors == [ "spore" ] && keaHosts == [ "spore" ] && broken == [ ])
+      "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; hosts running Kea: ${lib.concatStringsSep ", " keaHosts}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
   # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. The
   # node aliases are fleetd's, so spore declares none. An agent matches a node entry only when it

@@ -40,7 +40,7 @@ The DHCP offer supplies:
 - `SPORE_BOOTSTRAP_IP` as the TFTP server.
 - The signed iPXE boot file, through `boot_option` in `bootstrap.tf`.
 
-[Talos boot](../nixos/talos-boot.md) serves iPXE.
+[Talos boot](../nixos/talos-boot.md) serves iPXE. [Kea](../nixos/kea.md) on spore holds the same offer, and takes over when the Kubernetes network relays its DHCP to spore's bootstrap address in `k8s.tf`.
 
 ### Bootstrap network
 

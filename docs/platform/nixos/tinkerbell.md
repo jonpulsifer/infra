@@ -10,7 +10,7 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that reins
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | kube-apiserver and etcd | Store the `Hardware`, `Template`, `Workflow` and Rufio `Machine` objects. etcd listens on localhost. | spore, port 6443 |
-| Smee | Off on spore, by `homelab.tinkerbell.smee.enable`. On, it answers PXE on `bootstrap` as a proxy DHCP server, serves each MAC's iPXE script on port 7080 and receives HookOS's syslog | `SPORE_BOOTSTRAP_IP` |
+| Smee | Off on spore, by `homelab.tinkerbell.smee.enable`. On, it answers PXE on `bootstrap` as a proxy DHCP server unless `homelab.tinkerbell.smee.dhcp` is off, serves each MAC's iPXE script on port 7080 and receives HookOS's syslog | `SPORE_BOOTSTRAP_IP` |
 | Tink server and controller | Run workflows. The HookOS agent connects to `enroll.lolwtf.ca:42113` over TLS, with the enrollment name's certificate from `nix/services/fleetd.nix`. | `SPORE_BOOTSTRAP_IP` |
 | Rufio | Drives each node's BMC: Intel AMT over HTTP digest auth on port 16992 | spore |
 | fleetd | Makes the `Hardware`, `Machine` and `Workflow` objects from NetBox and from intake passes | spore |
@@ -51,7 +51,7 @@ The firmware verifies each image against `db`. Between runs, `allowPXE` is off o
 
 ## Rules
 
-- Smee is off on spore. The Kubernetes network's DHCP names the iPXE itself (`boot_option` in `terraform/network/unifi/folly/bootstrap.tf`) and iPXE's menu boots HookOS, so any MAC on a node port that PXE-boots reaches the same place, and the boot has no 7080 request to fail. To switch back, set `homelab.tinkerbell.smee.enable` on and `homelab.hookosSyslog.enable` off; the `spore-reliability` check then holds Smee to `proxy` mode, which HP's PXE ignores, and to TFTP off, which would collide with dnsmasq's.
+- Smee is off on spore. The Kubernetes network's DHCP names the iPXE itself (`boot_option` in `terraform/network/unifi/folly/bootstrap.tf`) and iPXE's menu boots HookOS, so any MAC on a node port that PXE-boots reaches the same place, and the boot has no 7080 request to fail. To switch back, set `homelab.tinkerbell.smee.enable` on and `homelab.hookosSyslog.enable` off, and keep `homelab.tinkerbell.smee.dhcp` off while [Kea](kea.md) is on; the `spore-reliability` check then holds Smee to `proxy` mode, which HP's PXE ignores, to TFTP off, which would collide with dnsmasq's, and to one DHCP server on the VLAN.
 - Keep namespaces out of `clusters/folly/tinkerbell/`. The API runs no namespace controller, so a deleted namespace stays `Terminating`.
 - Keep `Hardware`, `Machine` and `Workflow` objects out of the repo. fleetd owns them, and deletes an object when NetBox stops exporting its device.
 - Name a BMC Secret `bmc-<bmc_type>`, the NetBox field's value.
