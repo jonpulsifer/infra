@@ -3,11 +3,11 @@ title: From purchase to workload identity
 description: Follow a machine from receiving through NetBox and installation, then weigh Tinkerbell, direct BMC operation and simpler TPM enrollment.
 ---
 
-When we accept a machine into folly, we decide what it is, what it should run and whether we trust it with cluster credentials. We record that decision in inventory. The provisioning system then turns the record into an installation and reports the result back.
+The purpose of this work is to give workloads an identity rooted in hardware we accept into the lab. We verify the machine's TPM, enroll a device identity, and let SPIRE use that identity to admit the node and identify its workloads. Installing Talos is one step toward that result.
 
-NetBox is the record that fleetd reads. fleetd chooses and authorizes the work; Tinkerbell supplies the boot and workflow machinery that carries it out. This distinction matters when deciding whether Tinkerbell earns its operational cost: most of the lab's admission policy lives in fleetd.
+NetBox is the record that fleetd reads. fleetd chooses and authorizes the work; Tinkerbell supplies the boot and workflow machinery that carries it out. The DIY proposal separates those jobs further: a small boot image and a provisioning-time tool enroll the machine, while a narrow identity service and SPIRE support it afterwards.
 
-This brief follows a TPM 2.0 worker through the current path, then examines two alternatives. The alternatives and enrollment improvements are proposals, not enabled provisioning paths. Security engineers can use the linked source and tests to assess the design; this page does not certify a running machine.
+This brief follows a TPM 2.0 worker through the current path, then compares it with a DIY identity bootstrap stack. The alternatives and enrollment improvements are proposals, not enabled provisioning paths. Security engineers can use the linked source and tests to assess the design; this page does not certify a running machine.
 
 ## Follow one machine
 
@@ -67,31 +67,51 @@ Raw PXE or native UEFI HTTP boot changes how an image reaches the machine. Direc
 
 ## What removing Tinkerbell would look like
 
-### A manual Talos path
+The proposed replacement has no Tinkerbell and no full fleetd daemon. We build our own small, signed bootstrap image, use a provisioning-time verifier and installer, and keep a narrow attestation/renewal service online. SPIRE remains on spore and on the workload nodes. TPM verification, Local Device Identity (LDevID) enrollment and workload identity remain requirements throughout.
 
-The shortest alternative keeps the inventory and signed boot artifacts, uses AMT to request a network boot, and starts Talos in maintenance mode. The owner verifies the target, supplies its machine configuration through the Talos API, watches installation and records the result in NetBox. Later maintenance uses Talos's API; an unresponsive machine still needs AMT or physical access.
+### A bootstrap image with one job
 
-This removes the workflow services and their private Kubernetes API. It also makes the owner responsible for selecting the disk, sequencing destructive actions, resolving interrupted installs and recording completion. A small wrapper can generate the command inputs from inventory, but a wrapper with persistent jobs, cancellation and recovery is a controller again.
+An Alpine-based initramfs, or a similarly small Linux image, boots into RAM and runs our attester. It needs working network, storage and TPM drivers, a trusted verifier endpoint, and the tools for the chosen installer. We can package its kernel, initramfs and command line as a signed Unified Kernel Image (UKI). The attester and any later executable downloads must be covered by that trust policy. [Alpine's diskless mode](https://wiki.alpinelinux.org/wiki/Diskless_Mode) is a suitable starting point, not a complete attestation system.
 
-The security contract changes if we go straight to Talos: that path does not perform today's HookOS attestation and TPM-delivered install-code exchange. Talos's maintenance API accepts an initial configuration without client authentication, so the receiving network must restrict who can reach it. Verifying a console fingerprint can help identify the server; it does not prevent another reachable client from submitting a configuration. [Sidero's installation guide](https://docs.siderolabs.com/talos/v1.14/getting-started/getting-started) describes the maintenance-mode boundary.
+The image reads the TPM's EKs, creates an attestation key and an LDevID key inside the TPM, and sends evidence to the trusted provisioning tool. That tool checks the approved inventory binding, possession proof and fresh boot evidence, then obtains device certificates from the lab's DevID issuer. The image carries public trust anchors, never the issuer's private key. Much of this protocol already exists in `apps/fleetd/client/` and `apps/fleetd/attest/`; reusing that code does not require running fleetd as the lifecycle controller.
 
-This also needs an explicit integration plan for fleetd's per-node join approval and SPIRE eligibility. Completing a direct installation does not automatically satisfy the existing verdict and lifecycle requirements. We should not carry the automated path's assurance claims into a manual run without deciding which checks replace them.
+The owner can boot the machine through AMT or its console. After identity enrollment, a fixed install routine accepts a short-lived authorization for this machine, boot, disk and installer. It prepares the runtime identity material, installs Talos and finishes the node's initial join. A failed attempt stops for an explicit retry. We still need durable authorization receipts and safe disk checks, but we do not need a general workflow queue, arbitrary action templates or automated power recovery.
 
-### Keep attestation and replace the executor
+### Keep the identity working after reboot
 
-A second alternative keeps signed HookOS and fleetd's admission checks, but replaces Tinkerbell with direct AMT control and a small installer agent. NetBox still drives the desired action. After successful admission, fleetd gives that agent a job for this machine and boot, and the agent returns authenticated progress and completion reports.
+Generating an LDevID certificate is only half the job. The installed OS also needs its certificate chain and TPM-wrapped key blobs so the SPIRE agent can load the same device key after a cold boot. Certificates in TPM nonvolatile memory alone are insufficient. Today our agent initializer fetches the package from fleetd; the proposal instead delivers it to persistent local storage and makes the initializer load it there.
 
-That preserves the main security decisions, but it is a software project. The replacement needs durable job state, one-run exclusion, timeouts, safe cancellation, restart recovery and rules against replaying a wipe. It must retain disk-identity checks, installer preflight and retirement handling. Configuration delivery is currently tied to Workflow state, so that coupling also needs replacement.
+SPIRE's node attestor proves possession of the LDevID key and its relationship to the TPM. SPIRE then applies node registrations and workload selectors before issuing short-lived workload credentials, called SVIDs. The LDevID is the device credential; SPIRE issues the separate workload credentials. A pod does not receive the device's private key. The [SPIRE TPM DevID plugin](https://github.com/spiffe/spire/blob/main/doc/plugin_agent_nodeattestor_tpm_devid.md) describes this proof.
 
-| Choice | What becomes simpler | What we take responsibility for |
+The small continuous service handles later TPM boot checks, LDevID and attestation-key certificate renewal, and identity eligibility or withdrawal. It retains issuer/verifier state and lifecycle access, but has no BMC, disk installation or workflow role. The provisioning tool exits once installation, local identity delivery and initial Kubernetes admission are complete. [The DIY identity design](diy-identity-bootstrap.md) defines that split and the acceptance tests.
+
+## Glossary and DIY replacements
+
+This table describes the proposal. The current system still runs the components in the first column.
+
+| Component | What it does here | DIY replacement or retained role |
 | --- | --- | --- |
-| Keep Tinkerbell | Reuse its workflow execution, records and BMC controller. | More services, integration code and an agent protocol whose completion reports need stronger authentication. |
-| Direct AMT plus manual Talos | Fewer provisioning services and a short Talos-specific operating path. | Human sequencing, recovery and audit records; a different initial-admission boundary. |
-| Direct AMT plus a custom HookOS executor | A narrower stack with control over job authentication. | A durable destructive-job controller and its failure cases. This is more than replacing Rufio with a power command. |
+| Smee | Supplies proxy-DHCP/PXE behavior and per-machine iPXE scripts. | Existing DHCP plus a static signed-bootstrap boot path through iPXE or supported UEFI HTTP boot. No Smee. |
+| HookOS | Runs the attester and installation actions in temporary Linux. | Our Alpine-based or comparable small RAM image, packaged and signed with our attester and fixed install routine. No upstream HookOS dependency is required. |
+| Tink server, controller and agent | Deliver workflows and record action progress. | The bootstrap program's fixed sequence and the provisioning tool's attempt record. No Tink protocol or general job engine. |
+| Rufio | Requests BMC power and boot operations. | Owner-run AMT/BMC commands or console operation. No Rufio controller. |
+| Embedded Kubernetes API and etcd | Store Tinkerbell objects and workflow state. | No replacement cluster. Persist enrollment and install receipts with the provisioning tool. |
+| fleetd | Combines enrollment, installation, lifecycle reconciliation and identity maintenance. | Reuse verifier/installer code in a provisioning-time tool; retain only a small separate identity service at runtime. No full fleetd daemon. |
+| DevID CA | Signs certificates for device keys and attestation keys. | Retain the trusted issuer and protected signing key, available for enrollment and renewal. Never embed it in the bootstrap image. |
+| LDevID and LAK | Certificates for the TPM device key and locally certified attestation key. | Retain both, with persistent TPM-wrapped key material and a tested renewal handoff. |
+| SPIRE server | Admits agents and signs workload identity credentials. | Retain on spore, including registration and withdrawal handling. |
+| SPIRE agent | Proves node identity and serves the local Workload API. | Retain on each workload node; require the LDevID path for these nodes. |
+| NetBox | Records expected hardware, owner intent and lifecycle observations. | Retain inventory; the provisioning tool records outcomes and the identity service reads eligibility changes. |
 
-For a small Talos-only fleet with infrequent reinstalls, the manual path is a reasonable candidate if attended recovery is acceptable. If unattended reinstall and retirement are requirements, keeping Tinkerbell is the lower implementation-risk choice until a replacement demonstrates those behaviors. Rebuilding a general workflow engine offers little simplification.
+## What this choice buys us
 
-A useful pilot uses a spare worker and exercises a normal install, a power cut after wiping, a duplicate request and retirement. Compare the owner interventions and recovery behavior, not just the number of services. These are proposed decision criteria, not completed acceptance results.
+This is a credible simplification because the desired program has a narrow purpose: establish a TPM-backed identity, install an approved OS, and hand that identity to SPIRE. We can accept manual boot, attended retries and explicit retirement operations without sacrificing the identity chain. Those limits remove much of the need for a reusable provisioning orchestrator.
+
+The cost shifts to maintaining the bootstrap image, the bounded install protocol and the handoff across reboot and renewal. We own driver coverage, image updates, trust-root rotation and failure recovery. The continuous identity service still holds sensitive issuance and withdrawal authority; reducing its scope does not make it unprivileged.
+
+A direct Talos install without this enrollment path is a different option and does not meet the primary requirement by itself. It can remain an operational baseline, but a successful install is not the acceptance criterion. The proposed pilot must demonstrate a fresh SPIRE LDevID attestation and a workload SVID after the provisioning tool is shut down. It must also reject the wrong TPM, survive cold boot, renew the local identity package and withdraw access according to policy.
+
+Keep the current stack until that pilot demonstrates the identity and recovery behavior. The reason to build the DIY stack is to own a small hardware-to-workload identity path, with attended provisioning as an explicit scope choice.
 
 ## Make EK enrollment easier
 
@@ -121,4 +141,4 @@ Management-plane compromise is a broader limit. fleetd, the NetBox administrator
 
 Finally, stopping new issuance does not end every existing session. A cordon leaves running workloads in place, issued SPIRE credentials need to expire, and a saved disk can retain a kubelet certificate. Withdrawal safeguards and other registration owners can delay removal too. Those limits require a credential and incident-response policy under either provisioning approach.
 
-The [detailed threat model](folly-design.md#7-threat-model) maps these claims to source, and its [acceptance criteria](folly-design.md#8-failure-behavior-and-acceptance) distinguish tests from hardware evidence. The decision is whether we want automated lifecycle recovery enough to maintain its machinery, and which first-enrollment authority we are willing to trust.
+The [detailed threat model](folly-design.md#7-threat-model) maps these claims to source, and its [acceptance criteria](folly-design.md#8-failure-behavior-and-acceptance) distinguish tests from hardware evidence. The decision is whether the smaller bootstrap and identity services preserve the required TPM-to-workload chain with an acceptable amount of attended provisioning work.

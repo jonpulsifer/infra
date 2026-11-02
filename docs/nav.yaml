@@ -144,6 +144,7 @@ sections:
     index: reference/index.md
     items:
       - reference/purchase-to-identity.md
+      - reference/diy-identity-bootstrap.md
       - reference/folly-design.md
       - reference/glossary.md
       - reference/topology.md

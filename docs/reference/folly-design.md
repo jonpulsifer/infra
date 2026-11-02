@@ -108,7 +108,7 @@ An empty NetBox device list preserves the export. A malformed export preserves S
 
 ## 5. Design choices and tradeoffs
 
-[From purchase to workload identity](purchase-to-identity.md#what-removing-tinkerbell-would-look-like) follows NetBox through workflow selection and compares Tinkerbell with manual Talos installation and a custom executor.
+[From purchase to workload identity](purchase-to-identity.md#what-removing-tinkerbell-would-look-like) follows NetBox through workflow selection and compares Tinkerbell with a DIY identity bootstrapper and a narrow runtime attestation service. [The DIY design](diy-identity-bootstrap.md) keeps TPM-backed LDevID enrollment and SPIRE workload identity as its requirements.
 
 “Better suited” means a better fit for a stated requirement. It does not mean that one component replaces every function of another.
 
