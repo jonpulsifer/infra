@@ -131,7 +131,7 @@ func TestJunkStartsSpendNothing(t *testing.T) {
 func TestClaimedHostnameNeverOverwritesARecord(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	f.set(simSerial, func(d *fakeDevice) {
 		d.CustomFields["ek_hash"], d.CustomFields["ek_hash_ecc"] = h.hashes["rsa"], h.hashes["ecc"]
 	})

@@ -33,7 +33,7 @@ type Record struct {
 	Detail    []string          `json:"detail,omitempty"`
 	EKHashes  map[string]string `json:"ek_hashes,omitempty"`
 	EKIssuers []string          `json:"ek_issuers,omitempty"`
-	// Class is the machine's talos_class, the LDevID's OU.
+	// Class is the machine's class (NetBox's class, talos_class until that field is removed), the LDevID's OU.
 	Class string `json:"class,omitempty"`
 	// The SMBIOS facts the machine claimed, for NetBox.
 	Model string `json:"model,omitempty"`

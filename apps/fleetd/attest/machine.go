@@ -12,7 +12,7 @@ type Machine struct {
 	Name   string
 	Serial string
 	MAC    string
-	// Class is NetBox's talos_class, the LDevID's OU.
+	// Class is NetBox's class (talos_class until that field is removed), the LDevID's OU.
 	Class string
 	// Status is NetBox's lifecycle status, such as planned or active.
 	Status string
@@ -56,11 +56,11 @@ func (v *Verifier) lookupMachine(ctx context.Context, serial string) (Machine, b
 	return nb, ok, nil
 }
 
-// classControlPlane is the talos_class of the control plane, whose role
+// classControlPlane is the class of the control plane, whose role
 // clusters/folly/fleet/class-inputs.json names controlplane.
 const classControlPlane = "controlplane"
 
-// controlPlane reports whether the machine's class, NetBox's talos_class, is the control plane's. Quarantining such a node would
+// controlPlane reports whether the machine's class, NetBox's class (talos_class until that field is removed), is the control plane's. Quarantining such a node would
 // revoke the identity of the node that serves the cluster's API and cordon
 // it, so a failed running quote alerts and leaves it in place.
 func (m Machine) controlPlane() bool {

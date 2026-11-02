@@ -34,7 +34,7 @@ func (h *harness) runWithNetwork(n *protocol.Network) error {
 }
 
 func plannedWithNetworkFields(h *harness, f *fakeNetBox, preset map[string]any) {
-	fields := map[string]any{"talos_class": "worker-g5"}
+	fields := map[string]any{"class": "worker-g5"}
 	for k, v := range simNetworkFields {
 		fields[k] = v
 	}
@@ -129,7 +129,7 @@ func TestForgedNetworkIsNotRecorded(t *testing.T) {
 func TestNetworkWaitsForTheFields(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if err := h.runWithNetwork(&simNetwork); err != nil {
 		t.Fatal(err)
 	}

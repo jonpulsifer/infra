@@ -24,7 +24,7 @@ const (
 
 func nbDevice(id int, name, status, serial, model string, cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"install_disk": nil, "talos_class": nil, "tpm_version": nil, "bmc_type": nil,
+		"install_disk": nil, "class": nil, "tpm_version": nil, "bmc_type": nil,
 		"desired_action": "none", "last_workflow": nil, "expected_port": nil, "attest_verdict": nil,
 	}
 	for k, v := range cf {
@@ -45,7 +45,7 @@ func nbDevice(id int, name, status, serial, model string, cf map[string]any) map
 // and its verdict.
 func declared(cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"attest_verdict": "attested", "tpm_version": "2.0", "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "install_disk_serial": "30DF7020FGKL",
+		"attest_verdict": "attested", "tpm_version": "2.0", "class": "worker-g5", "install_disk": "/dev/nvme0n1", "install_disk_serial": "30DF7020FGKL",
 		"bmc_type": "amt", "amt": true, "secure_boot_expected": true, "expected_port": 5,
 	}
 	for k, v := range cf {
@@ -179,7 +179,7 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	for field, want := range map[string]any{
-		"talos_class": "worker-g5", "bmc_type": "amt", "install_disk": "/dev/nvme0n1",
+		"class": "worker-g5", "bmc_type": "amt", "install_disk": "/dev/nvme0n1",
 		"last_workflow": names[0], "desired_action": "none",
 	} {
 		if got := at.cf(field); got != want {
@@ -216,7 +216,7 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 // nothing the declaration owns.
 func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 	for field, name := range map[string]string{
-		"talos_class": "talos_class", "install_disk": "install_disk", "install_disk_serial": "install_disk_serial", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
+		"class": "class", "install_disk": "install_disk", "install_disk_serial": "install_disk_serial", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
 		"amt": "amt", "secure_boot_expected": "secure_boot_expected", "expected_port": "expected_port",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -259,7 +259,7 @@ func TestAdmitKeepsAnExplicitNoBMC(t *testing.T) {
 func TestAdmitNeverAutoProvisionsAControlPlane(t *testing.T) {
 	for name, setup := range map[string]func(*admitTest){
 		"the device's class": func(at *admitTest) {
-			at.node()["custom_fields"].(map[string]any)["talos_class"] = ControlPlaneClass
+			at.node()["custom_fields"].(map[string]any)["class"] = ControlPlaneClass
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -269,8 +269,8 @@ func TestAdmitNeverAutoProvisionsAControlPlane(t *testing.T) {
 			if code != http.StatusConflict || !strings.Contains(why, "a control plane; the owner sets desired_action to provision by hand") {
 				t.Fatalf("admit: %d %s", code, why)
 			}
-			if at.cf("talos_class") != ControlPlaneClass || len(at.kube.workflows()) != 0 || at.r.Metrics.AutoProvisioned.Load() != 0 {
-				t.Errorf("class %v workflows %v", at.cf("talos_class"), at.kube.workflows())
+			if at.cf("class") != ControlPlaneClass || len(at.kube.workflows()) != 0 || at.r.Metrics.AutoProvisioned.Load() != 0 {
+				t.Errorf("class %v workflows %v", at.cf("class"), at.kube.workflows())
 			}
 		})
 	}
@@ -355,7 +355,7 @@ func TestAdmitAfterAnEarlierRunWaitsForTheOwner(t *testing.T) {
 // The provision that netbooted the machine takes the code: no second run.
 func TestAdmitRendersUnderTheRunningProvision(t *testing.T) {
 	run := "provision-swell-1699990000"
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"last_workflow": run, "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "bmc_type": "amt"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"last_workflow": run, "class": "worker-g5", "install_disk": "/dev/nvme0n1", "bmc_type": "amt"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	wf := workflowObject(run, "swell", "provision", testNow.Add(-5*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING")
 	wf["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "true"}}
 	at.kube.objects[wfBase+run] = wf
@@ -385,7 +385,7 @@ func TestAdmitRefusesADeviceThatIsNotPlanned(t *testing.T) {
 // A node off its expected port is journaled once, and never cabled: the cable
 // is Terraform's, and a move after the port check is the owner's to judge.
 func TestCheckPortJournalsANodeOffItsExpectedPort(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow)
 	reconcile(t, at.r)
@@ -396,7 +396,7 @@ func TestCheckPortJournalsANodeOffItsExpectedPort(t *testing.T) {
 }
 
 func TestCheckPortIgnoresAnOldReport(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow.Add(-2*time.Hour))
 	reconcile(t, at.r)

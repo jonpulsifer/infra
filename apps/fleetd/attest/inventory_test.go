@@ -93,7 +93,7 @@ func (inv *Inventory) seed(f *fakeNetBox) {
 		if status == "" {
 			status = "active"
 		}
-		fields := map[string]any{"talos_class": m.Class}
+		fields := map[string]any{"class": m.Class}
 		if m.EKHash != "" {
 			fields["ek_hash"], fields["approved_ek_hash"] = m.EKHash, m.EKHash
 		}

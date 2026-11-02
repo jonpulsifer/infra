@@ -200,7 +200,7 @@ func newJoinTest(t *testing.T) (*Reconciler, *fakeNetBox, *fakeJoinAPI, *time.Ti
 	t.Helper()
 	nb := &fakeNetBox{devices: []map[string]any{
 		device("riptide", "active", "none", nil),
-		mergeID(device("optiplex", "active", "none", map[string]any{"talos_class": "controlplane"}), 8),
+		mergeID(device("optiplex", "active", "none", map[string]any{"class": "controlplane"}), 8),
 		mergeID(device("shale", "active", "none", nil), 9),
 		mergeID(device("swell", "decommissioning", "none", nil), 10),
 	}, ifaces: riptideIfaces()}

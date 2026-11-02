@@ -459,7 +459,7 @@ func device(name, status, action string, cf map[string]any) map[string]any {
 	fields := map[string]any{
 		"install_disk":        "/dev/nvme0n1",
 		"install_disk_serial": "30DF7020FGKL",
-		"talos_class":         map[string]any{"value": "worker-g5", "label": "worker-g5"},
+		"class":               map[string]any{"value": "worker-g5", "label": "worker-g5"},
 		"tpm_version":         "2.0",
 		"bmc_type":            "amt",
 		"desired_action":      action,
@@ -734,7 +734,7 @@ func (f *fakeCluster) server(t *testing.T) *Cluster {
 func TestQuarantinedNodeIsCordoned(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{
 		device("riptide", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr: PCR 7 differs"}),
-		mergeID(device("optiplex", "active", "none", map[string]any{"attest_verdict": "failed-no-quarantine: pcr", "talos_class": "controlplane"}), 8),
+		mergeID(device("optiplex", "active", "none", map[string]any{"attest_verdict": "failed-no-quarantine: pcr", "class": "controlplane"}), 8),
 		mergeID(device("shale", "active", "none", map[string]any{"attest_verdict": "attested"}), 9),
 		mergeID(device("swell", "planned", "none", map[string]any{"attest_verdict": "quarantined: ek"}), 10),
 	}, ifaces: riptideIfaces()}
@@ -770,8 +770,8 @@ func TestQuarantinedNodeIsCordoned(t *testing.T) {
 // the controlplane class, or by a class the class inputs render as one.
 func TestControlPlaneIsNeverCordoned(t *testing.T) {
 	nb := &fakeNetBox{devices: []map[string]any{
-		device("optiplex", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane"}),
-		mergeID(device("bigcp", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane-big"}), 8),
+		device("optiplex", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "class": "controlplane"}),
+		mergeID(device("bigcp", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "class": "controlplane-big"}), 8),
 	}, ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
@@ -1380,7 +1380,7 @@ func TestWebhookSignature(t *testing.T) {
 func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
 	for _, action := range []string{"provision", "wipe"} {
 		t.Run(action, func(t *testing.T) {
-			nb := &fakeNetBox{devices: []map[string]any{device("optiplex", "active", action, map[string]any{"talos_class": "controlplane"})}, ifaces: riptideIfaces()}
+			nb := &fakeNetBox{devices: []map[string]any{device("optiplex", "active", action, map[string]any{"class": "controlplane"})}, ifaces: riptideIfaces()}
 			kube := &fakeKube{}
 			r, done := newTest(t, nb, kube)
 			defer done()

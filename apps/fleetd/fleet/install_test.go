@@ -174,10 +174,10 @@ func TestRenderGates(t *testing.T) {
 		{name: "another node's run", status: "planned", cf: map[string]any{"last_workflow": "provision-swell-1700000000"}, want: 409},
 		{name: "run finished", status: "planned", kube: func(k *fakeKube) { k.setState(provWF, "STATE_SUCCESS") }, want: 409},
 		{name: "run gone", status: "planned", kube: func(k *fakeKube) { delete(k.objects, wfBase+provWF) }, want: 409},
-		{name: "control plane", status: "planned", cf: map[string]any{"talos_class": "controlplane"}, req: func(r *RenderRequest) { r.Class = "controlplane" }, want: 409},
+		{name: "control plane", status: "planned", cf: map[string]any{"class": "controlplane"}, req: func(r *RenderRequest) { r.Class = "controlplane" }, want: 409},
 		{name: "node mismatch", status: "planned", req: func(r *RenderRequest) { r.Node = "swell" }, want: 409},
 		{name: "class mismatch", status: "planned", req: func(r *RenderRequest) { r.Class = "worker-g2" }, want: 409},
-		{name: "class without inputs", status: "planned", cf: map[string]any{"talos_class": "worker-g9"}, req: func(r *RenderRequest) { r.Class = "worker-g9" }, want: 503},
+		{name: "class without inputs", status: "planned", cf: map[string]any{"class": "worker-g9"}, req: func(r *RenderRequest) { r.Class = "worker-g9" }, want: 503},
 		{name: "another SMBIOS UUID", status: "planned", req: func(r *RenderRequest) { r.UUID = "00000000-0000-0000-0000-000000000000" }, want: 409},
 		{name: "a run that installs nothing", status: "planned", kube: func(k *fakeKube) {
 			k.objects[wfBase+provWF]["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "false"}}
@@ -649,7 +649,7 @@ func TestWorkflowInstallsOnlyARenderedProvision(t *testing.T) {
 }
 
 func controlPlaneTest(t *testing.T) (*installTest, RenderRequest) {
-	it := newInstallTest(t, "planned", map[string]any{"talos_class": "controlplane"})
+	it := newInstallTest(t, "planned", map[string]any{"class": "controlplane"})
 	req := goodRequest()
 	req.Class = "controlplane"
 	return it, req

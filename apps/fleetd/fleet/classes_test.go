@@ -90,7 +90,7 @@ func TestWorkflowCarriesTheDiskSerial(t *testing.T) {
 }
 
 func TestAdmitRefusesAndJournalsAnUnknownClass(t *testing.T) {
-	d := declared(map[string]any{"talos_class": "worker-g9"})
+	d := declared(map[string]any{"class": "worker-g9"})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, `class "worker-g9" is not in the class table`) {
 		t.Fatalf("admit: %d %s", code, why)
@@ -178,10 +178,21 @@ func TestLoadConfigNeedsTheClassTable(t *testing.T) {
 		t.Fatal("a fleet without a class table loaded")
 	}
 	path := filepath.Join(t.TempDir(), "classes.json")
-	_ = os.WriteFile(path, []byte(`{"w": {"os": "talos", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"}}`), 0o600)
+	_ = os.WriteFile(path, []byte(`{"w": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"}}`), 0o600)
 	t.Setenv("FLEET_CLASSES", path)
 	cfg, err := LoadConfig()
 	if err != nil || cfg.Classes["w"].Template != "provision" {
 		t.Fatalf("%v %+v", err, cfg.Classes)
+	}
+}
+
+func TestParseDeviceReadsTalosClassWhenClassIsEmpty(t *testing.T) {
+	d, err := parseDevice([]byte(`{"id":1,"name":"n","custom_fields":{"talos_class":"worker-g5"}}`))
+	if err != nil || d.Class != "worker-g5" {
+		t.Fatalf("%v %q", err, d.Class)
+	}
+	d, err = parseDevice([]byte(`{"id":1,"name":"n","custom_fields":{"class":"controlplane","talos_class":"worker-g5"}}`))
+	if err != nil || d.Class != "controlplane" {
+		t.Fatalf("%v %q", err, d.Class)
 	}
 }
