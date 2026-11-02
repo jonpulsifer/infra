@@ -43,6 +43,10 @@ let
   topology = (lib.importJSON ../../clusters/${site}/config/cluster-topology.json).data;
 
   bootstrapIp = lab.bootstrap.hosts.spore;
+  # With Kea on this host (./kea.nix), fleetd writes its reservations file, in group kea, and
+  # reloads it over the control socket.
+  keaOn = lib.attrByPath [ "homelab" "kea" "enable" ] false config;
+  keaFleetDir = "/var/lib/kea/fleet";
   host = "enroll.${fleet.dnsZone}";
   # The command line nix/images/hookos-folly.nix bakes into the UKI. Without Secure Boot,
   # systemd-stub takes iPXE's arguments instead, so each Hardware's script passes the same one.
@@ -293,6 +297,11 @@ in
         # off nothing asks for the links; they cost one symlink per MAC and keep the switch back cheap.
         FLEET_TFTP_DIR = tftpDir;
         FLEET_TFTP_LINK_TARGET = "${tftpDir}/talos/${site}/ipxe-amd64-secureboot.efi";
+        # Kea's reservations: each NetBox device's MAC gets its address, and the signed iPXE as
+        # its boot file while the device has an unfinished Workflow (./kea.nix).
+        FLEET_KEA_FILE = lib.mkIf keaOn "${keaFleetDir}/reservations.json";
+        FLEET_KEA_SOCKET = lib.mkIf keaOn "/run/kea/kea-dhcp4.socket";
+        FLEET_KEA_BOOT_FILE = lib.mkIf keaOn "talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
         FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
         FLEET_WORKFLOW_TTL = "168h";
@@ -342,6 +351,7 @@ in
         ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleetd/bundle".path}";
         User = "fleetd";
         Group = "fleetd";
+        SupplementaryGroups = lib.optional keaOn "kea";
         StateDirectory = "fleetd";
         StateDirectoryMode = "0750";
         RuntimeDirectory = "fleetd";
@@ -350,7 +360,8 @@ in
         ReadWritePaths = [
           metricsDir
           tftpDir
-        ];
+        ]
+        ++ lib.optional keaOn keaFleetDir;
         UMask = "0027";
         Restart = "always";
         RestartSec = 5;

@@ -199,7 +199,15 @@ func newFleet() (*fleet.Reconciler, error) {
 		}
 		links = &fleet.TFTPLinks{Dir: dir, Target: target}
 	}
-	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
+	var kea *fleet.KeaReservations
+	if file := os.Getenv("FLEET_KEA_FILE"); file != "" {
+		boot := os.Getenv("FLEET_KEA_BOOT_FILE")
+		if boot == "" {
+			return nil, errors.New("FLEET_KEA_FILE needs FLEET_KEA_BOOT_FILE")
+		}
+		kea = &fleet.KeaReservations{File: file, Socket: os.Getenv("FLEET_KEA_SOCKET"), BootFile: boot}
+	}
+	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Kea: kea, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
 }
 
 // serveBoot serves the boot listener, with TLS when kp is set. Until its
