@@ -146,6 +146,17 @@ in
       inherit configFile;
     };
 
+    # A static user in place of the module's DynamicUser, so /var/lib/kea and /run/kea are plain
+    # directories that fleetd, in group kea, reaches for the reservations file and the control
+    # socket. With DynamicUser they are symlinks into /var/lib/private and /run/private, which only
+    # root traverses.
+    users.users.kea = {
+      isSystemUser = true;
+      group = "kea";
+      description = "Kea DHCP server";
+    };
+    users.groups.kea = { };
+
     # The relay's requests arrive on the VLAN from the gateway. ./talos-boot.nix's chain admits
     # what this interface declares.
     networking.firewall.interfaces.${iface}.allowedUDPPorts = [ 67 ];
@@ -159,6 +170,7 @@ in
       requires = [ "sys-subsystem-net-devices-${iface}.device" ];
       after = [ "sys-subsystem-net-devices-${iface}.device" ];
       serviceConfig = {
+        DynamicUser = lib.mkForce false;
         NoNewPrivileges = true;
         PrivateTmp = true;
         PrivateDevices = true;
