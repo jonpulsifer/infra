@@ -55,7 +55,7 @@ Talos boots from disk and exchanges the code for its configuration over HTTPS. f
 
 Once the node is eligible, SPIRE can issue identity credentials to its registered workloads. Later boot checks and NetBox lifecycle changes can restrict future issuance. Retirement coordinates disk erasure, power state and cluster cleanup, although credentials already issued can remain valid until expiry.
 
-![Receiving creates a declared NetBox device; fleetd selects and authorizes a workflow; Tinkerbell boots and installs it; fleetd records configuration release and identity eligibility](../assets/purchase-to-identity.svg)
+![Initial PXE boot reaches HookOS; fleetd records the proven machine’s MAC, admits the machine and creates its installation workflow](../assets/purchase-to-identity.svg)
 
 ## What Tinkerbell contributes
 
