@@ -91,10 +91,18 @@ func TestNodeDocument(t *testing.T) {
 	if strings.Contains(plain, "example.test/tpm") {
 		t.Error("a TPM 1.2 node got the TPM label")
 	}
+	if strings.Contains(doc, "taints") {
+		t.Error("a class without taints rendered a taints key")
+	}
+	in.Taints = map[string]string{"example.test/sandbox": "true:NoSchedule"}
+	tainted := nodeDocument(in, Node{Name: "swell", Disk: "/dev/nvme0n1", TPM: "2.0"})
+	if !strings.Contains(tainted, "example.test/sandbox: true:NoSchedule") {
+		t.Errorf("the workload's taint is missing:\n%s", tainted)
+	}
 	in.MachineType = "controlplane"
 	cp := nodeDocument(in, Node{Name: "optiplex", Disk: "/dev/sda", TPM: "2.0"})
-	if !strings.Contains(cp, "node-role.kubernetes.io/control-plane") || !strings.Contains(cp, "exclude-from-external-load-balancers") {
-		t.Errorf("the control-plane document lacks its deletions:\n%s", cp)
+	if !strings.Contains(cp, "node-role.kubernetes.io/control-plane") || !strings.Contains(cp, "exclude-from-external-load-balancers") || !strings.Contains(cp, "example.test/sandbox") {
+		t.Errorf("the control-plane document lacks its deletions or the workload's taint:\n%s", cp)
 	}
 }
 

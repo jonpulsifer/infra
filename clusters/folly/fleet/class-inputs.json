@@ -29,6 +29,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -63,6 +64,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -97,6 +99,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"

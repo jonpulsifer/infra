@@ -17,7 +17,7 @@ The file has two sections:
 Model facts include the SMBIOS model, manufacturer, NIC, install disk, TPM version, Intel AMT and expected Secure Boot state.
 Each node declares its model, serial, class, switch port, address and BMC type.
 
-A class is a key of `clusters/folly/fleet/classes.json`, the one table that says what a machine of the class runs and for whom: its `os`, its `workload` (`general` today), the attestation profile fleetd holds its boot to, and the payload its install writes. fleetd reads the table on spore, `terraform/netbox/folly` takes the class field's choices from it, and `clusters/folly/talos/` keeps the Talos role and patches of each class whose `os` is `talos`.
+A class is a key of `clusters/folly/fleet/classes.json`, the one table that says what a machine of the class runs and for whom: its `os`, its `workload` (`general` today), the attestation profile fleetd holds its boot to, and the payload its install writes. fleetd reads the table on spore, `terraform/netbox/folly` takes the class field's choices from it, and `clusters/folly/talos/` keeps the Talos role and patches of each class whose `os` is `talos`, and the labels and taints its `workload` puts on the node.
 A node can override its model's disk, TPM, AMT or Secure Boot setting.
 
 The file's opening comment defines each key. Every value is a scalar on its own line.

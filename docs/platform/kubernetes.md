@@ -38,7 +38,7 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 
 On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/talos/talos.tf` gives it the `lolwtf.ca/sandbox` label and a `NoSchedule` taint of the same key, so only a pod that selects the label and tolerates the taint lands there: the Rowbutt sandboxes, the GitHub Actions runners and the kthx engine's in-cluster build Jobs.
 
-A DaemonSet that should run on every node tolerates the taint in its chart values. folly has no sandbox node. Talos hands a node's taints to the kubelet, which applies them when it registers the Node, and NodeRestriction refuses the kubelet's later change, so a taint declared for a registered node is applied once by hand with `kubectl taint`.
+A DaemonSet that should run on every node tolerates the taint in its chart values. On folly, a node's labels and taints come from its class's `workload` in `clusters/folly/fleet/classes.json`, through the `workloads` map in `clusters/folly/talos/talos.tf`, which both the Talos root and fleetd's render read. Every folly class is `general` today, which sets none, so folly has no sandbox node. Talos hands a node's taints to the kubelet, which applies them when it registers the Node, and NodeRestriction refuses the kubelet's later change, so a taint declared for a registered node is applied once by hand with `kubectl taint`.
 
 ## Signed Talos images
 
