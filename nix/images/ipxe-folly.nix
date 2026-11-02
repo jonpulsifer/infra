@@ -1,8 +1,8 @@
 # folly's netboot iPXE, unsigned. Firmware PXE loads it from spore over TFTP, and its embedded
-# script chains Smee's script for the booting MAC. Smee has none unless a Workflow allows the MAC to
-# netboot, so a node with no Workflow, or one whose Workflow has finished, gets the menu below, from
-# spore's bootstrap address. Its default boots HookOS as a Hardware's script does (apps/fleetd),
-# which attests and waits for a Workflow.
+# script shows the menu below, from spore's bootstrap address. Its default boots HookOS as a
+# Hardware's script does (apps/fleetd), which attests and waits for a Workflow. The script asks Smee
+# (nix/services/tinkerbell.nix) for nothing: with Smee on, its per-MAC script boots the same HookOS,
+# and with it off the chain only cost each boot a failed request.
 # .github/workflows/talos-images.yml signs iPXE with the Talos UKI key. The firmware verifies every
 # image iPXE loads.
 {
@@ -14,8 +14,7 @@ let
   lab = import ../lib/anchor.nix;
   spore = lab.bootstrap.hosts.spore;
   hookos = callPackage ./hookos-folly.nix { };
-  # Smee's HTTP listener (--http-port, Tinkerbell's default) on spore's bootstrap address. The DHCP
-  # file and next-server name dnsmasq's TFTP, not Smee.
+  # The DHCP file and next-server name dnsmasq's TFTP; boot-url names nginx, at the same address.
   #
   # sanboot takes no relative URL, so the script sets boot-url. imgfree runs before the HookOS chain:
   # iPXE serves the initrd of any other loaded image to systemd-stub, which then refuses its own.
@@ -26,7 +25,6 @@ let
     #!ipxe
     dhcp || goto failed
     set boot-url http://${spore}/talos/folly
-    chain http://${spore}:7080/ipxe/script/''${net0/mac}/auto.ipxe || goto menu
     :menu
     menu folly netboot
     item hookos Boot HookOS, attest and wait for a Workflow

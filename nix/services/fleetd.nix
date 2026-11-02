@@ -289,7 +289,8 @@ in
         FLEET_WEBHOOK_ADDR = ":${toString cfg.webhookPort}";
         # Some firmware takes Smee's offer over the network's DHCP, and Smee names
         # /<mac>/netboot-not-allowed while allowPXE is off (./tinkerbell.nix). fleetd links that
-        # path to the signed iPXE under dnsmasq's TFTP root for each MAC NetBox holds.
+        # path to the signed iPXE under dnsmasq's TFTP root for each MAC NetBox holds. With Smee
+        # off nothing asks for the links; they cost one symlink per MAC and keep the switch back cheap.
         FLEET_TFTP_DIR = tftpDir;
         FLEET_TFTP_LINK_TARGET = "${tftpDir}/talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";

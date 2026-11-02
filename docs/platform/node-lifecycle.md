@@ -46,7 +46,7 @@ See [Identity](identity.md#terms) for the credential terms and [Tinkerbell](nixo
 | NetBox | Status, `desired_action`, verdicts, MACs | capsule |
 | fleetd | Attestation, the LDevID and LAK, install codes, renewal, `Hardware`, `Machine`, `Workflow`, the rendered config, retirement | spore |
 | [Boot plane](nixos/talos-boot.md) | dnsmasq, nginx, the signed iPXE and HookOS, at `SPORE_BOOTSTRAP_IP` | spore |
-| Tinkerbell | Smee, the Tink server and Rufio, which run each `Workflow` | spore |
+| Tinkerbell | The Tink server and Rufio, which run each `Workflow` | spore |
 | [SPIRE](identity.md) | The server, the agents, and `tpm-reattest` | server on spore, agents on the folly nodes |
 | [UniFi network](network/routing-and-firewall.md#node-ports) | Node ports, each the Kubernetes network untagged, and that network's DHCP pool for netbooting machines | `terraform/network/unifi/folly/bootstrap.tf`, `k8s.tf` |
 
