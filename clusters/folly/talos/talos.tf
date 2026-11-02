@@ -59,6 +59,21 @@ locals {
   # root holds the Talos role and patches of each class whose os is talos;
   # the check below keeps the two in step.
   fleet_classes = jsondecode(file("${path.module}/../fleet/classes.json"))
+
+  # What a workload means on a Talos node: the labels a pod selects and the
+  # taints it tolerates, key => "value:Effect" as the module takes them.
+  # general sets none; a workload a pod needs, such as a sandbox node, is
+  # one more entry here and one class in the table that names it. Talos
+  # applies a taint when the kubelet registers the Node and refuses a later
+  # change, so a new taint on a registered node is applied once by hand
+  # (docs/platform/kubernetes.md).
+  workloads = {
+    general = {
+      labels = {}
+      taints = {}
+    }
+  }
+  class_workload = { for class, c in local.classes : class => local.workloads[local.fleet_classes[class].workload] }
   classes = {
     controlplane = {
       role      = "controlplane"
@@ -126,7 +141,8 @@ locals {
     )
     tpm_patches   = module.talos.render_inputs.tpm_patches
     class_patches = [local.ephemeral_patch[class]]
-    labels        = {}
+    labels        = local.class_workload[class].labels
+    taints        = local.class_workload[class].taints
     tpm_labels    = module.talos.render_inputs.tpm_labels
     node_network  = module.talos.render_inputs.node_network
   } }
@@ -170,6 +186,8 @@ module "talos" {
     address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
     patches            = [local.ephemeral_patch[n.class]]
+    labels             = local.class_workload[n.class].labels
+    taints             = local.class_workload[n.class].taints
     installer_image    = local.secureboot_installer
     install_generation = local.install_generation
     bootstrap_token    = contains(local.fleet_workers, name) ? local.no_join_token : null
