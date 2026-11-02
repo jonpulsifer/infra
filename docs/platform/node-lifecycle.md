@@ -16,7 +16,7 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 7. Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address.
 8. After the complete response, fleetd deletes the configuration and sets the device `active`.
 9. fleetd approves the worker's initial kubelet certificate only when its per-node bootstrap token and requested node name match. Kubernetes readiness remains separate.
-10. Once spore has the node's alias, the SPIRE agent attests by LDevID and serves SVIDs.
+10. fleetd lists the `active`, attested node in `spire-nodes.json`, and spore's `spire-server-fleet-entries` registers the node's SPIRE entry, `spiffe://lolwtf.ca/node/<name>`, from it. The SPIRE agent then attests by LDevID and serves SVIDs, since each workload entry is parented to that node entry. [Identity](identity.md#fleetd-entries) has the entries.
 
 An unknown serial also waits. A machine must prove every EK that its inventory entry approves before fleetd issues an identity.
 
