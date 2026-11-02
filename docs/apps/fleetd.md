@@ -50,4 +50,5 @@ The owner sets `desired_action` in NetBox to request `provision`, `attest` or `w
 - Source and HTTP contract: `apps/fleetd/`
 - Service: `nix/services/fleetd.nix`
 - Class declarations: `clusters/folly/fleet/classes.json`
+- Kea reservations, one per NetBox device with a MAC: `/var/lib/kea/fleet/reservations.json` on spore ([Kea](../platform/nixos/kea.md#reservations))
 - Alerts: `clusters/folly/monitoring/fleetd-rules.yaml`

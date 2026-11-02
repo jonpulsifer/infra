@@ -20,9 +20,11 @@ let
   iface = "bootstrap";
   address = lab.bootstrap.hosts.spore;
   stateDir = "/var/lib/kea";
-  # A JSON array of host reservations. fleetd rewrites it and asks Kea to reload; an empty array is
-  # seeded so Kea starts before fleetd has written one.
-  reservationsFile = "${stateDir}/reservations.json";
+  # A JSON array of host reservations. fleetd (./fleetd.nix), in group kea, rewrites it in this
+  # group-writable, setgid directory and asks Kea to reload over the control socket; an empty array
+  # is seeded so Kea starts before fleetd has written one.
+  fleetDir = "${stateDir}/fleet";
+  reservationsFile = "${fleetDir}/reservations.json";
   socket = "/run/kea/kea-dhcp4.socket";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   # Under dnsmasq's TFTP root (./talos-boot.nix), the name UniFi's boot option carries today.
@@ -163,7 +165,8 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${stateDir} 0750 kea kea -"
-      "f ${reservationsFile} 0640 kea kea - []"
+      "d ${fleetDir} 2770 kea kea -"
+      "f ${reservationsFile} 0660 kea kea - []"
     ];
 
     systemd.services.kea-dhcp4-server = {
@@ -171,6 +174,10 @@ in
       after = [ "sys-subsystem-net-devices-${iface}.device" ];
       serviceConfig = {
         DynamicUser = lib.mkForce false;
+        # The control socket takes the umask, so group kea (fleetd) can connect to it; nobody else
+        # enters /run/kea.
+        UMask = lib.mkForce "0007";
+        RuntimeDirectoryMode = "0750";
         NoNewPrivileges = true;
         PrivateTmp = true;
         PrivateDevices = true;

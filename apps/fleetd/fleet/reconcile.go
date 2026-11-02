@@ -31,6 +31,12 @@ type Reconciler struct {
 	// Links keeps the TFTP netboot-not-allowed links of the devices' MACs,
 	// or is nil without a directory.
 	Links *TFTPLinks
+	// Kea writes each device's DHCP reservation, with the boot file while
+	// it may netboot, or is nil without a reservations file.
+	Kea *KeaReservations
+	// netboot is what this pass decided for each device's Hardware, for
+	// Kea's boot files.
+	netboot map[string]bool
 	// SpireNodesFile is where each pass writes the nodes SPIRE registers,
 	// or empty to write none.
 	SpireNodesFile string
@@ -173,6 +179,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	errs := []error{csrErr}
 	keep := map[string]bool{}
+	r.netboot = map[string]bool{}
 	for _, d := range devices {
 		keep[d.Name] = true
 		if err := r.cordonQuarantined(ctx, d); err != nil {
@@ -227,6 +234,12 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	if err := r.syncLinks(devices); err != nil {
 		errs = append(errs, err)
+	}
+	// An empty list is left alone here too: Kea keeps its last reservations.
+	if r.Kea != nil && len(devices) > 0 {
+		if err := r.Kea.Sync(devices, r.netboot); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	if r.SpireNodesFile != "" && len(devices) > 0 {
 		if err := r.writeSpireNodes(devices); err != nil {
@@ -317,7 +330,11 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 	}
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
-		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
+		netboot := Unfinished(workflows)
+		if r.netboot != nil {
+			r.netboot[d.Name] = netboot
+		}
+		if err := r.applyHardware(ctx, d, netboot); err != nil {
 			return err
 		}
 	}
