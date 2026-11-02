@@ -123,3 +123,25 @@ func TestKeaReservationsRefuseBadValuesAndFailedReloads(t *testing.T) {
 		t.Fatal("a missing socket passed")
 	}
 }
+
+func TestKeaReservationsRetryAFailedReloadUntilItPasses(t *testing.T) {
+	socket, calls := fakeKeaSocket(t, 0)
+	k := &KeaReservations{File: filepath.Join(t.TempDir(), "r.json"), Socket: filepath.Join(t.TempDir(), "missing.sock")}
+	devices := []Device{{Name: "good", MAC: "ec:8e:b5:72:35:24", Address: "10.3.0.12"}}
+	if err := k.Sync(devices, nil); err == nil {
+		t.Fatal("the first reload should fail")
+	}
+	k.Socket = socket
+	if err := k.Sync(devices, nil); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("the unchanged file was not reloaded after the failure: %d", calls.Load())
+	}
+	if err := k.Sync(devices, nil); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("a passed reload was repeated: %d", calls.Load())
+	}
+}

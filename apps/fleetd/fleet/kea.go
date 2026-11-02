@@ -29,6 +29,9 @@ type KeaReservations struct {
 	BootFile string
 	// Dial opens the control socket; nil dials the unix socket.
 	Dial func(network, addr string) (net.Conn, error)
+	// unreloaded is whether the file on disk is newer than what Kea has
+	// loaded: a write whose reload failed, which the next pass retries.
+	unreloaded bool
 }
 
 type keaReservation struct {
@@ -73,7 +76,8 @@ func (k *KeaReservations) Reservations(devices []Device, netboot map[string]bool
 
 // Sync writes the reservations and reloads Kea when they changed. The file
 // is written beside itself and renamed, so Kea reads a whole file or the
-// old one. An unchanged file sends no reload.
+// old one. An unchanged file sends no reload, unless the last write's reload
+// failed, which is retried until it passes.
 func (k *KeaReservations) Sync(devices []Device, netboot map[string]bool) error {
 	reservations, rerr := k.Reservations(devices, netboot)
 	body, err := json.MarshalIndent(reservations, "", "  ")
@@ -81,23 +85,24 @@ func (k *KeaReservations) Sync(devices []Device, netboot map[string]bool) error 
 		return err
 	}
 	body = append(body, '\n')
-	if old, err := os.ReadFile(k.File); err == nil && bytes.Equal(old, body) {
-		return rerr
+	if old, err := os.ReadFile(k.File); err != nil || !bytes.Equal(old, body) {
+		tmp := filepath.Join(filepath.Dir(k.File), "."+filepath.Base(k.File)+".tmp")
+		if err := os.WriteFile(tmp, body, 0o640); err != nil {
+			return errors.Join(rerr, err)
+		}
+		if err := os.Rename(tmp, k.File); err != nil {
+			_ = os.Remove(tmp)
+			return errors.Join(rerr, err)
+		}
+		k.unreloaded = true
 	}
-	tmp := filepath.Join(filepath.Dir(k.File), "."+filepath.Base(k.File)+".tmp")
-	if err := os.WriteFile(tmp, body, 0o640); err != nil {
-		return errors.Join(rerr, err)
-	}
-	if err := os.Rename(tmp, k.File); err != nil {
-		_ = os.Remove(tmp)
-		return errors.Join(rerr, err)
-	}
-	if k.Socket == "" {
+	if k.Socket == "" || !k.unreloaded {
 		return rerr
 	}
 	if err := k.reload(); err != nil {
 		return errors.Join(rerr, fmt.Errorf("kea reload: %w", err))
 	}
+	k.unreloaded = false
 	return rerr
 }
 
