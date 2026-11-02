@@ -25,11 +25,12 @@ let
   # is seeded so Kea starts before fleetd has written one.
   fleetDir = "${stateDir}/fleet";
   reservationsFile = "${fleetDir}/reservations.json";
-  # The control socket lives beside the reservations file, not under /run/kea: systemd's
-  # dynamic-user release left that directory owned by nobody when the unit moved to its static
-  # user, and nothing re-owns it, so a socket there admits no other user. Here the setgid directory
-  # and the unit's umask give the socket kea:kea 0770.
-  socket = "${fleetDir}/kea-dhcp4.socket";
+  # Kea 3 accepts a control socket only under its socket directory, /run/kea. The unit's umask
+  # gives the socket kea:kea 0770, and the tmpfiles rule below owns the directory: systemd's
+  # dynamic-user release left it nobody's when the unit moved to its static user, and the
+  # RuntimeDirectory migration keeps that ownership, so without the rule no other user connects.
+  runDir = "/run/kea";
+  socket = "${runDir}/kea-dhcp4.socket";
   metricsDir = "/var/lib/prometheus-node-exporter-text-files";
   # Under dnsmasq's TFTP root (./talos-boot.nix), the name UniFi's boot option carries today.
   ipxe = "talos/${site}/ipxe-amd64-secureboot.efi";
@@ -168,6 +169,7 @@ in
     networking.firewall.interfaces.${iface}.allowedUDPPorts = [ 67 ];
 
     systemd.tmpfiles.rules = [
+      "d ${runDir} 0750 kea kea -"
       "d ${stateDir} 0750 kea kea -"
       "d ${fleetDir} 2770 kea kea -"
       "f ${reservationsFile} 0660 kea kea - []"
