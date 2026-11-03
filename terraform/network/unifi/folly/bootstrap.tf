@@ -5,6 +5,11 @@ locals {
   # Tink and fleetd (nix/services/talos-boot.nix, nix/services/kea.nix,
   # nix/services/fleetd.nix). The Kubernetes network relays its DHCP here.
   boot_server = local.anchor_topology.SPORE_BOOTSTRAP_IP
+  # The host index of the boot address in its network, which bounds the bootstrap pool below it.
+  boot_server_index = index(
+    [for i in range(0, pow(2, 32 - tonumber(split("/", local.bootstrap_cidr)[1]))) : cidrhost(local.bootstrap_cidr, i)],
+    local.boot_server,
+  )
 
   # The boot option the gateway's own DHCP named while it leased the
   # Kubernetes network: the signed iPXE that dnsmasq serves over TFTP on
@@ -53,8 +58,16 @@ resource "unifi_network" "bootstrap" {
     interface_type = "none"
   }
 
+  # The gateway's DHCP is dnsmasq, which also runs the Kubernetes network's relay (k8s.tf), and
+  # dnsmasq honours a packet only on an interface it serves. Kea's replies to the relay arrive on
+  # this network's interface, so the gateway serves DHCP here too, or it drops every reply and no
+  # machine on a node port gets its offer. Nothing on this VLAN asks for a lease: spore's boot
+  # address is static, and the pool stops short of it.
   dhcp_server = {
-    enabled = false
+    enabled   = true
+    leasetime = local.one_day
+    start     = cidrhost(local.bootstrap_cidr, 2)
+    stop      = cidrhost(local.bootstrap_cidr, local.boot_server_index - 1)
   }
 
   lifecycle {
@@ -64,6 +77,10 @@ resource "unifi_network" "bootstrap" {
         local.boot_server,
       )
       error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP must be a host address in BOOTSTRAP_CIDR other than the gateway."
+    }
+    precondition {
+      condition     = local.boot_server_index >= 3
+      error_message = "anchor-topology.json's SPORE_BOOTSTRAP_IP must leave at least one host address between the gateway and itself for the bootstrap network's DHCP pool."
     }
   }
 }

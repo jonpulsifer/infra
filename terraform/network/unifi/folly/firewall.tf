@@ -609,15 +609,18 @@ resource "unifi_firewall_policy" "bootstrap_block_lb" {
 # Tink server that HookOS's agent polls. UDP: 69 for the signed iPXE over
 # TFTP, 123 for chrony, and 514 for HookOS's syslog, which rsyslog on spore
 # receives. Smee is off (nix/services/tinkerbell.nix), so its script port
-# 7080 is not here; add it back with Smee. DHCP needs no rule: the gateway
-# relays it onto the bootstrap VLAN itself (k8s.tf). Lab and
-# Bootstrap are custom zones, so the controller creates each reply rule. A reply
-# rule matches only these ports, so dnsmasq sends TFTP data from port 69 too
-# (tftp-single-port in nix/services/talos-boot.nix).
+# 7080 is not here; add it back with Smee. A machine's first DHCP needs no
+# rule: the gateway relays the broadcast onto the bootstrap VLAN itself
+# (k8s.tf). 67 is for a lease's renewal, which a client such as a node's AMT
+# sends unicast to Kea at half the lease; without it the client waits for its
+# broadcast rebind through the relay. Lab and Bootstrap are custom zones, so
+# the controller creates each reply rule. A reply rule matches only these
+# ports, so dnsmasq sends TFTP data from port 69 too (tftp-single-port in
+# nix/services/talos-boot.nix).
 resource "unifi_firewall_policy" "kubernetes_to_boot" {
   for_each = {
     tcp = "80,443,42113"
-    udp = "69,123,514"
+    udp = "67,69,123,514"
   }
 
   name                 = "Allow Kubernetes to Boot ${upper(each.key)}"
