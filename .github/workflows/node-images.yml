@@ -1,0 +1,295 @@
+name: node-images
+# Builds the NixOS node image, nix/images/node-nixos.nix, signs the UKI on its
+# EFI system partition with the UKI key in 1Password, verifies it against the
+# committed certificate, and publishes the compressed image as an immutable
+# release. A pull request only evaluates the image: the build needs the key.
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - nix/images/node-nixos.nix
+      - nix/profiles/**
+      - nix/system/**
+      - nix/hardware/x86/**
+      - nix/lib/mkHost.nix
+      - nix/lib/registry.nix
+      - nix/hosts/default.nix
+      - flake.lock
+      - .github/scripts/talos-uki-verify.sh
+      - .github/workflows/node-images.yml
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch:
+
+# An evicted pending run publishes nothing, so runs queue.
+concurrency:
+  group: node-images-${{ github.ref }}
+  queue: max
+
+permissions:
+  contents: read
+
+env:
+  ROOT: clusters/folly/talos
+  ATTRIBUTE: node-nixos
+  ASSET: nixos-node-amd64.img.zst
+  OP_ITEM: op://homelab/talos-secureboot
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.gate.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+      - name: The image must evaluate
+        run: |
+          set -euo pipefail
+          nix eval --raw ".#packages.x86_64-linux.$ATTRIBUTE.drvPath"
+          echo
+      # A pull request proves the image evaluates. A push to main or a
+      # dispatch builds, when the 1Password token is set.
+      - name: Decide whether to build
+        id: gate
+        env:
+          EVENT: ${{ github.event_name }}
+          HAS_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          build=false
+          case "$EVENT" in
+            push | workflow_dispatch) build=true ;;
+          esac
+          if [[ "$build" == true && "$HAS_TOKEN" != true ]]; then
+            echo "::warning::OP_SERVICE_ACCOUNT_TOKEN is not set, so no image is built"
+            build=false
+          fi
+          echo "build=$build" | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    needs: evaluate
+    if: needs.evaluate.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+      digest: ${{ steps.compress.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Install the signature and disk tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool mtools zstd
+      - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
+        with:
+          extra-conf: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Load the signing key
+        id: op
+        uses: 1password/load-secrets-action@70062d7a876d3eb6334754fa26efd2fbd90c32f2 # v5.0.1
+        with:
+          export-env: false
+        env:
+          OP_SERVICE_ACCOUNT_TOKEN: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
+          UKI_SIGNING_KEY: ${{ env.OP_ITEM }}/uki_signing_key
+          UKI_SIGNING_CERT: ${{ env.OP_ITEM }}/uki_signing_cert
+
+      # The private key lives only in this runner's temp directory, and the
+      # loaded certificate must be the committed one.
+      - name: Stage the key
+        env:
+          UKI_SIGNING_KEY: ${{ steps.op.outputs.UKI_SIGNING_KEY }}
+          UKI_SIGNING_CERT: ${{ steps.op.outputs.UKI_SIGNING_CERT }}
+        run: |
+          set -euo pipefail
+          umask 077
+          keys="$RUNNER_TEMP/secureboot"
+          mkdir -p "$keys"
+          printf '%s\n' "$UKI_SIGNING_KEY" >"$keys/uki-signing-key.pem"
+          printf '%s\n' "$UKI_SIGNING_CERT" >"$keys/uki-signing-cert.pem"
+          committed=$(openssl x509 -in "$ROOT/secureboot/uki-signing-cert.pem" -noout -fingerprint -sha256)
+          loaded=$(openssl x509 -in "$keys/uki-signing-cert.pem" -noout -fingerprint -sha256)
+          [[ "$committed" == "$loaded" ]] || { echo "::error::the 1Password uki-signing-cert is not the committed one"; exit 1; }
+          echo "KEYS=$keys" >>"$GITHUB_ENV"
+
+      - name: Build the image
+        run: |
+          set -euo pipefail
+          out=$(nix build --no-link --print-out-paths ".#$ATTRIBUTE")
+          file=$(nix eval --raw ".#nixosConfigurations.$ATTRIBUTE.config.image.filePath")
+          mkdir -p "$RUNNER_TEMP/out"
+          install -m 0644 "$out/$file" "$RUNNER_TEMP/out/${ASSET%.zst}"
+          ls -l "$RUNNER_TEMP/out"
+
+      # The UKI sits at the removable path on the first partition of type
+      # ESP. mtools reads and writes the partition in place through the
+      # image offset, so nothing is mounted.
+      - name: Sign the UKI in the image
+        run: |
+          set -euo pipefail
+          img="$RUNNER_TEMP/out/${ASSET%.zst}"
+          table=$(sfdisk --json "$img")
+          sector=$(jq -r '.partitiontable.sectorsize' <<<"$table")
+          start=$(jq -r '[.partitiontable.partitions[] | select(.type == "C12A7328-F81F-11D2-BA4B-00A0C93EC93B")][0].start' <<<"$table")
+          [[ "$start" =~ ^[0-9]+$ && "$sector" =~ ^[0-9]+$ ]] || { echo "::error::$img has no EFI system partition"; exit 1; }
+          offset=$((start * sector))
+          echo "ESP at sector $start, byte offset $offset"
+          uki="$RUNNER_TEMP/uki.efi"
+          signed="$RUNNER_TEMP/uki-signed.efi"
+          mcopy -i "$img@@$offset" ::/EFI/BOOT/BOOTX64.EFI "$uki"
+          sbsign --key "$KEYS/uki-signing-key.pem" --cert "$KEYS/uki-signing-cert.pem" --output "$signed" "$uki"
+          mcopy -o -i "$img@@$offset" "$signed" ::/EFI/BOOT/BOOTX64.EFI
+          echo "ESP_OFFSET=$offset" >>"$GITHUB_ENV"
+
+      - name: Remove the key
+        if: always()
+        run: |
+          if [[ -n "${KEYS:-}" ]]; then
+            find "$KEYS" -type f -exec shred -u {} +
+            rm -rf "$KEYS"
+          fi
+          rm -f "$RUNNER_TEMP/uki.efi" "$RUNNER_TEMP/uki-signed.efi"
+
+      - name: The UKI in the image must verify against the committed certificate
+        run: |
+          set -euo pipefail
+          img="$RUNNER_TEMP/out/${ASSET%.zst}"
+          back="$RUNNER_TEMP/uki-in-image.efi"
+          mcopy -i "$img@@$ESP_OFFSET" ::/EFI/BOOT/BOOTX64.EFI "$back"
+          bash .github/scripts/talos-uki-verify.sh "$ROOT/secureboot/uki-signing-cert.pem" "$back" | tee -a "$GITHUB_STEP_SUMMARY"
+          {
+            echo "### Node image UKI command line"
+            echo '```'
+            objcopy -O binary --only-section=.cmdline "$back" "$RUNNER_TEMP/cmdline"
+            tr -d '\0' <"$RUNNER_TEMP/cmdline"
+            echo
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      - name: Compress and digest
+        id: compress
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/out"
+          zstd -19 -T0 -q --rm "${ASSET%.zst}" -o "$ASSET"
+          sha256sum "$ASSET" | tee "$ASSET.sha256"
+          digest="sha256:$(cut -d' ' -f1 "$ASSET.sha256")"
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          ls -l
+
+      - name: Keep the image for a look when a check fails
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: nixos-node-amd64
+          path: ${{ runner.temp }}/out/
+          if-no-files-found: ignore
+          retention-days: 3
+
+      # Releases in this repository are immutable, and a tag name that an
+      # immutable release used is spent for good. Each build is its own
+      # release, tagged with the run id. The class table pins the asset's URL
+      # and digest, and the install downloads it from here.
+      - name: Publish the image
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DIGEST: ${{ steps.compress.outputs.digest }}
+        run: |
+          set -euo pipefail
+          tag="node-images/$GITHUB_RUN_ID"
+          notes="Signed NixOS node image for folly, built from $GITHUB_SHA. $ASSET is $DIGEST."
+          gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
+            --title "NixOS node image, build $GITHUB_RUN_ID" --notes "$notes" \
+            "$RUNNER_TEMP/out/$ASSET" \
+            "$RUNNER_TEMP/out/$ASSET.sha256"
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/${tag//\//%2F}/$ASSET"
+          # The pinned URL must serve the digest the pin names.
+          curl -fsSL --retry 8 --retry-delay 10 --retry-all-errors -o "$RUNNER_TEMP/served.img.zst" "$url"
+          served="sha256:$(sha256sum "$RUNNER_TEMP/served.img.zst" | cut -d' ' -f1)"
+          [[ "$served" == "$DIGEST" ]] || { echo "::error::$url serves $served, not $DIGEST"; exit 1; }
+          echo "url=$url" >>"$GITHUB_OUTPUT"
+          {
+            echo "Release: \`$tag\`"
+            echo "Image: \`$url\`"
+            echo "Digest: \`$DIGEST\`"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # fleetd installs only an image pinned by URL and digest, so each build pins
+  # the image it published in clusters/folly/fleet/classes.json, through a pull
+  # request the continuous-delivery App opens and merges, as talos-images.yml
+  # does for the installer. The nixos class must already be in the table: the
+  # pin fills its image fields and adds no class.
+  pin:
+    needs: build
+    if: >-
+      needs.build.result == 'success'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          # The pull request's checks run only when the identity that opens it
+          # also pushes the branch, so git must not send GITHUB_TOKEN.
+          persist-credentials: false
+      - name: Mint a continuous-delivery App token
+        id: cd-app-token
+        if: vars.CD_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.CD_APP_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
+      - name: Pin the image in the class table
+        env:
+          GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          IMAGE_URL: ${{ needs.build.outputs.url }}
+          DIGEST: ${{ needs.build.outputs.digest }}
+          CLASSES: clusters/folly/fleet/classes.json
+          BRANCH_NAME: cd/node-nixos-image
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the build published no digest"; exit 1; }
+          [[ "$IMAGE_URL" == https://github.com/*/releases/download/* ]] || { echo "::error::the build published no image URL"; exit 1; }
+          jq -e '.nixos | type == "object"' "$CLASSES" >/dev/null || {
+            echo "::error file=$CLASSES::the class table has no nixos class; the pin fills its image fields and adds no class"
+            exit 1
+          }
+          jq -e '.nixos.payload_kind == "nixos-image"' "$CLASSES" >/dev/null || {
+            echo "::error file=$CLASSES::the nixos class does not install a nixos-image payload"
+            exit 1
+          }
+          jq --arg image "$IMAGE_URL" --arg digest "$DIGEST" \
+            '.nixos.image = $image | .nixos.image_digest = $digest | .nixos.image_format = "raw.zst"' \
+            "$CLASSES" >"$RUNNER_TEMP/classes.json"
+          if cmp -s "$CLASSES" "$RUNNER_TEMP/classes.json"; then
+            echo "$CLASSES already pins $IMAGE_URL"
+            exit 0
+          fi
+          cp "$RUNNER_TEMP/classes.json" "$CLASSES"
+          git config user.name "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]"
+          git config user.email "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -B "$BRANCH_NAME"
+          git commit -am "fix(cd): pin the NixOS node image" -m "$IMAGE_URL" -m "$DIGEST"
+          git push origin "$BRANCH_NAME" --force
+          title="fix(cd): pin the NixOS node image"
+          body="Automated pin of the node image this build published, for fleetd's class table."
+          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --head "$BRANCH_NAME" --base main
+          else
+            gh pr edit "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+          # On the merge commit only: the branch commit keeps its checks.
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]"
