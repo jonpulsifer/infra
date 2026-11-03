@@ -46,7 +46,7 @@
     "image_format": "raw.zst"
   },
   "debian": {
-    "description": "Debian from the dated genericcloud release, written as a disk image with a NoCloud seed fleetd renders. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA at the CA level, with no shim or GRUB digest pins. The pin is the release's tar.xz and its sha256, set by hand from cloud.debian.org's SHA512SUMS. No in-node check yet, so reattest is off.",
+    "description": "Debian from the dated generic cloud release, written as a disk image with a NoCloud seed fleetd renders. The generic variant carries the drivers for physical hardware; genericcloud boots a node with no NIC. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA at the CA level, with no shim or GRUB digest pins. The pin is the release's tar.xz and its sha256, computed from a download that matches cloud.debian.org's SHA512SUMS. No in-node check yet, so reattest is off.",
     "os": "debian",
     "workload": "general",
     "template": "provision-image",
@@ -54,8 +54,8 @@
     "secure_boot": true,
     "payload_kind": "cloud-init-nocloud",
     "reattest": false,
-    "image": "https://cloud.debian.org/images/cloud/trixie/20261026-2643/debian-13-genericcloud-amd64-20261026-2643.tar.xz",
-    "image_digest": "sha256:c3489247bbe45073156a5c2d4e8bd60825634d2e74dd47a605326b38c329f3c0",
+    "image": "https://cloud.debian.org/images/cloud/trixie/20261026-2643/debian-13-generic-amd64-20261026-2643.tar.xz",
+    "image_digest": "sha256:1245808471c952fc7a081f90ef1958929330e75990bf851b399dc006aa433378",
     "image_format": "tar.xz"
   }
 }
