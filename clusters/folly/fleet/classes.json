@@ -4,33 +4,42 @@
     "os": "talos",
     "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:d67e4eacbdba5ee9cae3e438783794e2579d774c18e6a6ab56b365478ed7263f",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
-    "reattest": true
+    "reattest": true,
+    "image": "https://github.com/jonpulsifer/infra/releases/download/talos-folly%2Fv1.14.5-41731433258/metal-amd64-secureboot.raw.zst",
+    "image_digest": "sha256:cd6bd2b8d91cced6d34b98a9cd61e49be7457069e1aa1212d7c600ceb9503723",
+    "image_format": "raw.zst"
   },
   "worker-g5": {
     "description": "A Talos worker on a G5 desktop. .github/workflows/talos-images.yml pins its installer here by digest. Boots only the lab's signed UKI.",
     "os": "talos",
     "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:d67e4eacbdba5ee9cae3e438783794e2579d774c18e6a6ab56b365478ed7263f",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
-    "reattest": true
+    "reattest": true,
+    "image": "https://github.com/jonpulsifer/infra/releases/download/talos-folly%2Fv1.14.5-41731433258/metal-amd64-secureboot.raw.zst",
+    "image_digest": "sha256:cd6bd2b8d91cced6d34b98a9cd61e49be7457069e1aa1212d7c600ceb9503723",
+    "image_format": "raw.zst"
   },
   "worker-g2": {
     "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. .github/workflows/talos-images.yml pins its installer here by digest.",
     "os": "talos",
     "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:d67e4eacbdba5ee9cae3e438783794e2579d774c18e6a6ab56b365478ed7263f",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
-    "reattest": false
+    "reattest": false,
+    "image": "https://github.com/jonpulsifer/infra/releases/download/talos-folly%2Fv1.14.5-41731433258/metal-amd64-secureboot.raw.zst",
+    "image_digest": "sha256:cd6bd2b8d91cced6d34b98a9cd61e49be7457069e1aa1212d7c600ceb9503723",
+    "image_format": "raw.zst"
   },
   "nixos": {
     "description": "A NixOS node from the lab's signed disk image (nix/images/node-nixos.nix). .github/workflows/node-images.yml pins the image here by URL and digest after each build. Boots a UKI signed by the lab's key, so the talos profile holds it; its first boot reads the seed fleetd serves at /seed. No in-node check yet, so reattest is off.",
