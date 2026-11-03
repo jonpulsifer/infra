@@ -1,0 +1,94 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: suricata
+  labels:
+    app.kubernetes.io/name: suricata
+    app.kubernetes.io/part-of: sensor
+spec:
+  replicas: 1
+  # One capture per interface: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: suricata
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: suricata
+        app.kubernetes.io/part-of: sensor
+    spec:
+      # The sensor's USB NIC is on shale, cabled to the switch's mirror port
+      # (terraform/network/unifi/folly/bootstrap.tf).
+      nodeSelector:
+        kubernetes.io/hostname: shale
+      # The capture interface is the node's, so the pod shares its network
+      # namespace. Nothing listens.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      tolerations:
+        - effect: NoSchedule
+          key: unschedulable
+          operator: Equal
+          value: "true"
+      containers:
+        - name: suricata
+          image: docker.io/jasonish/suricata:8.0.8@sha256:d5a3a1785299ab40918d465e54fedf8e3afeeedba76bb64b0cc74dbc20bda2c3
+          # The image's entrypoint fills /etc/suricata, then runs these.
+          args: ["/bin/bash", "/scripts/suricata-run.sh"]
+          securityContext:
+            capabilities:
+              drop: [ALL]
+              # NET_ADMIN brings the link up in promiscuous mode, NET_RAW
+              # opens the AF_PACKET sockets, SYS_NICE sets thread priorities.
+              add: [NET_ADMIN, NET_RAW, SYS_NICE]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              memory: 3Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: rules
+              mountPath: /var/lib/suricata
+            - name: run
+              mountPath: /var/run/suricata
+            - name: logs
+              mountPath: /var/log/suricata
+        # Fetches the ET Open rules daily and reloads them over the socket.
+        - name: rules-update
+          image: docker.io/jasonish/suricata:8.0.8@sha256:d5a3a1785299ab40918d465e54fedf8e3afeeedba76bb64b0cc74dbc20bda2c3
+          args: ["/bin/bash", "/scripts/suricata-update-loop.sh"]
+          securityContext:
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: rules
+              mountPath: /var/lib/suricata
+            - name: run
+              mountPath: /var/run/suricata
+      volumes:
+        - name: scripts
+          configMap:
+            name: sensor-scripts
+            defaultMode: 0555
+        - name: rules
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: logs
+          emptyDir:
+            sizeLimit: 1Gi

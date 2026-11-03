@@ -13,6 +13,7 @@ The monitoring stack collects metrics, logs and traces from the [Kubernetes](kub
 | Vector, VictoriaLogs | Ship pod logs and the nodes' logs, and store them for one month | Each node, each cluster |
 | OpenTelemetry Collector, Tempo | Receive traces over OTLP, the OpenTelemetry protocol, and store them | Each cluster |
 | node exporter | Host metrics | Each node, and NixOS hosts with `homelab.fleet.metrics` |
+| Zeek, Suricata | Log and inspect the traffic that crosses folly's uplink, from a switch mirror port | shale, [Network sensor](observability/network-sensor.md) |
 
 ## Use it
 
