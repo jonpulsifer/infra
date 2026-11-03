@@ -22,7 +22,7 @@ fleet-boot is folly's own RAM boot image, a kernel and a NixOS systemd initrd pa
 2. fleet-boot waits for a default route and steps the clock over SNTP, from an answer that echoes its request.
 3. It attests with the `apps/fleetd/client` package, as `tink-attest` does: with the MAC of the NIC the firmware's `BootCurrent` entry names, then each NIC with a default route while fleetd refuses the claim. A verdict stops the tries; another failure gets five, 30 seconds apart.
 4. It asks for the run at `/attest/v1/boot/<session>/run`. The session's AK signs each request over the nonce, the route, a sequence number and the body.
-5. With no run, or no boot route, the machine waits, attested.
+5. With no run, or no boot route, the machine waits, attested. fleetd serves the route under its [boot executor](../../apps/fleetd/lifecycle.md#executors).
 
 ## Steps
 
@@ -39,7 +39,7 @@ A run's install inputs are checked before the wipe, so a malformed run keeps its
 
 ## Talos
 
-A Talos class installs as an image too. `talos-images.yml` builds the imager's `secureboot-metal` output, `metal-amd64-secureboot.raw.zst`, with the installer's `talos.config` URL, checks it with `.github/scripts/talos-metal-verify.sh`, and pins it in the Talos classes beside `installer_image` whenever the installer's digest moves. A Talos class with an image needs its installer. After the write, the install sets META key `0x0b`, which Talos fills `${code}` from, in the image's `META` partition: the Talos ADV of `github.com/siderolabs/go-adv`, two 256 KiB copies, as the installer's `--meta 0x0b=<code>` writes it. A Talos class with no image pin is refused before the wipe, since fleet-boot runs no installer container. Tinkerbell's `provision` Template still runs the installer.
+A Talos class installs as an image too. `talos-images.yml` builds the imager's `secureboot-metal` output, `metal-amd64-secureboot.raw.zst`, with the installer's `talos.config` URL, checks it with `.github/scripts/talos-metal-verify.sh`, and pins it in the Talos classes beside `installer_image` whenever the installer's digest moves. A Talos class with an image needs its installer. After the write, the install sets META key `0x0b`, which Talos fills `${code}` from, in the image's `META` partition: the Talos ADV of `github.com/siderolabs/go-adv`, two 256 KiB copies, as the installer's `--meta 0x0b=<code>` writes it. fleetd's boot executor puts the pinned image in a Talos class's run (`apps/fleetd/fleet/boot.go`). A Talos class with no image pin is refused before the wipe, since fleet-boot runs no installer container. Tinkerbell's `provision` Template still runs the installer.
 
 ## Rules
 

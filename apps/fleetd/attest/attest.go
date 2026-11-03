@@ -74,6 +74,9 @@ type Verifier struct {
 	// back to PXE after a BIOS reset, is refused and records nothing; it
 	// errs when it cannot say, which counts as unexpected.
 	Expected func(ctx context.Context, serial string) (bool, error)
+	// Booted, when set, takes each intake session whose signed confirm
+	// passed, after its install code, for the boot image's later requests.
+	Booted func(ctx context.Context, s BootSession)
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -955,6 +958,9 @@ func (v *Verifier) Confirm(ctx context.Context, id string, req protocol.ConfirmR
 		} else if c, ok := v.installCode(ctx, rec, s); ok {
 			resp.InstallCodeEKHash, resp.InstallCodeCredential, resp.InstallCodeSecret = c.EKHash, c.Credential, c.Secret
 		}
+	}
+	if signed && s.renew == nil {
+		v.handOver(ctx, id, s)
 	}
 	return resp, nil
 }

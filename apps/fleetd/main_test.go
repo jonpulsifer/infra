@@ -34,7 +34,7 @@ func TestBootHandlerRoutes(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusTeapot)
 	})
-	h := bootHandler(srv, config)
+	h := bootHandler(srv, config, nil)
 	for _, c := range []struct {
 		method, path string
 		want         int
@@ -111,7 +111,7 @@ func TestBootListenerWaitsForItsCertificate(t *testing.T) {
 	dir := t.TempDir()
 	kp := &keyPair{cert: filepath.Join(dir, "cert.pem"), key: filepath.Join(dir, "key.pem")}
 	srv := &attest.Server{V: &attest.Verifier{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	s := &http.Server{Handler: bootHandler(srv, http.NotFoundHandler())}
+	s := &http.Server{Handler: bootHandler(srv, http.NotFoundHandler(), nil)}
 	confirmAcks(s)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

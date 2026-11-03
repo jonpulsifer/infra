@@ -469,6 +469,15 @@ in
         ) "the initrd defines no fleet-boot target or service"
         ++ lib.optional (lib.any (lib.hasPrefix "worker_id=") words) "fleet-boot's command line names a worker"
         ++ lib.optional (
+          !(lib.elem pins.menu_default [
+            "hookos"
+            "fleetboot"
+          ])
+        ) "netboot.json's menu_default is neither hookos nor fleetboot"
+        ++
+          lib.optional ((spore.homelab.fleetd.executor == "boot") != (pins.menu_default == "fleetboot"))
+            "spore's fleetd executor is ${spore.homelab.fleetd.executor} and the iPXE menu boots ${pins.menu_default} by default"
+        ++ lib.optional (
           !(pkgs ? ${pins.fleet_boot.kernel})
         ) "netboot.json's fleet_boot.kernel names no nixpkgs kernel package set";
     in

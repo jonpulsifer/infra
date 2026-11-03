@@ -62,6 +62,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_BMC_AMT_CREDENTIAL_FILE`, `FLEET_BMC_STATE_FILE` | required with `FLEET_BMC=native` | The AMT credential, a JSON object with `username` and `password`, and the JSON file of each run's BMC record |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
 | `FLEET_SPIRE_NODES_FILE` | none | The file each pass writes with the nodes SPIRE registers and the ones it bans: `{"nodes": [{"name", "ek_hashes"}], "revoked": [{"name", "ek_hashes", "ldevids"}]}`. `nodes` holds each `active` device with a passing verdict; `revoked` holds each machine on record whose device is `decommissioning`, `offline` or gone, with its LDevID's SHA-1 fingerprint until its `notAfter`. Not written while NetBox lists no device, or while the store cannot be read |
+| `FLEET_EXECUTOR`, `FLEET_ATTEMPTS_FILE` | `tinkerbell`, none | What runs a device's runs. `tinkerbell`: Workflows on Tinkerbell's API, which HookOS runs. `boot`: fleet-boot runs them, and each run is an attempt in `FLEET_ATTEMPTS_FILE`, which every Workflow call fleetd makes reads and writes in place of the API; fleetd then serves [the boot routes](#boot-executor) |
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them no Talos class renders |
 | `FLEET_SEED_INPUTS` | none | The seed inputs: the node prefix, gateway, resolvers and DNS zone, the enrollment and DevID origins, the SPIRE server and trust domain, the SSH authorized keys, and the profile each seed payload kind names. Without it no `nixos-image`, `alpine-image` or `cloud-init-nocloud` class renders |
@@ -493,6 +494,17 @@ stay for audit. A retired record serves nothing: `/devid`, its files and a renew
 a refusal whatever NetBox says, including during a NetBox outage, and the LDevID expiry, check and
 PCR 0 metrics leave it out. `talos_attest_machine_status` reports it as `retired`. A device planned
 again with an approved binding attests from HookOS and gets a fresh record.
+
+## Boot executor
+
+Under `FLEET_EXECUTOR=boot`, `fleet/attempts.go` keeps each run as an attempt in the shape of the Workflow fleetd would have created, so the reconciler, the installer and the overdue rules read it by the same names. The signed confirm of a machine's intake pass hands its session (ID, AK, nonce) to the node's unfinished attempt; an attempt that already started fails instead, since a run never resumes in a new boot. fleet-boot's requests, under the device flow, are each signed by that AK over the nonce, the route, a sequence number above the last one taken and the body:
+
+| Route | Does |
+| --- | --- |
+| `POST /v1/boot/{session}/run` | Answers the run: the attempt's `hardwareMap` inputs, the device's install disk, and for a Talos class that pins its metal image, the image. The attempt turns running, with a deadline of the Template's global timeout |
+| `POST /v1/boot/{session}/report` | Takes a step's start, success or failure. A failure ends the attempt `FAILED` with the step and its reason; the reboot's success ends it `SUCCESS`. A report on an ended attempt answers 409 |
+
+An unbound session answers 404, a signature that fails 403, and a stale number 409. The overdue annotation ends a started attempt `TIMEOUT`, as Tinkerbell's controller ends a Workflow.
 
 ## Audit
 
