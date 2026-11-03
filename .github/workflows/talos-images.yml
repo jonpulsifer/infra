@@ -20,6 +20,8 @@ on:
       - apps/fleetd/client/**
       - apps/fleetd/protocol/**
       - apps/fleetd/lldp/**
+      - apps/fleetd/fleetboot/**
+      - apps/fleetd/classes/**
       # HookOS's fleet_attest_url reads this.
       - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
@@ -109,7 +111,7 @@ jobs:
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
               nix/images/ipxe-folly.nix nix/images/hookos-folly.nix nix/images/fleet-boot.nix \
               apps/fleetd/package.nix apps/fleetd/go.mod apps/fleetd/go.sum apps/fleetd/cmd/fleet-boot \
-              apps/fleetd/client apps/fleetd/protocol apps/fleetd/lldp \
+              apps/fleetd/client apps/fleetd/protocol apps/fleetd/lldp apps/fleetd/fleetboot apps/fleetd/classes \
               terraform/network/tailscale/fleet.tf.json \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
               .github/workflows/talos-images.yml

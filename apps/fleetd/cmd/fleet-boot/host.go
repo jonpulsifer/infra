@@ -166,6 +166,22 @@ func setClock(server string, log *logger) {
 	log.Printf("clock set from %s: %s", server, time.Now().UTC().Format(time.RFC3339))
 }
 
+// mountRAM mounts a tmpfs of most of the machine's memory at dir, for the
+// image download and the seed mounts, and answers its free bytes.
+func mountRAM(dir string) (int64, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return 0, err
+	}
+	if err := syscall.Mount("tmpfs", dir, "tmpfs", syscall.MS_NOSUID|syscall.MS_NODEV, "mode=0700,size=80%"); err != nil && !errors.Is(err, syscall.EBUSY) {
+		return 0, err
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	return int64(st.Bavail) * st.Bsize, nil
+}
+
 // mountSecurityfs mounts securityfs, where the kernel publishes the TCG event
 // log, unless it is there.
 func mountSecurityfs() error {
