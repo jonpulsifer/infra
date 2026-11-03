@@ -191,9 +191,13 @@ func LoadBMC(cfg Config) (func(Device) (bmc.BMC, error), *Runs, error) {
 	if _, _, err := runs.Get(""); err != nil {
 		return nil, nil, fmt.Errorf("FLEET_BMC_STATE_FILE: %w", err)
 	}
-	dialer := &bmc.Dialer{Credentials: map[string]bmc.Credential{"amt": cred}, AMTPort: cfg.AMTPort, Timeout: 20 * time.Second}
+	dialer := &bmc.Dialer{Credentials: map[string]bmc.Credential{"amt": cred}, AMTPort: cfg.AMTPort, Timeout: BMCCallTimeout(cfg.BMCJobWait)}
 	return func(d Device) (bmc.BMC, error) { return dialer.Dial(d.BMCType, d.BMCAddress) }, runs, nil
 }
+
+// BMCCallTimeout bounds one call to a BMC: a third of the power-off wait, so
+// one slow read leaves the wait room for more, and at least 5 seconds.
+func BMCCallTimeout(wait time.Duration) time.Duration { return max(wait/3, 5*time.Second) }
 
 // LoadCluster reads the site cluster's API: FLEET_CLUSTER_SERVER, its CA in
 // FLEET_CLUSTER_CA_FILE and a ServiceAccount token in FLEET_CLUSTER_TOKEN_FILE,

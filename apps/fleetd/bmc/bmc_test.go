@@ -1,6 +1,9 @@
 package bmc
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -89,5 +92,37 @@ func TestAMTSpeaksDigestOverHTTP(t *testing.T) {
 	}
 	if auth := seen[1]; !strings.Contains(auth, `Digest username="admin"`) || strings.Contains(auth, `"x"`) {
 		t.Errorf("the call's auth is %q", auth)
+	}
+}
+
+// A power-off whose power read fails is an error, not a machine taken for
+// off: the provider alone would send nothing and answer success.
+func TestAMTPowerOffFailsWhenThePowerReadFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			w.Header().Set("WWW-Authenticate", `Digest realm="Digest:A3829B3827DE4D33D4449B366831FD01", nonce="abc", stale="false", qop="auth"`)
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		http.Error(w, "busy", http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	host, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
+	p, _ := strconv.Atoi(port)
+	a := NewAMT(host, p, Credential{"admin", "x"}, 5*time.Second)
+	if err := a.PowerOff(t.Context()); err == nil || !strings.Contains(err.Error(), "read the power state") {
+		t.Fatalf("power-off: %v", err)
+	}
+	if err := a.PowerOn(t.Context()); err == nil {
+		t.Fatal("a power-on with a failed read answered")
+	}
+}
+
+// An error keeps its cause through the one-line form, so a caller can tell
+// a cancelled call from a BMC that refused.
+func TestOneLineKeepsTheCause(t *testing.T) {
+	err := oneLine(fmt.Errorf("post:\n\t%w", context.Canceled))
+	if !errors.Is(err, context.Canceled) || strings.Contains(err.Error(), "\n") {
+		t.Fatalf("%q", err)
 	}
 }

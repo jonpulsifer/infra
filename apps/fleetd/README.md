@@ -414,17 +414,27 @@ A node retired mid-install never fetches its config: [Config](#config) drops it.
 With `FLEET_BMC=native`, `apps/fleetd/bmc` does what Rufio does above, through bmclib's Intel AMT
 provider over plain HTTP digest auth on `AMTPort`. The rules above hold, with these differences:
 
-- No Machine, no `bmcRef` on a Hardware, no `stop-` Job, and no `bootMode` on a Workflow. A pass
-  deletes the Machines fleetd made before.
+- No Machine, no `bmcRef` on a Hardware, no `stop-` Job, and no `bootMode` on a Workflow. The
+  pass's cleanup deletes every Machine fleetd made.
 - A run that would netboot is netbooted by fleetd before its Workflow exists, as `netboot-Y` does:
-  power off, wait up to `BMCJobWait` for the BMC to report it off, one-time PXE boot, power on.
-  Kea's reservations get the device's boot file before the power-on. A netboot that fails creates
-  no Workflow, so no later boot runs it; fleetd names the run in `last_workflow`, clears
-  `desired_action`, leaves the status, and journals `Y (<action>) did not start: the BMC did not
-  network-boot the machine: <answer>`. A failure NetBox did not record is recorded again on the
-  next pass, not booted again. A retirement that failed there starts again on the same backoff.
+  power off, one-time PXE boot once the BMC reports the machine off, power on. Kea's reservations
+  get the device's boot file before the first BMC call, and a Kea that refuses it fails the pass
+  with no power change; on the first pass after a restart, the other devices keep the boot files
+  Kea's file holds. A machine still on after a pass's `BMCJobWait`, as one whose OS shuts down on
+  a graceful soft off, keeps the request: nothing is recorded in NetBox, the journal says once that
+  Y waits, and a later pass goes on with Y without a second power-off. A pass that ends mid-netboot,
+  as at a restart, records nothing either. The netboot fails when the machine is still on 10
+  minutes after the power-off.
+- A netboot that fails creates no Workflow, so no later boot runs it; fleetd names the run in
+  `last_workflow`, clears `desired_action`, leaves the status, and journals `Y (<action>) did not
+  start: the BMC did not network-boot the machine: <answer>`. A failure NetBox did not record is
+  recorded again on the next pass, not booted again, and one NetBox already names is not
+  journaled twice. A retirement that failed there starts again on the same backoff.
 - A stop asks the BMC once per run and reads the power on each pass until the machine is off; it
-  fails after 10 minutes on, as Rufio's Task does.
+  fails after 10 minutes on, as Rufio's Task does. A stop that never reached the BMC, as for a BMC
+  fleetd could not open, records nothing, and a later pass asks again.
+- Each BMC call is bounded by a third of `BMCJobWait`, at least 5 seconds. A power change reads
+  the power state first, and fails when that read fails.
 - A retirement's success is corroborated by fleetd's own read of the BMC.
 - `FLEET_BMC_STATE_FILE` holds what annotations hold in `rufio` mode, by run: the netboot's time
   and failure, the attempt, the run superseded, the power-off wait's start, and the stop's outcome.

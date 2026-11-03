@@ -150,16 +150,19 @@ func (a *AMT) Power(ctx context.Context) (string, error) {
 // PowerOff requests the first power-off state the BMC offers, of graceful
 // soft off, soft off, graceful hard off and hard off, as Rufio's power-off
 // does through the same provider.
-func (a *AMT) PowerOff(ctx context.Context) error {
-	return a.do(ctx, func(ctx context.Context) error {
-		_, err := a.conn.PowerSet(ctx, Off)
-		return err
-	})
-}
+func (a *AMT) PowerOff(ctx context.Context) error { return a.set(ctx, Off) }
 
-func (a *AMT) PowerOn(ctx context.Context) error {
+func (a *AMT) PowerOn(ctx context.Context) error { return a.set(ctx, On) }
+
+// set reads the power state before it asks for state, because the
+// provider's PowerSet takes a failed read for "off" and then sends no
+// power-off at all.
+func (a *AMT) set(ctx context.Context, state string) error {
 	return a.do(ctx, func(ctx context.Context) error {
-		_, err := a.conn.PowerSet(ctx, On)
+		if _, err := a.conn.PowerStateGet(ctx); err != nil {
+			return fmt.Errorf("read the power state: %w", err)
+		}
+		_, err := a.conn.PowerSet(ctx, state)
 		return err
 	})
 }
@@ -179,5 +182,12 @@ func oneLine(err error) error {
 	if err == nil {
 		return nil
 	}
-	return errors.New(strings.Join(strings.Fields(err.Error()), " "))
+	return lineError{err}
 }
+
+// lineError is an error on one line that still unwraps to the original.
+type lineError struct{ err error }
+
+func (e lineError) Error() string { return strings.Join(strings.Fields(e.err.Error()), " ") }
+
+func (e lineError) Unwrap() error { return e.err }

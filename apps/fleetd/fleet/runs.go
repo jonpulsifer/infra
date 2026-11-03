@@ -21,21 +21,30 @@ type Run struct {
 	Attempt int `json:"attempt,omitempty"`
 	// Supersedes names the run this retirement superseded.
 	Supersedes string `json:"supersedes,omitempty"`
-	// BootedAt is when fleetd netbooted the machine for the run.
-	// BootFailed is the BMC's answer when that failed, and then the run has
-	// no Workflow. Recorded says NetBox names the failed run.
-	BootedAt   time.Time `json:"booted_at,omitzero"`
-	BootFailed string    `json:"boot_failed,omitempty"`
-	Recorded   bool      `json:"recorded,omitempty"`
+	// BootedAt is when fleetd started to netboot the machine for the run.
+	// BootOffRequested says the BMC took the netboot's power-off, and Booted
+	// that it took the power-on; a netboot between the two is pending, and a
+	// later pass resumes it. BootFailed is the BMC's answer when the netboot
+	// failed, and then the run has no Workflow. Recorded says NetBox names
+	// the failed run.
+	BootedAt         time.Time `json:"booted_at,omitzero"`
+	BootOffRequested bool      `json:"boot_off_requested,omitempty"`
+	Booted           bool      `json:"booted,omitempty"`
+	BootFailed       string    `json:"boot_failed,omitempty"`
+	Recorded         bool      `json:"recorded,omitempty"`
 	// PowerWaitStartedAt is PowerWaitAnnotation's time.
 	PowerWaitStartedAt time.Time `json:"power_wait_started_at,omitzero"`
-	// StopAt is when fleetd asked the BMC to power the machine off to stop
-	// the run, and Stop its outcome, jobCompleted or jobFailed, empty while
-	// the machine is not off yet; StopReason is a failure's reason.
+	// StopAt is when the BMC took fleetd's power-off that stops the run, and
+	// Stop its outcome, jobCompleted or jobFailed, empty while the machine
+	// is not off yet; StopReason is a failure's reason.
 	StopAt     time.Time `json:"stop_at,omitzero"`
 	Stop       string    `json:"stop,omitempty"`
 	StopReason string    `json:"stop_reason,omitempty"`
 }
+
+// pending says whether the run's netboot has started and neither booted
+// the machine nor failed.
+func (r Run) pending() bool { return !r.BootedAt.IsZero() && !r.Booted && r.BootFailed == "" }
 
 // attempt is the run's Attempt, at least 1.
 func (r Run) attempt() int { return max(r.Attempt, 1) }
@@ -108,11 +117,9 @@ func (s *Runs) Put(name string, r Run) error {
 	return s.save()
 }
 
-// Unrecorded is the node's newest netboot when it was a run of the action
-// that failed and that NetBox does not name yet. A netboot since, of any
-// action, means the request moved on, as the newest Workflow does in rufio
-// mode.
-func (s *Runs) Unrecorded(node, action string) (string, Run, bool, error) {
+// Latest is the node's newest netboot, the run of its last request in
+// native mode, as the newest Workflow is in rufio mode.
+func (s *Runs) Latest(node string) (string, Run, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.load(); err != nil {
@@ -125,10 +132,7 @@ func (s *Runs) Unrecorded(node, action string) (string, Run, bool, error) {
 		}
 	}
 	r, ok := s.runs[newest]
-	if !ok || r.Action != action || r.BootFailed == "" || r.Recorded {
-		return "", Run{}, false, nil
-	}
-	return newest, r, true, nil
+	return newest, r, ok, nil
 }
 
 // Prune drops every record keep refuses.

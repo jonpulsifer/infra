@@ -231,7 +231,8 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				continue
 			}
 			for _, o := range objs {
-				if !keep[o.Name()] {
+				// In native mode no device keeps a Machine.
+				if !keep[o.Name()] || (res == MachineResource && r.Config.NativeBMC()) {
 					if err := r.Kube.Delete(ctx, res, o.Name()); err != nil {
 						errs = append(errs, fmt.Errorf("delete %s %s: %w", res.Kind, o.Name(), err))
 					}
@@ -350,9 +351,11 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 			return err
 		}
 	}
-	// In native mode fleetd drives the BMC itself, so no device keeps a
-	// Machine.
-	if d.HasBMC() && !r.Config.NativeBMC() {
+	// In native mode fleetd drives the BMC itself, and the pass's cleanup
+	// deletes every Machine fleetd made.
+	switch {
+	case r.Config.NativeBMC():
+	case d.HasBMC():
 		m, err := r.Config.Machine(d)
 		if err != nil {
 			return err
@@ -360,8 +363,10 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		if err := r.Kube.Apply(ctx, MachineResource, m); err != nil {
 			return fmt.Errorf("apply Machine: %w", err)
 		}
-	} else if err := r.deleteManaged(ctx, MachineResource, d.Name); err != nil {
-		return fmt.Errorf("delete Machine: %w", err)
+	default:
+		if err := r.deleteManaged(ctx, MachineResource, d.Name); err != nil {
+			return fmt.Errorf("delete Machine: %w", err)
+		}
 	}
 
 	if d.Status == "decommissioning" {
@@ -571,6 +576,9 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		return r.adopt(ctx, d, action, running)
 	}
 	name, err := r.create(ctx, d, action, hookos, nil)
+	if errors.Is(err, errNetbootPending) {
+		return "", nil
+	}
 	if errors.Is(err, errBootFailed) {
 		return name, nil
 	}
@@ -612,27 +620,43 @@ func (r *Reconciler) deleteFinished(ctx context.Context, workflows []Object) err
 // create makes a new run of the action, with the Hardware's netboot on first,
 // and the annotations. In native mode, a run that would netboot has fleetd
 // netboot the machine before its Workflow exists, and keeps the attempt in
-// Runs rather than on the Workflow; a netboot that fails creates no Workflow
-// and is errBootFailed, once NetBox has it. A failed netboot that NetBox does
-// not have yet is recorded again rather than tried again.
+// Runs rather than on the Workflow. A netboot that fails creates no Workflow
+// and is errBootFailed, once NetBox has it; one that waits for the machine to
+// go off is errNetbootPending, and the next request's create goes on with it
+// under the same name. The device's newest netboot decides, as the newest
+// Workflow does in start: a failure of this action that NetBox does not have
+// yet is recorded again rather than tried again.
 func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos bool, annotations map[string]string) (string, error) {
 	native := r.netboots(d, hookos)
+	var name string
+	var run Run
 	if native {
-		name, run, ok, err := r.Runs.Unrecorded(d.Name, action)
+		latest, last, ok, err := r.Runs.Latest(d.Name)
 		if err != nil {
 			return "", err
 		}
-		if ok {
-			return name, r.recordBootFailure(ctx, d, name, run)
+		switch {
+		case ok && last.Action == action && last.BootFailed != "" && !last.Recorded:
+			return latest, r.recordBootFailure(ctx, d, latest, last)
+		case ok && r.resumable(last, action):
+			name, run = latest, last
+		default:
+			run = r.newRun(d, action, annotations)
 		}
 	}
 	wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
 	if err == nil {
+		if name != "" {
+			wf.metadata()["name"] = name
+		}
 		a := map[string]any{}
 		for k, v := range annotations {
 			if !native || k != AttemptAnnotation {
 				a[k] = v
 			}
+		}
+		if native && run.Supersedes != "" {
+			a[SupersedesAnnotation] = run.Supersedes
 		}
 		if len(a) > 0 {
 			wf.metadata()["annotations"] = a
@@ -649,7 +673,7 @@ func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos
 		return "", err
 	}
 	if native {
-		if err := r.netbootMachine(ctx, d, wf.Name(), action, annotations); err != nil {
+		if err := r.netbootMachine(ctx, d, wf.Name(), run); err != nil {
 			return wf.Name(), err
 		}
 	}
@@ -834,7 +858,7 @@ func (r *Reconciler) retryRetire(ctx context.Context, d Device, wf Object, workf
 	}
 	n := attempt(wf) + 1
 	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{AttemptAnnotation: strconv.Itoa(n)})
-	if errors.Is(err, errBootFailed) {
+	if deferred(err) {
 		return nil
 	}
 	if err != nil {
@@ -910,7 +934,7 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 		return err
 	}
 	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{SupersedesAnnotation: old})
-	if errors.Is(err, errBootFailed) {
+	if deferred(err) {
 		return nil
 	}
 	if err != nil {
@@ -993,8 +1017,8 @@ func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, er
 
 // prune deletes fleetd's Workflows older than the TTL. In native mode it
 // drops each run's record once neither a Workflow nor a device's
-// last_workflow names the run, after a pass that read devices. A failed
-// netboot has no Workflow, so its record stays for the TTL.
+// last_workflow names the run, after a pass that read devices. A failed or
+// pending netboot has no Workflow, so its record stays for the TTL.
 func (r *Reconciler) prune(ctx context.Context, devices []Device) error {
 	objs, err := r.Kube.List(ctx, WorkflowResource, ManagedLabel+"="+FieldManager)
 	if err != nil {
@@ -1022,7 +1046,7 @@ func (r *Reconciler) prune(ctx context.Context, devices []Device) error {
 			named[d.LastWorkflow] = true
 		}
 		keep := func(name string, run Run) bool {
-			return named[name] || (run.BootFailed != "" && run.BootedAt.After(cutoff))
+			return named[name] || (run.BootedAt.After(cutoff) && (run.BootFailed != "" || run.pending()))
 		}
 		if err := r.Runs.Prune(keep); err != nil {
 			errs = append(errs, fmt.Errorf("prune the BMC runs: %w", err))

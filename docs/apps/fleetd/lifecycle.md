@@ -29,7 +29,7 @@ The `decommissioning` status requests retirement separately from `desired_action
 
 In `native` mode fleetd makes no Rufio `Machine` or `Job`, deletes the `Machine`s it made before, and its `Hardware` names no `Machine`. `apps/fleetd/bmc` drives Intel AMT through bmclib's AMT provider, the same code Rufio runs, over plain HTTP digest auth on port 16992.
 
-A native netboot waits up to 30 seconds for the machine to show off before it sets the PXE boot. A netboot that fails creates no Workflow, so no later boot of the machine runs it: fleetd records the run in `last_workflow`, clears `desired_action` and journals the BMC's answer, as a run that ended at its boot job in `rufio` mode.
+A native netboot sets the PXE boot only once the BMC reports the machine off. A machine still on after a pass's 30-second wait, such as one whose OS shuts down on a graceful soft off, keeps its request, and a later pass goes on with the same run; the netboot fails when the machine is still on 10 minutes after the power-off. A netboot that fails creates no Workflow, so no later boot of the machine runs it: fleetd records the run in `last_workflow`, clears `desired_action` and journals the BMC's answer, as a run that ended at its boot job in `rufio` mode.
 
 ## Class policy
 

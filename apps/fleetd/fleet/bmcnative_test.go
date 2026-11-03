@@ -24,13 +24,19 @@ type fakeBMC struct {
 	// stuck takes a power-off and leaves the machine on.
 	stuck bool
 	calls []string
+	// onCall, when set, runs as each call lands.
+	onCall func(name string)
 }
 
 func (b *fakeBMC) call(name string) error {
 	b.mu.Lock()
 	b.calls = append(b.calls, name)
 	refused := b.refuse[name]
+	hook := b.onCall
 	b.mu.Unlock()
+	if hook != nil {
+		hook(name)
+	}
 	b.kube.mu.Lock()
 	b.kube.log = append(b.kube.log, "BMC "+name)
 	b.kube.mu.Unlock()
@@ -85,6 +91,18 @@ func (b *fakeBMC) count(name string) int {
 	n := 0
 	for _, c := range b.calls {
 		if c == name {
+			n++
+		}
+	}
+	return n
+}
+
+func (f *fakeKube) logCount(line string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, l := range f.log {
+		if l == line {
 			n++
 		}
 	}
@@ -169,9 +187,12 @@ func TestNativeDeletesTheMachine(t *testing.T) {
 		t.Fatal("rufio mode made no Machine")
 	}
 	native(t, r, kube)
-	reconcileN(t, r, 1)
+	reconcileN(t, r, 2)
 	if kube.get(mPath) != nil {
 		t.Error("the Machine outlived the switch to native mode")
+	}
+	if n := kube.logCount("GET " + mPath); n != 0 {
+		t.Errorf("native passes read the Machine %d times", n)
 	}
 }
 
@@ -207,21 +228,140 @@ func TestNativeNetbootFailureCreatesNoWorkflow(t *testing.T) {
 	}
 }
 
-// A machine that does not show off after the boot's power-off is not
-// booted: fleetd sets no PXE and powers nothing on.
-func TestNativeNetbootNeedsThePowerOff(t *testing.T) {
+// A machine that takes longer than a pass's wait to go off, as an OS shutting
+// down on a graceful soft off does, holds its netboot: no PXE, no power-on,
+// no Workflow and the request kept, and the pass that finds it off goes on
+// under the same name without a second power-off. One that stays on for
+// powerOffTimeout fails.
+func TestNativeNetbootWaitsForASlowPowerOff(t *testing.T) {
 	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "wipe", nil)}, Ifaces: riptideIfaces(), Apply: true}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
+	now := testNow
+	r.Now = func() time.Time { return now }
+	b := native(t, r, kube)
+	b.stuck = true
+	reconcileN(t, r, 2)
+	if b.count("pxe") != 0 || b.count("on") != 0 || b.count("off") != 1 || len(kube.workflows()) != 0 || len(nb.Patches) != 0 {
+		t.Fatalf("calls %v workflows %v patches %v", b.calls, kube.workflows(), nb.Patches)
+	}
+	if len(nb.JournalWith("waits for the BMC to report the machine off before it network-boots it")) != 1 {
+		t.Errorf("journals %v", nb.Journals)
+	}
+	name, pending, ok, _ := r.Runs.Latest("riptide")
+	if !ok || !pending.pending() || !pending.BootOffRequested {
+		t.Fatalf("run %q %+v", name, pending)
+	}
+
+	now = testNow.Add(3 * time.Minute)
+	b.set(bmc.Off)
+	reconcileN(t, r, 1)
+	if names := kube.workflows(); len(names) != 1 || names[0] != name || b.count("off") != 1 || b.count("on") != 1 {
+		t.Fatalf("workflows %v calls %v", names, b.calls)
+	}
+	if cf := lastPatch(nb)["custom_fields"].(map[string]any); cf["last_workflow"] != name || cf["desired_action"] != "none" {
+		t.Errorf("patch %v", lastPatch(nb))
+	}
+}
+
+func TestNativeNetbootFailsWhenTheMachineStaysOn(t *testing.T) {
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "wipe", nil)}, Ifaces: riptideIfaces(), Apply: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	now := testNow
+	r.Now = func() time.Time { return now }
 	b := native(t, r, kube)
 	b.stuck = true
 	reconcileN(t, r, 1)
-	if b.count("pxe") != 0 || b.count("on") != 0 || len(kube.workflows()) != 0 {
-		t.Fatalf("calls %v workflows %v", b.calls, kube.workflows())
+	now = testNow.Add(powerOffTimeout)
+	reconcileN(t, r, 2)
+	if b.count("pxe") != 0 || b.count("on") != 0 || len(kube.workflows()) != 0 || len(nb.Patches) != 1 {
+		t.Fatalf("calls %v workflows %v patches %v", b.calls, kube.workflows(), nb.Patches)
 	}
-	if len(nb.JournalWith("the machine was not off 0s after the power-off (the BMC reports it on)")) != 1 {
+	if len(nb.JournalWith("the machine was not off 10m0s after the power-off (the BMC reports it on)")) != 1 {
 		t.Errorf("journals %v", nb.Journals)
+	}
+}
+
+// A pass that ends while the netboot waits, as at a restart of fleetd,
+// records no failure and keeps the request; the next pass goes on.
+func TestNativeNetbootSurvivesARestartMidWait(t *testing.T) {
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil)}, Ifaces: riptideIfaces(), Apply: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	r.Config.BMCJobWait = time.Minute
+	b := native(t, r, kube)
+	b.stuck = true
+	ctx, cancel := context.WithCancel(t.Context())
+	b.onCall = func(name string) {
+		if name == "power" {
+			cancel()
+		}
+	}
+	if err := r.Reconcile(ctx); err == nil {
+		t.Fatal("a cancelled pass reported success")
+	}
+	b.onCall = nil
+	if len(nb.Patches) != 0 || len(kube.workflows()) != 0 {
+		t.Fatalf("patches %v workflows %v", nb.Patches, kube.workflows())
+	}
+	if _, last, _, _ := r.Runs.Latest("riptide"); !last.pending() {
+		t.Fatalf("run %+v", last)
+	}
+	r.Config.BMCJobWait = 0
+	b.set(bmc.Off)
+	reconcileN(t, r, 1)
+	if len(kube.workflows()) != 1 || b.count("off") != 1 || b.count("on") != 1 {
+		t.Fatalf("workflows %v calls %v", kube.workflows(), b.calls)
+	}
+}
+
+// Kea that refuses the boot file fails the pass before any power changes,
+// and the request stays for the next pass.
+func TestNativeNetbootNeedsKeaFirst(t *testing.T) {
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil)}, Ifaces: riptideIfaces(), Apply: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	b := native(t, r, kube)
+	r.Kea = &KeaReservations{File: filepath.Join(t.TempDir(), "missing", "reservations.json"), BootFile: "ipxe.efi"}
+	if err := r.Reconcile(t.Context()); err == nil || !strings.Contains(err.Error(), "boot file before the netboot") {
+		t.Fatalf("pass: %v", err)
+	}
+	if len(b.calls) != 0 || len(kube.workflows()) != 0 || len(nb.Patches) != 0 {
+		t.Fatalf("calls %v workflows %v patches %v", b.calls, kube.workflows(), nb.Patches)
+	}
+	if _, _, ok, _ := r.Runs.Latest("riptide"); ok {
+		t.Error("a netboot that never reached the BMC left a record")
+	}
+}
+
+// The boot file written before the power-on keeps the other devices' boot
+// files, from Kea's file on the first pass after a restart.
+func TestNativeNetbootKeepsTheOtherBootFiles(t *testing.T) {
+	swell := mergeID(device("swell", "active", "none", nil), 8)
+	swell["primary_ip4"] = map[string]any{"address": "10.3.0.13/26"}
+	ifaces := append(riptideIfaces(), map[string]any{"id": 4, "device": map[string]any{"id": 8}, "primary_mac_address": map[string]any{"mac_address": "38:22:E2:2D:96:45"}})
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil), swell}, Ifaces: ifaces, Apply: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	b := native(t, r, kube)
+	file := filepath.Join(t.TempDir(), "reservations.json")
+	_ = os.WriteFile(file, []byte(`[{"hw-address":"38:22:e2:2d:96:45","ip-address":"10.3.0.13","hostname":"swell","boot-file-name":"ipxe.efi"}]`), 0o600)
+	r.Kea = &KeaReservations{File: file, BootFile: "ipxe.efi"}
+	var atPowerOn map[string]bool
+	b.onCall = func(name string) {
+		if name == "on" {
+			atPowerOn = r.Kea.Netbooting()
+		}
+	}
+	reconcileN(t, r, 1)
+	if !atPowerOn["riptide"] || !atPowerOn["swell"] {
+		t.Fatalf("boot files at the power-on %v", atPowerOn)
 	}
 }
 
@@ -336,8 +476,32 @@ func TestNativeRetirementWaitsWhenTheBMCRefusesPowerOff(t *testing.T) {
 	}
 }
 
+// A stop whose BMC fleetd could not open records nothing, so a later pass
+// asks again rather than keeping the run for good.
+func TestNativeStopThatNeverReachedTheBMCIsRetried(t *testing.T) {
+	const prov = "provision-riptide-1"
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
+	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	b := native(t, r, kube)
+	dial := r.BMC
+	r.BMC = func(Device) (bmc.BMC, error) { return nil, errors.New("the BMC has no address") }
+	if err := r.Reconcile(t.Context()); err == nil {
+		t.Fatal("a stop that could not reach the BMC passed")
+	}
+	if rec := run(t, r, prov); rec.Stop != "" || len(nb.Journals) != 0 {
+		t.Fatalf("run %+v journals %v", rec, nb.Journals)
+	}
+	r.BMC = dial
+	reconcileN(t, r, 1)
+	if names := kube.workflows(); len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") || b.count("off") < 1 {
+		t.Fatalf("workflows %v calls %v", names, b.calls)
+	}
+}
+
 // A power-off the BMC took holds the supersede over passes until the machine
-// shows off, and fails once it has stayed on for stopTimeout.
+// shows off, and fails once it has stayed on for powerOffTimeout.
 func TestNativeSupersedeWaitsForThePowerOff(t *testing.T) {
 	const prov = "provision-riptide-1"
 	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
@@ -352,7 +516,7 @@ func TestNativeSupersedeWaitsForThePowerOff(t *testing.T) {
 	if kube.deletes(prov) != 0 || kube.creates() != 0 || len(nb.Journals) != 0 || b.count("off") != 1 {
 		t.Fatalf("deletes %d creates %d journals %v calls %v", kube.deletes(prov), kube.creates(), nb.Journals, b.calls)
 	}
-	now = testNow.Add(stopTimeout)
+	now = testNow.Add(powerOffTimeout)
 	reconcileN(t, r, 2)
 	if len(nb.JournalWith("the machine was not off 10m0s after the power-off")) != 1 || kube.deletes(prov) != 0 {
 		t.Fatalf("journals %v", nb.Journals)
@@ -416,20 +580,37 @@ func TestRunsPersistAndPrune(t *testing.T) {
 	}
 }
 
-// Only the node's newest netboot can be an unrecorded failure: a netboot
-// since means the request moved on.
-func TestUnrecordedIsTheNewestNetboot(t *testing.T) {
+// Latest is the node's newest netboot, whatever its action.
+func TestLatestIsTheNewestNetboot(t *testing.T) {
 	s := &Runs{File: filepath.Join(t.TempDir(), "runs.json")}
 	_ = s.Put("provision-riptide-1", Run{Node: "riptide", Action: "provision", BootedAt: testNow, BootFailed: "power on: 500"})
-	if name, _, ok, _ := s.Unrecorded("riptide", "provision"); !ok || name != "provision-riptide-1" {
+	_ = s.Put("provision-riptide-2", Run{Node: "riptide", StopAt: testNow.Add(time.Hour)})
+	if name, _, ok, _ := s.Latest("riptide"); !ok || name != "provision-riptide-1" {
 		t.Fatalf("%q %v", name, ok)
 	}
-	if _, _, ok, _ := s.Unrecorded("riptide", "wipe"); ok {
-		t.Error("another action's failure is this one's")
+	_ = s.Put("wipe-riptide-3", Run{Node: "riptide", Action: "wipe", BootedAt: testNow.Add(time.Minute)})
+	if name, _, _, _ := s.Latest("riptide"); name != "wipe-riptide-3" {
+		t.Errorf("latest %q", name)
 	}
-	_ = s.Put("wipe-riptide-2", Run{Node: "riptide", Action: "wipe", BootedAt: testNow.Add(time.Minute)})
-	if _, _, ok, _ := s.Unrecorded("riptide", "provision"); ok {
-		t.Error("a failure older than the node's last netboot is unrecorded")
+}
+
+// A failed netboot that NetBox already names, whose mark in Runs was lost,
+// is marked, not journaled again, and the retirement's retry follows.
+func TestNativeFailureNetBoxNamesIsNotRecordedTwice(t *testing.T) {
+	const retire = "retire-riptide-1699990000"
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": retire})}, Ifaces: riptideIfaces(), Apply: true}
+	kube := &fakeKube{}
+	r, done := newTest(t, nb, kube)
+	defer done()
+	b := native(t, r, kube)
+	_ = r.Runs.Put(retire, Run{Node: "riptide", Action: ActionRetire, BootedAt: testNow.Add(-time.Hour), BootFailed: "power off: 500"})
+	reconcileN(t, r, 1)
+	if len(nb.Patches) != 0 || len(nb.Journals) != 0 || len(b.calls) != 0 || !run(t, r, retire).Recorded {
+		t.Fatalf("patches %v journals %v calls %v", nb.Patches, nb.Journals, b.calls)
+	}
+	reconcileN(t, r, 1)
+	if names := kube.workflows(); len(names) != 1 || len(nb.JournalWith("to try again (attempt 2)")) != 1 {
+		t.Fatalf("workflows %v journals %v", names, nb.Journals)
 	}
 }
 
