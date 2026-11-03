@@ -81,6 +81,10 @@ let
     # A reservation is a node's or an AMT's declared address, never one from the pool.
     reservations-out-of-pool = true;
     host-reservation-identifiers = [ "hw-address" ];
+    # One NIC sends several client identifiers across a boot: PXE firmware and HookOS the MAC,
+    # an installed NixOS a DUID, an AMT none. A lease is per MAC, so the installed OS renews the
+    # reserved address instead of losing it to the boot's lease and taking a pool address.
+    match-client-id = false;
     # The same unconditional offer UniFi makes: PXE firmware fetches the signed iPXE from spore.
     next-server = address;
     boot-file-name = ipxe;
