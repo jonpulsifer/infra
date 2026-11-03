@@ -207,7 +207,11 @@ func newFleet() (*fleet.Reconciler, error) {
 		}
 		kea = &fleet.KeaReservations{File: file, Socket: os.Getenv("FLEET_KEA_SOCKET"), BootFile: boot}
 	}
-	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Kea: kea, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
+	dialBMC, runs, err := fleet.LoadBMC(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Kea: kea, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), BMC: dialBMC, Runs: runs, Now: time.Now}, nil
 }
 
 // serveBoot serves the boot listener, with TLS when kp is set. Until its

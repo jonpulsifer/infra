@@ -57,6 +57,8 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, a quarantine is journaled for the owner to cordon, and a retirement leaves the Node to the owner |
 | `FLEET_HOOKOS_URL`, `FLEET_HOOKOS_CMDLINE` | required | The signed HookOS UKI and the command line each Hardware's iPXE script passes |
 | `FLEET_BMC_SECRETS` | `amt=bmc-amt` | The Secret per `bmc_type` a Machine names |
+| `FLEET_BMC` | `rufio` | Who drives each BMC. `rufio`: a Machine per device, `stop-` Jobs, and `bootMode: netboot` on a Workflow that boots. `native`: fleetd itself, with no Rufio object; see [Native BMC mode](#native-bmc-mode) |
+| `FLEET_BMC_AMT_CREDENTIAL_FILE`, `FLEET_BMC_STATE_FILE` | required with `FLEET_BMC=native` | The AMT credential, a JSON object with `username` and `password`, and the JSON file of each run's BMC record |
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
 | `FLEET_SPIRE_NODES_FILE` | none | The file each pass writes with the nodes SPIRE registers and the ones it bans: `{"nodes": [{"name", "ek_hashes"}], "revoked": [{"name", "ek_hashes", "ldevids"}]}`. `nodes` holds each `active` device with a passing verdict; `revoked` holds each machine on record whose device is `decommissioning`, `offline` or gone, with its LDevID's SHA-1 fingerprint until its `notAfter`. Not written while NetBox lists no device, or while the store cannot be read |
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
@@ -406,6 +408,26 @@ says the cancellation cannot stop it. A kept retirement ends at its global timeo
 is off, as any run does.
 
 A node retired mid-install never fetches its config: [Config](#config) drops it.
+
+### Native BMC mode
+
+With `FLEET_BMC=native`, `apps/fleetd/bmc` does what Rufio does above, through bmclib's Intel AMT
+provider over plain HTTP digest auth on `AMTPort`. The rules above hold, with these differences:
+
+- No Machine, no `bmcRef` on a Hardware, no `stop-` Job, and no `bootMode` on a Workflow. A pass
+  deletes the Machines fleetd made before.
+- A run that would netboot is netbooted by fleetd before its Workflow exists, as `netboot-Y` does:
+  power off, wait up to `BMCJobWait` for the BMC to report it off, one-time PXE boot, power on.
+  Kea's reservations get the device's boot file before the power-on. A netboot that fails creates
+  no Workflow, so no later boot runs it; fleetd names the run in `last_workflow`, clears
+  `desired_action`, leaves the status, and journals `Y (<action>) did not start: the BMC did not
+  network-boot the machine: <answer>`. A failure NetBox did not record is recorded again on the
+  next pass, not booted again. A retirement that failed there starts again on the same backoff.
+- A stop asks the BMC once per run and reads the power on each pass until the machine is off; it
+  fails after 10 minutes on, as Rufio's Task does.
+- A retirement's success is corroborated by fleetd's own read of the BMC.
+- `FLEET_BMC_STATE_FILE` holds what annotations hold in `rufio` mode, by run: the netboot's time
+  and failure, the attempt, the run superseded, the power-off wait's start, and the stop's outcome.
 
 ## Retirement and the cluster
 

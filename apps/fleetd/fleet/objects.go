@@ -92,7 +92,8 @@ func labels(d Device, extra map[string]string) map[string]any {
 // allowPXE included, and an apply that left a flag out would unset it. The
 // script frees every iPXE image before the chain, because iPXE claims the
 // Linux initrd device whenever another image is loaded, and systemd-stub then
-// fails to register the UKI's initrd.
+// fails to register the UKI's initrd. A device with a BMC names its Machine,
+// except in native mode, which has none.
 func (c Config) Hardware(d Device, netboot bool) Object {
 	spec := map[string]any{
 		"disks": []any{map[string]any{"device": d.Disk}},
@@ -112,7 +113,7 @@ func (c Config) Hardware(d Device, netboot bool) Object {
 			},
 		}},
 	}
-	if d.HasBMC() {
+	if d.HasBMC() && !c.NativeBMC() {
 		spec["bmcRef"] = map[string]any{"apiGroup": "bmc.tinkerbell.org", "kind": "Machine", "name": d.Name}
 	}
 	return Object{
@@ -225,7 +226,8 @@ func (c Config) IsControlPlane(class string) bool {
 // Workflow runs the class's Template for one action, and refuses a device
 // whose class the table lacks, and a run that wipes a disk the device does not
 // identify (Unidentified). A device that boots by hand (ManualBoot), or
-// one whose machine already waits in HookOS (hookos), gets no boot mode.
+// one whose machine already waits in HookOS (hookos), gets no boot mode,
+// and in native mode no Workflow has one: fleetd netboots the machine itself.
 // toggleAllowNetboot is off: the fleet sets the Hardware's flags before the
 // Workflow exists, and Tinkerbell's toggle would be a second writer of the
 // same atomic list, racing the fleet's apply.
@@ -276,7 +278,7 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 		"hardwareMap": hm,
 	}
 	boot := map[string]any{"toggleAllowNetboot": false}
-	if !hookos && !d.ManualBoot() {
+	if !hookos && !d.ManualBoot() && !c.NativeBMC() {
 		boot["bootMode"] = "netboot"
 	}
 	spec["bootOptions"] = boot
