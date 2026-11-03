@@ -12,14 +12,14 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that reins
 | kube-apiserver and etcd | Store the `Hardware`, `Template`, `Workflow` and Rufio `Machine` objects. etcd listens on localhost. | spore, port 6443 |
 | Smee | Off on spore, by `homelab.tinkerbell.smee.enable`. On, it answers PXE on `bootstrap` as a proxy DHCP server unless `homelab.tinkerbell.smee.dhcp` is off, serves each MAC's iPXE script on port 7080 and receives HookOS's syslog | `SPORE_BOOTSTRAP_IP` |
 | Tink server and controller | Run workflows. The HookOS agent connects to `enroll.lolwtf.ca:42113` over TLS, with the enrollment name's certificate from `nix/services/fleetd.nix`. | `SPORE_BOOTSTRAP_IP` |
-| Rufio | Drives each node's BMC: Intel AMT over HTTP digest auth on port 16992 | spore |
-| fleetd | Makes the `Hardware`, `Machine` and `Workflow` objects from NetBox and from intake passes | spore |
+| Rufio | Drives each node's BMC in fleetd's `rufio` mode, the default: Intel AMT over HTTP digest auth on port 16992 | spore |
+| fleetd | Makes the `Hardware`, `Machine` and `Workflow` objects from NetBox and from intake passes. In its `native` BMC mode it drives each BMC itself and makes no `Machine` ([BMC mode](../../apps/fleetd/lifecycle.md#bmc-mode)) | spore |
 
 ## Boot path
 
 Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace: the `provision` and `provision-image` Templates and the BMC credential Secrets. fleetd keeps one `Hardware` per NetBox device and one `Machine` per device with a BMC. Setting a device's `desired_action` in NetBox starts a run:
 
-1. fleetd turns the `Hardware`'s `allowPXE` on and creates a `Workflow` for the device, and Rufio powers the node off, sets a one-time PXE boot and powers it on.
+1. fleetd turns the `Hardware`'s `allowPXE` on and creates a `Workflow` for the device, and Rufio powers the node off, sets a one-time PXE boot and powers it on. In fleetd's `native` BMC mode, fleetd does those three steps itself before it creates the `Workflow`.
 2. UniFi's offer names the signed iPXE at spore's bootstrap address, which dnsmasq serves. iPXE's menu chains the signed HookOS UKI from nginx.
 3. HookOS's agent image sets the clock from spore's NTP and [attests the node](../../apps/fleetd.md) before tink-agent waits. An intake pass of a `provision` gets the install code. The agent then takes its actions from the Tink server over TLS; its signed command line names the server and `tinkerbell_tls=true`, so no host on the Kubernetes network can stand in for it. The agent itself holds no credential, so fleetd corroborates a retirement's reported success with the BMC's power state.
 4. The `provision` Template wipes the `Hardware`'s disk when the run asks for it, installs Talos with the code when it asks for that, sets the next boot, and reboots. Its actions run `images/tink-reprovision-tools`, which carries the disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
