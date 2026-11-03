@@ -23,6 +23,8 @@
   config,
   lib,
   pkgs,
+  name,
+  inputs,
   ...
 }:
 let
@@ -89,6 +91,31 @@ let
 
   devidPort = 8444;
   adminPort = 8445;
+  # The seed a NixOS or Alpine class's first boot reads once (apps/fleetd/fleet/seed.go): the
+  # node prefix and router from the topology, the anchors' resolvers, the fleet's endpoints, the
+  # SPIRE server this host runs, the owner's SSH keys, and the profile each payload kind names.
+  spire = lib.attrByPath [ "homelab" "spire" ] { enable = false; } config;
+  seedInputs = pkgs.writeText "fleet-seed-inputs.json" (
+    builtins.toJSON {
+      prefix_length = lib.toInt (lib.last (lib.splitString "/" topology.K8S_NODE_CIDR));
+      gateway = topology.ROUTER_IP;
+      resolvers = [
+        lab.ns.ns1
+        lab.ns.ns2
+      ];
+      dns_zone = fleet.dnsZone;
+      enroll_url = "https://${host}";
+      devid_url = "http://${lab.hosts.spore}:${toString devidPort}";
+      spire = {
+        server = "${name}.${fleet.dnsZone}:${toString (spire.port or 0)}";
+        trust_domain = spire.trustDomain or "";
+      };
+      ssh_authorized_keys = lib.filter (k: k != "") (
+        lib.splitString "\n" (builtins.readFile inputs.keys)
+      );
+      profiles = cfg.seeds.profiles;
+    }
+  );
   runDir = "/run/fleetd";
   adminSocket = "${runDir}/admin.sock";
   stateDir = "/var/lib/fleetd";
@@ -157,6 +184,22 @@ in
       default = true;
       description = "Start the provision of an admitted worker that never ran a Workflow. Off, an admitted device waits for the owner.";
     };
+    seeds = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Render the seed a NixOS or Alpine class's first boot reads, from the site's topology and this host's SPIRE server. Off, a seed class is refused at admission.";
+      };
+      profiles = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {
+          nixos-image = "github:jonpulsifer/infra#\${name}";
+          alpine-image = "http://${bootstrapIp}/alpine/${site}/\${workload}.apkovl.tar.gz";
+        };
+        defaultText = "the node's flake attribute in this repository, and the workload's apkovl under nginx's alpine/<site>/ on the bootstrap address";
+        description = "The profile each seed payload kind names, with \${name}, \${class} and \${workload} filled from the node: the flake attribute a NixOS node switches into, and the apkovl an Alpine node applies.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -164,6 +207,10 @@ in
       {
         assertion = config.sops.secrets ? "tinkerbell/admin-crt";
         message = "fleetd.nix reaches Tinkerbell's API with the certificates that tinkerbell.nix declares.";
+      }
+      {
+        assertion = !cfg.seeds.enable || spire.enable;
+        message = "homelab.fleetd.seeds names this host's SPIRE server, which homelab.spire.enable runs (spire-server.nix).";
       }
       {
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
@@ -311,6 +358,8 @@ in
         FLEET_CONFIG_DIR = "${runDir}/configs";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
+        # The seed a NixOS or Alpine class renders, served once at /seed by the install code.
+        FLEET_SEED_INPUTS = lib.mkIf cfg.seeds.enable "${seedInputs}";
         # The Talos root bootstraps etcd on the control plane at the API server's address: no
         # provision or wipe runs there, and it never installs from here.
         FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;

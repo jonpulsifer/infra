@@ -11,14 +11,19 @@ import (
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
-const ubuntuImage = "ghcr.io/jonpulsifer/ubuntu-installer@sha256:ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+const (
+	ubuntuImage = "ghcr.io/jonpulsifer/ubuntu-installer@sha256:ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+	imageWriter = "ghcr.io/jonpulsifer/tink-image-writer@sha256:cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12"
+)
 
 var testClasses = classes.Table{
 	"controlplane": {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"cp-g5":        {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"worker-g5":    {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"worker-g2":    {OS: "talos", Template: "provision", PolicyProfile: "talos"},
-	"ubuntu":       {OS: "ubuntu", Template: "provision-ubuntu", InstallerImage: ubuntuImage, PolicyProfile: "ubuntu"},
+	"ubuntu":       {OS: "ubuntu", Template: "provision-ubuntu", InstallerImage: ubuntuImage, PolicyProfile: "ubuntu", PayloadKind: classes.PayloadCloudInit},
+	"nixos":        {OS: "nixos", Workload: "general", Template: "provision-image", InstallerImage: imageWriter, PolicyProfile: "talos", PayloadKind: classes.PayloadNixOSImage},
+	"alpine":       {OS: "alpine", Workload: "general", Template: "provision-image", InstallerImage: imageWriter, PolicyProfile: "talos", PayloadKind: classes.PayloadAlpineImage},
 }
 
 func mustWorkflow(t *testing.T, cfg Config, d Device, action string) Object {

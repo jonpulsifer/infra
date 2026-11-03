@@ -216,12 +216,13 @@ func LoadBundle(path string, worker WorkerSecrets) error {
 	return nil
 }
 
-// Node is what a render takes from a NetBox device: its name, class,
+// Node is what a render takes from a NetBox device: its name, serial, class,
 // install disk, TPM spec version ("2.0" for a node that seals its disks) and
 // primary IPv4 address. A worker also takes its own bootstrap token, which
 // its config carries as cluster.token in place of the cluster's.
 type Node struct {
 	Name           string
+	Serial         string
 	Class          string
 	Disk           string
 	TPM            string

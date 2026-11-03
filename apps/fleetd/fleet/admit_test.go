@@ -100,7 +100,8 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	r.Config.Installs = map[string]string{"worker-g5": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"}
 	at.rend = &fakeRenderer{types: map[string]string{"worker-g5": "worker", "controlplane": "controlplane"}}
 	r.Installer = &Installer{
-		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Renderer: at.rend, Tokens: &fakeTokens{}, Configs: &Configs{},
+		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Classes: testClasses, Renderer: at.rend, Seeds: testSeeds(),
+		Tokens: &fakeTokens{}, Configs: &Configs{},
 		TTL: 2 * time.Hour, Metrics: r.Metrics, Now: func() time.Time { return testNow },
 	}
 	at.r = r
@@ -208,6 +209,33 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 	}
 	if at.held(testCode) || !at.held(again) {
 		t.Fatal("the older code's config survived")
+	}
+}
+
+// A declared device of a seed class is admitted the same way: its class's
+// Template runs with the class's image, and its seed waits under the code,
+// rendered by the seed renderer with no bootstrap token.
+func TestAdmitProvisionsASeedClassDevice(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "nixos"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.Installs["nixos"] = imageWriter
+	if code, why := at.admit(testCode); code != http.StatusCreated {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	names := at.kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	spec := at.kube.get(wfBase + names[0])["spec"].(map[string]any)
+	hm := spec["hardwareMap"].(map[string]any)
+	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != imageWriter {
+		t.Errorf("template %v, hardwareMap %v", spec["templateRef"], hm)
+	}
+	if !at.held(testCode) || at.rend.calls != 0 {
+		t.Fatalf("held %v, Talos renders %d", at.held(testCode), at.rend.calls)
+	}
+	p, cfg, _ := at.r.Installer.Configs.Get(boxUUID, testCode, testNow)
+	if !SeedKind(p.Kind) || !strings.Contains(string(cfg), `"profile": "github:jonpulsifer/infra#swell"`) {
+		t.Fatalf("the pending config: %+v %s", p, cfg)
 	}
 }
 

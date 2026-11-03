@@ -167,6 +167,7 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		Site:    cfg.Site,
 		NetBox:  netbox,
 		Kube:    kube,
+		Classes: cfg.Classes,
 		Configs: &Configs{Dir: os.Getenv("FLEET_CONFIG_DIR")},
 		Metrics: metrics,
 		Now:     time.Now,
@@ -177,6 +178,15 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	var err error
 	if in.TTL, err = time.ParseDuration(env("FLEET_CONFIG_TTL", "2h")); err != nil || in.TTL <= 0 {
 		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be a positive duration")
+	}
+	// FLEET_SEED_INPUTS lets a seed class render; a Talos class needs the
+	// three below.
+	if seeds := os.Getenv("FLEET_SEED_INPUTS"); seeds != "" {
+		inputs, err := LoadSeedInputs(seeds)
+		if err != nil {
+			return nil, err
+		}
+		in.Seeds = &SeedRenderer{Inputs: inputs, Classes: cfg.Classes}
 	}
 	inputsFile, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
 	if inputsFile == "" && workers == "" && bin == "" {

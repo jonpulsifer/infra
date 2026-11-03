@@ -259,11 +259,14 @@ func confirmAcks(s *http.Server) {
 }
 
 // bootHandler serves what a netbooting machine and a first boot reach: the
-// device flow under /attest/ and the one-time config at /talos/config.
+// device flow under /attest/, and the one-time config at /talos/config or
+// /seed, by the class's payload kind.
 func bootHandler(srv *attest.Server, installer http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/attest/", http.StripPrefix("/attest", srv.Public()))
-	mux.Handle("/talos/config", installer)
+	for path := range fleet.Routes {
+		mux.Handle(path, installer)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", http.NotFound)
 	return mux

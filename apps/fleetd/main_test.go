@@ -43,6 +43,8 @@ func TestBootHandlerRoutes(t *testing.T) {
 		{http.MethodGet, "/healthz", http.StatusOK},
 		{http.MethodGet, "/talos/config?uuid=x&code=y", http.StatusTeapot},
 		{http.MethodHead, "/talos/config?uuid=x&code=y", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/seed?uuid=x&code=y", http.StatusTeapot},
+		{http.MethodHead, "/seed?uuid=x&code=y", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/devid/SERIAL", http.StatusNotFound},
 		{http.MethodGet, "/v1/attest", http.StatusNotFound},
 		{http.MethodGet, "/", http.StatusNotFound},

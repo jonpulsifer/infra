@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 // Installer renders the config a machine fetches on its first boot from
@@ -18,19 +20,24 @@ import (
 //
 // Admit renders at the end of an intake pass, before the verifier answers
 // the machine its install code. The installer checks the device's state in
-// NetBox and Tinkerbell, renders the config with the class inputs, the
-// worker secrets and a bootstrap token it creates for the worker alone, or
-// the full bundle for a joining control plane, and keeps
-// it in memory for GET /talos/config?uuid=<uuid>&code=<code>. The first GET
-// whose every byte the node acknowledged burns it and sets the device
-// active; a GET with another code
-// is journaled once per machine and code window; a config nobody fetched
-// goes after its TTL.
+// NetBox and Tinkerbell, and renders by the class's payload kind: a Talos
+// config with the class inputs, the worker secrets and a bootstrap token it
+// creates for the worker alone, or the full bundle for a joining control
+// plane; or a seed, the JSON a NixOS or Alpine image's first boot reads. It
+// keeps the bytes in memory for GET /talos/config?uuid=<uuid>&code=<code>,
+// or GET /seed with the same query for a seed. The first GET whose every
+// byte the node acknowledged burns it and sets the device active; a GET
+// with another code is journaled once per machine and code window; a
+// config nobody fetched goes after its TTL.
 type Installer struct {
-	Site     string
-	NetBox   *NetBox
-	Kube     *Kube
+	Site   string
+	NetBox *NetBox
+	Kube   *Kube
+	// Classes is the class table, whose payload_kind picks the renderer.
+	Classes  classes.Table
 	Renderer Renderer
+	// Seeds renders a seed; without it no seed class renders.
+	Seeds *SeedRenderer
 	// Prepare readies the renderer before its first render; it runs again
 	// after a failure.
 	Prepare func(context.Context) error
@@ -103,7 +110,7 @@ func unavailable(format string, a ...any) error {
 // Render checks the request and the device, renders the config and keeps it
 // for the node's first boot. Every outcome is counted and audited.
 func (i *Installer) Render(ctx context.Context, req RenderRequest) error {
-	if i.Renderer == nil {
+	if i.Renderer == nil && i.Seeds == nil {
 		i.Metrics.RenderFailed.Add(1)
 		return unavailable("the fleet has no renderer")
 	}
@@ -181,21 +188,26 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 	if err := i.gates(ctx, d); err != nil {
 		return d, err
 	}
-	n := Node{Name: d.Name, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address}
-	rendered, ttl := i.Now(), i.ttl(d.Class)
-	if i.Renderer.MachineType(d.Class) == "worker" {
-		token, err := i.Tokens.Mint(ctx, d.Name, rendered.Add(ttl+JoinTokenGrace))
-		if err != nil {
-			return d, unavailable("create %s's bootstrap token: %v", d.Name, err)
+	n := Node{Name: d.Name, Serial: d.Serial, Class: d.Class, Disk: d.Disk, TPM: d.TPM, Address: d.Address}
+	rendered, ttl, kind := i.Now(), i.ttl(d.Class), i.payload(d.Class)
+	var cfg []byte
+	if SeedKind(kind) {
+		cfg, err = i.Seeds.Render(n)
+	} else {
+		if i.Renderer.MachineType(d.Class) == "worker" {
+			token, err := i.Tokens.Mint(ctx, d.Name, rendered.Add(ttl+JoinTokenGrace))
+			if err != nil {
+				return d, unavailable("create %s's bootstrap token: %v", d.Name, err)
+			}
+			n.BootstrapToken = token
 		}
-		n.BootstrapToken = token
+		cfg, err = i.Renderer.Render(ctx, n)
 	}
-	cfg, err := i.Renderer.Render(ctx, n)
 	if err != nil {
 		return d, unavailable("render %s: %v", d.Name, err)
 	}
 	p := Pending{
-		UUID: req.UUID, Code: req.Code, Serial: d.Serial, Node: d.Name, Class: d.Class,
+		UUID: req.UUID, Code: req.Code, Serial: d.Serial, Node: d.Name, Class: d.Class, Kind: kind,
 		Workflow: d.LastWorkflow, Rendered: rendered, TTL: ttl,
 	}
 	if err := i.Configs.Put(p, cfg); errors.Is(err, ErrBurned) {
@@ -204,7 +216,7 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 		return d, unavailable("keep the config: %v", err)
 	}
 	i.pending()
-	comment := fmt.Sprintf("fleetd: rendered the %s config for %s's install; it is dropped when the node fetches it on its first boot, or unread after %s", d.Class, d.Name, p.TTL)
+	comment := fmt.Sprintf("fleetd: rendered the %s %s for %s's install; it is dropped when the node fetches it on its first boot, or unread after %s", d.Class, p.what(), d.Name, p.TTL)
 	if err := i.NetBox.Update(ctx, d, "", nil, "info", comment); err != nil {
 		log.Printf("journal the render of %s: %v", d.Name, err)
 	}
@@ -215,27 +227,50 @@ func (i *Installer) render(ctx context.Context, req RenderRequest) (Device, erro
 // that installs it: the class, the control-plane gate, the TPM version and
 // the renderer. Admit asks before it creates the Workflow.
 func (i *Installer) Ready(ctx context.Context, d Device) error {
-	if i.Renderer == nil {
+	if i.Renderer == nil && i.Seeds == nil {
 		return unavailable("the fleet has no renderer")
 	}
 	return i.gates(ctx, d)
 }
 
-// gates are the device's render gates.
+// payload is the class's payload kind from the table, or the Talos config
+// for a class the table lacks, which the Talos renderer then refuses.
+func (i *Installer) payload(class string) string {
+	if c, ok := i.Classes[class]; ok && c.PayloadKind != "" {
+		return c.PayloadKind
+	}
+	return classes.PayloadTalosConfig
+}
+
+// gates are the device's render gates, by its class's payload kind.
 func (i *Installer) gates(ctx context.Context, d Device) error {
-	switch i.Renderer.MachineType(d.Class) {
-	case "":
-		return unavailable("the class inputs have no class %q", d.Class)
-	case "worker":
-		if i.Tokens == nil {
-			return unavailable("%s is a worker, whose config carries a bootstrap token fleetd creates in the cluster, and fleetd has no credentials for the cluster's API", d.Name)
+	switch kind := i.payload(d.Class); {
+	case SeedKind(kind):
+		if i.Seeds == nil {
+			return unavailable("%s is of class %s, whose %s seed needs the seed inputs, and fleetd has none", d.Name, d.Class, kind)
 		}
-	case "controlplane":
-		if !i.ControlPlanes {
-			return conflict("%s is a control plane, which the owner renders", d.Name)
+		if d.Address == "" {
+			return conflict("%s has no address, which its %s seed names", d.Name, kind)
 		}
-		if d.Address == "" || d.Address == i.Bootstrap {
-			return conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
+	case kind != classes.PayloadTalosConfig:
+		return unavailable("%s is of class %s, whose %s payload fleetd does not render", d.Name, d.Class, kind)
+	case i.Renderer == nil:
+		return unavailable("the fleet has no Talos renderer")
+	default:
+		switch i.Renderer.MachineType(d.Class) {
+		case "":
+			return unavailable("the class inputs have no class %q", d.Class)
+		case "worker":
+			if i.Tokens == nil {
+				return unavailable("%s is a worker, whose config carries a bootstrap token fleetd creates in the cluster, and fleetd has no credentials for the cluster's API", d.Name)
+			}
+		case "controlplane":
+			if !i.ControlPlanes {
+				return conflict("%s is a control plane, which the owner renders", d.Name)
+			}
+			if d.Address == "" || d.Address == i.Bootstrap {
+				return conflict("%s is the control plane the Talos root bootstraps, or has no address; only a joining control plane installs", d.Name)
+			}
 		}
 	}
 	if d.TPM == "" {
@@ -271,10 +306,19 @@ func (i *Installer) Warm(ctx context.Context) {
 	}
 }
 
-// ServeHTTP answers GET /talos/config?uuid=<uuid>&code=<code> with the
-// config whole, and burns it once the node has acknowledged every byte of
-// the answer. A HEAD, a conditional request or another method serves
-// nothing; a Range is ignored, so the answer is always the whole file.
+// Routes are the paths the installer serves, each for its payload kinds: a
+// Talos config at /talos/config, a seed at /seed. A config asked for at the
+// other path is not found and stays.
+var Routes = map[string]func(kind string) bool{
+	"/talos/config": func(kind string) bool { return kind == "" || kind == classes.PayloadTalosConfig },
+	"/seed":         SeedKind,
+}
+
+// ServeHTTP answers GET /talos/config?uuid=<uuid>&code=<code>, or GET /seed
+// with the same query, with the config whole, and burns it once the node has
+// acknowledged every byte of the answer. A HEAD, a conditional request or
+// another method serves nothing; a Range is ignored, so the answer is always
+// the whole file.
 func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodGet {
@@ -291,10 +335,21 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	serves, known := Routes[r.URL.Path]
+	if !known {
+		http.NotFound(w, r)
+		return
+	}
 	now := i.Now()
 	p, cfg, ok := i.Configs.Claim(uuid, code, now)
 	if !ok {
 		i.notFound(r.Context(), uuid, code, now)
+		http.NotFound(w, r)
+		return
+	}
+	if !serves(p.Kind) {
+		i.Configs.Unclaim(uuid, code)
+		log.Printf("%s: %s asked at %s for its %s, which the path does not serve; the config stays", r.URL.Path, p.Node, r.RemoteAddr, p.what())
 		http.NotFound(w, r)
 		return
 	}
@@ -315,7 +370,7 @@ func (i *Installer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h := w.Header()
-	h.Set("Content-Type", "text/yaml")
+	h.Set("Content-Type", p.contentType())
 	h.Set("Cache-Control", "no-store")
 	h.Set("Content-Length", strconv.Itoa(len(cfg)))
 	if err := armReset(r, true); err != nil {
@@ -388,7 +443,7 @@ func sentence(s string) string {
 func (i *Installer) unacked(ctx context.Context, p Pending, peer string, at time.Time, why error, left string) {
 	d, err := i.NetBox.BySerial(ctx, i.Site, p.Serial)
 	if err == nil {
-		comment := fmt.Sprintf("fleetd: at %s fleetd wrote the Talos config to %s, and the peer did not acknowledge all of it: %v. %s", timestamp(at), peer, why, sentence(left))
+		comment := fmt.Sprintf("fleetd: at %s fleetd wrote the %s to %s, and the peer did not acknowledge all of it: %v. %s", timestamp(at), p.what(), peer, why, sentence(left))
 		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 	}
 	if err != nil {
@@ -549,7 +604,7 @@ func (i *Installer) refetched(ctx context.Context, uuid string, s Served, now ti
 	d, err := i.NetBox.BySerial(ctx, i.Site, s.Serial)
 	if err == nil {
 		Audit("fleet.refetch", i.Site, d, s.Workflow, "the node asked again for the config fleetd served it")
-		comment := fmt.Sprintf("fleetd: at %s the node asked again for the Talos config fleetd served it at %s for Workflow %s. Its kernel acknowledged every byte, and the node did not keep it: a power loss or a reset before Talos wrote it to STATE. Its code is spent and fleetd serves no config twice, so the node asks in vain. Set desired_action to provision; the disk holds no STATE to lose", timestamp(now), timestamp(s.At), s.Workflow)
+		comment := fmt.Sprintf("fleetd: at %s the node asked again for the config fleetd served it at %s for Workflow %s. Its kernel acknowledged every byte, and the node did not keep it: a power loss or a reset before it was written to disk. Its code is spent and fleetd serves no config twice, so the node asks in vain. Set desired_action to provision; the disk holds no state to lose", timestamp(now), timestamp(s.At), s.Workflow)
 		err = i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 	}
 	i.mu.Lock()
@@ -598,7 +653,7 @@ func (i *Installer) otherCode(ctx context.Context, p Pending, now time.Time) err
 	if err != nil {
 		return err
 	}
-	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config with a code other than the one rendered for it, and got 404", timestamp(now))
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its %s with a code other than the one rendered for it, and got 404", timestamp(now), p.what())
 	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 }
 
@@ -633,7 +688,7 @@ func (i *Installer) missing(ctx context.Context, uuid string, now time.Time) err
 			cause = fmt.Sprintf("fleetd served the config of %s at %s, NetBox has not taken its release, and the node did not keep it", p.Workflow, timestamp(p.Fetched))
 		}
 	}
-	comment := fmt.Sprintf("fleetd: at %s the node asked for its Talos config, and fleetd holds none for it: %s. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), cause)
+	comment := fmt.Sprintf("fleetd: at %s the node asked for its config, and fleetd holds none for it: %s. The node asks in vain and the device stays planned. Set desired_action to provision", timestamp(now), cause)
 	if err := i.NetBox.Update(ctx, d, "", nil, "warning", comment); err != nil {
 		return err
 	}
@@ -678,14 +733,14 @@ func (i *Installer) release(ctx context.Context, p Pending) error {
 		return err
 	}
 	status, level := "active", "success"
-	comment := fmt.Sprintf("fleetd: the node fetched its Talos config at %s; the device is active and the config is dropped", timestamp(p.Fetched))
+	comment := fmt.Sprintf("fleetd: the node fetched its %s at %s; the device is active and the config is dropped", p.what(), timestamp(p.Fetched))
 	switch {
 	case !p.Withdrawn.IsZero():
 		status, level = "", "warning"
 		comment = fmt.Sprintf("fleetd: the node fetched the config fleetd withdrew at %s; the fetch was writing it at the withdrawal and the node got all of it at %s. The status stays %s", timestamp(p.Withdrawn), timestamp(p.Fetched), d.Status)
 	case d.Status != "planned":
 		status = ""
-		comment = fmt.Sprintf("fleetd: the node fetched its Talos config at %s and the config is dropped; the status stays %s", timestamp(p.Fetched), d.Status)
+		comment = fmt.Sprintf("fleetd: the node fetched its %s at %s and the config is dropped; the status stays %s", p.what(), timestamp(p.Fetched), d.Status)
 	}
 	fields := map[string]any{"attest_consumed_at": timestamp(p.Fetched)}
 	if err := i.NetBox.Update(ctx, d, status, fields, level, comment); err != nil {
@@ -720,7 +775,7 @@ func (i *Installer) releaseFailed(ctx context.Context, p Pending, err error) {
 	if lookup != nil {
 		return
 	}
-	comment := fmt.Sprintf("fleetd: the node fetched its Talos config at %s, and NetBox refused its release; fleetd retries: %v", timestamp(p.Fetched), err)
+	comment := fmt.Sprintf("fleetd: the node fetched its %s at %s, and NetBox refused its release; fleetd retries: %v", p.what(), timestamp(p.Fetched), err)
 	if i.NetBox.Update(ctx, d, "", nil, "danger", comment) == nil {
 		i.mu.Lock()
 		i.unreleased[p.Code] = true
@@ -745,7 +800,7 @@ func (i *Installer) expire(ctx context.Context, p Pending) error {
 	if err != nil {
 		return err
 	}
-	comment := fmt.Sprintf("fleetd: the Talos config rendered at %s was not fetched within %s and is dropped; provision the node again", timestamp(p.Rendered), p.TTL)
+	comment := fmt.Sprintf("fleetd: the %s rendered at %s was not fetched within %s and is dropped; provision the node again", p.what(), timestamp(p.Rendered), p.TTL)
 	return i.NetBox.Update(ctx, found, "", nil, "warning", comment)
 }
 
@@ -763,11 +818,11 @@ func (i *Installer) Withdraw(ctx context.Context, d Device) error {
 	i.pending()
 	if fetching {
 		Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn while a fetch writes it: the device is "+d.Status)
-		comment := fmt.Sprintf("fleetd: the device is %s; a fetch was writing its Talos config, rendered at %s for Workflow %s, so the node may have it. fleetd journals the fetch's end if the node got all of it", d.Status, timestamp(p.Rendered), p.Workflow)
+		comment := fmt.Sprintf("fleetd: the device is %s; a fetch was writing its %s, rendered at %s for Workflow %s, so the node may have it. fleetd journals the fetch's end if the node got all of it", d.Status, p.what(), timestamp(p.Rendered), p.Workflow)
 		return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 	}
 	Audit("fleet.expire", i.Site, d, p.Workflow, "withdrawn: the device is "+d.Status)
-	comment := fmt.Sprintf("fleetd: the device is %s, so fleetd dropped the Talos config rendered at %s for Workflow %s before the node fetched it; the node gets no config", d.Status, timestamp(p.Rendered), p.Workflow)
+	comment := fmt.Sprintf("fleetd: the device is %s, so fleetd dropped the %s rendered at %s for Workflow %s before the node fetched it; the node gets no config", d.Status, p.what(), timestamp(p.Rendered), p.Workflow)
 	return i.NetBox.Update(ctx, d, "", nil, "warning", comment)
 }
 

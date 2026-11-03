@@ -88,7 +88,9 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 		Site:     "folly",
 		NetBox:   &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
 		Kube:     &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
+		Classes:  testClasses,
 		Renderer: it.rend,
+		Seeds:    testSeeds(),
 		Configs:  &Configs{},
 		TTL:      2 * time.Hour,
 		Metrics:  NewMetrics(),
@@ -124,7 +126,12 @@ func goodRequest() RenderRequest {
 
 // fetch is the node's GET of its config.
 func (it *installTest) fetch(method, uuid, code string, header map[string]string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(method, "/talos/config?uuid="+uuid+"&code="+code, nil)
+	return it.fetchAt("/talos/config", method, uuid, code, header)
+}
+
+// fetchAt is a fetch at one of the installer's paths.
+func (it *installTest) fetchAt(path, method, uuid, code string, header map[string]string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(method, path+"?uuid="+uuid+"&code="+code, nil)
 	for k, v := range header {
 		r.Header.Set(k, v)
 	}
@@ -289,6 +296,95 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 	}
 }
 
+// A class whose payload is a seed renders through the seed renderer, with no
+// bootstrap token, and its first boot fetches it at /seed as JSON; the Talos
+// path does not serve it. Once served, the device goes active as a Talos
+// node's does.
+func TestASeedClassRendersASeedServedAtSeed(t *testing.T) {
+	it := newInstallTest(t, "planned", map[string]any{"class": map[string]any{"value": "nixos", "label": "nixos"}})
+	req := goodRequest()
+	req.Class = "nixos"
+	if code, why := it.render(req); code != http.StatusCreated {
+		t.Fatalf("render: %d %s", code, why)
+	}
+	if it.rend.calls != 0 || len(it.tokens.minted) != 0 {
+		t.Fatalf("a seed went through the Talos renderer (%d calls) or minted a token (%v)", it.rend.calls, it.tokens.minted)
+	}
+	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "rendered the nixos seed") {
+		t.Errorf("the render's journal: %v", it.nb.journals)
+	}
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || !it.held(testCode) {
+		t.Fatalf("the Talos path answered a seed with %d, held %v", w.Code, it.held(testCode))
+	}
+	w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/json" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("the fetch: %d %v %q", w.Code, w.Header(), w.Body.String())
+	}
+	var s Seed
+	if err := json.Unmarshal(w.Body.Bytes(), &s); err != nil || s.Name != "riptide" || s.Serial != "MXL0172Q6L" || s.Class != "nixos" ||
+		s.Network.Address != "10.3.0.12/26" || s.Profile != "github:jonpulsifer/infra#riptide" {
+		t.Fatalf("the seed: %v %+v", err, s)
+	}
+	p := lastPatch(it.nb)
+	if p == nil || p["status"] != "active" {
+		t.Fatalf("the release patch: %v", p)
+	}
+	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "fetched its seed") {
+		t.Errorf("the release's journal: %v", it.nb.journals)
+	}
+	if w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+		t.Fatalf("a second fetch answered %d", w.Code)
+	}
+}
+
+// A Talos config is not served at /seed, and stays for the node's fetch at
+// its own path.
+func TestTheSeedPathDoesNotServeATalosConfig(t *testing.T) {
+	it := newInstallTest(t, "planned", nil)
+	if code, _ := it.render(goodRequest()); code != http.StatusCreated {
+		t.Fatal(code)
+	}
+	if w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || !it.held(testCode) {
+		t.Fatalf("/seed answered a Talos config with %d, held %v", w.Code, it.held(testCode))
+	}
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "text/yaml" {
+		t.Fatalf("the Talos path: %d %v", w.Code, w.Header())
+	}
+}
+
+// A seed class's gates: the seed inputs, and the node's address. Neither
+// needs the Talos renderer or the cluster's API.
+func TestSeedGates(t *testing.T) {
+	req := goodRequest()
+	req.Class = "nixos"
+	nixos := map[string]any{"class": map[string]any{"value": "nixos", "label": "nixos"}}
+
+	it := newInstallTest(t, "planned", nixos)
+	it.in.Seeds = nil
+	if code, why := it.render(req); code != http.StatusServiceUnavailable || !strings.Contains(why, "seed inputs") {
+		t.Errorf("without the seed inputs: %d %s", code, why)
+	}
+
+	it = newInstallTest(t, "planned", nixos)
+	it.nb.devices[0]["primary_ip4"] = nil
+	if code, why := it.render(req); code != http.StatusConflict || !strings.Contains(why, "no address") {
+		t.Errorf("without an address: %d %s", code, why)
+	}
+
+	it = newInstallTest(t, "planned", nixos)
+	it.in.Renderer, it.in.Tokens = nil, nil
+	if code, why := it.render(req); code != http.StatusCreated {
+		t.Errorf("without the Talos renderer: %d %s", code, why)
+	}
+
+	// A payload fleetd does not render is refused before anything starts.
+	it = newInstallTest(t, "planned", map[string]any{"class": map[string]any{"value": "ubuntu", "label": "ubuntu"}})
+	req.Class = "ubuntu"
+	if code, why := it.render(req); code != http.StatusServiceUnavailable || !strings.Contains(why, "does not render") {
+		t.Errorf("a cloud-init class: %d %s", code, why)
+	}
+}
+
 // Only a whole GET serves and burns: HEAD and other methods are refused, a
 // conditional request is refused, and a Range is ignored.
 func TestOnlyAWholeGetBurns(t *testing.T) {
@@ -412,7 +508,7 @@ func TestAFetchForAConfigFleetdDoesNotHoldIsJournaledOnce(t *testing.T) {
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("answered %d", w.Code)
 	}
-	got := it.nb.journalWith("the node asked for its Talos config, and fleetd holds none for it")
+	got := it.nb.journalWith("the node asked for its config, and fleetd holds none for it")
 	if len(got) != 1 || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
 		t.Fatalf("journals %v, missing %d", it.nb.journals, it.in.Metrics.ConfigMissing.Load())
 	}
@@ -982,11 +1078,11 @@ func TestAServedConfigAskedForAgainIsJournaledOncePerRun(t *testing.T) {
 			t.Fatalf("a re-fetch answered %d", w.Code)
 		}
 	}
-	got := it.nb.journalWith("the node asked again for the Talos config fleetd served it at " + timestamp(served) + " for Workflow " + provWF)
+	got := it.nb.journalWith("the node asked again for the config fleetd served it at " + timestamp(served) + " for Workflow " + provWF)
 	if len(got) != 1 || it.in.Metrics.ConfigRefetched.Load() != 3 || it.in.Metrics.ConfigMissing.Load() != 0 {
 		t.Fatalf("journals %v, refetched %d, missing %d", it.nb.journals, it.in.Metrics.ConfigRefetched.Load(), it.in.Metrics.ConfigMissing.Load())
 	}
-	for _, want := range []string{"a power loss or a reset before Talos wrote it to STATE", "Set desired_action to provision"} {
+	for _, want := range []string{"a power loss or a reset before it was written to disk", "Set desired_action to provision"} {
 		if !strings.Contains(got[0], want) {
 			t.Errorf("journal %q lacks %q", got[0], want)
 		}
@@ -1015,7 +1111,7 @@ func TestAReFetchBeforeTheReleaseNamesTheServedConfig(t *testing.T) {
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatal(w.Code)
 	}
-	if len(it.nb.journalWith("asked again for the Talos config fleetd served it")) != 1 || len(it.nb.journalWith("a reboot of spore")) != 0 {
+	if len(it.nb.journalWith("asked again for the config fleetd served it")) != 1 || len(it.nb.journalWith("a reboot of spore")) != 0 {
 		t.Fatalf("journals %v", it.nb.journals)
 	}
 	it.fetch(http.MethodGet, testUUID, strings.Repeat("Z", 43), nil)
