@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jonpulsifer/infra/apps/fleetd/bmc"
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
@@ -86,10 +87,24 @@ type Config struct {
 	// AutoProvision lets an admitted device with a class and an address,
 	// which never ran a Workflow, start its provision without the owner.
 	AutoProvision bool
-	// BMCJobWait is how long a pass waits for the Rufio Job that powers a
-	// machine off before it supersedes the machine's run.
+	// BMCJobWait is how long a pass waits for the BMC to power a machine
+	// off: the Rufio Job that stops a run, or in native mode the stop and
+	// the power-off a netboot starts with.
 	BMCJobWait time.Duration
+	// BMCMode is who drives a device's BMC: BMCRufio, through Rufio's
+	// Machine and Job objects and Tinkerbell's boot jobs, or BMCNative,
+	// fleetd itself, from FLEET_BMC.
+	BMCMode string
 }
+
+// The BMC modes FLEET_BMC names.
+const (
+	BMCRufio  = "rufio"
+	BMCNative = "native"
+)
+
+// NativeBMC says whether fleetd drives the BMCs itself.
+func (c Config) NativeBMC() bool { return c.BMCMode == BMCNative }
 
 // LoadConfig reads the FLEET_* environment that README.md lists.
 func LoadConfig() (Config, error) {
@@ -101,6 +116,10 @@ func LoadConfig() (Config, error) {
 		BMCSecrets:    map[string]string{"amt": "bmc-amt"},
 		AMTPort:       16992,
 		BMCJobWait:    30 * time.Second,
+		BMCMode:       env("FLEET_BMC", BMCRufio),
+	}
+	if c.BMCMode != BMCRufio && c.BMCMode != BMCNative {
+		return c, fmt.Errorf("FLEET_BMC %q is neither %s nor %s", c.BMCMode, BMCRufio, BMCNative)
 	}
 	for _, k := range []string{"FLEET_HOOKOS_URL", "FLEET_HOOKOS_CMDLINE"} {
 		if _, err := required(k); err != nil {
@@ -148,6 +167,37 @@ func LoadConfig() (Config, error) {
 	}
 	return c, nil
 }
+
+// LoadBMC reads native mode's environment: FLEET_BMC_AMT_CREDENTIAL_FILE,
+// the AMT credential, and FLEET_BMC_STATE_FILE, where fleetd keeps each
+// run's BMC record. In rufio mode it returns nils and reads nothing.
+func LoadBMC(cfg Config) (func(Device) (bmc.BMC, error), *Runs, error) {
+	if !cfg.NativeBMC() {
+		return nil, nil, nil
+	}
+	credFile, err := required("FLEET_BMC_AMT_CREDENTIAL_FILE")
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC=native: %w", err)
+	}
+	state, err := required("FLEET_BMC_STATE_FILE")
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC=native: %w", err)
+	}
+	cred, err := bmc.LoadCredential(credFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC_AMT_CREDENTIAL_FILE: %w", err)
+	}
+	runs := &Runs{File: state}
+	if _, _, err := runs.Get(""); err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC_STATE_FILE: %w", err)
+	}
+	dialer := &bmc.Dialer{Credentials: map[string]bmc.Credential{"amt": cred}, AMTPort: cfg.AMTPort, Timeout: BMCCallTimeout(cfg.BMCJobWait)}
+	return func(d Device) (bmc.BMC, error) { return dialer.Dial(d.BMCType, d.BMCAddress) }, runs, nil
+}
+
+// BMCCallTimeout bounds one call to a BMC: a third of the power-off wait, so
+// one slow read leaves the wait room for more, and at least 5 seconds.
+func BMCCallTimeout(wait time.Duration) time.Duration { return max(wait/3, 5*time.Second) }
 
 // LoadCluster reads the site cluster's API: FLEET_CLUSTER_SERVER, its CA in
 // FLEET_CLUSTER_CA_FILE and a ServiceAccount token in FLEET_CLUSTER_TOKEN_FILE,

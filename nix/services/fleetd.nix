@@ -15,6 +15,11 @@
 # - HTTP on port 8446 of the Anchor network for NetBox's event-rule webhook, and /metrics.
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
 #
+# homelab.fleetd.bmc says who drives each machine's BMC. With "rufio", the default, fleetd makes a
+# Rufio Machine per device and Tinkerbell's controller power-cycles a run's machine. With "native",
+# fleetd makes no Machine and powers and netboots each machine through its AMT itself, with the
+# credential fleetd/bmc-amt in spore's sops file: a JSON object with username and password.
+#
 # With fleetd/folly-cordon-token sealed, it reaches the cluster's API as
 # clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account: it cordons a node it
 # quarantined, creates the bootstrap token each worker's install config carries, and takes a retired
@@ -39,6 +44,7 @@ let
   webhook = sealed "webhook-secret";
   cordon = sealed "folly-cordon-token";
   workerSecrets = sealed "worker-secrets";
+  nativeBmc = cfg.bmc == "native";
   cluster = (import ../lib/networks.nix).${site};
   # An admitted device's address comes from the node prefix. Only these keys are read, so a new
   # node, which changes the inventory export, leaves the service's environment alone.
@@ -169,6 +175,14 @@ in
       default = false;
       description = "Let a control-plane class render and install like a worker and join the cluster. fleetd then holds the full secrets bundle, fleetd/bundle in spore's sops file, with the cluster's CA keys. The control plane at the API server's address, which the Talos root bootstraps, never installs from here. Off, sops-nix does not decrypt the bundle and a control plane is refused.";
     };
+    bmc = lib.mkOption {
+      type = lib.types.enum [
+        "rufio"
+        "native"
+      ];
+      default = "rufio";
+      description = "Who drives each machine's BMC. rufio: fleetd makes a Rufio Machine per device, stops a run with a Rufio Job, and Tinkerbell's controller network-boots a run's machine. native: fleetd powers, stops and network-boots each machine through its AMT itself, with fleetd/bmc-amt from spore's sops file, and makes no Rufio object.";
+    };
     webhookPort = lib.mkOption {
       type = lib.types.port;
       default = 8446;
@@ -224,6 +238,10 @@ in
         message = "fleetd/bundle is in spore's sops file while homelab.fleetd.controlPlanes is off; run scripts/talos-worker-secrets.sh drop-bundle spore.";
       }
       {
+        assertion = !nativeBmc || sealed "bmc-amt";
+        message = "homelab.fleetd.bmc = \"native\" needs fleetd/bmc-amt in spore's sops file.";
+      }
+      {
         assertion = !workerSecrets || cordon;
         message = "fleetd/worker-secrets needs fleetd/folly-cordon-token in spore's sops file: each worker's config carries a bootstrap token fleetd creates through that account.";
       }
@@ -253,6 +271,11 @@ in
     // lib.optionalAttrs cfg.controlPlanes {
       # The full bundle, with the cluster's CA keys.
       "fleetd/bundle" = { };
+    }
+    // lib.optionalAttrs nativeBmc {
+      # The AMT user and password, the same as the Flux Secret bmc-amt Rufio reads
+      # (clusters/folly/tinkerbell/bmc-amt.sops.yaml).
+      "fleetd/bmc-amt" = { };
     };
 
     users.users.fleetd = {
@@ -351,6 +374,7 @@ in
         FLEET_KEA_BOOT_FILE = lib.mkIf keaOn "talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
         FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
+        FLEET_BMC = cfg.bmc;
         FLEET_WORKFLOW_TTL = "168h";
         FLEET_CONFIG_TTL = "2h";
         # Rendered configs wait in this tmpfs, which RuntimeDirectoryPreserve keeps across a
@@ -381,6 +405,12 @@ in
         FLEET_WORKER_SECRETS = "%d/worker-secrets";
         FLEET_TALOSCTL = lib.getExe talosctl;
       }
+      // lib.optionalAttrs nativeBmc {
+        FLEET_BMC_AMT_CREDENTIAL_FILE = "%d/bmc-amt";
+        # Each run's netboot, stop and power-off wait, which Workflow annotations and Rufio Jobs hold
+        # in rufio mode.
+        FLEET_BMC_STATE_FILE = "${stateDir}/bmc-runs.json";
+      }
       // lib.optionalAttrs cfg.controlPlanes {
         FLEET_CONTROLPLANE_BUNDLE = "%d/bundle";
         # A control plane's config carries the CA keys, so it waits unread for less time.
@@ -400,7 +430,8 @@ in
         ++ lib.optional webhook "webhook-secret:${config.sops.secrets."fleetd/webhook-secret".path}"
         ++ lib.optional cordon "folly-cordon-token:${config.sops.secrets."fleetd/folly-cordon-token".path}"
         ++ lib.optional workerSecrets "worker-secrets:${config.sops.secrets."fleetd/worker-secrets".path}"
-        ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleetd/bundle".path}";
+        ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleetd/bundle".path}"
+        ++ lib.optional nativeBmc "bmc-amt:${config.sops.secrets."fleetd/bmc-amt".path}";
         User = "fleetd";
         Group = "fleetd";
         SupplementaryGroups = lib.optional keaOn "kea";
