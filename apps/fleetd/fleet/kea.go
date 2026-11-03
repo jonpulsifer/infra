@@ -74,6 +74,27 @@ func (k *KeaReservations) Reservations(devices []Device, netboot map[string]bool
 	return out, errors.Join(errs...)
 }
 
+// Netbooting is the devices whose reservation in the file on disk carries
+// the boot file, by hostname: what the last write decided. A file that
+// does not read is none.
+func (k *KeaReservations) Netbooting() map[string]bool {
+	out := map[string]bool{}
+	b, err := os.ReadFile(k.File)
+	if err != nil {
+		return out
+	}
+	var reservations []keaReservation
+	if err := json.Unmarshal(b, &reservations); err != nil {
+		return out
+	}
+	for _, r := range reservations {
+		if r.BootFileName != "" {
+			out[r.Hostname] = true
+		}
+	}
+	return out
+}
+
 // Sync writes the reservations and reloads Kea when they changed. The file
 // is written beside itself and renamed, so Kea reads a whole file or the
 // old one. An unchanged file sends no reload, unless the last write's reload

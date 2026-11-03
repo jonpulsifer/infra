@@ -14,7 +14,10 @@ if [ "$arg" = "--follow" ]; then
   exec ssh -t "$host" "sudo journalctl -fu fleetd -o cat | grep --line-buffered -E '\"machine\":\"$node\"|\"node\":\"$node\"'"
 fi
 serial=${arg:-$(awk -v n="$node" '$1==n":"{f=1} f && /serial:/{print $2; exit}' "$repo/clusters/folly/inventory/nodes.yaml")}
-[ -n "$serial" ] || { echo "no serial for $node in clusters/folly/inventory/nodes.yaml; pass it" >&2; exit 1; }
+[ -n "$serial" ] || {
+  echo "no serial for $node in clusters/folly/inventory/nodes.yaml; pass it" >&2
+  exit 1
+}
 
 ssh "$host" NODE="$node" SERIAL="$serial" 'bash -s' <<'REMOTE'
 set -u

@@ -69,6 +69,12 @@ Kubelet client certificates cannot be revoked. A disk image can retain a certifi
 
 Every Talos configuration also contains the cluster's trustd token, `machine.token`. Nothing rotates this token. A copy on disk can still obtain Talos API certificates.
 
+## BMC access
+
+`homelab.fleetd.bmc` picks who reaches each machine's AMT ([BMC mode](lifecycle.md#bmc-mode)). The default, `rufio`, uses the Flux Secret `clusters/folly/tinkerbell/bmc-amt.sops.yaml`. `native` uses `fleetd/bmc-amt` in `nix/secrets/spore.sops.yaml`, and the two hold the same user and password, so a password change goes into both files.
+
+In `native` mode, fleetd keeps each run's netboot, stop and power-off wait in `/var/lib/fleetd/bmc-runs.json` on spore, which `sudo jq . /var/lib/fleetd/bmc-runs.json` reads. It drops a run's record once no `Workflow` and no device's `last_workflow` names the run, and keeps the record of a failed netboot, or one that waits for the machine to go off, for `FLEET_WORKFLOW_TTL`.
+
 ## Disk identity
 
 The disk check trusts the serial that the disk reports. Duplicate serials cause refusal, including clones and some USB bridges. A disk without a serial exposed through sysfs cannot be wiped or installed through fleetd.
