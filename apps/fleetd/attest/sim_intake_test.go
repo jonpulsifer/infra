@@ -23,19 +23,6 @@ import (
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
-// macOf is the primary MAC on the device's interfaces.
-func (f *fakeNetBox) macOf(serial string) string {
-	id := f.bySerial(serial).ID
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, i := range f.interfaces {
-		if i.DeviceID == id && i.MAC != "" {
-			return i.MAC
-		}
-	}
-	return ""
-}
-
 func (h *harness) pending(t *testing.T, serial string) {
 	t.Helper()
 	r := refusal(t, func() error { _, err := h.run(serial, simMAC); return err }())
@@ -211,12 +198,7 @@ func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
 		change       func(*fakeNetBox, *fakeDevice)
 	}{
 		{"bound to another MAC", reasonMACMismatch, func(f *fakeNetBox, d *fakeDevice) {
-			for _, i := range f.interfaces {
-				if i.DeviceID == d.ID {
-					f.next++
-					i.MAC, i.MACID = "aa:bb:cc:dd:ee:ff", f.next
-				}
-			}
+			f.bindMAC(d.ID, "aa:bb:cc:dd:ee:ff")
 		}},
 		{"approval replaced", reasonBinding, func(_ *fakeNetBox, d *fakeDevice) { d.CustomFields["approved_ek_hash"] = strings.Repeat("ab", 32) }},
 		{"approval removed", reasonBinding, func(_ *fakeNetBox, d *fakeDevice) {
@@ -232,9 +214,10 @@ func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
 			d := f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(nil))
 			h.v.Installer = newFakeInstaller(nil)
 			h.tamper = func(*protocol.EvidenceRequest) {
-				f.mu.Lock()
-				defer f.mu.Unlock()
+				f.Mu.Lock()
+				defer f.Mu.Unlock()
 				c.change(f, d)
+				f.writeBack(d)
 			}
 			r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }())
 			if r.Verdict.Reason != c.reason || r.Verdict.Verdict != protocol.VerdictRefused {
@@ -283,9 +266,9 @@ func TestAnotherCertifiedTPMGetsNothing(t *testing.T) {
 		t.Fatal("a mismatch waits as a claim")
 	}
 	waitFor(t, "the mismatch journal entry", func() bool { return f.journaled("not its approved binding") })
-	f.mu.Lock()
-	n := len(f.journal)
-	f.mu.Unlock()
+	f.Mu.Lock()
+	n := len(f.journalLines())
+	f.Mu.Unlock()
 	if n != 1 {
 		t.Fatalf("%d journal entries for two refusals within ten minutes", n)
 	}
@@ -458,9 +441,9 @@ func TestABoundPassPinsTheBindingAlone(t *testing.T) {
 			if d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != nil {
 				t.Fatalf("pins after a pass against an RSA-only binding: %+v", d.CustomFields)
 			}
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			for _, ch := range f.changes {
+			f.Mu.Lock()
+			defer f.Mu.Unlock()
+			for _, ch := range f.Changes {
 				if ch.Post["ek_hash_ecc"] == h.hashes["ecc"] {
 					t.Fatalf("the extra ECC EK was pinned in change %d", ch.ID)
 				}

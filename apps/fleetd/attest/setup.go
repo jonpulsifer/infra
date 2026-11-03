@@ -112,7 +112,7 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
 	}
-	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Log: log}
+	nb := NewNetBox(u, strings.TrimSpace(string(tok)), &http.Client{Timeout: 10 * time.Second}, log)
 	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
 	}

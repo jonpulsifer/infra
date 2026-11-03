@@ -2,16 +2,6 @@ package fleet
 
 import "time"
 
-// Attested is where fleetd recorded the machine plugged in at its
-// last intake pass, from facts the session's AK signed: the switch's LLDP
-// chassis ID and port ID, and when. These are the only network facts the
-// controller acts on.
-type Attested struct {
-	Switch string
-	Port   string
-	At     time.Time
-}
-
 // AttestedPortTTL bounds how old an attested port may be to cable a node
 // after its binding.
 const AttestedPortTTL = time.Hour

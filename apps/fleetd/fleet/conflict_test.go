@@ -32,7 +32,7 @@ func (f *fakeKube) deletes(name string) int {
 // with a netboot, whose power cycle stops the install, and journals both once.
 func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -47,12 +47,12 @@ func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	if boot := kube.get(wfBase + retire)["spec"].(map[string]any)["bootOptions"].(map[string]any); boot["bootMode"] != "netboot" {
 		t.Errorf("the retirement does not power-cycle the machine: %v", boot)
 	}
-	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retire {
-		t.Fatalf("patches %v", nb.patches)
+	if len(nb.Patches) != 1 || nb.Patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retire {
+		t.Fatalf("patches %v", nb.Patches)
 	}
 	want := "fleetd: the retirement ends Workflow " + prov + " (provision) and starts " + retire + ": the BMC powered the machine off (Rufio Job stop-" + prov + "), which stopped " + prov + ", and fleetd deleted it"
-	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || nb.Journals[0]["comments"] != want {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	if got := kube.get(wfBase + retire).Annotations()[SupersedesAnnotation]; got != prov {
 		t.Errorf("the retirement does not name the run it superseded: %q", got)
@@ -60,12 +60,12 @@ func TestRetirementSupersedesARunWithABMC(t *testing.T) {
 	if kube.posts(jobBase) != 1 || kube.get(jobBase+"stop-"+prov) != nil {
 		t.Errorf("the stop Job was not made once and pruned: %v", kube.log)
 	}
-	nb.set("last_workflow", retire)
+	nb.Set("last_workflow", retire)
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(nb.journals) != 1 || len(nb.patches) != 1 || kube.creates() != 1 {
-		t.Fatalf("a second pass wrote again: %v %v", nb.journals, nb.patches)
+	if len(nb.Journals) != 1 || len(nb.Patches) != 1 || kube.creates() != 1 {
+		t.Fatalf("a second pass wrote again: %v %v", nb.Journals, nb.Patches)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestRetirementSupersedesOnlyTheRunItListed(t *testing.T) {
 	moved := installing(prov)
 	moved.metadata()["resourceVersion"] = "2"
 	moved["status"].(map[string]any)["currentState"] = map[string]any{"actionName": "next-boot"}
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{
 		objects: map[string]Object{wfBase + prov: installing(prov)},
 		racing:  map[string]Object{wfBase + prov: moved},
@@ -90,8 +90,8 @@ func TestRetirementSupersedesOnlyTheRunItListed(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || names[0] != prov || kube.creates() != 0 {
 		t.Fatalf("a 409 on the delete still started the retirement: %v", names)
 	}
-	if len(nb.patches) != 0 || len(nb.journalWith("changed between fleetd's read and its delete; the next pass tries again")) != 1 {
-		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
+	if len(nb.Patches) != 0 || len(nb.JournalWith("changed between fleetd's read and its delete; the next pass tries again")) != 1 {
+		t.Fatalf("patches %v journals %v", nb.Patches, nb.Journals)
 	}
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -122,7 +122,7 @@ func TestRetirementSupersedesAnOverdueRun(t *testing.T) {
 		return agedWorkflow(prov, 40*time.Minute, testNow.Add(-10*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING", "install")
 	}
 	t.Run("annotated once", func(t *testing.T) {
-		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+		nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 		kube := &fakeKube{objects: map[string]Object{wfBase + prov: overdue()}}
 		r, done := newTest(t, nb, kube)
 		defer done()
@@ -136,7 +136,7 @@ func TestRetirementSupersedesAnOverdueRun(t *testing.T) {
 		}
 	})
 	t.Run("superseded in the pass that annotates it", func(t *testing.T) {
-		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+		nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 		kube := &fakeKube{objects: map[string]Object{wfBase + prov: overdue()}}
 		r, done := newTest(t, nb, kube)
 		defer done()
@@ -148,10 +148,10 @@ func TestRetirementSupersedesAnOverdueRun(t *testing.T) {
 		}
 		names := kube.workflows()
 		if len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") {
-			t.Fatalf("the retirement did not supersede the overdue run: %v, journals %v", names, nb.journals)
+			t.Fatalf("the retirement did not supersede the overdue run: %v, journals %v", names, nb.Journals)
 		}
-		if len(nb.journalWith("the retirement ends Workflow "+prov)) != 1 {
-			t.Fatalf("journals %v", nb.journals)
+		if len(nb.JournalWith("the retirement ends Workflow "+prov)) != 1 {
+			t.Fatalf("journals %v", nb.Journals)
 		}
 	})
 }
@@ -161,7 +161,7 @@ func TestRetirementSupersedesAnOverdueRun(t *testing.T) {
 // pass after the run ends.
 func TestRetirementWaitsForARunWithoutABMC(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov, "bmc_type": "none"})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov, "bmc_type": "none"})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -174,8 +174,8 @@ func TestRetirementWaitsForARunWithoutABMC(t *testing.T) {
 		t.Fatalf("the run without a BMC was not kept: %v", names)
 	}
 	want := "fleetd: the retirement waits for Workflow " + prov + " (provision); power the machine off to end it, and it retires on its next network boot"
-	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want || len(nb.patches) != 0 {
-		t.Fatalf("journals %v patches %v", nb.journals, nb.patches)
+	if len(nb.Journals) != 1 || nb.Journals[0]["comments"] != want || len(nb.Patches) != 0 {
+		t.Fatalf("journals %v patches %v", nb.Journals, nb.Patches)
 	}
 	kube.setState(prov, "STATE_SUCCESS")
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -202,21 +202,21 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 	t.Run("a run that changed is kept", func(t *testing.T) {
 		moved := running()
 		moved.metadata()["resourceVersion"] = "2"
-		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire})}, ifaces: riptideIfaces()}
+		nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire})}, Ifaces: riptideIfaces()}
 		kube := &fakeKube{objects: map[string]Object{wfBase + retire: running()}, racing: map[string]Object{wfBase + retire: moved}}
 		r, done := newTest(t, nb, kube)
 		defer done()
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if kube.get(wfBase+retire) == nil || len(nb.journals) != 0 {
-			t.Fatalf("a changed retirement was deleted: journals %v", nb.journals)
+		if kube.get(wfBase+retire) == nil || len(nb.Journals) != 0 {
+			t.Fatalf("a changed retirement was deleted: journals %v", nb.Journals)
 		}
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
 		}
-		if kube.get(wfBase+retire) != nil || len(nb.journalWith("which stopped the retirement Workflow "+retire+", and fleetd deleted it")) != 1 {
-			t.Fatalf("the retirement survived: journals %v", nb.journals)
+		if kube.get(wfBase+retire) != nil || len(nb.JournalWith("which stopped the retirement Workflow "+retire+", and fleetd deleted it")) != 1 {
+			t.Fatalf("the retirement survived: journals %v", nb.Journals)
 		}
 		post, del := kube.logIndex("POST "+strings.TrimSuffix(jobBase, "/")), kube.logIndex("DELETE "+wfBase+retire)
 		if post < 0 || post > del || kube.posts(jobBase) != 1 {
@@ -224,7 +224,7 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 		}
 	})
 	t.Run("a BMC that refuses keeps it", func(t *testing.T) {
-		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire})}, ifaces: riptideIfaces()}
+		nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire})}, Ifaces: riptideIfaces()}
 		kube := &fakeKube{objects: map[string]Object{wfBase + retire: running()}, bmc: "refuse"}
 		r, done := newTest(t, nb, kube)
 		defer done()
@@ -237,12 +237,12 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 			t.Fatalf("workflows %v, Job posts %d", names, kube.posts(jobBase))
 		}
 		want := "the cancellation could not stop the retirement Workflow " + retire + ": the BMC did not power the machine off (Rufio Job stop-" + retire + " failed: failed to perform PowerAction: 500 Internal Server Error)"
-		if len(nb.journals) != 1 || len(nb.journalWith(want)) != 1 || len(nb.journalWith("Power the machine off by hand")) != 1 || nb.journals[0]["kind"] != "danger" {
-			t.Fatalf("journals %v", nb.journals)
+		if len(nb.Journals) != 1 || len(nb.JournalWith(want)) != 1 || len(nb.JournalWith("Power the machine off by hand")) != 1 || nb.Journals[0]["kind"] != "danger" {
+			t.Fatalf("journals %v", nb.Journals)
 		}
 	})
 	t.Run("without a BMC", func(t *testing.T) {
-		nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire, "bmc_type": "none"})}, ifaces: riptideIfaces()}
+		nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": retire, "bmc_type": "none"})}, Ifaces: riptideIfaces()}
 		kube := &fakeKube{objects: map[string]Object{wfBase + retire: running()}}
 		r, done := newTest(t, nb, kube)
 		defer done()
@@ -254,8 +254,8 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 		if names := kube.workflows(); len(names) != 1 || names[0] != retire || kube.deletes(retire) != 0 {
 			t.Fatalf("workflows %v", names)
 		}
-		if len(nb.journalWith("no BMC can stop the machine, so the cancellation cannot stop the retirement")) != 1 {
-			t.Fatalf("journals %v", nb.journals)
+		if len(nb.JournalWith("no BMC can stop the machine, so the cancellation cannot stop the retirement")) != 1 {
+			t.Fatalf("journals %v", nb.Journals)
 		}
 	})
 }
@@ -264,7 +264,7 @@ func TestLeavingDecommissioningEndsTheRetirementSafely(t *testing.T) {
 // planned, so a node being retired never fetches the cluster's secrets.
 func TestDecommissioningWithdrawsAnUnreadConfig(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -283,7 +283,7 @@ func TestDecommissioningWithdrawsAnUnreadConfig(t *testing.T) {
 		t.Fatal("a planned device's config was dropped")
 	}
 
-	nb.set("status", map[string]any{"value": "decommissioning"})
+	nb.Set("status", map[string]any{"value": "decommissioning"})
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -296,8 +296,8 @@ func TestDecommissioningWithdrawsAnUnreadConfig(t *testing.T) {
 	if !r.Installer.Configs.Spent(testUUID, testCode) {
 		t.Error("the withdrawn code is not burned")
 	}
-	if got := nb.journalWith("the device is decommissioning, so fleetd dropped the Talos config"); len(got) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if got := nb.JournalWith("the device is decommissioning, so fleetd dropped the Talos config"); len(got) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 }
 
@@ -306,7 +306,7 @@ func TestDecommissioningWithdrawsAnUnreadConfig(t *testing.T) {
 // provision ends starts it.
 func TestARequestDuringAnotherRunWaitsForIt(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "wipe", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "wipe", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -318,12 +318,12 @@ func TestARequestDuringAnotherRunWaitsForIt(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || names[0] != prov {
 		t.Fatalf("workflows %v", names)
 	}
-	if len(nb.patches) != 0 {
-		t.Fatalf("the waiting request was written: %v", nb.patches)
+	if len(nb.Patches) != 0 {
+		t.Fatalf("the waiting request was written: %v", nb.Patches)
 	}
 	want := "fleetd: wipe waits: Workflow " + prov + " (provision) is still running; it starts when " + prov + " ends"
-	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || nb.Journals[0]["comments"] != want {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 
 	kube.setState(prov, "STATE_SUCCESS")
@@ -334,11 +334,11 @@ func TestARequestDuringAnotherRunWaitsForIt(t *testing.T) {
 	if len(names) != 1 || !strings.HasPrefix(names[0], "wipe-riptide-") {
 		t.Fatalf("the waiting wipe did not start: %v", names)
 	}
-	if cf := nb.patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != names[0] {
-		t.Fatalf("patches %v", nb.patches)
+	if cf := nb.Patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != names[0] {
+		t.Fatalf("patches %v", nb.Patches)
 	}
-	if len(nb.journalWith("fleetd: started Workflow "+names[0]+" (wipe)")) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.JournalWith("fleetd: started Workflow "+names[0]+" (wipe)")) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 }
 
@@ -346,22 +346,22 @@ func TestARequestDuringAnotherRunWaitsForIt(t *testing.T) {
 // consumed, and the journal says so rather than that it waits.
 func TestTheSameRequestDuringItsRunIsThatRun(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "provision", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "provision", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if kube.creates() != 0 || len(nb.patches) != 1 {
-		t.Fatalf("creates %d patches %v", kube.creates(), nb.patches)
+	if kube.creates() != 0 || len(nb.Patches) != 1 {
+		t.Fatalf("creates %d patches %v", kube.creates(), nb.Patches)
 	}
-	if cf := nb.patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != prov {
-		t.Fatalf("patch %v", nb.patches[0])
+	if cf := nb.Patches[0]["custom_fields"].(map[string]any); cf["desired_action"] != "none" || cf["last_workflow"] != prov {
+		t.Fatalf("patch %v", nb.Patches[0])
 	}
 	want := "fleetd: Workflow " + prov + " (provision) is already running; the request is that run"
-	if len(nb.journals) != 1 || nb.journals[0]["comments"] != want {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || nb.Journals[0]["comments"] != want {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 }
 
@@ -369,9 +369,9 @@ func TestTheSameRequestDuringItsRunIsThatRun(t *testing.T) {
 // cleared with the request the pass consumed: the run is recorded, and the
 // new request stays set and waits for it.
 func TestARequestSetWhileARunStartsIsKept(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), apply: true}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil)}, Ifaces: riptideIfaces(), Apply: true}
 	kube := &fakeKube{}
-	kube.created = func() { nb.set("desired_action", "wipe") }
+	kube.created = func() { nb.Set("desired_action", "wipe") }
 	r, done := newTest(t, nb, kube)
 	defer done()
 	if err := r.Reconcile(context.Background()); err != nil {
@@ -382,18 +382,18 @@ func TestARequestSetWhileARunStartsIsKept(t *testing.T) {
 	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-riptide-") {
 		t.Fatalf("workflows %v", names)
 	}
-	cf := nb.patches[0]["custom_fields"].(map[string]any)
+	cf := nb.Patches[0]["custom_fields"].(map[string]any)
 	if _, cleared := cf["desired_action"]; cleared || cf["last_workflow"] != names[0] {
-		t.Fatalf("patch %v", nb.patches[0])
+		t.Fatalf("patch %v", nb.Patches[0])
 	}
-	if len(nb.journalWith("desired_action changed to wipe while fleetd started it, so it stays set and waits for "+names[0])) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.JournalWith("desired_action changed to wipe while fleetd started it, so it stays set and waits for "+names[0])) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if kube.creates() != 1 || len(nb.journalWith("wipe waits: Workflow "+names[0])) != 1 {
-		t.Fatalf("creates %d, journals %v", kube.creates(), nb.journals)
+	if kube.creates() != 1 || len(nb.JournalWith("wipe waits: Workflow "+names[0])) != 1 {
+		t.Fatalf("creates %d, journals %v", kube.creates(), nb.Journals)
 	}
 }
 
@@ -410,6 +410,6 @@ func TestAdmitDuringAnotherRunRendersNothing(t *testing.T) {
 		t.Fatalf("workflows %v", n)
 	}
 	if at.cf("desired_action") != "provision" || !at.journal("provision waits: Workflow "+wipe+" (wipe)") {
-		t.Fatalf("desired_action %v, journals %v", at.cf("desired_action"), at.nb.journals)
+		t.Fatalf("desired_action %v, journals %v", at.cf("desired_action"), at.nb.Journals)
 	}
 }

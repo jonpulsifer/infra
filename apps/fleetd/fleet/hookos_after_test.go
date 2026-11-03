@@ -8,7 +8,7 @@ import (
 
 func (at *admitTest) hookosJournals() int {
 	n := 0
-	for _, j := range at.nb.journals {
+	for _, j := range at.nb.Journals {
 		if strings.Contains(j["comments"].(string), "booted HookOS and attested after Workflow") {
 			n++
 		}
@@ -25,14 +25,14 @@ func TestAdmitJournalsAHookOSBootAfterASuccessfulInstall(t *testing.T) {
 	}
 	run := at.kube.workflows()[0]
 	if code, _ := at.admit(strings.Repeat("Q", 43)); code != http.StatusCreated || at.hookosJournals() != 0 {
-		t.Fatalf("a running provision journaled: %v", at.nb.journals)
+		t.Fatalf("a running provision journaled: %v", at.nb.Journals)
 	}
 	at.kube.setState(run, "STATE_SUCCESS")
 	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "its last run is "+run) {
 		t.Fatalf("answer changed: %d %s", code, why)
 	}
 	if at.hookosJournals() != 1 || at.r.Metrics.HookOSAfter.Load() != 1 {
-		t.Fatalf("journals %v count %d", at.nb.journals, at.r.Metrics.HookOSAfter.Load())
+		t.Fatalf("journals %v count %d", at.nb.Journals, at.r.Metrics.HookOSAfter.Load())
 	}
 	if _, ok := at.kube.get(wfBase + run).Annotations()[HookOSAfterAnnotation]; !ok {
 		t.Fatal("the Workflow is not marked")
@@ -41,7 +41,7 @@ func TestAdmitJournalsAHookOSBootAfterASuccessfulInstall(t *testing.T) {
 	at.r.reported = nil
 	at.admit(testCode)
 	if at.hookosJournals() != 1 || at.r.Metrics.HookOSAfter.Load() != 1 {
-		t.Errorf("journaled again: %v", at.nb.journals)
+		t.Errorf("journaled again: %v", at.nb.Journals)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestAdmitJournalsNoHookOSBootForAnythingElse(t *testing.T) {
 			}
 			at.admit(testCode)
 			if at.hookosJournals() != 0 || at.r.Metrics.HookOSAfter.Load() != 0 {
-				t.Errorf("journals %v", at.nb.journals)
+				t.Errorf("journals %v", at.nb.Journals)
 			}
 		})
 	}

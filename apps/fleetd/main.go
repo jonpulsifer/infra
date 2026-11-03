@@ -168,7 +168,7 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NetBox token: %w", err)
 	}
-	netbox := &fleet.NetBox{URL: netboxURL, Token: token, Client: &http.Client{Timeout: 30 * time.Second}}
+	netbox := fleet.NewNetBox(netboxURL, token, &http.Client{Timeout: 30 * time.Second})
 	kube, err := fleet.NewKube(
 		env("FLEET_KUBE_SERVER", "https://localhost:6443"),
 		env("FLEET_KUBE_CA_FILE", "/etc/tinkerbell/ca.crt"),

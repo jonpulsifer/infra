@@ -137,8 +137,8 @@ func TestAdmitRefusesAndJournalsAnUnknownClass(t *testing.T) {
 	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, `class "worker-g9" is not in the class table`) {
 		t.Fatalf("admit: %d %s", code, why)
 	}
-	if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || !at.journal("not in the class table") {
-		t.Errorf("a refused admission wrote: patches %v workflows %v journals %v", at.nb.patches, at.kube.workflows(), at.nb.journals)
+	if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || !at.journal("not in the class table") {
+		t.Errorf("a refused admission wrote: patches %v workflows %v journals %v", at.nb.Patches, at.kube.workflows(), at.nb.Journals)
 	}
 }
 

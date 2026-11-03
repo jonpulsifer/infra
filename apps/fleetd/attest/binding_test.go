@@ -29,8 +29,8 @@ func TestBindingCountsOnlyFromTerraform(t *testing.T) {
 			f.author = "owner"
 			f.set("SER-1", func(d *fakeDevice) { d.CustomFields["class"] = "worker-g2" })
 		}},
-		{"changelog unreadable", "counts for nothing", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.failChanges = true }},
-		{"changelog pruned", "pruned", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.changes = nil }},
+		{"changelog unreadable", "counts for nothing", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.FailChanges = true }},
+		{"changelog pruned", "pruned", fakeTerraform, fakeTerraform, func(f *fakeNetBox) { f.Changes = nil }},
 		{"no author set", "no binding author is set", fakeTerraform, "", nil},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -58,9 +58,9 @@ func TestBindingCountsOnlyFromTerraform(t *testing.T) {
 			}
 			deadline := time.Now().Add(5 * time.Second)
 			for {
-				f.mu.Lock()
-				n := len(f.journal)
-				f.mu.Unlock()
+				f.Mu.Lock()
+				n := len(f.journalLines())
+				f.Mu.Unlock()
 				if n == 1 {
 					break
 				}

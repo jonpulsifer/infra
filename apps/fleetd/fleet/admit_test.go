@@ -88,10 +88,10 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	t.Helper()
 	at := &admitTest{}
 	at.nb = &fakeNetBox{
-		apply:    true,
-		devices:  devices,
-		ifaces:   append(ifaces, switchIfaces()...),
-		switches: []map[string]any{{"id": 100, "name": "usw-24-poe"}},
+		Apply:    true,
+		Devices:  devices,
+		Ifaces:   append(ifaces, switchIfaces()...),
+		Switches: []map[string]any{{"id": 100, "name": "usw-24-poe"}},
 	}
 	at.kube = &fakeKube{}
 	r, done := newTest(t, at.nb, at.kube)
@@ -137,7 +137,7 @@ func (at *admitTest) admit(code string) (int, string) {
 }
 
 func (at *admitTest) node() map[string]any {
-	for _, d := range at.nb.devices {
+	for _, d := range at.nb.Devices {
 		if d["id"] == nodeID {
 			return d
 		}
@@ -148,7 +148,7 @@ func (at *admitTest) node() map[string]any {
 func (at *admitTest) cf(field string) any { return at.node()["custom_fields"].(map[string]any)[field] }
 
 func (at *admitTest) journal(substr string) bool {
-	for _, j := range at.nb.journals {
+	for _, j := range at.nb.Journals {
 		if strings.Contains(j["comments"].(string), substr) {
 			return true
 		}
@@ -191,12 +191,12 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 		t.Fatal("the config was not rendered under the code")
 	}
 	if !at.journal("attested from HookOS, where it waits") || at.r.Metrics.AutoProvisioned.Load() != 1 {
-		t.Errorf("journals %v autoprovisioned %d", at.nb.journals, at.r.Metrics.AutoProvisioned.Load())
+		t.Errorf("journals %v autoprovisioned %d", at.nb.Journals, at.r.Metrics.AutoProvisioned.Load())
 	}
 
 	// A second pass from the same boot renders under its new code in the
 	// same run, and writes nothing again.
-	patches := len(at.nb.patches)
+	patches := len(at.nb.Patches)
 	again := strings.Repeat("Q", 43)
 	if code, why := at.admit(again); code != http.StatusCreated {
 		t.Fatalf("second admit: %d %s", code, why)
@@ -204,8 +204,8 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 	if n := at.kube.workflows(); len(n) != 1 || n[0] != names[0] {
 		t.Fatalf("a second run started: %v", n)
 	}
-	if len(at.nb.patches) != patches {
-		t.Errorf("a second admission wrote: %v", at.nb.patches[patches:])
+	if len(at.nb.Patches) != patches {
+		t.Errorf("a second admission wrote: %v", at.nb.Patches[patches:])
 	}
 	if at.held(testCode) || !at.held(again) {
 		t.Fatal("the older code's config survived")
@@ -271,7 +271,7 @@ func TestAdmitProvisionsACloudInitClassDevice(t *testing.T) {
 		t.Fatalf("the pending config: %+v %v", p, members)
 	}
 	if !at.journal("rendered the debian cloud-init seed") {
-		t.Errorf("journals %v", at.nb.journals)
+		t.Errorf("journals %v", at.nb.Journals)
 	}
 }
 
@@ -302,11 +302,11 @@ func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 			if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks "+name) {
 				t.Fatalf("admit: %d %s", code, why)
 			}
-			if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
-				t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
+			if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+				t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.Patches, at.kube.workflows())
 			}
 			if !at.journal("lacks " + name) {
-				t.Errorf("journals %v", at.nb.journals)
+				t.Errorf("journals %v", at.nb.Journals)
 			}
 		})
 	}
@@ -314,8 +314,8 @@ func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 		d := declared(nil)
 		d["primary_ip4"] = nil
 		at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-		if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks primary_ip4") || len(at.nb.patches) != 0 {
-			t.Fatalf("admit: %d %s, patches %v", code, why, at.nb.patches)
+		if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks primary_ip4") || len(at.nb.Patches) != 0 {
+			t.Fatalf("admit: %d %s, patches %v", code, why, at.nb.Patches)
 		}
 	})
 }
@@ -361,11 +361,11 @@ func TestAdmitChecksTheExpectedPort(t *testing.T) {
 			t.Fatalf("admit: %d %s", code, why)
 		}
 	}
-	if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
-		t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
+	if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+		t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.Patches, at.kube.workflows())
 	}
-	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7 (swell)") {
-		t.Errorf("journals %v", at.nb.journals)
+	if len(at.nb.Journals) != 1 || !at.journal("on port 5, expected 7 (swell)") {
+		t.Errorf("journals %v", at.nb.Journals)
 	}
 }
 
@@ -376,9 +376,9 @@ func TestAdmitOnPort24IsLikeAnyPort(t *testing.T) {
 		code, _ := at.admit(testCode)
 		switch {
 		case ok && code != http.StatusCreated:
-			t.Errorf("expected_port 24: %d, journals %v", code, at.nb.journals)
+			t.Errorf("expected_port 24: %d, journals %v", code, at.nb.Journals)
 		case !ok && (code != http.StatusConflict || !at.journal("on port 24, expected 7 (swell)")):
-			t.Errorf("expected_port 7: %d journals %v", code, at.nb.journals)
+			t.Errorf("expected_port 7: %d journals %v", code, at.nb.Journals)
 		}
 	}
 }
@@ -401,11 +401,11 @@ func TestAdmitWithoutAFreshPortIsRefused(t *testing.T) {
 			if code, _ := at.admit(testCode); code != http.StatusConflict {
 				t.Fatalf("admit: %d", code)
 			}
-			if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 {
-				t.Errorf("a refused admission wrote: patches %v", at.nb.patches)
+			if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 {
+				t.Errorf("a refused admission wrote: patches %v", at.nb.Patches)
 			}
 			if !at.journal("its intake pass attested no switch port, and swell expects port 5") {
-				t.Errorf("journals %v", at.nb.journals)
+				t.Errorf("journals %v", at.nb.Journals)
 			}
 		})
 	}
@@ -455,8 +455,8 @@ func TestAdmitRefusesADeviceThatIsNotPlanned(t *testing.T) {
 	if code, _ := at.admit(testCode); code != http.StatusConflict {
 		t.Fatalf("admit: %d", code)
 	}
-	if len(at.nb.patches) != 0 || len(at.nb.journals) != 0 || len(at.kube.workflows()) != 0 {
-		t.Errorf("an active device was admitted: %v", at.nb.patches)
+	if len(at.nb.Patches) != 0 || len(at.nb.Journals) != 0 || len(at.kube.workflows()) != 0 {
+		t.Errorf("an active device was admitted: %v", at.nb.Patches)
 	}
 }
 
@@ -468,8 +468,8 @@ func TestCheckPortJournalsANodeOffItsExpectedPort(t *testing.T) {
 	at.attest(rackMAC, testNow)
 	reconcile(t, at.r)
 	reconcile(t, at.r)
-	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.patches) != 0 {
-		t.Errorf("journals %v patches %v", at.nb.journals, at.nb.patches)
+	if len(at.nb.Journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.Patches) != 0 {
+		t.Errorf("journals %v patches %v", at.nb.Journals, at.nb.Patches)
 	}
 }
 
@@ -478,8 +478,8 @@ func TestCheckPortIgnoresAnOldReport(t *testing.T) {
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow.Add(-2*time.Hour))
 	reconcile(t, at.r)
-	if len(at.nb.journals) != 0 {
-		t.Errorf("journals %v", at.nb.journals)
+	if len(at.nb.Journals) != 0 {
+		t.Errorf("journals %v", at.nb.Journals)
 	}
 }
 func reconcile(t *testing.T, r *Reconciler) {
@@ -511,8 +511,8 @@ func TestAdmitGivesUpWhileAPassRuns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	err := at.r.Admit(ctx, RenderRequest{Serial: boxSerial, UUID: boxUUID, Node: "swell", Code: testCode})
-	if status(err) != http.StatusServiceUnavailable || len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 {
-		t.Fatalf("admit during a pass: %v, patches %v", err, at.nb.patches)
+	if status(err) != http.StatusServiceUnavailable || len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 {
+		t.Fatalf("admit during a pass: %v, patches %v", err, at.nb.Patches)
 	}
 	at.r.unlock()
 	if code, why := at.admit(testCode); code != http.StatusCreated {

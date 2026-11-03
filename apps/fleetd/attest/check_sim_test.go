@@ -764,9 +764,9 @@ func foreignPublic(t *testing.T, h *harness) []byte {
 
 // journaled is whether a journal entry contains s.
 func (f *fakeNetBox) journaled(s string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, j := range f.journal {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	for _, j := range f.journalLines() {
 		if strings.Contains(j, s) {
 			return true
 		}

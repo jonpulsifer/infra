@@ -60,10 +60,10 @@ var Actions = map[string]Action{
 
 var diskSerialPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
-// Unidentified says why a run of action cannot start on the device, or ""
+// unidentified says why a run of action cannot start on the device, or ""
 // when it can: a run that wipes needs the serial its install disk reports,
 // because the Template wipes and installs only the disk that reports it.
-func (d Device) Unidentified(action string) string {
+func unidentified(d Device, action string) string {
 	if !Actions[action].Wipe {
 		return ""
 	}
@@ -74,30 +74,6 @@ func (d Device) Unidentified(action string) string {
 		return fmt.Sprintf("%s's install_disk_serial %q is malformed", d.Name, d.DiskSerial)
 	}
 	return ""
-}
-
-// Installing says whether a planned device has passed attestation: its
-// first install, or a reinstall after a provision or wipe moved it back to
-// planned. It stays planned until its node fetches its config.
-func (d Device) Installing() bool { return d.Status == "planned" && passedVerdict(d.Verdict) }
-
-// passedVerdict says whether an attest_verdict is a pass, as the verifier reads
-// it: attested, or a control plane's failed check that left it in place.
-func passedVerdict(verdict string) bool {
-	return verdict == "attested" || strings.HasPrefix(verdict, "failed-no-quarantine")
-}
-
-// HasBMC says whether the device gets a Machine now: a BMC type and an
-// address for it, which for AMT is the device's own declared address, from
-// the moment it has one, a planned device's included.
-func (d Device) HasBMC() bool {
-	return d.BMCType != "" && d.BMCType != "none" && d.BMCAddress != ""
-}
-
-// ManualBoot says whether Rufio stays out of a run: a device without a
-// Machine.
-func (d Device) ManualBoot() bool {
-	return !d.HasBMC()
 }
 
 func labels(d Device, extra map[string]string) map[string]any {
@@ -263,7 +239,7 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 	if !ok {
 		return nil, fmt.Errorf("%s's class %q is not in the class table", d.Name, d.Class)
 	}
-	if why := d.Unidentified(action); why != "" {
+	if why := unidentified(d, action); why != "" {
 		return nil, errors.New(why)
 	}
 	a := Actions[action]

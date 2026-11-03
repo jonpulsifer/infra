@@ -56,7 +56,7 @@ func TestSpireNodesRevokeRetiredMachines(t *testing.T) {
 
 func TestSpireNodesFileListsRevokedAndWaitsForIdentities(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "spire-nodes.json")
-	nb := &fakeNetBox{devices: []map[string]any{spireDevice("riptide", "active", "attested", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{spireDevice("riptide", "active", "attested", nil)}, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	r.SpireNodesFile = path
@@ -94,7 +94,7 @@ func spireDevice(name, status, verdict string, cf map[string]any) map[string]any
 
 func reconcileSpire(t *testing.T, path string, devices ...map[string]any) {
 	t.Helper()
-	nb := &fakeNetBox{devices: devices, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: devices, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	r.SpireNodesFile = path
