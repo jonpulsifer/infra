@@ -21,7 +21,7 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
    mise run kube:login <site>
    ```
 
-   Result: `wrote ~/.kube/<site>.yaml`. With `--merge` after the site, the context `<site>` is also in `~/.kube/config`.
+   Result: `wrote ~/.kube/<site>.yaml`.
 
 2. Use it. The first call opens a browser at Google.
 
@@ -30,7 +30,7 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
    kubectl get nodes
    ```
 
-   Result: each node shows `Ready`. kubelogin keeps the tokens under `~/.kube/cache/oidc-login` and refreshes them, so the browser opens again only when the refresh token lapses.
+   Result: each node shows `Ready`. kubelogin keeps the tokens under `~/.kube/cache/oidc-login` and refreshes them, so the browser opens again only when the refresh token lapses. After a change to the exec arguments, `kubectl oidc-login clean` drops the old cache and the next call signs in once.
 
 ## Break-glass: the admin certificate
 
@@ -92,6 +92,7 @@ A lost workstation also holds the admin certificates and the talosconfig, which 
 | kubectl prints `Unauthorized` after a sign-in | The API server does not trust the issuer or the account: the client ID in the file is not the one the token names, the account is outside the hosted domain, or the Talos root has not applied the file | Read the API server's log with `talosctl --context <site> logs kube-apiserver`, then plan and apply `clusters/<site>/talos` |
 | kubectl prints `forbidden` | No binding names `google:<email>` | Add it to `clusters/base/cluster-access-rbac.yaml` |
 | kubectl prints `You must be logged in to the server` with the admin kubeconfig | The admin certificate expired | Run step 2 of [Break-glass](#break-glass-the-admin-certificate) again |
+| The browser opens on most calls, and a call made a second later works | The exec arguments carry more than one `--oidc-auth-request-extra-params`: kubelogin hashes its cache key from a map, so the key differs between calls | Run `mise run kube:login <site>` again; the script passes one |
 | `x509: certificate signed by unknown authority` | `clusters/<site>/config/kubernetes-ca.crt` is not the cluster's CA, after a CA rotation | Replace it from the new admin kubeconfig |
 
 ## Related
