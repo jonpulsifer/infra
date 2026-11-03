@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,20 +68,20 @@ type Attempt struct {
 	EndedAt    time.Time     `json:"ended_at,omitzero"`
 	// The session fleet-boot's requests go over, bound at the signed
 	// confirm of the machine's intake pass: its ID, the AK's PKIX DER, the
-	// nonce and the last sequence number taken.
-	Session string    `json:"session,omitempty"`
-	AK      []byte    `json:"ak,omitempty"`
-	Nonce   []byte    `json:"nonce,omitempty"`
-	Seq     uint64    `json:"seq,omitempty"`
-	BoundAt time.Time `json:"bound_at,omitzero"`
+	// nonce and the last sequence number taken. An attempt's end clears it,
+	// so the session's later requests find no run.
+	Session string `json:"session,omitempty"`
+	AK      []byte `json:"ak,omitempty"`
+	Nonce   []byte `json:"nonce,omitempty"`
+	Seq     uint64 `json:"seq,omitempty"`
 }
 
 func (a *Attempt) finished() bool { return Finished(a.State) }
 
-// Overdue says whether the attempt passed its deadline, the start plus the
-// Template's global timeout, without an end.
-func (a *Attempt) Overdue(now time.Time) bool {
-	return !a.finished() && !a.StartedAt.IsZero() && now.After(a.StartedAt.Add(TemplateGlobalTimeout))
+// end ends the attempt in state and drops its session.
+func (a *Attempt) end(state string, at time.Time) {
+	a.State, a.EndedAt = state, at
+	a.Session, a.AK, a.Nonce = "", nil, nil
 }
 
 func anyMap(m map[string]string) map[string]any {
@@ -94,6 +96,7 @@ func anyMap(m map[string]string) map[string]any {
 // Reconciler reads of one.
 func (a *Attempt) object() Object {
 	status := map[string]any{
+		"executor":      fleetBootExecutor,
 		"state":         a.State,
 		"globalTimeout": float64(TemplateGlobalTimeout / time.Second),
 	}
@@ -108,9 +111,14 @@ func (a *Attempt) object() Object {
 		status["currentState"] = map[string]any{"actionName": a.Steps[n-1].Name, "state": a.Steps[n-1].State}
 	}
 	status["tasks"] = []any{map[string]any{"name": "provision", "actions": actions}}
-	spec, _ := json.Marshal(a.Spec)
-	var s map[string]any
-	_ = json.Unmarshal(spec, &s)
+	// The callers may change what they read, so the spec's maps are
+	// copies; their values are strings.
+	s := maps.Clone(a.Spec)
+	for k, v := range s {
+		if m, ok := v.(map[string]any); ok {
+			s[k] = maps.Clone(m)
+		}
+	}
 	return Object{
 		"apiVersion": WorkflowResource.apiVersion(),
 		"kind":       WorkflowResource.Kind,
@@ -159,7 +167,14 @@ func (s *Attempts) load() error {
 		return err
 	}
 	if err := json.Unmarshal(b, &s.recs); err != nil {
-		return fmt.Errorf("%s: %w", s.File, err)
+		// A record fleetd cannot read would stop every run; it moves
+		// aside, whole, for the owner, and the store starts empty.
+		aside := fmt.Sprintf("%s.unreadable-%d", s.File, s.now().Unix())
+		if rerr := os.Rename(s.File, aside); rerr != nil {
+			return fmt.Errorf("%s does not parse (%v), and it cannot be moved aside: %w", s.File, err, rerr)
+		}
+		log.Printf("attempts: %s does not parse (%v); it is now %s, and fleetd starts with no attempts. Runs in it are lost: set desired_action again for any that had not finished", s.File, err, aside)
+		s.recs = map[string]*Attempt{}
 	}
 	s.loaded = true
 	return nil
@@ -276,7 +291,7 @@ func (s *Attempts) Annotate(_ context.Context, name string, annotations map[stri
 			a.Annotations[k] = v
 		}
 		if _, ok := annotations[OverdueAnnotation]; ok && !a.finished() && !a.StartedAt.IsZero() {
-			a.State, a.EndedAt = stateTimeout, s.now()
+			a.end(stateTimeout, s.now())
 			if n := len(a.Steps); n > 0 && a.Steps[n-1].State == stateRunning {
 				a.Steps[n-1].State, a.Steps[n-1].EndedAt = stateTimeout, a.EndedAt
 				a.FailedStep = a.Steps[n-1].Name
@@ -320,11 +335,10 @@ func (s *Attempts) Delete(_ context.Context, name string) error {
 // the verifier hands over: fleet-boot's later requests are checked against
 // its AK and nonce.
 type BootSession struct {
-	ID      string
-	Node    string
-	AK      []byte
-	Nonce   []byte
-	Created time.Time
+	ID    string
+	Node  string
+	AK    []byte
+	Nonce []byte
 }
 
 // Bind gives the node's unfinished attempt the session, and answers its
@@ -355,20 +369,23 @@ func (s *Attempts) Bind(bs BootSession) (string, error) {
 		if n := len(newest.Steps); n > 0 {
 			last = newest.Steps[n-1].Name
 		}
-		newest.State, newest.EndedAt = stateFailed, now
+		newest.end(stateFailed, now)
 		newest.FailedStep = last
 		newest.Steps = append(newest.Steps, AttemptStep{Name: last, State: stateFailed, Message: "the machine booted fleet-boot again after " + last + "; a run never resumes in a new boot; set desired_action to run it again", StartedAt: now, EndedAt: now})
 		newest.Revision++
 		return "", s.save()
 	}
-	newest.Session, newest.AK, newest.Nonce, newest.Seq, newest.BoundAt = bs.ID, bs.AK, bs.Nonce, 0, now
+	newest.Session, newest.AK, newest.Nonce, newest.Seq = bs.ID, bs.AK, bs.Nonce, 0
 	newest.Revision++
 	return newest.Name, s.save()
 }
 
 // errStale is a request whose sequence number fleetd took already, or one
-// over an attempt that ended.
-var errStale = errors.New("stale")
+// over an attempt that ended; errBadReport is a report no run takes.
+var (
+	errStale     = errors.New("stale")
+	errBadReport = errors.New("bad report")
+)
 
 // take finds the attempt bound to the session, checks the request's number
 // and signature with check, and records the number. It answers a copy.
@@ -421,7 +438,7 @@ func (s *Attempts) report(name string, r protocol.BootReport) error {
 		switch r.Phase {
 		case protocol.PhaseStarted:
 			if last >= 0 && a.Steps[last].State == stateRunning {
-				return false, fmt.Errorf("%s starts while %s runs", r.Step, a.Steps[last].Name)
+				return false, fmt.Errorf("%w: %s starts while %s runs", errBadReport, r.Step, a.Steps[last].Name)
 			}
 			a.Steps = append(a.Steps, AttemptStep{Name: r.Step, State: stateRunning, StartedAt: now})
 		case protocol.PhaseSucceeded, protocol.PhaseFailed:
@@ -429,7 +446,7 @@ func (s *Attempts) report(name string, r protocol.BootReport) error {
 				// fleet-boot fails a run before its first step starts when
 				// the run's inputs are refused.
 				if r.Phase != protocol.PhaseFailed {
-					return false, fmt.Errorf("%s ends without its start", r.Step)
+					return false, fmt.Errorf("%w: %s ends without its start", errBadReport, r.Step)
 				}
 				a.Steps = append(a.Steps, AttemptStep{Name: r.Step, StartedAt: now})
 				last = len(a.Steps) - 1
@@ -438,16 +455,69 @@ func (s *Attempts) report(name string, r protocol.BootReport) error {
 			st.Message, st.EndedAt = r.Detail, now
 			if r.Phase == protocol.PhaseFailed {
 				st.State = stateFailed
-				a.State, a.FailedStep, a.EndedAt = stateFailed, r.Step, now
+				a.end(stateFailed, now)
+				a.FailedStep = r.Step
 			} else {
 				st.State = stateSuccess
 				if r.Step == protocol.StepReboot {
-					a.State, a.EndedAt = stateSuccess, now
+					a.end(stateSuccess, now)
 				}
 			}
 		default:
-			return false, fmt.Errorf("phase %q", r.Phase)
+			return false, fmt.Errorf("%w: phase %q", errBadReport, r.Phase)
 		}
 		return true, nil
 	})
+}
+
+// fleetBootExecutor marks a run fleet-boot runs, in status.executor, so the
+// journal names fleet-boot and its log for it.
+const fleetBootExecutor = "fleet-boot"
+
+func ranByFleetBoot(wf Object) bool {
+	st, _ := wf["status"].(map[string]any)
+	s, _ := st["executor"].(string)
+	return s == fleetBootExecutor
+}
+
+// executorName is what runs the run, and bootImage the image it runs in.
+func executorName(wf Object) string {
+	if ranByFleetBoot(wf) {
+		return "fleet-boot"
+	}
+	return "Tinkerbell"
+}
+
+func bootImage(wf Object) string {
+	if ranByFleetBoot(wf) {
+		return "fleet-boot"
+	}
+	return "HookOS"
+}
+
+// endedBy says how fleetd ended an overdue run: Tinkerbell's controller ends
+// a Workflow once asked; fleetd ends an attempt itself.
+func endedBy(wf Object) string {
+	if ranByFleetBoot(wf) {
+		return "ended it"
+	}
+	return "asked Tinkerbell to end it"
+}
+
+// firstReportLost is what stops a run before its first report.
+func firstReportLost(wf Object) string {
+	if ranByFleetBoot(wf) {
+		return "a fleet-boot that stopped before it asked for the run"
+	}
+	return "an agent that died before wipe-disk reported"
+}
+
+// consoleHint says where a failed run's machine-side log is: spore's
+// tinkerbell journal for HookOS, and for fleet-boot, which reports its
+// reason with the step, its syslog lines in spore's journal.
+func consoleHint(wf Object, d Device) string {
+	if ranByFleetBoot(wf) {
+		return fmt.Sprintf(". fleet-boot's log is in spore's journal: journalctl -t hookos HOOKOS_PROGRAM=fleet-boot | grep %s", d.Address)
+	}
+	return fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s", d.Address)
 }

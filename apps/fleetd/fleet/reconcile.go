@@ -494,7 +494,7 @@ func (r *Reconciler) reportEnded(ctx context.Context, d Device, wf Object) error
 		} else {
 			why = fmt.Sprintf("fleetd: Workflow %s ended %s; %s. Set desired_action to run it again", wf.Name(), state, detail)
 		}
-		why += fmt.Sprintf(". The reason is in the machine's console output, which spore's tinkerbell journal holds: journalctl -u tinkerbell | grep %s", d.Address)
+		why += consoleHint(wf, d)
 	}
 	if err := r.journalOnce(ctx, "ended/"+wf.Name(), d, kind, why); err != nil {
 		return err
@@ -516,7 +516,7 @@ func (r *Reconciler) annotateOverdue(ctx context.Context, d Device, wf Object, s
 		return fmt.Errorf("annotate overdue %s: %w", wf.Name(), err)
 	}
 	action := wf.CurrentAction()
-	why := fmt.Sprintf("fleetd: Workflow %s passed its global timeout at %s while %q was current, and fleetd asked Tinkerbell to end it", wf.Name(), stop.UTC().Format(time.RFC3339), action)
+	why := fmt.Sprintf("fleetd: Workflow %s passed its global timeout at %s while %q was current, and fleetd %s", wf.Name(), stop.UTC().Format(time.RFC3339), action, endedBy(wf))
 	if action == "reboot" {
 		why += "; the install and next-boot reported success and the reboot's report was lost, so the disk holds the install"
 	}
@@ -547,7 +547,7 @@ func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object
 		return false, fmt.Errorf("end %s: %w", wf.Name(), err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "ended: no first report within its global timeout")
-	why := fmt.Sprintf("fleetd: Workflow %s never reported its first action within its global timeout of %s from its creation at %s, so Tinkerbell set it no deadline, and fleetd deleted it. A power loss, a machine that never reached HookOS, or an agent that died before wipe-disk reported stops a run there. The disk may be partly wiped or may still hold the old install, and no later boot resumes the run; set desired_action to run it again", wf.Name(), timeout, created.UTC().Format(time.RFC3339))
+	why := fmt.Sprintf("fleetd: Workflow %s never reported its first action within its global timeout of %s from its creation at %s, so %s set it no deadline, and fleetd deleted it. A power loss, a machine that never reached %s, or %s stops a run there. The disk may be partly wiped or may still hold the old install, and no later boot resumes the run; set desired_action to run it again", wf.Name(), timeout, created.UTC().Format(time.RFC3339), executorName(wf), bootImage(wf), firstReportLost(wf))
 	return true, r.journalOnce(ctx, "overdue/"+wf.Name(), d, "warning", why)
 }
 
@@ -756,7 +756,7 @@ func stateWord(wf Object) string {
 	if s := strings.TrimPrefix(wf.State(), "STATE_"); s != "" {
 		return s
 	}
-	return "not yet picked up by Tinkerbell"
+	return "not yet picked up by " + executorName(wf)
 }
 
 // retire runs one retire Workflow for a decommissioning device and, when the

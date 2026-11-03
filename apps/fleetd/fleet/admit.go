@@ -135,7 +135,7 @@ func (r *Reconciler) hookosAfterSuccess(ctx context.Context, d Device, uuid stri
 	if _, done := wf.Annotations()[HookOSAfterAnnotation]; done {
 		return nil
 	}
-	why := fmt.Sprintf("fleetd: the node booted HookOS and attested after Workflow %s succeeded, so its firmware did not boot the installed disk. Check its boot order (PXE first sends it back to HookOS) and its console, then fix the order or set desired_action to provision to run it again", wf.Name())
+	why := fmt.Sprintf("fleetd: the node booted %[2]s and attested after Workflow %[1]s succeeded, so its firmware did not boot the installed disk. Check its boot order (PXE first sends it back to %[2]s) and its console, then fix the order or set desired_action to provision to run it again", wf.Name(), bootImage(wf))
 	if err := r.journalOnce(ctx, "hookos-after/"+wf.Name(), d, "warning", why); err != nil {
 		return err
 	}

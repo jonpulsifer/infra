@@ -3,7 +3,6 @@ package attest
 import (
 	"context"
 	"crypto/x509"
-	"time"
 )
 
 // BootSession is an intake session whose signed confirm passed, which the
@@ -13,10 +12,8 @@ import (
 type BootSession struct {
 	ID      string
 	Machine string
-	Serial  string
 	AK      []byte
 	Nonce   []byte
-	At      time.Time
 }
 
 // handOver gives Booted a confirmed intake session.
@@ -29,5 +26,5 @@ func (v *Verifier) handOver(ctx context.Context, id string, s *session) {
 		v.Log.Error("boot session: the AK does not marshal", "machine", s.machine.Name, "err", err)
 		return
 	}
-	v.Booted(ctx, BootSession{ID: id, Machine: s.machine.Name, Serial: s.machine.Serial, AK: der, Nonce: append([]byte{}, s.nonce...), At: v.Now()})
+	v.Booted(ctx, BootSession{ID: id, Machine: s.machine.Name, AK: der, Nonce: append([]byte{}, s.nonce...)})
 }

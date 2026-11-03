@@ -136,9 +136,9 @@ func TestBootExecutorRunsAProvision(t *testing.T) {
 	if err != nil || !Succeeded(wf.State()) {
 		t.Fatalf("the attempt is %q (%v)", wf.State(), err)
 	}
-	// A report on an ended run is refused, and fleet-boot stops.
+	// The run's end drops the session, so its later requests find no run.
 	rep := &protocol.BootReport{Run: name, Step: protocol.StepReboot, Phase: protocol.PhaseStarted}
-	if code := post(t, h, reportPath("s1"), ak.sign(t, protocol.PathBootReport, rep), nil); code != http.StatusConflict {
+	if code := post(t, h, reportPath("s1"), ak.sign(t, protocol.PathBootReport, rep), nil); code != http.StatusNotFound {
 		t.Errorf("a report after the end got %d", code)
 	}
 	// A restart of fleetd reads the same record.

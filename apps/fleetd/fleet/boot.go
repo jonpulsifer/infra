@@ -11,6 +11,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/google/go-tpm/legacy/tpm2"
 
@@ -69,7 +70,39 @@ func refuseBoot(w http.ResponseWriter, code int, reason string) {
 	writeBoot(w, code, protocol.Verdict{Reason: "boot", Detail: []string{reason}})
 }
 
-// accept decodes the request and takes it over the session.
+// maxDetail caps a report's reason, as fleet-boot does, before it reaches
+// the log, the record and NetBox's journal.
+const maxDetail = 2000
+
+// shape checks what a request holds before anything is taken: the run
+// request no report, the report request one with a known step and phase.
+func shape(route string, req *protocol.BootRequest) error {
+	rep := req.Report
+	if route == protocol.PathBootRun {
+		if rep != nil {
+			return errors.New("the run request carries no report")
+		}
+		return nil
+	}
+	if rep == nil {
+		return errors.New("the report request carries no report")
+	}
+	switch rep.Step {
+	case protocol.StepWipe, protocol.StepInstall, protocol.StepNextBoot, protocol.StepReboot:
+	default:
+		return fmt.Errorf("step %q", rep.Step)
+	}
+	switch rep.Phase {
+	case protocol.PhaseStarted, protocol.PhaseSucceeded, protocol.PhaseFailed:
+	default:
+		return fmt.Errorf("phase %q", rep.Phase)
+	}
+	return nil
+}
+
+// accept decodes the request, checks its shape, and takes it over the
+// session: only a signed request for the session's own run moves the
+// record's sequence number.
 func (b *BootServer) accept(w http.ResponseWriter, r *http.Request, route string) (Attempt, protocol.BootRequest, bool) {
 	var req protocol.BootRequest
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
@@ -78,9 +111,23 @@ func (b *BootServer) accept(w http.ResponseWriter, r *http.Request, route string
 		refuseBoot(w, http.StatusBadRequest, err.Error())
 		return Attempt{}, req, false
 	}
+	if err := shape(route, &req); err != nil {
+		refuseBoot(w, http.StatusBadRequest, err.Error())
+		return Attempt{}, req, false
+	}
 	session := r.PathValue("session")
-	a, err := b.Attempts.take(session, req.Seq, func(a *Attempt) error { return verifyBoot(a, route, req) })
+	a, err := b.Attempts.take(session, req.Seq, func(a *Attempt) error {
+		if err := verifyBoot(a, route, req); err != nil {
+			return err
+		}
+		if req.Report != nil && req.Report.Run != a.Name {
+			return fmt.Errorf("%w: the report names %q, and the session's run is %s", errBadReport, req.Report.Run, a.Name)
+		}
+		return nil
+	})
 	switch {
+	case errors.Is(err, errBadReport):
+		refuseBoot(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ErrNotFound):
 		refuseBoot(w, http.StatusNotFound, "no run holds this session")
 	case errors.Is(err, errSignature):
@@ -98,12 +145,8 @@ func (b *BootServer) accept(w http.ResponseWriter, r *http.Request, route string
 }
 
 func (b *BootServer) run(w http.ResponseWriter, r *http.Request) {
-	a, req, ok := b.accept(w, r, protocol.PathBootRun)
+	a, _, ok := b.accept(w, r, protocol.PathBootRun)
 	if !ok {
-		return
-	}
-	if req.Report != nil {
-		refuseBoot(w, http.StatusBadRequest, "the run request carries no report")
 		return
 	}
 	d, err := b.Device(r.Context(), a.Labels[NodeLabel])
@@ -113,7 +156,7 @@ func (b *BootServer) run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := b.Attempts.started(a.Name); err != nil {
-		refuseBoot(w, http.StatusConflict, err.Error())
+		refuseBoot(w, statusOf(err), err.Error())
 		return
 	}
 	run := BootRun(a, d, b.Config)
@@ -126,27 +169,32 @@ func (b *BootServer) report(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rep := req.Report
-	switch {
-	case rep == nil:
-		refuseBoot(w, http.StatusBadRequest, "the report request carries no report")
-		return
-	case rep.Run != a.Name:
-		refuseBoot(w, http.StatusBadRequest, fmt.Sprintf("the report names %q, and the session's run is %s", rep.Run, a.Name))
-		return
+	rep := *req.Report
+	if len(rep.Detail) > maxDetail {
+		rep.Detail = strings.ToValidUTF8(rep.Detail[:maxDetail], "")
 	}
-	switch rep.Step {
-	case protocol.StepWipe, protocol.StepInstall, protocol.StepNextBoot, protocol.StepReboot:
-	default:
-		refuseBoot(w, http.StatusBadRequest, fmt.Sprintf("step %q", rep.Step))
-		return
-	}
-	if err := b.Attempts.report(a.Name, *rep); err != nil {
-		refuseBoot(w, http.StatusConflict, err.Error())
+	if err := b.Attempts.report(a.Name, rep); err != nil {
+		refuseBoot(w, statusOf(err), err.Error())
 		return
 	}
 	log.Printf("boot: %s: %s %s %s", a.Name, rep.Step, rep.Phase, rep.Detail)
 	writeBoot(w, http.StatusOK, map[string]string{"status": "recorded"})
+}
+
+// statusOf is the answer to a store error: a report no run takes is the
+// client's fault, a run that ended or moved on a conflict, and a run that
+// is gone not found.
+func statusOf(err error) int {
+	switch {
+	case errors.Is(err, errBadReport):
+		return http.StatusBadRequest
+	case errors.Is(err, errStale):
+		return http.StatusConflict
+	case errors.Is(err, ErrNotFound):
+		return http.StatusNotFound
+	}
+	log.Printf("boot: %v", err)
+	return http.StatusInternalServerError
 }
 
 // BootRun is the run an attempt asks of fleet-boot: its hardwareMap's

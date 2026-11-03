@@ -57,7 +57,7 @@ func run(log *slog.Logger) error {
 	if attempts != nil {
 		boot = &fleet.BootServer{Attempts: attempts, Config: r.Config, Device: r.Device}
 		srv.V.Booted = func(ctx context.Context, s attest.BootSession) {
-			boot.BindBoot(ctx, fleet.BootSession{ID: s.ID, Node: s.Machine, AK: s.AK, Nonce: s.Nonce, Created: s.At})
+			boot.BindBoot(ctx, fleet.BootSession{ID: s.ID, Node: s.Machine, AK: s.AK, Nonce: s.Nonce})
 		}
 	}
 	srv.V.Installer = attest.InstallerFunc(func(ctx context.Context, req attest.InstallRequest) error {
