@@ -37,9 +37,13 @@ const maxSeed = 8 * mib
 // seed writes the run's seed by payload kind. A NixOS or Alpine image gets
 // fleet-seed.json on its EFI system partition, and its first boot fetches
 // the seed itself. A cloud-init image gets the seed now, on its root, so
-// for it the install code is spent here.
+// for it the install code is spent here. A Talos image gets the install
+// code in META, as the installer's --meta 0x0b=<code> writes it, and its
+// first boot fetches its config from talos.config with it.
 func (e *Executor) seed(ctx context.Context, r protocol.BootRun, d Disk, g GPT, esp Partition, espDev string) error {
 	switch r.PayloadKind {
+	case classes.PayloadTalosConfig:
+		return e.writeCode(d, g)
 	case classes.PayloadNixOSImage, classes.PayloadAlpineImage:
 		return e.withMount(espDev, "vfat", "esp", func(dir string) error {
 			b, _ := json.Marshal(seedFile{URL: r.SeedURL, UUID: e.UUID, Code: e.Code})
@@ -71,6 +75,36 @@ func (e *Executor) seed(ctx context.Context, r protocol.BootRun, d Disk, g GPT, 
 		})
 	}
 	return fmt.Errorf("the payload kind %q has no seed", r.PayloadKind)
+}
+
+// writeCode writes the install code into the Talos image's META partition
+// through the disk, and reads it back.
+func (e *Executor) writeCode(d Disk, g GPT) error {
+	p, ok := g.Named(MetaPartition)
+	if !ok {
+		return fmt.Errorf("%s has no %s partition; the image is written without the install code", d.Path, MetaPartition)
+	}
+	off, length := p.Bytes(g.SectorSize)
+	f, err := os.OpenFile(d.Path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	meta := struct {
+		io.ReaderAt
+		io.WriterAt
+	}{io.NewSectionReader(f, off, length), io.NewOffsetWriter(f, off)}
+	if err := SetMETA(meta, length, METADownloadURLCode, []byte(e.Code)); err != nil {
+		return fmt.Errorf("the install code cannot be written to META: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if got := readADV(meta)[METADownloadURLCode]; string(got) != e.Code {
+		return errors.New("META does not read back the install code")
+	}
+	e.logf("wrote the install code to META key 0x%02x on partition %d", METADownloadURLCode, p.Number)
+	return nil
 }
 
 // withMount mounts dev at a directory under RAM, runs fn, syncs and

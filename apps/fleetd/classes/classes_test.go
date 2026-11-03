@@ -64,9 +64,13 @@ func TestLoadChecksTheImageFields(t *testing.T) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
-	talos := `{"c": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"` + all + `}}`
-	if err := load(t, talos); err == nil || !strings.Contains(err.Error(), "talos-machineconfig") {
+	// A Talos class carries its metal image beside its installer.
+	talos := `{"c": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig", "installer_image": "ghcr.io/x/y@` + testImageDigest + `"` + all + `}}`
+	if err := load(t, talos); err != nil {
 		t.Errorf("a Talos class with an image: %v", err)
+	}
+	if err := load(t, strings.Replace(talos, `"image_format": "raw.zst"`, `"image_format": ""`, 1)); err == nil || !strings.Contains(err.Error(), "go together") {
+		t.Errorf("a Talos class with half an image: %v", err)
 	}
 }
 
@@ -82,6 +86,13 @@ func TestInstallsNeedsTheWholeImage(t *testing.T) {
 	c.PayloadKind = PayloadTalosConfig
 	if c.Installs() {
 		t.Error("a Talos class installs through the image fields")
+	}
+	if !c.TalosImage() {
+		t.Error("a Talos class with a complete image has no Talos image")
+	}
+	c.ImageFormat = ""
+	if c.TalosImage() {
+		t.Error("a Talos class with half an image has a Talos image")
 	}
 }
 

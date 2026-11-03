@@ -35,7 +35,9 @@ type Class struct {
 	InstallerImage string `json:"installer_image"`
 	// Image is the disk image an image class writes to the install disk,
 	// with the sha256 of the downloaded file and its format: all three or
-	// none, and the class installs only with all three.
+	// none, and the class installs only with all three. A Talos class may
+	// carry one too, its signed metal disk image, which fleet-boot writes
+	// in place of running InstallerImage.
 	Image       string `json:"image,omitempty"`
 	ImageDigest string `json:"image_digest,omitempty"`
 	ImageFormat string `json:"image_format,omitempty"`
@@ -82,8 +84,16 @@ func ImagePayload(kind string) bool {
 // an image and image, image_digest and image_format are all set. A Talos
 // class installs through the class inputs, not through this.
 func (c Class) Installs() bool {
-	return ImagePayload(c.PayloadKind) && c.Image != "" && c.ImageDigest != "" && c.ImageFormat != ""
+	return ImagePayload(c.PayloadKind) && c.hasImage()
 }
+
+// TalosImage says whether a Talos class carries its metal disk image, which
+// fleet-boot writes and then gives the install code in META.
+func (c Class) TalosImage() bool {
+	return c.PayloadKind == PayloadTalosConfig && c.hasImage()
+}
+
+func (c Class) hasImage() bool { return c.Image != "" && c.ImageDigest != "" && c.ImageFormat != "" }
 
 // Load reads and checks a class table.
 func Load(path string) (Table, error) {
@@ -132,7 +142,8 @@ func (c Class) validate() error {
 }
 
 // validateImage checks the image fields: all three or none, on an image
-// class alone, which carries no installer_image.
+// class, which carries no installer_image, or on a Talos class, beside its
+// installer.
 func (c Class) validateImage() error {
 	set := 0
 	for _, f := range []string{c.Image, c.ImageDigest, c.ImageFormat} {
@@ -146,10 +157,10 @@ func (c Class) validateImage() error {
 	if set != 3 {
 		return fmt.Errorf("image, image_digest and image_format go together")
 	}
-	if !ImagePayload(c.PayloadKind) {
-		return fmt.Errorf("image is for a %s, %s or %s class, not a %s one", PayloadNixOSImage, PayloadAlpineImage, PayloadCloudInit, c.PayloadKind)
+	if !ImagePayload(c.PayloadKind) && c.PayloadKind != PayloadTalosConfig {
+		return fmt.Errorf("image is for a %s, %s, %s or %s class, not a %s one", PayloadNixOSImage, PayloadAlpineImage, PayloadCloudInit, PayloadTalosConfig, c.PayloadKind)
 	}
-	if c.InstallerImage != "" {
+	if c.InstallerImage != "" && c.PayloadKind != PayloadTalosConfig {
 		return fmt.Errorf("an image class installs its image, not an installer_image")
 	}
 	if u, err := url.Parse(c.Image); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {

@@ -37,6 +37,10 @@ The steps are the `provision` and `provision-image` Templates' in Go, every disk
 
 A run's install inputs are checked before the wipe, so a malformed run keeps its disk.
 
+## Talos
+
+A Talos class installs as an image too. `talos-images.yml` builds the imager's `secureboot-metal` output, `metal-amd64-secureboot.raw.zst`, with the installer's `talos.config` URL, checks it with `.github/scripts/talos-metal-verify.sh`, and pins it in the Talos classes beside `installer_image`. After the write, the install sets META key `0x0b`, which Talos fills `${code}` from, in the image's `META` partition: the Talos ADV of `github.com/siderolabs/go-adv`, two 256 KiB copies, as the installer's `--meta 0x0b=<code>` writes it. A Talos class with no image pin is refused before the wipe, since fleet-boot runs no installer container. Tinkerbell's `provision` Template still runs the installer.
+
 ## Rules
 
 - A change to the fleet-boot binary or the packages it imports rebuilds the Talos release.
