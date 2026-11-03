@@ -121,7 +121,7 @@ func TestPreflight(t *testing.T) {
 		"short digest":      {func(r *protocol.BootRun) { r.ImageDigest = "sha256:abc" }, code},
 		"http image":        {func(r *protocol.BootRun) { r.ImageURL = "http://example.com/i" }, code},
 		"unknown format":    {func(r *protocol.BootRun) { r.ImageFormat = "qcow2" }, code},
-		"talos payload":     {func(r *protocol.BootRun) { r.PayloadKind = "talos-machineconfig" }, code},
+		"unknown payload":   {func(r *protocol.BootRun) { r.PayloadKind = "ignition" }, code},
 		"http seed":         {func(r *protocol.BootRun) { r.SeedURL = "http://enroll.example/seed" }, code},
 		"seed with ?":       {func(r *protocol.BootRun) { r.SeedURL = "https://enroll.example/seed?x=1" }, code},
 		"seed with no host": {func(r *protocol.BootRun) { r.SeedURL = "https://" }, code},
