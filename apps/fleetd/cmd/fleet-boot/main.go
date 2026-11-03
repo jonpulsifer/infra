@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/client"
+	"github.com/jonpulsifer/infra/apps/fleetd/fleetboot"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -27,6 +29,8 @@ const (
 	tpmDevice = "/dev/tpmrm0"
 	eventLog  = "/sys/kernel/security/tpm0/binary_bios_measurements"
 	efiVars   = "/sys/firmware/efi/efivars"
+	// ramDir holds the download and the mounts, on a tmpfs of its own.
+	ramDir = "/run/fleet-boot"
 )
 
 func main() {
@@ -96,17 +100,39 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 	if err != nil {
 		return err
 	}
-	return execute(ctx, log.Printf, r)
-}
-
-// execute takes the run fleetd answered.
-func execute(_ context.Context, logf func(string, ...any), r protocol.BootRun) error {
 	if r.Run == "" {
-		logf("fleetd holds no run for this boot")
+		log.Printf("fleetd holds no run for this boot")
 		return nil
 	}
-	logf("run %s (%s): this fleet-boot runs no steps, so the run goes no further", r.Run, r.Action)
-	return nil
+	log.Printf("run %s: %s", r.Run, r.Action)
+	free, err := mountRAM(ramDir)
+	if err != nil {
+		return fmt.Errorf("mount the RAM directory: %w", err)
+	}
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return err
+	}
+	budget, err := fleetboot.MemoryBudget(meminfo, free)
+	if err != nil {
+		return err
+	}
+	e := &fleetboot.Executor{
+		Host:        fleetboot.LinuxHost{},
+		Reporter:    b,
+		HTTP:        &http.Client{},
+		Logf:        log.Printf,
+		Sys:         "/sys",
+		Dev:         "/dev",
+		EFIVars:     "/sys/firmware/efi/efivars",
+		RAM:         ramDir,
+		UUID:        strings.ToLower(uuid),
+		Code:        res.InstallCode,
+		MaxImage:    budget,
+		EraseBudget: 780 * time.Second,
+		RebootDelay: 10 * time.Second,
+	}
+	return e.Run(ctx, r)
 }
 
 // attest runs the attestation until it passes, fleetd gives a verdict, or
