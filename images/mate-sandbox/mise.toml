@@ -31,6 +31,7 @@ disable_tools = [
   "jq",
   "k9s",
   "kubectl",
+  "kubelogin",
   "kustomize",
   "opentofu",
   "powershell",

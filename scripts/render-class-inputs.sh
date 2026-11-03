@@ -40,6 +40,8 @@ cp "$root"/clusters/folly/talos/*.tf "$root/clusters/folly/talos/.terraform.lock
 ln -s "$root/terraform" "$work/terraform"
 ln -s "$root/clusters/folly/config" "$work/clusters/folly/config"
 ln -s "$root/clusters/folly/inventory" "$work/clusters/folly/inventory"
+ln -s "$root/clusters/folly/fleet" "$work/clusters/folly/fleet"
+ln -s "$root/clusters/base" "$work/clusters/base"
 # The override's locals take each node's status from NetBox's answer above, so
 # init and console never configure the NetBox provider.
 cat >"$tf/render_override.tf" <<EOF
