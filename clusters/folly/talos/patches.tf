@@ -176,4 +176,15 @@ locals {
     name         = "EPHEMERAL"
     provisioning = { maxSize = c.ephemeral }
   }) }
+
+  # The network sensor's USB NIC on shale is an ASIX AX88179, whose driver the
+  # usb-modem-drivers extension carries and Talos does not load on its own
+  # (clusters/folly/apps/sensor/). usbnet is its dependency.
+  sensor_nic_patch = yamlencode({
+    machine = {
+      kernel = {
+        modules = [{ name = "usbnet" }, { name = "ax88179_178a" }]
+      }
+    }
+  })
 }
