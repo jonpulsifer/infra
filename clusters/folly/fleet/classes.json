@@ -50,8 +50,8 @@
     "secure_boot": true,
     "payload_kind": "nixos-image",
     "reattest": false,
-    "image": "https://github.com/jonpulsifer/infra/releases/download/node-images%2F41729151050/nixos-node-amd64.img.zst",
-    "image_digest": "sha256:842f5faca538d9a319cbaa164cfeddcbae1643fc5a0421c955f4f5fc35363370",
+    "image": "https://github.com/jonpulsifer/infra/releases/download/node-images%2F41738292068/nixos-node-amd64.img.zst",
+    "image_digest": "sha256:29966c90edaf72cb6d2a010d4af677f82113c93f2ded847c6ba77008f6281f60",
     "image_format": "raw.zst"
   },
   "debian": {
