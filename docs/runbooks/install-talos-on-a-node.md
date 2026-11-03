@@ -77,7 +77,7 @@ Use this runbook to boot a NixOS node into the Talos Linux installer without a U
    talosctl get extensions --insecure --nodes <addr>
    ```
 
-   Result: `gvisor`, `i915`, `intel-ucode`, `kata-containers`, `realtek-firmware`, and a row named for the schematic ID.
+   Result: `gvisor`, `i915`, `intel-ucode`, `kata-containers`, `realtek-firmware`, `usb-modem-drivers`, and a row named for the schematic ID.
 
 3. Read the disks and the links.
 

@@ -176,6 +176,8 @@ module "talos" {
     "siderolabs/intel-ucode",
     "siderolabs/kata-containers",
     "siderolabs/realtek-firmware",
+    # USB NIC drivers for the network sensor's AX88179 (patches.tf).
+    "siderolabs/usb-modem-drivers",
   ]
 
   op_vault          = local.op_vault_homelab
@@ -185,7 +187,7 @@ module "talos" {
     role               = n.role
     address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
-    patches            = [local.ephemeral_patch[n.class]]
+    patches            = concat([local.ephemeral_patch[n.class]], name == "shale" ? [local.sensor_nic_patch] : [])
     labels             = local.class_workload[n.class].labels
     taints             = local.class_workload[n.class].taints
     installer_image    = local.secureboot_installer
