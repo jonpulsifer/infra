@@ -147,6 +147,28 @@ func TestUbuntuProfileRefusesAnUnlistedCA(t *testing.T) {
 	}
 }
 
+// The debian profile is the ubuntu one with Debian's Secure Boot CA as the
+// vendor authority: it accepts a Debian boot, refuses a Canonical one, and
+// still needs HookOS at intake.
+func TestDebianProfileAcceptsADebianShimBoot(t *testing.T) {
+	debian := readFile(t, "testdata/debian-secure-boot-ca.der")
+	canonical := readFile(t, "testdata/canonical-master-ca.der")
+	p := profile(t, "debian")
+	events := ubuntuEvents(t, microsoftDER(t), debian)
+	if got := p.EvaluateRenewal(events); len(got) != 0 {
+		t.Fatalf("violations %q, want none", got)
+	}
+	if got := p.Evaluate(events); len(got) != 1 || !strings.Contains(got[0], "The boot path lacks FML HookOS Secure Boot") {
+		t.Fatalf("violations %q, want only the missing HookOS authority", got)
+	}
+	if got := p.EvaluateRenewal(ubuntuEvents(t, microsoftDER(t), canonical)); len(got) != 1 || !strings.Contains(got[0], "A boot authority holds") {
+		t.Fatalf("a Canonical-verified kernel: %q", got)
+	}
+	if got := profile(t, "ubuntu").EvaluateRenewal(events); len(got) != 1 {
+		t.Fatalf("the ubuntu profile accepted a Debian-verified kernel: %q", got)
+	}
+}
+
 func TestBootFactsReadDBXAndSBAT(t *testing.T) {
 	canonical := readFile(t, "testdata/canonical-master-ca.der")
 	f := bootFactsOf(ubuntuEvents(t, microsoftDER(t), canonical))
