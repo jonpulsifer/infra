@@ -14,7 +14,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
@@ -54,6 +53,9 @@ func (e *Executor) seed(ctx context.Context, r protocol.BootRun, d Disk, g GPT, 
 		seed, err := e.fetchSeed(ctx, r.SeedURL)
 		if err != nil {
 			return err
+		}
+		if err := checkSeed(seed); err != nil {
+			return fmt.Errorf("%v; the image is written without a seed", err)
 		}
 		root, err := e.rootPartition(d, g)
 		if err != nil {
@@ -119,9 +121,6 @@ func (e *Executor) fetchSeed(ctx context.Context, seedURL string) ([]byte, error
 	if len(b) > maxSeed {
 		return nil, errors.New("the seed is over 8 MiB; the image is written without a seed")
 	}
-	if err := checkSeed(b); err != nil {
-		return nil, fmt.Errorf("%v; the image is written without a seed", err)
-	}
 	return b, nil
 }
 
@@ -137,7 +136,7 @@ func checkSeed(b []byte) error {
 		if err != nil {
 			return fmt.Errorf("the seed tar does not read: %w", err)
 		}
-		if !localName(h.Name) {
+		if !filepath.IsLocal(h.Name) {
 			return fmt.Errorf("the seed tar names %q, a path outside its directory", h.Name)
 		}
 		switch h.Typeflag {
@@ -148,24 +147,9 @@ func checkSeed(b []byte) error {
 	}
 }
 
-func localName(name string) bool {
-	if name == "" || strings.HasPrefix(name, "/") {
-		return false
-	}
-	for _, part := range strings.Split(name, "/") {
-		if part == ".." {
-			return false
-		}
-	}
-	return filepath.IsLocal(path.Clean(name))
-}
-
-// extractSeed writes a checked seed tar under dest and requires its
-// user-data and meta-data.
+// extractSeed writes a seed tar checkSeed passed under dest and requires
+// its user-data and meta-data.
 func extractSeed(b []byte, dest string) error {
-	if err := checkSeed(b); err != nil {
-		return err
-	}
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}

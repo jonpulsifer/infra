@@ -1,6 +1,7 @@
 package fleetboot
 
 import (
+	"archive/tar"
 	"bufio"
 	"bytes"
 	"context"
@@ -14,6 +15,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,9 +30,6 @@ var (
 	seedURLPattern = regexp.MustCompile(`^https://[A-Za-z0-9:/._%~-]+$`)
 	uuidPattern    = regexp.MustCompile(`^[0-9a-f-]+$`)
 )
-
-// imagePayload says whether a payload kind is written as a disk image.
-func imagePayload(kind string) bool { return classes.ImagePayload(kind) }
 
 // preflight refuses a run whose install inputs are malformed before the
 // wipe, so a refused run keeps its disk. The Templates check the same
@@ -55,9 +55,9 @@ func preflight(r protocol.BootRun, code string) error {
 		return fmt.Errorf("the image digest %q is not sha256:<64 lower-case hex>; nothing wiped", r.ImageDigest)
 	case !strings.HasPrefix(r.ImageURL, "https://"):
 		return fmt.Errorf("the image URL %q is not https; nothing wiped", r.ImageURL)
-	case !validFormat(r.ImageFormat):
+	case !slices.Contains(classes.ImageFormats, r.ImageFormat):
 		return fmt.Errorf("the image format %q is unknown; nothing wiped", r.ImageFormat)
-	case !imagePayload(r.PayloadKind):
+	case !classes.ImagePayload(r.PayloadKind):
 		return fmt.Errorf("the payload kind %q is not an image's; nothing wiped", r.PayloadKind)
 	case !strings.HasPrefix(r.SeedURL, "https://"):
 		return fmt.Errorf("the seed URL %q is not https; nothing wiped", r.SeedURL)
@@ -65,15 +65,6 @@ func preflight(r protocol.BootRun, code string) error {
 		return errors.New("the seed URL is malformed; nothing wiped")
 	}
 	return nil
-}
-
-func validFormat(f string) bool {
-	for _, v := range classes.ImageFormats {
-		if f == v {
-			return true
-		}
-	}
-	return false
 }
 
 // Magic numbers of the packed formats.
@@ -104,9 +95,9 @@ func DetectFormat(head []byte) string {
 	return ""
 }
 
-// decodeCommands is the pipeline that unpacks a format to the raw disk on
-// stdout, from the file at path: zstd and gzip decompress; a tar.xz's one
-// member comes out of GNU tar, which reads a GNU sparse member.
+// decodeCommands is the pipeline that unpacks a format on stdout, from the
+// file at path: the raw disk for raw, zstd and gzip, and for a tar.xz the
+// tarball, whose one member writeDisk reads.
 func decodeCommands(format, path string) [][]string {
 	switch format {
 	case "raw":
@@ -116,7 +107,7 @@ func decodeCommands(format, path string) [][]string {
 	case "raw.gz":
 		return [][]string{{"gzip", "-dc", path}}
 	case "tar.xz":
-		return [][]string{{"xz", "-dc", path}, {"tar", "-xOf", "-"}}
+		return [][]string{{"xz", "-dc", path}}
 	}
 	return nil
 }
@@ -182,22 +173,31 @@ func pipeline(ctx context.Context, cmds [][]string) (io.ReadCloser, func() error
 	return out, wait, nil
 }
 
-// tarMembers counts a tar.xz's members.
-func tarMembers(ctx context.Context, path string) (int, error) {
-	out, wait, err := pipeline(ctx, [][]string{{"xz", "-dc", path}, {"tar", "-tf", "-"}})
+// diskMember reads a tarball's first member, which must be a file: a
+// cloud image's disk is a GNU sparse member, whose holes the reader fills
+// with zeros.
+func diskMember(tr *tar.Reader) (io.Reader, error) {
+	h, err := tr.Next()
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("the tarball has no member: %w", err)
 	}
-	n := 0
-	s := bufio.NewScanner(out)
-	for s.Scan() {
-		n++
+	switch h.Typeflag {
+	case tar.TypeReg, tar.TypeGNUSparse, '\x00':
+		return tr, nil
 	}
-	out.Close()
-	if err := wait(); err != nil {
-		return 0, err
+	return nil, fmt.Errorf("the tarball's first member %q is no file", h.Name)
+}
+
+// onlyMember says whether a tarball holds nothing after the member read.
+func onlyMember(tr *tar.Reader) error {
+	h, err := tr.Next()
+	switch {
+	case errors.Is(err, io.EOF):
+		return nil
+	case err != nil:
+		return err
 	}
-	return n, s.Err()
+	return fmt.Errorf("the tarball has a second member, %q, so it is no one disk image", h.Name)
 }
 
 // download fetches url into path with at most max bytes and answers the
@@ -234,9 +234,28 @@ func download(ctx context.Context, c *http.Client, url, path string, max int64) 
 	return hex.EncodeToString(h.Sum(nil)), f.Close()
 }
 
-// MemoryBudget is how much of the RAM directory's file system a download
-// may take: what is free, less a quarter for the steps that follow.
-func MemoryBudget(free int64) int64 { return free - free/4 }
+// writeHeadroom is memory a download leaves for the disk write's page cache
+// and fleet-boot itself.
+const writeHeadroom = 512 * mib
+
+// MemoryBudget is how much a download may take: a quarter less than the
+// memory /proc/meminfo says is available, less writeHeadroom, and no more
+// than the RAM directory's file system has free.
+func MemoryBudget(meminfo []byte, tmpfsFree int64) (int64, error) {
+	s := bufio.NewScanner(bytes.NewReader(meminfo))
+	for s.Scan() {
+		f := strings.Fields(s.Text())
+		if len(f) == 3 && f[0] == "MemAvailable:" && f[2] == "kB" {
+			kb, err := strconv.ParseInt(f[1], 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			avail := kb * 1024
+			return max(0, min(avail-avail/4-writeHeadroom, tmpfsFree)), nil
+		}
+	}
+	return 0, errors.New("/proc/meminfo has no MemAvailable")
+}
 
 // install writes the class's image to the wiped disk, then the seed.
 func (e *Executor) install(ctx context.Context, r protocol.BootRun) (string, error) {
@@ -273,15 +292,6 @@ func (e *Executor) install(ctx context.Context, r protocol.BootRun) (string, err
 	if got := DetectFormat(head); got != r.ImageFormat {
 		return "", fmt.Errorf("the image's first bytes say %q, and the class says %q; nothing written", got, r.ImageFormat)
 	}
-	if r.ImageFormat == "tar.xz" {
-		n, err := tarMembers(ctx, img)
-		if err != nil {
-			return "", fmt.Errorf("the tarball cannot be listed (%v); nothing written", err)
-		}
-		if n != 1 {
-			return "", fmt.Errorf("the tarball has %d members, not one disk image; nothing written", n)
-		}
-	}
 	e.logf("writing %s to %s", r.ImageFormat, d.Path)
 	if err := e.writeDisk(ctx, d, r.ImageFormat, img); err != nil {
 		return "", err
@@ -297,6 +307,7 @@ func (e *Executor) install(ctx context.Context, r protocol.BootRun) (string, err
 		return "", err
 	}
 	e.logf("the EFI system partition is %s", espDev)
+	e.esp = &installedESP{disk: d, Partition: esp}
 	if err := e.seed(ctx, r, d, g, esp, espDev); err != nil {
 		return "", err
 	}
@@ -309,17 +320,36 @@ func (e *Executor) writeDisk(ctx context.Context, d Disk, format, img string) er
 	if err != nil {
 		return fmt.Errorf("the image cannot be unpacked (%v); nothing written", err)
 	}
+	var src io.Reader = out
+	var tr *tar.Reader
+	if format == "tar.xz" {
+		tr = tar.NewReader(out)
+		if src, err = diskMember(tr); err != nil {
+			out.Close()
+			_ = wait()
+			return fmt.Errorf("%v; nothing written", err)
+		}
+	}
 	f, err := os.OpenFile(d.Path, os.O_WRONLY, 0)
 	if err != nil {
+		out.Close()
 		_ = wait()
 		return fmt.Errorf("open %s: %w; nothing written", d.Path, err)
 	}
-	_, cerr := io.CopyBuffer(f, out, make([]byte, 4<<20))
+	_, cerr := io.CopyBuffer(f, src, make([]byte, 4<<20))
+	var merr error
+	if cerr == nil && tr != nil {
+		merr = onlyMember(tr)
+	}
+	// The decompressor writes the tarball's end blocks too.
+	_, _ = io.Copy(io.Discard, out)
 	out.Close()
 	serr := f.Sync()
 	f.Close()
 	werr := wait()
 	switch {
+	case merr != nil:
+		return fmt.Errorf("%v; the disk is partly written", merr)
 	case cerr != nil:
 		return fmt.Errorf("writing %s failed (%v); the disk is partly written", d.Path, cerr)
 	case werr != nil:

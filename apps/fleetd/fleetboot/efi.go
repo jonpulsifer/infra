@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -72,7 +71,7 @@ func ParseBootVars(out []byte) BootVars {
 func (v BootVars) ForESP(n int, guid string) (BootEntry, bool) {
 	needle := strings.ToLower(fmt.Sprintf("HD(%d,GPT,%s,", n, guid))
 	for _, e := range v.Entries {
-		if strings.Contains(strings.ToLower(e.Path), needle) || strings.Contains(strings.ToLower(e.Label), needle) {
+		if strings.Contains(strings.ToLower(e.Path), needle) {
 			return e, true
 		}
 	}
@@ -140,7 +139,9 @@ func (e *Executor) nextBoot(ctx context.Context, r protocol.BootRun) (string, er
 		}
 		return "", fmt.Errorf("%s; the run fails, and the node stays in fleet-boot", msg)
 	}
-	e.mountEFIVars()
+	if err := e.mountEFIVars(); err != nil {
+		return fail("%v", err)
+	}
 	efibootmgr := func(args ...string) ([]byte, error) {
 		out, err := e.Host.Run(ctx, "efibootmgr", args...)
 		if err != nil {
@@ -156,24 +157,13 @@ func (e *Executor) nextBoot(ctx context.Context, r protocol.BootRun) (string, er
 	guid := ""
 	var target BootEntry
 	if r.Install {
-		d, err := e.checkDisk(r.Disk, r.DiskSerial, "no boot entry set")
-		if err != nil {
-			return fail("%v", err)
+		esp := e.esp
+		if esp == nil {
+			return fail("this boot's install found no EFI system partition")
 		}
-		f, err := os.Open(d.Path)
-		if err != nil {
-			return fail("open %s: %v", d.Path, err)
-		}
-		g, err := ReadGPT(f, d.SectorSize)
-		f.Close()
-		if err != nil {
-			return fail("%s's GPT: %v", d.Path, err)
-		}
-		esp, ok := g.OfType(TypeESP)
-		if !ok {
-			return fail("%s has no EFI system partition", d.Path)
-		}
+		d := esp.disk
 		guid = esp.GUID
+		var ok bool
 		if target, ok = vars.ForESP(esp.Number, guid); !ok {
 			label := "fleet " + r.OS
 			if r.OS == "" {

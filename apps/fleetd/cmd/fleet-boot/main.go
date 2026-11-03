@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -109,6 +109,14 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 	if err != nil {
 		return fmt.Errorf("mount the RAM directory: %w", err)
 	}
+	meminfo, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return err
+	}
+	budget, err := fleetboot.MemoryBudget(meminfo, free)
+	if err != nil {
+		return err
+	}
 	e := &fleetboot.Executor{
 		Host:        fleetboot.LinuxHost{},
 		Reporter:    b,
@@ -120,7 +128,7 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 		RAM:         ramDir,
 		UUID:        strings.ToLower(uuid),
 		Code:        res.InstallCode,
-		MaxImage:    fleetboot.MemoryBudget(free),
+		MaxImage:    budget,
 		EraseBudget: 780 * time.Second,
 		RebootDelay: 10 * time.Second,
 	}
