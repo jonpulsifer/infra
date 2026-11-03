@@ -133,7 +133,7 @@ A replaced TPM, as after a board swap, needs the same change: the old binding re
 | --- | --- | --- |
 | The journal says `on port N, expected M` | A switch port the device does not expect | Move the machine, or correct `switch_port` in the nodes file, and power-cycle it |
 | The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Set AMT's address, or power the machine on by hand |
-| The firmware gets no DHCP offer on a node port | Kea on spore is down, or the gateway does not relay the Kubernetes network to it | Check `kea-dhcp4-server` on spore and `SporeKeaDown`, then `dhcp_relay` in `terraform/network/unifi/folly/k8s.tf` |
+| The firmware gets no DHCP offer on a node port | Kea on spore is down, the gateway does not relay the Kubernetes network to it, or the gateway's dnsmasq drops Kea's reply because the bootstrap network has no gateway DHCP server | Check `kea-dhcp4-server` on spore and `SporeKeaDown`, then `dhcp_relay` in `terraform/network/unifi/folly/k8s.tf` and `dhcp_server` on the bootstrap network in `bootstrap.tf`. Kea's `pkt4-offer-sent` rising with `pkt4-request-received` at zero is the dropped reply |
 | The journal says the device `lacks` a field | `terraform/netbox/folly` has not applied the node's entry | Comment `atlantis plan -d terraform/netbox/folly` and apply it |
 | The console says `attest: try 5 failed` | fleetd did not answer | Read `journalctl -u fleetd` on spore |
 | The console says `attest: FAILED` and the agent starts at once | fleetd refused the machine | Read the `attest.verdict` audit line in `journalctl -u fleetd` |

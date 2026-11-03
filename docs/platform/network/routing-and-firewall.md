@@ -40,11 +40,11 @@ The gateway relays the Kubernetes network's DHCP to [Kea](../nixos/kea.md) on sp
 - `SPORE_BOOTSTRAP_IP` as the TFTP server.
 - The signed iPXE boot file.
 
-[Talos boot](../nixos/talos-boot.md) serves iPXE. The relay is gateway-originated traffic onto the bootstrap VLAN, so no policy admits it.
+[Talos boot](../nixos/talos-boot.md) serves iPXE. The relay is gateway-originated traffic onto the bootstrap VLAN, so no policy admits it. Kea's replies come back on that VLAN, and the gateway's dnsmasq accepts a packet only on an interface it serves, so the bootstrap network keeps a gateway DHCP server whose pool nothing asks for (`bootstrap.tf`). A client renews its lease by unicast to Kea, which the Lab-to-Boot UDP policy admits on 67.
 
 ### Bootstrap network
 
-The `bootstrap` network holds spore's boot address and has no DHCP. Its keys are `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN` and `SPORE_BOOTSTRAP_IP` in `clusters/folly/config/anchor-topology.json`.
+The `bootstrap` network holds spore's boot address. Its keys are `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN` and `SPORE_BOOTSTRAP_IP` in `clusters/folly/config/anchor-topology.json`. The gateway serves DHCP on it from a pool below spore's address, for the relay's sake and for no client.
 
 Only spore's switch port carries this VLAN, tagged. No port carries it untagged.
 
