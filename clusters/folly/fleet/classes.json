@@ -2,8 +2,9 @@
   "controlplane": {
     "description": "A Talos control plane. .github/workflows/talos-images.yml pins its installer here by digest. Boots the lab's signed UKI; the control plane at the API server's address installs from the Talos root, not from here.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:df0d9e3a18f73b5b7e63a3005ec918e1a6e98b5764808241d2c429bd8a7b2d95",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
@@ -12,8 +13,9 @@
   "worker-g5": {
     "description": "A Talos worker on a G5 desktop. .github/workflows/talos-images.yml pins its installer here by digest. Boots only the lab's signed UKI.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:df0d9e3a18f73b5b7e63a3005ec918e1a6e98b5764808241d2c429bd8a7b2d95",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
@@ -22,20 +24,38 @@
   "worker-g2": {
     "description": "A Talos worker on a G2 desktop, which has a TPM 1.2 and attests nothing. .github/workflows/talos-images.yml pins its installer here by digest.",
     "os": "talos",
+    "workload": "general",
     "template": "provision",
-    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:df0d9e3a18f73b5b7e63a3005ec918e1a6e98b5764808241d2c429bd8a7b2d95",
+    "installer_image": "ghcr.io/jonpulsifer/talos-installer-folly@sha256:134ea8563d84f1d3a3966c7ce444b4687e19bf601ff1b224c9d757c0254e1cd5",
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "talos-machineconfig",
     "reattest": false
   },
-  "ubuntu": {
-    "description": "Ubuntu Server from Canonical's cloud image. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA at the CA level, with no shim or GRUB digest pins. dbx and SBAT are read at attestation and alert on a change. The installer image is set once CI builds it.",
-    "os": "ubuntu",
-    "template": "provision-ubuntu",
-    "policy_profile": "ubuntu",
+  "nixos": {
+    "description": "A NixOS node from the lab's signed disk image (nix/images/node-nixos.nix). .github/workflows/node-images.yml pins the image here by URL and digest after each build. Boots a UKI signed by the lab's key, so the talos profile holds it; its first boot reads the seed fleetd serves at /seed. No in-node check yet, so reattest is off.",
+    "os": "nixos",
+    "workload": "general",
+    "template": "provision-image",
+    "policy_profile": "talos",
+    "secure_boot": true,
+    "payload_kind": "nixos-image",
+    "reattest": false,
+    "image": "https://github.com/jonpulsifer/infra/releases/download/node-images%2F41729151050/nixos-node-amd64.img.zst",
+    "image_digest": "sha256:842f5faca538d9a319cbaa164cfeddcbae1643fc5a0421c955f4f5fc35363370",
+    "image_format": "raw.zst"
+  },
+  "debian": {
+    "description": "Debian from the dated generic cloud release, written as a disk image with a NoCloud seed fleetd renders. The generic variant carries the drivers for physical hardware; genericcloud boots a node with no NIC. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA at the CA level, with no shim or GRUB digest pins. The pin is the release's tar.xz and its sha256, computed from a download that matches cloud.debian.org's SHA512SUMS. No in-node check yet, so reattest is off.",
+    "os": "debian",
+    "workload": "general",
+    "template": "provision-image",
+    "policy_profile": "debian",
     "secure_boot": true,
     "payload_kind": "cloud-init-nocloud",
-    "reattest": false
+    "reattest": false,
+    "image": "https://cloud.debian.org/images/cloud/trixie/20261026-2643/debian-13-generic-amd64-20261026-2643.tar.xz",
+    "image_digest": "sha256:1245808471c952fc7a081f90ef1958929330e75990bf851b399dc006aa433378",
+    "image_format": "tar.xz"
   }
 }

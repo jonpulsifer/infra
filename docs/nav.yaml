@@ -25,6 +25,7 @@ sections:
           - apps/netbench.md
           - path: apps/fleetd.md
             children: [apps/fleetd/lifecycle.md, apps/fleetd/attestation.md, apps/fleetd/operations.md]
+          - apps/keylime.md
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform
@@ -32,7 +33,7 @@ sections:
     items:
       - platform/how-changes-ship.md
       - path: platform/nixos.md
-        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/tinkerbell.md, platform/nixos/build-host-and-cache.md]
+        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/fleet-boot.md, platform/nixos/kea.md, platform/nixos/tinkerbell.md, platform/nixos/node-image.md, platform/nixos/build-host-and-cache.md]
       - path: platform/kubernetes.md
         children: [platform/kubernetes/talos.md]
       - platform/workloads.md

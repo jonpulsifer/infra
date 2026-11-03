@@ -198,12 +198,12 @@ func (f *fakeJoinAPI) issue(name string) {
 // decommissioning, and optiplex the control plane.
 func newJoinTest(t *testing.T) (*Reconciler, *fakeNetBox, *fakeJoinAPI, *time.Time) {
 	t.Helper()
-	nb := &fakeNetBox{devices: []map[string]any{
+	nb := &fakeNetBox{Devices: []map[string]any{
 		device("riptide", "active", "none", nil),
-		mergeID(device("optiplex", "active", "none", map[string]any{"talos_class": "controlplane"}), 8),
+		mergeID(device("optiplex", "active", "none", map[string]any{"class": "controlplane"}), 8),
 		mergeID(device("shale", "active", "none", nil), 9),
 		mergeID(device("swell", "decommissioning", "none", nil), 10),
-	}, ifaces: riptideIfaces()}
+	}, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	t.Cleanup(done)
 	api := &fakeJoinAPI{csrs: map[string]*joinCSR{}}
@@ -222,7 +222,7 @@ func newJoinTest(t *testing.T) (*Reconciler, *fakeNetBox, *fakeJoinAPI, *time.Ti
 
 func journalFor(nb *fakeNetBox, part string) []string {
 	var out []string
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		if c := j["comments"].(string); strings.Contains(c, part) {
 			out = append(out, c)
 		}
@@ -270,7 +270,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		"retiring":     {"warning", "swell is decommissioning", 1},
 	} {
 		var got []map[string]any
-		for _, j := range nb.journals {
+		for _, j := range nb.Journals {
 			if c := j["comments"].(string); strings.Contains(c, "request "+csr+" ") || strings.Contains(c, "request "+csr+",") || strings.Contains(c, "request "+csr+":") {
 				got = append(got, j)
 			}
@@ -290,7 +290,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		t.Error("a renewal was journaled")
 	}
 	if len(journalFor(nb, "approved the kubelet client certificate request bound")) != 1 {
-		t.Errorf("the approval's journal: %v", nb.journals)
+		t.Errorf("the approval's journal: %v", nb.Journals)
 	}
 
 	// The token is spent on its first approval: another request it makes
@@ -300,7 +300,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(api.approvals) != 1 || len(journalFor(nb, "spent: fleetd approved CSR bound")) != 1 {
-		t.Fatalf("a second request: approvals %v, journals %v", api.approvals, nb.journals)
+		t.Fatalf("a second request: approvals %v, journals %v", api.approvals, nb.Journals)
 	}
 
 	// The token lives until the certificate is issued and a minute has
@@ -332,7 +332,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		t.Fatal("the ledger still holds the spent token")
 	}
 	if len(journalFor(nb, "deleted riptide's bootstrap token")) != 1 {
-		t.Errorf("the spend's journal: %v", nb.journals)
+		t.Errorf("the spend's journal: %v", nb.Journals)
 	}
 
 	// The token is gone, so a new request with it waits, and nothing more
@@ -342,7 +342,7 @@ func TestApproveJoinsBindsTheCertificateToTheToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(api.approvals) != 1 || len(journalFor(nb, "no live bootstrap token of its own for riptide")) != 1 {
-		t.Fatalf("after the spend: approvals %v, journals %v", api.approvals, nb.journals)
+		t.Fatalf("after the spend: approvals %v, journals %v", api.approvals, nb.Journals)
 	}
 }
 
@@ -357,7 +357,7 @@ func TestApproveJoinsRefusesAnExpiredOrUnknownToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(api.approvals) != 0 || len(journalFor(nb, "riptide's bootstrap token expired")) != 1 {
-		t.Fatalf("approvals %v, journals %v", api.approvals, nb.journals)
+		t.Fatalf("approvals %v, journals %v", api.approvals, nb.Journals)
 	}
 
 	r, nb, api, clock = newJoinTest(t)
@@ -368,7 +368,7 @@ func TestApproveJoinsRefusesAnExpiredOrUnknownToken(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(api.approvals) != 0 || len(journalFor(nb, "no live bootstrap token of its own")) != 1 {
-		t.Fatalf("approvals %v, journals %v", api.approvals, nb.journals)
+		t.Fatalf("approvals %v, journals %v", api.approvals, nb.Journals)
 	}
 }
 
@@ -494,7 +494,7 @@ func TestReportedKeysGoWithTheirCSR(t *testing.T) {
 		return n
 	}
 	if csrKeys() == 0 || len(journalFor(nb, "request cluster-wide,")) != 1 {
-		t.Fatalf("keys %v, journals %v", r.reported, nb.journals)
+		t.Fatalf("keys %v, journals %v", r.reported, nb.Journals)
 	}
 	api.csrs = map[string]*joinCSR{}
 	if err := r.Reconcile(t.Context()); err != nil {

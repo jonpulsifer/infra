@@ -44,6 +44,14 @@ metadata:
   name: velero-node-agent
   namespace: velero
 rules:
+  # File-system backups create a hosting pod for each volume, then remove it.
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, delete]
+  - apiGroups: [apps]
+    resources: [daemonsets]
+    resourceNames: [node-agent]
+    verbs: [get]
   - apiGroups: [velero.io]
     resources: [podvolumebackups, podvolumerestores]
     verbs: [get, list, watch, update, patch]

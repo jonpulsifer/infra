@@ -24,7 +24,7 @@ const (
 
 func nbDevice(id int, name, status, serial, model string, cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"install_disk": nil, "talos_class": nil, "tpm_version": nil, "bmc_type": nil,
+		"install_disk": nil, "class": nil, "tpm_version": nil, "bmc_type": nil,
 		"desired_action": "none", "last_workflow": nil, "expected_port": nil, "attest_verdict": nil,
 	}
 	for k, v := range cf {
@@ -45,7 +45,7 @@ func nbDevice(id int, name, status, serial, model string, cf map[string]any) map
 // and its verdict.
 func declared(cf map[string]any) map[string]any {
 	fields := map[string]any{
-		"attest_verdict": "attested", "tpm_version": "2.0", "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "install_disk_serial": "30DF7020FGKL",
+		"attest_verdict": "attested", "tpm_version": "2.0", "class": "worker-g5", "install_disk": "/dev/nvme0n1", "install_disk_serial": "30DF7020FGKL",
 		"bmc_type": "amt", "amt": true, "secure_boot_expected": true, "expected_port": 5,
 	}
 	for k, v := range cf {
@@ -88,10 +88,10 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	t.Helper()
 	at := &admitTest{}
 	at.nb = &fakeNetBox{
-		apply:    true,
-		devices:  devices,
-		ifaces:   append(ifaces, switchIfaces()...),
-		switches: []map[string]any{{"id": 100, "name": "usw-24-poe"}},
+		Apply:    true,
+		Devices:  devices,
+		Ifaces:   append(ifaces, switchIfaces()...),
+		Switches: []map[string]any{{"id": 100, "name": "usw-24-poe"}},
 	}
 	at.kube = &fakeKube{}
 	r, done := newTest(t, at.nb, at.kube)
@@ -100,7 +100,8 @@ func newAdmitTest(t *testing.T, mac string, devices []map[string]any, ifaces []m
 	r.Config.Installs = map[string]string{"worker-g5": "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"}
 	at.rend = &fakeRenderer{types: map[string]string{"worker-g5": "worker", "controlplane": "controlplane"}}
 	r.Installer = &Installer{
-		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Renderer: at.rend, Tokens: &fakeTokens{}, Configs: &Configs{},
+		Site: "folly", NetBox: r.NetBox, Kube: r.Kube, Classes: testClasses, Renderer: at.rend, Seeds: testSeeds(),
+		Tokens: &fakeTokens{}, Configs: &Configs{},
 		TTL: 2 * time.Hour, Metrics: r.Metrics, Now: func() time.Time { return testNow },
 	}
 	at.r = r
@@ -136,7 +137,7 @@ func (at *admitTest) admit(code string) (int, string) {
 }
 
 func (at *admitTest) node() map[string]any {
-	for _, d := range at.nb.devices {
+	for _, d := range at.nb.Devices {
 		if d["id"] == nodeID {
 			return d
 		}
@@ -147,7 +148,7 @@ func (at *admitTest) node() map[string]any {
 func (at *admitTest) cf(field string) any { return at.node()["custom_fields"].(map[string]any)[field] }
 
 func (at *admitTest) journal(substr string) bool {
-	for _, j := range at.nb.journals {
+	for _, j := range at.nb.Journals {
 		if strings.Contains(j["comments"].(string), substr) {
 			return true
 		}
@@ -179,7 +180,7 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 		t.Errorf("hardwareMap %v", hm)
 	}
 	for field, want := range map[string]any{
-		"talos_class": "worker-g5", "bmc_type": "amt", "install_disk": "/dev/nvme0n1",
+		"class": "worker-g5", "bmc_type": "amt", "install_disk": "/dev/nvme0n1",
 		"last_workflow": names[0], "desired_action": "none",
 	} {
 		if got := at.cf(field); got != want {
@@ -190,12 +191,12 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 		t.Fatal("the config was not rendered under the code")
 	}
 	if !at.journal("attested from HookOS, where it waits") || at.r.Metrics.AutoProvisioned.Load() != 1 {
-		t.Errorf("journals %v autoprovisioned %d", at.nb.journals, at.r.Metrics.AutoProvisioned.Load())
+		t.Errorf("journals %v autoprovisioned %d", at.nb.Journals, at.r.Metrics.AutoProvisioned.Load())
 	}
 
 	// A second pass from the same boot renders under its new code in the
 	// same run, and writes nothing again.
-	patches := len(at.nb.patches)
+	patches := len(at.nb.Patches)
 	again := strings.Repeat("Q", 43)
 	if code, why := at.admit(again); code != http.StatusCreated {
 		t.Fatalf("second admit: %d %s", code, why)
@@ -203,11 +204,88 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 	if n := at.kube.workflows(); len(n) != 1 || n[0] != names[0] {
 		t.Fatalf("a second run started: %v", n)
 	}
-	if len(at.nb.patches) != patches {
-		t.Errorf("a second admission wrote: %v", at.nb.patches[patches:])
+	if len(at.nb.Patches) != patches {
+		t.Errorf("a second admission wrote: %v", at.nb.Patches[patches:])
 	}
 	if at.held(testCode) || !at.held(again) {
 		t.Fatal("the older code's config survived")
+	}
+}
+
+// A declared device of a seed class is admitted the same way: its class's
+// Template runs with the class's image and the seed URL, no installer image,
+// and its seed waits under the code, rendered by the seed renderer with no
+// bootstrap token.
+func TestAdmitProvisionsASeedClassDevice(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "nixos"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"nixos": true}, testSeedURL
+	if code, why := at.admit(testCode); code != http.StatusCreated {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	names := at.kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	spec := at.kube.get(wfBase + names[0])["spec"].(map[string]any)
+	hm := spec["hardwareMap"].(map[string]any)
+	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != "" ||
+		hm["image_url"] != nixosImage || hm["image_digest"] != nixosDigest || hm["image_format"] != "raw.zst" ||
+		hm["payload_kind"] != "nixos-image" || hm["os"] != "nixos" || hm["seed_url"] != testSeedURL {
+		t.Errorf("template %v, hardwareMap %v", spec["templateRef"], hm)
+	}
+	if !at.held(testCode) || at.rend.calls != 0 {
+		t.Fatalf("held %v, Talos renders %d", at.held(testCode), at.rend.calls)
+	}
+	p, cfg, _ := at.r.Installer.Configs.Get(boxUUID, testCode, testNow)
+	if !SeedKind(p.Kind) || !strings.Contains(string(cfg), `"profile": "github:jonpulsifer/infra#swell"`) {
+		t.Fatalf("the pending config: %+v %s", p, cfg)
+	}
+}
+
+// A declared device of a cloud-init class is admitted alike: its Workflow
+// carries the class's image and the seed URL, and its cloud-init tar waits
+// under the code.
+func TestAdmitProvisionsACloudInitClassDevice(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "debian"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"debian": true}, testSeedURL
+	if code, why := at.admit(testCode); code != http.StatusCreated {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	names := at.kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	spec := at.kube.get(wfBase + names[0])["spec"].(map[string]any)
+	hm := spec["hardwareMap"].(map[string]any)
+	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != "" ||
+		hm["image_url"] != debianImage || hm["image_digest"] != debianDigest || hm["image_format"] != "tar.xz" ||
+		hm["payload_kind"] != "cloud-init-nocloud" || hm["os"] != "debian" || hm["seed_url"] != testSeedURL {
+		t.Errorf("template %v, hardwareMap %v", spec["templateRef"], hm)
+	}
+	if !at.held(testCode) || at.rend.calls != 0 {
+		t.Fatalf("held %v, Talos renders %d", at.held(testCode), at.rend.calls)
+	}
+	p, cfg, _ := at.r.Installer.Configs.Get(boxUUID, testCode, testNow)
+	members := tarMembers(t, cfg)
+	if p.Kind != "cloud-init-nocloud" || !strings.Contains(members["user-data"], `hostname: "swell"`) || !strings.Contains(members["meta-data"], `instance-id: "`+boxSerial+`"`) {
+		t.Fatalf("the pending config: %+v %v", p, members)
+	}
+	if !at.journal("rendered the debian cloud-init seed") {
+		t.Errorf("journals %v", at.nb.Journals)
+	}
+}
+
+// An image class whose seed gates fail starts no run: the gates run before
+// the Workflow, as a Talos class's do.
+func TestAdmitRunsTheSeedGatesBeforeAnImageProvision(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "debian"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"debian": true}, testSeedURL
+	at.r.Installer.Seeds = nil
+	if code, why := at.admit(testCode); code != http.StatusServiceUnavailable || !strings.Contains(why, "seed inputs") {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	if n := at.kube.workflows(); len(n) != 0 || at.held(testCode) {
+		t.Fatalf("a run started without the seed inputs: %v held %v", n, at.held(testCode))
 	}
 }
 
@@ -216,7 +294,7 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 // nothing the declaration owns.
 func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 	for field, name := range map[string]string{
-		"talos_class": "talos_class", "install_disk": "install_disk", "install_disk_serial": "install_disk_serial", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
+		"class": "class", "install_disk": "install_disk", "install_disk_serial": "install_disk_serial", "bmc_type": "bmc_type", "tpm_version": "tpm_version",
 		"amt": "amt", "secure_boot_expected": "secure_boot_expected", "expected_port": "expected_port",
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -224,11 +302,11 @@ func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 			if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks "+name) {
 				t.Fatalf("admit: %d %s", code, why)
 			}
-			if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
-				t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
+			if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+				t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.Patches, at.kube.workflows())
 			}
 			if !at.journal("lacks " + name) {
-				t.Errorf("journals %v", at.nb.journals)
+				t.Errorf("journals %v", at.nb.Journals)
 			}
 		})
 	}
@@ -236,8 +314,8 @@ func TestAdmitRefusesAnIncompleteDeclaration(t *testing.T) {
 		d := declared(nil)
 		d["primary_ip4"] = nil
 		at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-		if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks primary_ip4") || len(at.nb.patches) != 0 {
-			t.Fatalf("admit: %d %s, patches %v", code, why, at.nb.patches)
+		if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, "lacks primary_ip4") || len(at.nb.Patches) != 0 {
+			t.Fatalf("admit: %d %s, patches %v", code, why, at.nb.Patches)
 		}
 	})
 }
@@ -259,7 +337,7 @@ func TestAdmitKeepsAnExplicitNoBMC(t *testing.T) {
 func TestAdmitNeverAutoProvisionsAControlPlane(t *testing.T) {
 	for name, setup := range map[string]func(*admitTest){
 		"the device's class": func(at *admitTest) {
-			at.node()["custom_fields"].(map[string]any)["talos_class"] = ControlPlaneClass
+			at.node()["custom_fields"].(map[string]any)["class"] = ControlPlaneClass
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -269,8 +347,8 @@ func TestAdmitNeverAutoProvisionsAControlPlane(t *testing.T) {
 			if code != http.StatusConflict || !strings.Contains(why, "a control plane; the owner sets desired_action to provision by hand") {
 				t.Fatalf("admit: %d %s", code, why)
 			}
-			if at.cf("talos_class") != ControlPlaneClass || len(at.kube.workflows()) != 0 || at.r.Metrics.AutoProvisioned.Load() != 0 {
-				t.Errorf("class %v workflows %v", at.cf("talos_class"), at.kube.workflows())
+			if at.cf("class") != ControlPlaneClass || len(at.kube.workflows()) != 0 || at.r.Metrics.AutoProvisioned.Load() != 0 {
+				t.Errorf("class %v workflows %v", at.cf("class"), at.kube.workflows())
 			}
 		})
 	}
@@ -283,11 +361,11 @@ func TestAdmitChecksTheExpectedPort(t *testing.T) {
 			t.Fatalf("admit: %d %s", code, why)
 		}
 	}
-	if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
-		t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.patches, at.kube.workflows())
+	if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || at.held(testCode) {
+		t.Errorf("a refused admission wrote: patches %v workflows %v", at.nb.Patches, at.kube.workflows())
 	}
-	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7 (swell)") {
-		t.Errorf("journals %v", at.nb.journals)
+	if len(at.nb.Journals) != 1 || !at.journal("on port 5, expected 7 (swell)") {
+		t.Errorf("journals %v", at.nb.Journals)
 	}
 }
 
@@ -298,9 +376,9 @@ func TestAdmitOnPort24IsLikeAnyPort(t *testing.T) {
 		code, _ := at.admit(testCode)
 		switch {
 		case ok && code != http.StatusCreated:
-			t.Errorf("expected_port 24: %d, journals %v", code, at.nb.journals)
+			t.Errorf("expected_port 24: %d, journals %v", code, at.nb.Journals)
 		case !ok && (code != http.StatusConflict || !at.journal("on port 24, expected 7 (swell)")):
-			t.Errorf("expected_port 7: %d journals %v", code, at.nb.journals)
+			t.Errorf("expected_port 7: %d journals %v", code, at.nb.Journals)
 		}
 	}
 }
@@ -323,11 +401,11 @@ func TestAdmitWithoutAFreshPortIsRefused(t *testing.T) {
 			if code, _ := at.admit(testCode); code != http.StatusConflict {
 				t.Fatalf("admit: %d", code)
 			}
-			if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 {
-				t.Errorf("a refused admission wrote: patches %v", at.nb.patches)
+			if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 {
+				t.Errorf("a refused admission wrote: patches %v", at.nb.Patches)
 			}
 			if !at.journal("its intake pass attested no switch port, and swell expects port 5") {
-				t.Errorf("journals %v", at.nb.journals)
+				t.Errorf("journals %v", at.nb.Journals)
 			}
 		})
 	}
@@ -355,7 +433,7 @@ func TestAdmitAfterAnEarlierRunWaitsForTheOwner(t *testing.T) {
 // The provision that netbooted the machine takes the code: no second run.
 func TestAdmitRendersUnderTheRunningProvision(t *testing.T) {
 	run := "provision-swell-1699990000"
-	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"last_workflow": run, "talos_class": "worker-g5", "install_disk": "/dev/nvme0n1", "bmc_type": "amt"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"last_workflow": run, "class": "worker-g5", "install_disk": "/dev/nvme0n1", "bmc_type": "amt"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	wf := workflowObject(run, "swell", "provision", testNow.Add(-5*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING")
 	wf["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "true"}}
 	at.kube.objects[wfBase+run] = wf
@@ -377,31 +455,31 @@ func TestAdmitRefusesADeviceThatIsNotPlanned(t *testing.T) {
 	if code, _ := at.admit(testCode); code != http.StatusConflict {
 		t.Fatalf("admit: %d", code)
 	}
-	if len(at.nb.patches) != 0 || len(at.nb.journals) != 0 || len(at.kube.workflows()) != 0 {
-		t.Errorf("an active device was admitted: %v", at.nb.patches)
+	if len(at.nb.Patches) != 0 || len(at.nb.Journals) != 0 || len(at.kube.workflows()) != 0 {
+		t.Errorf("an active device was admitted: %v", at.nb.Patches)
 	}
 }
 
 // A node off its expected port is journaled once, and never cabled: the cable
 // is Terraform's, and a move after the port check is the owner's to judge.
 func TestCheckPortJournalsANodeOffItsExpectedPort(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow)
 	reconcile(t, at.r)
 	reconcile(t, at.r)
-	if len(at.nb.journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.patches) != 0 {
-		t.Errorf("journals %v patches %v", at.nb.journals, at.nb.patches)
+	if len(at.nb.Journals) != 1 || !at.journal("on port 5, expected 7") || len(at.nb.Patches) != 0 {
+		t.Errorf("journals %v patches %v", at.nb.Journals, at.nb.Patches)
 	}
 }
 
 func TestCheckPortIgnoresAnOldReport(t *testing.T) {
-	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"talos_class": "worker-g5", "expected_port": 7})
+	d := nbDevice(nodeID, "swell", "active", boxSerial, g5, map[string]any{"class": "worker-g5", "expected_port": 7})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	at.attest(rackMAC, testNow.Add(-2*time.Hour))
 	reconcile(t, at.r)
-	if len(at.nb.journals) != 0 {
-		t.Errorf("journals %v", at.nb.journals)
+	if len(at.nb.Journals) != 0 {
+		t.Errorf("journals %v", at.nb.Journals)
 	}
 }
 func reconcile(t *testing.T, r *Reconciler) {
@@ -433,8 +511,8 @@ func TestAdmitGivesUpWhileAPassRuns(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	err := at.r.Admit(ctx, RenderRequest{Serial: boxSerial, UUID: boxUUID, Node: "swell", Code: testCode})
-	if status(err) != http.StatusServiceUnavailable || len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 {
-		t.Fatalf("admit during a pass: %v, patches %v", err, at.nb.patches)
+	if status(err) != http.StatusServiceUnavailable || len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 {
+		t.Fatalf("admit during a pass: %v, patches %v", err, at.nb.Patches)
 	}
 	at.r.unlock()
 	if code, why := at.admit(testCode); code != http.StatusCreated {

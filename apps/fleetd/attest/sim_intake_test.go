@@ -23,19 +23,6 @@ import (
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
-// macOf is the primary MAC on the device's interfaces.
-func (f *fakeNetBox) macOf(serial string) string {
-	id := f.bySerial(serial).ID
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, i := range f.interfaces {
-		if i.DeviceID == id && i.MAC != "" {
-			return i.MAC
-		}
-	}
-	return ""
-}
-
 func (h *harness) pending(t *testing.T, serial string) {
 	t.Helper()
 	r := refusal(t, func() error { _, err := h.run(serial, simMAC); return err }())
@@ -111,7 +98,7 @@ func TestDeclaredStubBinds(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 
-	f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(map[string]any{"class": "worker-g5"}))
 	if res, err := h.run("SIM-STUB", simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("declared stub: %v", err)
 	}
@@ -150,7 +137,7 @@ func TestUnboundStubWaits(t *testing.T) {
 			f := newFakeNetBox(t)
 			c.opts.netbox = f
 			h := newHarness(t, c.opts)
-			f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"talos_class": "worker-g5"})
+			f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"class": "worker-g5"})
 			h.pending(t, "SIM-STUB")
 			d := f.bySerial("SIM-STUB")
 			if h.intakeAudited("SIM-STUB") || h.issued() || f.macOf("SIM-STUB") != "" || d.CustomFields["ek_hash"] != nil || d.CustomFields["attest_verdict"] != StatusPending {
@@ -211,12 +198,7 @@ func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
 		change       func(*fakeNetBox, *fakeDevice)
 	}{
 		{"bound to another MAC", reasonMACMismatch, func(f *fakeNetBox, d *fakeDevice) {
-			for _, i := range f.interfaces {
-				if i.DeviceID == d.ID {
-					f.next++
-					i.MAC, i.MACID = "aa:bb:cc:dd:ee:ff", f.next
-				}
-			}
+			f.bindMAC(d.ID, "aa:bb:cc:dd:ee:ff")
 		}},
 		{"approval replaced", reasonBinding, func(_ *fakeNetBox, d *fakeDevice) { d.CustomFields["approved_ek_hash"] = strings.Repeat("ab", 32) }},
 		{"approval removed", reasonBinding, func(_ *fakeNetBox, d *fakeDevice) {
@@ -232,9 +214,10 @@ func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
 			d := f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(nil))
 			h.v.Installer = newFakeInstaller(nil)
 			h.tamper = func(*protocol.EvidenceRequest) {
-				f.mu.Lock()
-				defer f.mu.Unlock()
+				f.Mu.Lock()
+				defer f.Mu.Unlock()
 				c.change(f, d)
+				f.writeBack(d)
 			}
 			r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }())
 			if r.Verdict.Reason != c.reason || r.Verdict.Verdict != protocol.VerdictRefused {
@@ -258,7 +241,7 @@ func TestDeclaredStubIsRecheckedBeforeIssue(t *testing.T) {
 func TestAnotherCertifiedTPMGetsNothing(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	approved := map[string]any{"approved_ek_hash": strings.Repeat("ab", 32), "approved_ek_hash_ecc": strings.Repeat("cd", 32), "talos_class": "worker-g5"}
+	approved := map[string]any{"approved_ek_hash": strings.Repeat("ab", 32), "approved_ek_hash_ecc": strings.Repeat("cd", 32), "class": "worker-g5"}
 	f.add("swell", "SIM-STUB", statusPlanned, "", approved)
 	installer := newFakeInstaller(nil)
 	h.v.Installer = installer
@@ -283,9 +266,9 @@ func TestAnotherCertifiedTPMGetsNothing(t *testing.T) {
 		t.Fatal("a mismatch waits as a claim")
 	}
 	waitFor(t, "the mismatch journal entry", func() bool { return f.journaled("not its approved binding") })
-	f.mu.Lock()
-	n := len(f.journal)
-	f.mu.Unlock()
+	f.Mu.Lock()
+	n := len(f.journalLines())
+	f.Mu.Unlock()
 	if n != 1 {
 		t.Fatalf("%d journal entries for two refusals within ten minutes", n)
 	}
@@ -307,7 +290,7 @@ func TestApprovedTPMStillProvesItsBoot(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeNetBox(t)
 			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-			f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(map[string]any{"talos_class": "worker-g5"}))
+			f.add("swell", "SIM-STUB", statusPlanned, "", h.bound(map[string]any{"class": "worker-g5"}))
 			installer := newFakeInstaller(nil)
 			h.v.Installer = installer
 			h.tamper = func(r *protocol.EvidenceRequest) { c.tamper(t, r) }
@@ -375,12 +358,12 @@ func TestABindingChangeReplacesTheTPM(t *testing.T) {
 }
 
 // Once a node runs, neither a reboot into HookOS nor a renewal nor the
-// daily check needs its binding: an unbound active node keeps working on
+// hourly check needs its binding: an unbound active node keeps working on
 // the pins its passes proved.
 func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, statusPlanned, simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, statusPlanned, simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -395,7 +378,7 @@ func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 		t.Fatalf("renewal: %v", err)
 	}
 	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
-		t.Fatalf("daily check: %v", err)
+		t.Fatalf("hourly check: %v", err)
 	}
 	if res, err := h.run(simSerial, simMAC); err != nil || res.Verdict.Verdict != protocol.VerdictPass {
 		t.Fatalf("reboot into HookOS: %v", err)
@@ -411,7 +394,7 @@ func TestRebootAndRenewalNeedNoNewApproval(t *testing.T) {
 func TestABindingAddedDuringTheSessionRefuses(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, "active", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +431,7 @@ func TestABoundPassPinsTheBindingAlone(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFakeNetBox(t)
 			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-			fields := map[string]any{"approved_ek_hash": h.hashes["rsa"], "talos_class": "worker-g5"}
+			fields := map[string]any{"approved_ek_hash": h.hashes["rsa"], "class": "worker-g5"}
 			maps.Copy(fields, c.pins)
 			f.add("swell", "SIM-STUB", statusPlanned, simMAC, fields)
 			if _, err := h.run("SIM-STUB", simMAC); err != nil {
@@ -458,9 +441,9 @@ func TestABoundPassPinsTheBindingAlone(t *testing.T) {
 			if d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != nil {
 				t.Fatalf("pins after a pass against an RSA-only binding: %+v", d.CustomFields)
 			}
-			f.mu.Lock()
-			defer f.mu.Unlock()
-			for _, ch := range f.changes {
+			f.Mu.Lock()
+			defer f.Mu.Unlock()
+			for _, ch := range f.Changes {
 				if ch.Post["ek_hash_ecc"] == h.hashes["ecc"] {
 					t.Fatalf("the extra ECC EK was pinned in change %d", ch.ID)
 				}
@@ -470,12 +453,12 @@ func TestABoundPassPinsTheBindingAlone(t *testing.T) {
 }
 
 // A planned device gets its identity only from an intake pass: a renewal
-// is refused and journaled, and quarantines nothing. The daily check, which
+// is refused and journaled, and quarantines nothing. The hourly check, which
 // issues nothing, still runs, and an active node renews with no binding.
 func TestRenewalRefusedWhilePlanned(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, statusPlanned, simMAC, h.bound(map[string]any{"talos_class": "worker-g5"}))
+	f.add("testbox", simSerial, statusPlanned, simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -489,7 +472,7 @@ func TestRenewalRefusedWhilePlanned(t *testing.T) {
 	}
 	waitFor(t, "the renewal journal entry", func() bool { return f.journaled("refused a renewal while the device is planned") })
 	if _, err := h.check(h.ts.URL, "1.0"); err != nil {
-		t.Fatalf("daily check while planned: %v", err)
+		t.Fatalf("hourly check while planned: %v", err)
 	}
 	f.set(simSerial, func(d *fakeDevice) {
 		d.Status = "active"
@@ -543,7 +526,7 @@ func TestEvidenceRacingABindingChange(t *testing.T) {
 func TestABindingNotFromTerraformRefuses(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"talos_class": "worker-g5"})
+	f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"class": "worker-g5"})
 	f.author = "owner"
 	f.set("SIM-STUB", func(d *fakeDevice) { maps.Copy(d.CustomFields, h.bound(nil)) })
 	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }()); r.Verdict.Reason != reasonBindingAuthor || r.Verdict.Verdict != protocol.VerdictRefused {

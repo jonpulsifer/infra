@@ -15,15 +15,31 @@ fleetd reads owner requests from NetBox and runs one Tinkerbell Workflow per dev
 
 The `decommissioning` status requests retirement separately from `desired_action`.
 
+## BMC mode
+
+`homelab.fleetd.bmc` in `nix/services/fleetd.nix` sets `FLEET_BMC`, which says who drives each machine's baseboard management controller (BMC). The default is `rufio`.
+
+| Need | `rufio` | `native` |
+| --- | --- | --- |
+| Network-boot a run's machine | The Workflow carries `bootMode: netboot`, and Tinkerbell's controller runs the Rufio Job `netboot-<workflow>`: power off, one-time PXE, power on | fleetd does the same three steps through the BMC before it creates the Workflow, which carries no boot mode |
+| Stop a run | The Rufio Job `stop-<run>` | fleetd asks the BMC for the power-off itself |
+| Read the power state | The Rufio `Machine`'s `status.powerState` | fleetd reads the BMC |
+| Credential | The Flux Secret `bmc-amt` in Tinkerbell's namespace | `fleetd/bmc-amt` in spore's sops file, a JSON object with `username` and `password`, through `FLEET_BMC_AMT_CREDENTIAL_FILE` |
+| Per-run state | Annotations on the Workflow | `FLEET_BMC_STATE_FILE`, `/var/lib/fleetd/bmc-runs.json` |
+
+In `native` mode fleetd makes no Rufio `Machine` or `Job`, deletes the `Machine`s it made before, and its `Hardware` names no `Machine`. `apps/fleetd/bmc` drives Intel AMT through bmclib's AMT provider, the same code Rufio runs, over plain HTTP digest auth on port 16992.
+
+A native netboot sets the PXE boot only once the BMC reports the machine off. A machine still on after a pass's 30-second wait, such as one whose OS shuts down on a graceful soft off, keeps its request, and a later pass goes on with the same run; the netboot fails when the machine is still on 10 minutes after the power-off. A netboot that fails creates no Workflow, so no later boot of the machine runs it: fleetd records the run in `last_workflow`, clears `desired_action` and journals the BMC's answer, as a run that ended at its boot job in `rufio` mode.
+
 ## Class policy
 
 Git owns the class table at `clusters/folly/fleet/classes.json`. fleetd reads it through `FLEET_CLASSES`.
 
-Each class declares its operating system, Workflow template, installer image, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior. Every installing class pins its installer image by digest. `.github/workflows/talos-images.yml` writes the Talos classes' pin after each build, and fleetd prefers it over the tag `class-inputs.json` carries for the Talos root.
+Each class declares its operating system, workload, Workflow template, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior, and what its install writes: a Talos class pins its installer image by digest, and an image class (`nixos`, `debian`) pins a disk image by URL, digest and format (`image`, `image_digest`, `image_format`). `.github/workflows/talos-images.yml` writes the Talos classes' pin after each build, and fleetd prefers it over the tag `class-inputs.json` carries for the Talos root; `.github/workflows/node-images.yml` writes the `nixos` class's pin the same way; the `debian` pin is the dated generic release, the variant with drivers for physical hardware, set by hand from its `SHA512SUMS`. A class with no complete pin installs nothing. A Talos class may also pin its signed metal disk image the same way, which [fleet-boot](../../platform/nixos/fleet-boot.md#talos) writes in place of the installer; Tinkerbell's Template ignores it.
 
 An unknown class is refused and journaled. The verifier also refuses a missing profile or a Secure Boot mismatch.
 
-The `talos` profile applies to Talos classes. The `ubuntu` profile accepts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA after the PCR 7 separator. It pins no shim or GRUB digest.
+The `talos` profile applies to the Talos classes and to `nixos`, whose image boots a UKI signed by the same lab key. The `debian` profile accepts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA after the PCR 7 separator. It pins no shim or GRUB digest. The `ubuntu` profile, Canonical's CA in the same shape, stays on disk with no class.
 
 fleetd records SHA-256 hashes of dbx and shim's `SbatLevel` in `dbx_hash` and `sbat_level`. A change produces a journal warning, without quarantine.
 
@@ -40,7 +56,7 @@ The Workflow carries the serial in `hardwareMap`. Before a write, the template r
 ## Retirement
 
 1. The retirement Workflow wipes and erases the disk, then powers off the machine.
-2. fleetd acts on the Workflow's success only once the BMC's Rufio `Machine` reports the machine off, since the agent's report alone is unauthenticated. It journals the wait once, and a `danger` line after 15 minutes. A device without a BMC proceeds on the agent's report, and the journal says so.
+2. fleetd acts on the Workflow's success only once the BMC reports the machine off, through the Rufio `Machine` or, in `native` mode, its own read of the BMC, since the agent's report alone is unauthenticated. It journals the wait once, and a `danger` line after 15 minutes. A device without a BMC proceeds on the agent's report, and the journal says so.
 3. fleetd cordons the Kubernetes node and evicts its pods. It waits up to ten minutes for a PodDisruptionBudget.
 4. fleetd deletes the Node, kubelet certificate requests and bootstrap token.
 5. fleetd sets the device to `offline`.
@@ -55,11 +71,11 @@ A request for the current action is consumed. A different action stays pending u
 
 If NetBox rejects a new run's record, fleetd adopts the existing Workflow, whether running or finished, and retries the write. It never creates a duplicate run. The journal says `its record was late`.
 
-If retirement interrupts another run, fleetd first requests power-off through the baseboard management controller (BMC), using a Rufio Job. After power-off, it rechecks the run before deleting it and starting retirement.
+If retirement interrupts another run, fleetd first requests power-off through the BMC: a Rufio Job, or in `native` mode its own request. After power-off, it rechecks the run before deleting it and starting retirement.
 
 Without a BMC, or if power-off fails, retirement waits. Deleting a Workflow alone does not stop its executing action.
 
-If retirement fails at the BMC Job, no disk action runs. fleetd journals the Job and BMC response. Retry delays double from five minutes to four hours while the device stays `decommissioning`.
+If retirement fails at its netboot, no disk action runs. fleetd journals the BMC's response, with the Rufio Job's name in `rufio` mode. Retry delays double from five minutes to four hours while the device stays `decommissioning`.
 
 ## Configuration access
 
@@ -68,6 +84,7 @@ Only a `planned` device can fetch its configuration. Leaving that state, disappe
 ## Related
 
 - [fleetd overview](../fleetd.md)
+- [fleet-boot](../../platform/nixos/fleet-boot.md), the lab's own boot image, which attests as HookOS does
 - [Provision a node](../../runbooks/provision-a-node.md)
 - [Reprovision a node](../../runbooks/reprovision-a-node.md)
 - [Retire a node](../../runbooks/retire-a-node.md)

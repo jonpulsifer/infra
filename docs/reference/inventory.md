@@ -15,7 +15,9 @@ The file has two sections:
 | `nodes` | One entry per node, keyed by node name |
 
 Model facts include the SMBIOS model, manufacturer, NIC, install disk, TPM version, Intel AMT and expected Secure Boot state.
-Each node declares its model, serial, Talos class, switch port, address and BMC type.
+Each node declares its model, serial, class, switch port, address and BMC type.
+
+A class is a key of `clusters/folly/fleet/classes.json`, the one table that says what a machine of the class runs and for whom: its `os`, its `workload` (`general` today), the attestation profile fleetd holds its boot to, and the payload its install writes. fleetd reads the table on spore, `terraform/netbox/folly` takes the class field's choices from it, and `clusters/folly/talos/` keeps the Talos role and patches of each class whose `os` is `talos`, and the labels and taints its `workload` puts on the node.
 A node can override its model's disk, TPM, AMT or Secure Boot setting.
 
 The file's opening comment defines each key. Every value is a scalar on its own line.
@@ -89,8 +91,7 @@ The root creates each device with status `planned`. It declares:
 - The serial, device type, site, role and platform.
 - The address on the interface from the device type's template, and that address as the primary IPv4.
 - A cable to the switch port.
-- The hardware fields `talos_class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt` and `secure_boot_expected`.
-- `expected_port`, which identifies the switch port.
+- The fields `class`, `bmc_type`, `install_disk`, `install_disk_serial`, `tpm_version`, `amt` and `secure_boot_expected`.- `expected_port`, which identifies the switch port.
 
 fleetd does not write these fields. It refuses installation when a required field is empty.
 A missing `disk_serial` produces a null `install_disk_serial`.

@@ -38,6 +38,7 @@ in
       probe = spore.systemd.services.spore-native-boot-artifact-check;
       fetchScript = rackpi5.boot.initrd.systemd.services.fetch-nix-store.script;
       smee = "${spore.systemd.services.tinkerbell.serviceConfig.ExecStart} ";
+      smeeOn = spore.homelab.tinkerbell.smee.enable;
       failures = lib.filter (failure: failure != null) [
         (
           if lib.hasInfix "/$expected.squashfs" fetchScript then
@@ -98,11 +99,18 @@ in
           if !(spore.services.dnsmasq.settings ? "dhcp-range") then
             null
           else
-            "dnsmasq could hand out leases or answer DHCP beside Smee"
+            "dnsmasq could hand out leases or answer DHCP beside UniFi's"
+        )
+        (
+          if lib.hasInfix " --enable-smee=${lib.boolToString smeeOn} " smee then
+            null
+          else
+            "Tinkerbell's flags disagree with homelab.tinkerbell.smee.enable"
         )
         (
           if
-            lib.all (flag: lib.hasInfix flag smee) [
+            !smeeOn
+            || lib.all (flag: lib.hasInfix flag smee) [
               " --dhcp-mode=proxy "
               " --dhcp-bind-interface=bootstrap "
             ]
@@ -112,10 +120,22 @@ in
             "Smee could hand out leases or answer DHCP beyond the bootstrap VLAN"
         )
         (
-          if lib.hasInfix " --tftp-server-enabled=false " smee then
+          if spore.homelab.kea.enable && smeeOn && lib.hasInfix " --dhcp-enabled=true " smee then
+            "Smee and Kea would both answer the relay's DHCP on the bootstrap VLAN"
+          else
+            null
+        )
+        (
+          if !smeeOn || lib.hasInfix " --tftp-server-enabled=false " smee then
             null
           else
             "Smee's TFTP listener would collide with dnsmasq's"
+        )
+        (
+          if smeeOn != spore.homelab.hookosSyslog.enable then
+            null
+          else
+            "HookOS's syslog has ${if smeeOn then "two receivers" else "no receiver"} on the bootstrap VLAN"
         )
         (
           if
@@ -136,13 +156,25 @@ in
     in
     require "spore-reliability" (failures == [ ]) (lib.concatStringsSep "; " failures);
 
-  # spore alone serves TFTP on the bootstrap VLAN. A DHCP answer from it would race UniFi's and
-  # Smee's offers. The VLAN holds unenrolled machines, so its chain must refuse ssh, NFS, Garage,
-  # the exporters and the Tinkerbell API, which the global allowed ports open on every other
-  # interface.
+  # spore alone serves TFTP on the bootstrap VLAN, and alone runs Kea, which answers the gateway's
+  # relayed requests only: a UDP socket on the bootstrap address hears no broadcast from a machine
+  # on the VLAN, so dnsmasq and Kea together still lease nothing there. The VLAN holds unenrolled
+  # machines, so its chain must refuse ssh, NFS, Garage, the exporters and the Tinkerbell API,
+  # which the global allowed ports open on every other interface.
   boot-plane =
     let
       anchors = lib.filterAttrs (_: c: c.networking.vlans ? bootstrap) configs;
+      keaHosts = namesWhere (c: c.services.kea.dhcp4.enable) configs;
+      keaBroken =
+        c:
+        c.services.kea.dhcp4.enable
+        && (
+          let
+            text = c.services.kea.dhcp4.configFile.text;
+          in
+          !(lib.hasInfix ''"dhcp-socket-type":"udp"'' text)
+          || !(lib.hasInfix ''"interfaces":["bootstrap/'' text)
+        );
       refused = [
         22
         111
@@ -200,11 +232,12 @@ in
         || dnsmasq.port != [ 0 ]
         || dnsmasq."tftp-single-port" or [ ] != [ true ]
         || firewallBroken c
+        || keaBroken c
       ) anchors;
     in
     require "boot-plane"
-      (lib.attrNames anchors == [ "spore" ] && broken == [ ])
-      "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; misconfigured: ${lib.concatStringsSep ", " broken}";
+      (lib.attrNames anchors == [ "spore" ] && keaHosts == [ "spore" ] && broken == [ ])
+      "hosts on the bootstrap VLAN: ${lib.concatStringsSep ", " (lib.attrNames anchors)}; hosts running Kea: ${lib.concatStringsSep ", " keaHosts}; misconfigured: ${lib.concatStringsSep ", " broken}";
 
   # spore's SPIRE server runs the EK attestor, the tpm_devid attestor, or both, by two switches. The
   # node aliases are fleetd's, so spore declares none. An agent matches a node entry only when it
@@ -404,4 +437,49 @@ in
     require "fleet-unique-uids" (
       clashing == [ ]
     ) "hosts with two normal users sharing a uid: ${lib.concatStringsSep ", " clashing}";
+
+  # The lab's own RAM boot image must reach the fleetd, NTP server and syslog receiver HookOS does,
+  # boot its own target rather than look for a root, and keep the kernel series netboot.json pins.
+  # The drvPath makes the image evaluate without building it.
+  fleet-boot-image =
+    let
+      image = pkgs.callPackage ../images/fleet-boot.nix { };
+      hookos = pkgs.callPackage ../images/hookos-folly.nix { };
+      pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
+      words = lib.splitString " " image.cmdline;
+      shared = lib.filter (
+        w:
+        lib.any (k: lib.hasPrefix "${k}=" w) [
+          "fleet_attest_url"
+          "fleet_ntp_server"
+          "syslog_host"
+        ]
+      ) (lib.splitString " " hookos.cmdline);
+      units = image.config.boot.initrd.systemd.units;
+      failures =
+        lib.optional (lib.length shared != 3) "HookOS's command line lost a key fleet-boot shares"
+        ++ map (w: "fleet-boot's command line lacks ${w}, which HookOS's has") (
+          lib.filter (w: !(lib.elem w words)) shared
+        )
+        ++ lib.optional (
+          !(lib.elem "rd.systemd.unit=fleet-boot.target" words)
+        ) "fleet-boot does not boot fleet-boot.target"
+        ++ lib.optional (
+          !(units ? "fleet-boot.target" && units ? "fleet-boot.service")
+        ) "the initrd defines no fleet-boot target or service"
+        ++ lib.optional (lib.any (lib.hasPrefix "worker_id=") words) "fleet-boot's command line names a worker"
+        ++ lib.optional (
+          !(pkgs ? ${pins.fleet_boot.kernel})
+        ) "netboot.json's fleet_boot.kernel names no nixpkgs kernel package set";
+    in
+    pkgs.runCommand "check-fleet-boot-image"
+      {
+        drvPath = builtins.unsafeDiscardOutputDependency image.drvPath;
+      }
+      (
+        if failures == [ ] then
+          "touch $out"
+        else
+          throw "check 'fleet-boot-image' failed: ${lib.concatStringsSep "; " failures}"
+      );
 }

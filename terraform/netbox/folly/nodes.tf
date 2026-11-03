@@ -24,6 +24,9 @@ locals {
   disk_serials = [for n in values(local.nodes) : n.disk_serial if lookup(n, "disk_serial", null) != null]
 
   node_prefix_length = split("/", local.topology.K8S_NODE_CIDR)[1]
-  classes            = ["controlplane", "worker-g5", "worker-g2"]
-  bmc_types          = ["amt", "none"]
+  # The class table fleetd reads: every class a node may declare, with its
+  # OS and workload. Its keys are the choice set of the class field.
+  class_table = jsondecode(file("${path.module}/../../../clusters/folly/fleet/classes.json"))
+  classes     = sort(keys(local.class_table))
+  bmc_types   = ["amt", "none"]
 }

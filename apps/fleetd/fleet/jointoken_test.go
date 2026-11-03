@@ -210,7 +210,7 @@ func TestWorkerRenderCarriesItsOwnToken(t *testing.T) {
 		t.Fatalf("a worker rendered without the cluster's API: %d", code)
 	}
 
-	it = newInstallTest(t, "planned", map[string]any{"talos_class": "controlplane"})
+	it = newInstallTest(t, "planned", map[string]any{"class": "controlplane"})
 	it.in.ControlPlanes = true
 	it.in.Bootstrap = "10.3.0.10"
 	req := goodRequest()

@@ -15,11 +15,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/go-attestation/attest"
 
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -221,6 +221,4 @@ const (
 	reasonInternal       = "internal"
 )
 
-func normalMAC(m string) string {
-	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m), "-", ":"))
-}
+func normalMAC(m string) string { return netbox.NormalMAC(m) }

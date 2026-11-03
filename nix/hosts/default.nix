@@ -67,6 +67,14 @@
     module = ../images/netboot.nix;
     artifact = "netbootBundle";
   };
+  # The disk image a folly `nixos` class installs. .github/workflows/node-images.yml builds it, signs
+  # its UKI and pins the release in clusters/folly/fleet/classes.json.
+  node-nixos = {
+    kind = "image";
+    baseline = "fleet";
+    module = ../images/node-nixos.nix;
+    artifact = "image";
+  };
   wsl = {
     kind = "image";
     module = ../images/wsl.nix;
@@ -117,5 +125,10 @@
   hookos-folly = {
     kind = "package";
     module = ../images/hookos-folly.nix;
+  };
+  # folly's own RAM boot image, unsigned, which the same pipeline signs with the HookOS key.
+  fleet-boot = {
+    kind = "package";
+    module = ../images/fleet-boot.nix;
   };
 }

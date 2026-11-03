@@ -17,7 +17,7 @@ type platform struct {
 }
 
 func readPlatform(dir string) platform {
-	r := func(name string) string { return readTrim(dir + "/" + name) }
+	r := func(name string) string { return client.ReadTrim(dir + "/" + name) }
 	return platform{r("sys_vendor"), r("product_name"), r("product_sku"), r("bios_vendor"), r("bios_version"), r("bios_date")}
 }
 

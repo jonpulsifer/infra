@@ -10,8 +10,8 @@ fleetd exposes device, administration and monitoring endpoints. Use this page to
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
 | Device flow | `https://enroll.lolwtf.ca/attest/v1/attest` and the session routes under it | HookOS on a netbooting machine, at spore's bootstrap address |
-| Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` | A node's first boot from disk |
-| LDevID and verdict lookups, renewal and daily check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
+| Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` for a Talos class, `https://enroll.lolwtf.ca/seed?uuid=<uuid>&code=<code>` for a `nixos-image`, `alpine-image` or `cloud-init-nocloud` class | A node's first boot from disk; for a `cloud-init-nocloud` class, the install in HookOS |
+| LDevID and verdict lookups, renewal and hourly check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
 | Webhook and metrics | `http://<SPORE_IP>:8446/webhook`, `/healthz`, `/metrics` | NetBox's event rule and the Anchor network |
 | Admin API | `https://spore.<tailnet>:8445`, `GET /machines` | Tailnet logins in `ATTEST_APPROVERS` |
 | NetBox | A device's `desired_action` and `status` | The owner |
@@ -69,6 +69,12 @@ Kubelet client certificates cannot be revoked. A disk image can retain a certifi
 
 Every Talos configuration also contains the cluster's trustd token, `machine.token`. Nothing rotates this token. A copy on disk can still obtain Talos API certificates.
 
+## BMC access
+
+`homelab.fleetd.bmc` picks who reaches each machine's AMT ([BMC mode](lifecycle.md#bmc-mode)). The default, `rufio`, uses the Flux Secret `clusters/folly/tinkerbell/bmc-amt.sops.yaml`. `native` uses `fleetd/bmc-amt` in `nix/secrets/spore.sops.yaml`, and the two hold the same user and password, so a password change goes into both files.
+
+In `native` mode, fleetd keeps each run's netboot, stop and power-off wait in `/var/lib/fleetd/bmc-runs.json` on spore, which `sudo jq . /var/lib/fleetd/bmc-runs.json` reads. It drops a run's record once no `Workflow` and no device's `last_workflow` names the run, and keeps the record of a failed netboot, or one that waits for the machine to go off, for `FLEET_WORKFLOW_TTL`.
+
 ## Disk identity
 
 The disk check trusts the serial that the disk reports. Duplicate serials cause refusal, including clones and some USB bridges. A disk without a serial exposed through sysfs cannot be wiped or installed through fleetd.
@@ -87,8 +93,8 @@ The disk check trusts the serial that the disk reports. Duplicate serials cause 
 | `FleetNodeBootedHookOSAfterInstall` | A planned device attested from HookOS after its provision succeeded, so its firmware did not boot the disk | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestQuarantined` | A node's newest verdict is a quarantine | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestWaitingForApproval` | An intake waits for an approved EK binding | [Provision a node](../../runbooks/provision-a-node.md#approve-a-machines-eks) |
-| `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's daily quote or renewal fails | [Add a TPM node to SPIRE](../../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
-| `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A daily check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
+| `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's hourly quote or renewal fails | [Add a TPM node to SPIRE](../../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
+| `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A hourly check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
 | `KubeletCSRPending` | A kubelet's first certificate request has waited an hour | [Install Talos on a node](../../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate) |
 | `NodeClientApprovalBindingRestored` | The controller manager's approval binding has subjects again, as after a Talos Kubernetes upgrade, or fleetd cannot read it | Reconcile Flux's `tinkerbell-access` |
 

@@ -11,9 +11,14 @@
 #   this address (./coredns-sinkhole.nix), and a node on the Kubernetes network reaches it through
 #   the gateway. The Tink server presents the same certificate on 42113 (./tinkerbell.nix).
 # - HTTP on port 8444 for folly's nodes and pods (the firewall admits the node and pod CIDRs): the
-#   DevID lookups, the renewal and the daily check.
+#   DevID lookups, the renewal and the hourly check.
 # - HTTP on port 8446 of the Anchor network for NetBox's event-rule webhook, and /metrics.
 # - The admin API on a unix socket that `tailscale serve` publishes on the tailnet.
+#
+# homelab.fleetd.bmc says who drives each machine's BMC. With "rufio", the default, fleetd makes a
+# Rufio Machine per device and Tinkerbell's controller power-cycles a run's machine. With "native",
+# fleetd makes no Machine and powers and netboots each machine through its AMT itself, with the
+# credential fleetd/bmc-amt in spore's sops file: a JSON object with username and password.
 #
 # With fleetd/folly-cordon-token sealed, it reaches the cluster's API as
 # clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml's account: it cordons a node it
@@ -23,6 +28,8 @@
   config,
   lib,
   pkgs,
+  name,
+  inputs,
   ...
 }:
 let
@@ -37,12 +44,17 @@ let
   webhook = sealed "webhook-secret";
   cordon = sealed "folly-cordon-token";
   workerSecrets = sealed "worker-secrets";
+  nativeBmc = cfg.bmc == "native";
   cluster = (import ../lib/networks.nix).${site};
   # An admitted device's address comes from the node prefix. Only these keys are read, so a new
   # node, which changes the inventory export, leaves the service's environment alone.
   topology = (lib.importJSON ../../clusters/${site}/config/cluster-topology.json).data;
 
   bootstrapIp = lab.bootstrap.hosts.spore;
+  # With Kea on this host (./kea.nix), fleetd writes its reservations file, in group kea, and
+  # reloads it over the control socket.
+  keaOn = lib.attrByPath [ "homelab" "kea" "enable" ] false config;
+  keaFleetDir = "/var/lib/kea/fleet";
   host = "enroll.${fleet.dnsZone}";
   # The command line nix/images/hookos-folly.nix bakes into the UKI. Without Secure Boot,
   # systemd-stub takes iPXE's arguments instead, so each Hardware's script passes the same one.
@@ -85,6 +97,31 @@ let
 
   devidPort = 8444;
   adminPort = 8445;
+  # The seed a NixOS or Alpine class's first boot reads once (apps/fleetd/fleet/seed.go): the
+  # node prefix and router from the topology, the anchors' resolvers, the fleet's endpoints, the
+  # SPIRE server this host runs, the owner's SSH keys, and the profile each payload kind names.
+  spire = lib.attrByPath [ "homelab" "spire" ] { enable = false; } config;
+  seedInputs = pkgs.writeText "fleet-seed-inputs.json" (
+    builtins.toJSON {
+      prefix_length = lib.toInt (lib.last (lib.splitString "/" topology.K8S_NODE_CIDR));
+      gateway = topology.ROUTER_IP;
+      resolvers = [
+        lab.ns.ns1
+        lab.ns.ns2
+      ];
+      dns_zone = fleet.dnsZone;
+      enroll_url = "https://${host}";
+      devid_url = "http://${lab.hosts.spore}:${toString devidPort}";
+      spire = {
+        server = "${name}.${fleet.dnsZone}:${toString (spire.port or 0)}";
+        trust_domain = spire.trustDomain or "";
+      };
+      ssh_authorized_keys = lib.filter (k: k != "") (
+        lib.splitString "\n" (builtins.readFile inputs.keys)
+      );
+      profiles = cfg.seeds.profiles;
+    }
+  );
   runDir = "/run/fleetd";
   adminSocket = "${runDir}/admin.sock";
   stateDir = "/var/lib/fleetd";
@@ -138,6 +175,14 @@ in
       default = false;
       description = "Let a control-plane class render and install like a worker and join the cluster. fleetd then holds the full secrets bundle, fleetd/bundle in spore's sops file, with the cluster's CA keys. The control plane at the API server's address, which the Talos root bootstraps, never installs from here. Off, sops-nix does not decrypt the bundle and a control plane is refused.";
     };
+    bmc = lib.mkOption {
+      type = lib.types.enum [
+        "rufio"
+        "native"
+      ];
+      default = "rufio";
+      description = "Who drives each machine's BMC. rufio: fleetd makes a Rufio Machine per device, stops a run with a Rufio Job, and Tinkerbell's controller network-boots a run's machine. native: fleetd powers, stops and network-boots each machine through its AMT itself, with fleetd/bmc-amt from spore's sops file, and makes no Rufio object.";
+    };
     webhookPort = lib.mkOption {
       type = lib.types.port;
       default = 8446;
@@ -153,6 +198,22 @@ in
       default = true;
       description = "Start the provision of an admitted worker that never ran a Workflow. Off, an admitted device waits for the owner.";
     };
+    seeds = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Render the seed a NixOS or Alpine class's first boot reads, and the cloud-init tar a cloud-init class's install unpacks, from the site's topology and this host's SPIRE server, and give each image class's Workflow the seed URL. Off, a seed class is refused at admission and no image class installs.";
+      };
+      profiles = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = {
+          nixos-image = "github:jonpulsifer/infra#\${name}";
+          alpine-image = "http://${bootstrapIp}/alpine/${site}/\${workload}.apkovl.tar.gz";
+        };
+        defaultText = "the node's flake attribute in this repository, and the workload's apkovl under nginx's alpine/<site>/ on the bootstrap address";
+        description = "The profile each seed payload kind names, with \${name}, \${class} and \${workload} filled from the node: the flake attribute a NixOS node switches into, and the apkovl an Alpine node applies.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -160,6 +221,10 @@ in
       {
         assertion = config.sops.secrets ? "tinkerbell/admin-crt";
         message = "fleetd.nix reaches Tinkerbell's API with the certificates that tinkerbell.nix declares.";
+      }
+      {
+        assertion = !cfg.seeds.enable || spire.enable;
+        message = "homelab.fleetd.seeds names this host's SPIRE server, which homelab.spire.enable runs (spire-server.nix).";
       }
       {
         assertion = !cfg.controlPlanes || (cfg.installs && workerSecrets && sealed "bundle");
@@ -171,6 +236,10 @@ in
         # drop-bundle removes it).
         assertion = cfg.controlPlanes || !sealed "bundle";
         message = "fleetd/bundle is in spore's sops file while homelab.fleetd.controlPlanes is off; run scripts/talos-worker-secrets.sh drop-bundle spore.";
+      }
+      {
+        assertion = !nativeBmc || sealed "bmc-amt";
+        message = "homelab.fleetd.bmc = \"native\" needs fleetd/bmc-amt in spore's sops file.";
       }
       {
         assertion = !workerSecrets || cordon;
@@ -202,6 +271,11 @@ in
     // lib.optionalAttrs cfg.controlPlanes {
       # The full bundle, with the cluster's CA keys.
       "fleetd/bundle" = { };
+    }
+    // lib.optionalAttrs nativeBmc {
+      # The AMT user and password, the same as the Flux Secret bmc-amt Rufio reads
+      # (clusters/folly/tinkerbell/bmc-amt.sops.yaml).
+      "fleetd/bmc-amt" = { };
     };
 
     users.users.fleetd = {
@@ -289,11 +363,18 @@ in
         FLEET_WEBHOOK_ADDR = ":${toString cfg.webhookPort}";
         # Some firmware takes Smee's offer over the network's DHCP, and Smee names
         # /<mac>/netboot-not-allowed while allowPXE is off (./tinkerbell.nix). fleetd links that
-        # path to the signed iPXE under dnsmasq's TFTP root for each MAC NetBox holds.
+        # path to the signed iPXE under dnsmasq's TFTP root for each MAC NetBox holds. With Smee
+        # off nothing asks for the links; they cost one symlink per MAC and keep the switch back cheap.
         FLEET_TFTP_DIR = tftpDir;
         FLEET_TFTP_LINK_TARGET = "${tftpDir}/talos/${site}/ipxe-amd64-secureboot.efi";
+        # Kea's reservations: each NetBox device's MAC gets its address, and the signed iPXE as
+        # its boot file while the device has an unfinished Workflow (./kea.nix).
+        FLEET_KEA_FILE = lib.mkIf keaOn "${keaFleetDir}/reservations.json";
+        FLEET_KEA_SOCKET = lib.mkIf keaOn "/run/kea/kea-dhcp4.socket";
+        FLEET_KEA_BOOT_FILE = lib.mkIf keaOn "talos/${site}/ipxe-amd64-secureboot.efi";
         FLEET_INTERVAL = "2m";
         FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
+        FLEET_BMC = cfg.bmc;
         FLEET_WORKFLOW_TTL = "168h";
         FLEET_CONFIG_TTL = "2h";
         # Rendered configs wait in this tmpfs, which RuntimeDirectoryPreserve keeps across a
@@ -301,6 +382,11 @@ in
         FLEET_CONFIG_DIR = "${runDir}/configs";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
+        # The seed a NixOS, Alpine or cloud-init class renders, served once at /seed by the
+        # install code, and the URL an image class's Workflow carries so the install writes it
+        # to the disk, or fetches the seed itself.
+        FLEET_SEED_INPUTS = lib.mkIf cfg.seeds.enable "${seedInputs}";
+        FLEET_SEED_URL = lib.mkIf cfg.seeds.enable "https://${host}/seed";
         # The Talos root bootstraps etcd on the control plane at the API server's address: no
         # provision or wipe runs there, and it never installs from here.
         FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;
@@ -318,6 +404,12 @@ in
         FLEET_CLASS_INPUTS = "${../../clusters/${site}/fleet/class-inputs.json}";
         FLEET_WORKER_SECRETS = "%d/worker-secrets";
         FLEET_TALOSCTL = lib.getExe talosctl;
+      }
+      // lib.optionalAttrs nativeBmc {
+        FLEET_BMC_AMT_CREDENTIAL_FILE = "%d/bmc-amt";
+        # Each run's netboot, stop and power-off wait, which Workflow annotations and Rufio Jobs hold
+        # in rufio mode.
+        FLEET_BMC_STATE_FILE = "${stateDir}/bmc-runs.json";
       }
       // lib.optionalAttrs cfg.controlPlanes {
         FLEET_CONTROLPLANE_BUNDLE = "%d/bundle";
@@ -338,9 +430,11 @@ in
         ++ lib.optional webhook "webhook-secret:${config.sops.secrets."fleetd/webhook-secret".path}"
         ++ lib.optional cordon "folly-cordon-token:${config.sops.secrets."fleetd/folly-cordon-token".path}"
         ++ lib.optional workerSecrets "worker-secrets:${config.sops.secrets."fleetd/worker-secrets".path}"
-        ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleetd/bundle".path}";
+        ++ lib.optional cfg.controlPlanes "bundle:${config.sops.secrets."fleetd/bundle".path}"
+        ++ lib.optional nativeBmc "bmc-amt:${config.sops.secrets."fleetd/bmc-amt".path}";
         User = "fleetd";
         Group = "fleetd";
+        SupplementaryGroups = lib.optional keaOn "kea";
         StateDirectory = "fleetd";
         StateDirectoryMode = "0750";
         RuntimeDirectory = "fleetd";
@@ -349,7 +443,8 @@ in
         ReadWritePaths = [
           metricsDir
           tftpDir
-        ];
+        ]
+        ++ lib.optional keaOn keaFleetDir;
         UMask = "0027";
         Restart = "always";
         RestartSec = 5;
@@ -412,7 +507,7 @@ in
     # fleetd's /metrics, for node-exporter's textfile collector (../profiles/anchor.nix), since its port
     # admits only the Anchor network. A fleetd that does not answer leaves the file empty, so its
     # series go absent. fleetd_devid_serving probes the DevID listener on its own, since every
-    # node's renewal and daily check reach it there.
+    # node's renewal and hourly check reach it there.
     systemd.services.fleetd-metrics = {
       description = "Export fleetd's metrics through node-exporter";
       serviceConfig = {

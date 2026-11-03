@@ -36,6 +36,8 @@ in
     ../profiles/pi5-nvme.nix
     ../services/fleetd.nix
     ../services/garage.nix
+    ../services/hookos-syslog.nix
+    ../services/kea.nix
     ../services/nfs-server.nix
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
@@ -47,6 +49,16 @@ in
 
   # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
   homelab.fleetd.installs = true;
+
+  # UniFi's DHCP names the iPXE and the iPXE's menu boots HookOS, so Smee's proxy offer, which
+  # riptide's firmware raced against UniFi's, and its per-MAC script add nothing a node can see.
+  # rsyslog takes over HookOS's syslog. Smee stays in tinkerbell.nix for the switch back.
+  homelab.tinkerbell.smee.enable = false;
+  homelab.hookosSyslog.enable = true;
+
+  # Kea answers the Kubernetes network's DHCP once the UDM relays it here
+  # (terraform/network/unifi/folly/k8s.tf). With Smee off it is the only DHCP server on the VLAN.
+  homelab.kea.enable = true;
 
   # terraform/netbox/folly writes as this NetBox user once the owner switches its token to the user's own.
   # Until then its writes record as admin and no approved EK binding counts.

@@ -133,7 +133,7 @@ resource "restapi_object" "declared" {
     device_type = tonumber(netbox_device_type.node[each.value.model].id)
     primary_ip4 = tonumber(netbox_ip_address.node[each.key].id)
     custom_fields = {
-      talos_class          = each.value.class
+      class                = each.value.class
       bmc_type             = each.value.bmc
       install_disk         = each.value.disk
       install_disk_serial  = lookup(each.value, "disk_serial", null)

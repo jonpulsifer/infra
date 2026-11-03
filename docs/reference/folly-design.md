@@ -98,7 +98,7 @@ SPIRE supports two node proofs here. The EK plugin checks possession against an 
 
 Registration entries connect the node identity to workload selectors. A pod receives only identities that match its registration. GCP access also requires an IAM grant for the subject. [Identity](../platform/identity.md) describes the token exchange.
 
-The running node sends daily LAK-signed boot evidence to fleetd. Renewal also replaces expiring device certificates. An authenticated policy failure quarantines a worker and requests a cordon. A control-plane failure records a failed verdict and raises an alert without an automatic cordon. The failed verdict can also remove eligibility for fleet-owned SPIRE registrations.
+The running node sends hourly LAK-signed boot evidence to fleetd. Renewal also replaces expiring device certificates. An authenticated policy failure quarantines a worker and requests a cordon. A control-plane failure records a failed verdict and raises an alert without an automatic cordon. The failed verdict can also remove eligibility for fleet-owned SPIRE registrations.
 
 A cordon prevents new scheduling. It does not stop existing pods or isolate the network. Transport failure is not evidence of an unacceptable boot, so it does not trigger the same quarantine decision.
 
@@ -163,7 +163,7 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | Forge a physical switch location | Not solved | `apps/fleetd/attest/network.go` checks signed reports; admission checks `expected_port`. | LLDP observations do not authenticate a cable or switch. |
 | Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. A quoted PCR with no log events must read its initial value. | Does not establish that firmware measures all relevant code correctly. |
 | Run an old but accepted signed image | Not solved | Signing-authority checks apply in the class's profile under `apps/fleetd/attest/policy/`. | Empty `boot_applications` provides no exact-image restriction or version floor. A filled pin also requires a boot application in PCR 4's log, so a log stripped of PCR 4 fails. |
-| Compromise a host after an acceptable boot | Not solved | Daily quotes provide later boot evidence. | They do not prove runtime memory integrity or remove an attacker. |
+| Compromise a host after an acceptable boot | Not solved | Hourly quotes provide later boot evidence. | They do not prove runtime memory integrity or remove an attacker. |
 | Replay a fully consumed config code | Solved | Burn state and single-fetch exclusion in `apps/fleetd/fleet/configs.go`. | Theft before consumption remains possible. |
 | Steal an unspent install code from the node | Not solved | TPM delivery, HTTPS, file permissions and expiry reduce exposure. | The code is a bearer secret after unwrapping, including in META. |
 | Trigger quarantine with unauthenticated bad evidence | Solved | TPM-proof gates in `apps/fleetd/attest/attest.go`. Claimed fields are capped before they are logged, invalid requests are counted and not journaled, `verdicts.jsonl` rotates, and an unproven request displaces no open session. | Resource exhaustion and network denial remain possible. |

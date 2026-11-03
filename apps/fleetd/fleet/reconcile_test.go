@@ -15,223 +15,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox/netboxtest"
 )
 
-// fakeNetBox serves a device list and records the patches and journal
-// entries it receives. pageSize > 0 pages the device list with next links
-// that name a foreign host, as NetBox's do.
-type fakeNetBox struct {
-	mu        sync.Mutex
-	devices   []map[string]any
-	ifaces    []map[string]any
-	patches   []map[string]any
-	journals  []map[string]any
-	failPatch bool
-	pageSize  int
-	pages     int
-
-	// apply makes a device PATCH change the stored device, as NetBox does.
-	apply    bool
-	failMACs bool
-	macs     []map[string]any
-	switches []map[string]any
-	deleted  []string
-	nextID   int
-}
-
-func (f *fakeNetBox) id() int {
-	if f.nextID == 0 {
-		f.nextID = 1000
-	}
-	f.nextID++
-	return f.nextID
-}
-
-func (f *fakeNetBox) ifaceByID(id int) map[string]any {
-	for _, i := range f.ifaces {
-		if fmt.Sprint(i["id"]) == fmt.Sprint(id) {
-			return i
-		}
-	}
-	return nil
-}
-
-// applyPatch merges a device PATCH into the stored device.
-func (f *fakeNetBox) applyPatch(id string, p map[string]any) {
-	for _, d := range f.devices {
-		if fmt.Sprint(d["id"]) != id {
-			continue
-		}
-		for k, v := range p {
-			switch k {
-			case "id":
-			case "custom_fields":
-				for ck, cv := range v.(map[string]any) {
-					d["custom_fields"].(map[string]any)[ck] = cv
-				}
-			case "status":
-				d["status"] = map[string]any{"value": v}
-			default:
-				d[k] = v
-			}
-		}
-	}
-}
-
-func (f *fakeNetBox) handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/dcim/devices/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.pages++
-		if r.URL.Query().Get("role") == "switch" {
-			json.NewEncoder(w).Encode(map[string]any{"count": len(f.switches), "next": nil, "results": f.switches})
-			return
-		}
-		results := f.devices
-		var next any
-		if f.pageSize > 0 {
-			offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-			end := offset + f.pageSize
-			if end > len(f.devices) {
-				end = len(f.devices)
-			}
-			results = f.devices[offset:end]
-			if end < len(f.devices) {
-				q := r.URL.Query()
-				q.Set("offset", strconv.Itoa(end))
-				next = "https://netbox.example/api/dcim/devices/?" + q.Encode()
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"count": len(f.devices), "next": next, "results": results})
-	})
-	mux.HandleFunc("GET /api/dcim/interfaces/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		q := r.URL.Query()
-		results := []map[string]any{}
-		for _, i := range f.ifaces {
-			if ids := q["device_id"]; len(ids) > 0 {
-				dev := fmt.Sprint(i["device"].(map[string]any)["id"])
-				found := false
-				for _, id := range ids {
-					found = found || id == dev
-				}
-				if !found {
-					continue
-				}
-			}
-			if n := q.Get("name"); n != "" && i["name"] != n {
-				continue
-			}
-			if q.Get("type__n") == "virtual" && i["type"] == "virtual" {
-				continue
-			}
-			results = append(results, i)
-		}
-		json.NewEncoder(w).Encode(map[string]any{"count": len(results), "next": nil, "results": results})
-	})
-	mux.HandleFunc("GET /api/dcim/interfaces/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		id, _ := strconv.Atoi(r.PathValue("id"))
-		i := f.ifaceByID(id)
-		if i == nil {
-			http.NotFound(w, r)
-			return
-		}
-		json.NewEncoder(w).Encode(i)
-	})
-	mux.HandleFunc("PATCH /api/dcim/devices/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if f.failPatch {
-			http.Error(w, `{"detail":"down"}`, http.StatusBadGateway)
-			return
-		}
-		var p map[string]any
-		json.NewDecoder(r.Body).Decode(&p)
-		if f.apply {
-			f.applyPatch(r.PathValue("id"), p)
-		}
-		p["id"] = r.PathValue("id")
-		f.patches = append(f.patches, p)
-		w.Write([]byte("{}"))
-	})
-	mux.HandleFunc("DELETE /api/dcim/devices/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		for i, d := range f.devices {
-			if fmt.Sprint(d["id"]) == r.PathValue("id") {
-				f.deleted = append(f.deleted, d["name"].(string))
-				f.devices = append(f.devices[:i], f.devices[i+1:]...)
-				w.WriteHeader(http.StatusNoContent)
-				return
-			}
-		}
-		http.NotFound(w, r)
-	})
-	mux.HandleFunc("GET /api/dcim/mac-addresses/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		if f.failMACs {
-			http.Error(w, `{"detail":"down"}`, http.StatusBadGateway)
-			return
-		}
-		results := []map[string]any{}
-		for _, m := range f.macs {
-			if strings.EqualFold(m["mac_address"].(string), r.URL.Query().Get("mac_address")) {
-				results = append(results, m)
-			}
-		}
-		json.NewEncoder(w).Encode(map[string]any{"count": len(results), "next": nil, "results": results})
-	})
-	mux.HandleFunc("POST /api/dcim/interfaces/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var i map[string]any
-		json.NewDecoder(r.Body).Decode(&i)
-		i["id"] = f.id()
-		i["device"] = map[string]any{"id": i["device"]}
-		f.ifaces = append(f.ifaces, i)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(i)
-	})
-	mux.HandleFunc("PATCH /api/dcim/interfaces/{id}/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var p map[string]any
-		json.NewDecoder(r.Body).Decode(&p)
-		id, _ := strconv.Atoi(r.PathValue("id"))
-		i := f.ifaceByID(id)
-		for _, m := range f.macs {
-			if fmt.Sprint(m["id"]) == fmt.Sprint(p["primary_mac_address"]) {
-				i["primary_mac_address"] = map[string]any{"id": m["id"], "mac_address": m["mac_address"]}
-			}
-		}
-		json.NewEncoder(w).Encode(i)
-	})
-	mux.HandleFunc("POST /api/dcim/mac-addresses/", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var m map[string]any
-		json.NewDecoder(r.Body).Decode(&m)
-		m["id"] = f.id()
-		f.macs = append(f.macs, m)
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(m)
-	})
-	mux.HandleFunc("POST /api/extras/journal-entries/", func(w http.ResponseWriter, r *http.Request) {
-		var p map[string]any
-		json.NewDecoder(r.Body).Decode(&p)
-		f.mu.Lock()
-		f.journals = append(f.journals, p)
-		f.mu.Unlock()
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte("{}"))
-	})
-	return mux
-}
+// fakeNetBox is the shared in-memory NetBox.
+type fakeNetBox = netboxtest.Fake
 
 // fakeKube stores objects by path and filters lists by label selector.
 type fakeKube struct {
@@ -248,7 +37,7 @@ type fakeKube struct {
 	// once, "refuse" fails its first Task as a BMC that answers 500 does, and
 	// "down" leaves it running.
 	bmc string
-	// power is the status.power Rufio reports for a Machine fleetd applies;
+	// power is the status.powerState Rufio reports for a Machine fleetd applies;
 	// "" leaves the status as it stands.
 	power string
 }
@@ -323,7 +112,7 @@ func (f *fakeKube) handler() http.Handler {
 					o["status"] = st
 				}
 				if f.power != "" && strings.Contains(r.URL.Path, "/machines/") {
-					o["status"] = map[string]any{"power": f.power}
+					o["status"] = map[string]any{"powerState": f.power}
 				}
 				f.objects[r.URL.Path] = o
 			case "application/merge-patch+json":
@@ -459,7 +248,7 @@ func device(name, status, action string, cf map[string]any) map[string]any {
 	fields := map[string]any{
 		"install_disk":        "/dev/nvme0n1",
 		"install_disk_serial": "30DF7020FGKL",
-		"talos_class":         map[string]any{"value": "worker-g5", "label": "worker-g5"},
+		"class":               map[string]any{"value": "worker-g5", "label": "worker-g5"},
 		"tpm_version":         "2.0",
 		"bmc_type":            "amt",
 		"desired_action":      action,
@@ -486,16 +275,6 @@ func riptideIfaces() []map[string]any {
 	}}
 }
 
-func (f *fakeNetBox) set(field string, value any) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if field == "status" {
-		f.devices[0]["status"] = value
-		return
-	}
-	f.devices[0]["custom_fields"].(map[string]any)[field] = value
-}
-
 var testNow = time.Unix(1_700_000_000, 0)
 
 func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func()) {
@@ -503,7 +282,7 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 	if kube.objects == nil {
 		kube.objects = map[string]Object{}
 	}
-	nbs := httptest.NewServer(nb.handler())
+	nbs := httptest.NewServer(nb.Handler())
 	ks := httptest.NewServer(kube.handler())
 	cfg := Config{
 		Site: "folly", Namespace: "tinkerbell", Classes: testClasses,
@@ -515,7 +294,7 @@ func newTest(t *testing.T, nb *fakeNetBox, kube *fakeKube) (*Reconciler, func())
 	now := testNow
 	r := &Reconciler{
 		Config:  cfg,
-		NetBox:  &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
+		NetBox:  NewNetBox(nbs.URL, "nbt_x.y", nbs.Client()),
 		Kube:    &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
 		Metrics: NewMetrics(),
 		Now:     func() time.Time { now = now.Add(time.Second); return now },
@@ -528,44 +307,6 @@ const (
 	mPath  = "/apis/bmc.tinkerbell.org/v1alpha1/namespaces/tinkerbell/machines/riptide"
 	wfBase = "/apis/tinkerbell.org/v1alpha1/namespaces/tinkerbell/workflows/"
 )
-
-func TestSelectValueShapes(t *testing.T) {
-	cases := map[string]string{
-		`"provision"`: "provision",
-		`{"value":"provision","label":"Provision"}`: "provision",
-		`null`: "",
-		``:     "",
-	}
-	for in, want := range cases {
-		if got := selectValue(json.RawMessage(in)); got != want {
-			t.Errorf("selectValue(%s) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestParseDeviceBMCAddress(t *testing.T) {
-	raw, _ := json.Marshal(device("riptide", "active", "none", nil))
-	d, err := parseDevice(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.BMCAddress != "10.3.0.12" || d.Address != "10.3.0.12" || d.Class != "worker-g5" || d.Status != "active" {
-		t.Fatalf("parsed %+v", d)
-	}
-	oob := device("swell", "planned", "none", map[string]any{"bmc_type": map[string]any{"value": "amt"}})
-	oob["oob_ip"] = map[string]any{"address": "10.4.0.5/24"}
-	raw, _ = json.Marshal(oob)
-	d, _ = parseDevice(raw)
-	if d.BMCType != "amt" || d.BMCAddress != "10.4.0.5" {
-		t.Fatalf("oob_ip parsed %+v", d)
-	}
-	none := device("shale", "active", "none", map[string]any{"bmc_type": "none"})
-	raw, _ = json.Marshal(none)
-	d, _ = parseDevice(raw)
-	if d.BMCAddress != "" {
-		t.Fatalf("none has address %q", d.BMCAddress)
-	}
-}
 
 func TestNextStatus(t *testing.T) {
 	for _, c := range []struct {
@@ -587,7 +328,7 @@ func TestNextStatus(t *testing.T) {
 }
 
 func TestPlannedDeviceStaysPlannedThroughProvision(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("swell", "planned", "provision", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -598,10 +339,10 @@ func TestPlannedDeviceStaysPlannedThroughProvision(t *testing.T) {
 	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
 		t.Fatalf("workflows %v", names)
 	}
-	if len(nb.patches) != 1 {
-		t.Fatalf("patches %v", nb.patches)
+	if len(nb.Patches) != 1 {
+		t.Fatalf("patches %v", nb.Patches)
 	}
-	p := nb.patches[0]
+	p := nb.Patches[0]
 	if _, has := p["status"]; has {
 		t.Errorf("a planned device's status was written: %v", p)
 	}
@@ -620,7 +361,7 @@ func machineHost(m Object) any {
 func TestPlannedAMTDeviceIsPoweredAtItsDeclaredAddress(t *testing.T) {
 	swellMachine := strings.Replace(mPath, "riptide", "swell", 1)
 	swellHardware := strings.Replace(hwPath, "riptide", "swell", 1)
-	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "provision", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("swell", "planned", "provision", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -641,8 +382,8 @@ func TestPlannedAMTDeviceIsPoweredAtItsDeclaredAddress(t *testing.T) {
 	if _, has := wf.metadata()["annotations"]; has {
 		t.Errorf("the run carries annotations: %v", wf.metadata()["annotations"])
 	}
-	if len(nb.journals) != 1 || strings.Contains(nb.journals[0]["comments"].(string), "by hand") {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || strings.Contains(nb.Journals[0]["comments"].(string), "by hand") {
+		t.Errorf("journals %v", nb.Journals)
 	}
 }
 
@@ -651,7 +392,7 @@ func TestPlannedAMTDeviceIsPoweredAtItsDeclaredAddress(t *testing.T) {
 func TestPlannedDeviceWithoutAnAddressBootsByHand(t *testing.T) {
 	d := device("swell", "planned", "provision", nil)
 	d["primary_ip4"] = nil
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -665,15 +406,15 @@ func TestPlannedDeviceWithoutAnAddressBootsByHand(t *testing.T) {
 	if _, has := boot["bootMode"]; has || boot["toggleAllowNetboot"] != false {
 		t.Errorf("bootOptions %v", boot)
 	}
-	if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), "power the machine on by hand") {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || !strings.Contains(nb.Journals[0]["comments"].(string), "power the machine on by hand") {
+		t.Errorf("journals %v", nb.Journals)
 	}
 }
 
 func TestPlannedDeviceWithOOBIPGetsItsMachine(t *testing.T) {
 	d := device("surge", "planned", "provision", nil)
 	d["oob_ip"] = map[string]any{"address": "10.4.0.6/24"}
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -732,12 +473,12 @@ func (f *fakeCluster) server(t *testing.T) *Cluster {
 // A quarantined node is cordoned on every pass; a control plane's failed
 // check, a pass and an unknown node are not.
 func TestQuarantinedNodeIsCordoned(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{
+	nb := &fakeNetBox{Devices: []map[string]any{
 		device("riptide", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr: PCR 7 differs"}),
-		mergeID(device("optiplex", "active", "none", map[string]any{"attest_verdict": "failed-no-quarantine: pcr", "talos_class": "controlplane"}), 8),
+		mergeID(device("optiplex", "active", "none", map[string]any{"attest_verdict": "failed-no-quarantine: pcr", "class": "controlplane"}), 8),
 		mergeID(device("shale", "active", "none", map[string]any{"attest_verdict": "attested"}), 9),
 		mergeID(device("swell", "planned", "none", map[string]any{"attest_verdict": "quarantined: ek"}), 10),
-	}, ifaces: riptideIfaces()}
+	}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -756,23 +497,23 @@ func TestQuarantinedNodeIsCordoned(t *testing.T) {
 		t.Errorf("Authorization %q", fc.auth[0])
 	}
 	cordoned := 0
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		if strings.Contains(j["comments"].(string), "cordoned the node") {
 			cordoned++
 		}
 	}
 	if cordoned != 1 {
-		t.Errorf("%d cordon journal entries, want one: %v", cordoned, nb.journals)
+		t.Errorf("%d cordon journal entries, want one: %v", cordoned, nb.Journals)
 	}
 }
 
 // A control plane is never cordoned, even with a quarantined verdict: by
 // the controlplane class, or by a class the class inputs render as one.
 func TestControlPlaneIsNeverCordoned(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{
-		device("optiplex", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane"}),
-		mergeID(device("bigcp", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "talos_class": "controlplane-big"}), 8),
-	}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{
+		device("optiplex", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "class": "controlplane"}),
+		mergeID(device("bigcp", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr", "class": "controlplane-big"}), 8),
+	}, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	r.Config.ControlPlaneClasses = map[string]bool{"controlplane-big": true}
@@ -788,7 +529,7 @@ func TestControlPlaneIsNeverCordoned(t *testing.T) {
 	if err := r.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		if strings.Contains(j["comments"].(string), "cordon") {
 			t.Errorf("a control plane's quarantine was journaled for a cordon: %v", j)
 		}
@@ -796,14 +537,14 @@ func TestControlPlaneIsNeverCordoned(t *testing.T) {
 }
 
 func TestQuarantineWithoutClusterCredentialsIsJournaled(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr"})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", map[string]any{"attest_verdict": "quarantined: pcr"})}, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	if err := r.Reconcile(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), "cordon it by hand") {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || !strings.Contains(nb.Journals[0]["comments"].(string), "cordon it by hand") {
+		t.Errorf("journals %v", nb.Journals)
 	}
 }
 
@@ -835,20 +576,20 @@ func TestPagingFollowsNext(t *testing.T) {
 		d["id"] = 100 + i
 		devices = append(devices, d)
 	}
-	nb := &fakeNetBox{devices: devices, pageSize: 2}
+	nb := &fakeNetBox{Devices: devices, PageSize: 2}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	got, err := r.NetBox.Devices(context.Background(), "folly")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 || nb.pages != 3 {
-		t.Fatalf("%d devices over %d pages", len(got), nb.pages)
+	if len(got) != 5 || nb.Pages != 3 {
+		t.Fatalf("%d devices over %d pages", len(got), nb.Pages)
 	}
 }
 
 func TestProvisionStartsOneWorkflow(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -894,28 +635,28 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if boot["bootMode"] != "netboot" || boot["toggleAllowNetboot"] != false {
 		t.Errorf("bootOptions %v", boot)
 	}
-	if len(nb.patches) != 1 {
-		t.Fatalf("patches %v", nb.patches)
+	if len(nb.Patches) != 1 {
+		t.Fatalf("patches %v", nb.Patches)
 	}
-	p := nb.patches[0]
+	p := nb.Patches[0]
 	cf := p["custom_fields"].(map[string]any)
 	if p["status"] != "planned" || cf["desired_action"] != "none" || cf["last_workflow"] != wfName {
 		t.Errorf("patch %v", p)
 	}
-	if len(nb.journals) != 1 {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 {
+		t.Errorf("journals %v", nb.Journals)
 	}
 
 	// The webhook rings on fleetd's own write. NetBox now shows the reset field.
-	nb.set("desired_action", "none")
-	nb.set("last_workflow", wfName)
-	nb.set("status", "planned")
-	nb.set("attest_verdict", "attested")
+	nb.Set("desired_action", "none")
+	nb.Set("last_workflow", wfName)
+	nb.Set("status", "planned")
+	nb.Set("attest_verdict", "attested")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(nb.patches) != 1 {
-		t.Fatalf("a second pass wrote again: %v", nb.patches)
+	if len(nb.Patches) != 1 {
+		t.Fatalf("a second pass wrote again: %v", nb.Patches)
 	}
 	if n := kube.workflows(); len(n) != 1 {
 		t.Fatalf("%v after two passes", n)
@@ -923,20 +664,20 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 
 	// The owner asks for another action mid-run: no second run, and the
 	// request waits, set, for the run to end.
-	nb.set("desired_action", "attest")
+	nb.Set("desired_action", "attest")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if n := kube.workflows(); len(n) != 1 || n[0] != wfName {
 		t.Fatalf("a second run started mid-run: %v", n)
 	}
-	if len(nb.patches) != 1 {
-		t.Errorf("a waiting request was written: %v", nb.patches)
+	if len(nb.Patches) != 1 {
+		t.Errorf("a waiting request was written: %v", nb.Patches)
 	}
 
 	// The run finishes; the first pass after it deletes the finished run and
 	// starts the waiting request.
-	nb.set("status", "active")
+	nb.Set("status", "active")
 	kube.setState(wfName, "SUCCESS")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
@@ -945,7 +686,7 @@ func TestProvisionStartsOneWorkflow(t *testing.T) {
 	if len(n) != 1 || !strings.HasPrefix(n[0], "attest-riptide-") {
 		t.Fatalf("after the finished run: %v", n)
 	}
-	last := nb.patches[len(nb.patches)-1]
+	last := nb.Patches[len(nb.Patches)-1]
 	if _, has := last["status"]; has {
 		t.Errorf("attest changed the status: %v", last)
 	}
@@ -981,7 +722,7 @@ func handSetAllowPXE(kube *fakeKube, v bool) {
 // fleetd is the only writer of the netboot flags: they follow the
 // device's unfinished Workflow, and every pass overwrites a hand-set value.
 func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -999,7 +740,7 @@ func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
 		t.Errorf("dhcp %v", dhcp)
 	}
 
-	nb.set("desired_action", "provision")
+	nb.Set("desired_action", "provision")
 	pass()
 	wfName := kube.workflows()[0]
 	assertNetboot(t, kube, true, "a run just created")
@@ -1019,10 +760,10 @@ func TestHardwareNetbootFlagsFollowTheWorkflow(t *testing.T) {
 		t.Errorf("the Workflow was created before the Hardware allowed netboot: %q precedes it", before)
 	}
 
-	nb.set("desired_action", "none")
-	nb.set("last_workflow", wfName)
-	nb.set("status", "planned")
-	nb.set("attest_verdict", "attested")
+	nb.Set("desired_action", "none")
+	nb.Set("last_workflow", wfName)
+	nb.Set("status", "planned")
+	nb.Set("attest_verdict", "attested")
 	for _, state := range []string{"STATE_PREPARING", "STATE_PENDING", "STATE_RUNNING", "STATE_POST"} {
 		kube.setState(wfName, state)
 		handSetAllowPXE(kube, false)
@@ -1051,24 +792,6 @@ func (f *fakeKube) creates() int {
 	return n
 }
 
-func (f *fakeNetBox) failPatches(fail bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.failPatch = fail
-}
-
-func (f *fakeNetBox) journalWith(substr string) []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []string
-	for _, j := range f.journals {
-		if c, _ := j["comments"].(string); strings.Contains(c, substr) {
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 // The Workflow is the request's record. While NetBox refuses the write that
 // names a run, every pass, a restart's included, adopts the run and tries the
 // write again, before and after the run ends; no pass starts a second one.
@@ -1079,7 +802,7 @@ func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
 			name = "unfinished"
 		}
 		t.Run(name, func(t *testing.T) {
-			nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "provision", nil)}, ifaces: riptideIfaces(), failPatch: true}
+			nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "provision", nil)}, Ifaces: riptideIfaces(), FailPatch: true}
 			kube := &fakeKube{}
 			r, done := newTest(t, nb, kube)
 			defer done()
@@ -1107,17 +830,17 @@ func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
 				t.Fatalf("a failing write started another run: %v, %d creates", n, kube.creates())
 			}
 
-			nb.failPatches(false)
+			nb.FailPatches(false)
 			if err := r.Reconcile(context.Background()); err != nil {
 				t.Fatal(err)
 			}
 			if n := kube.workflows(); len(n) != 1 || n[0] != names[0] || kube.creates() != 1 {
 				t.Fatalf("the recovery pass changed the run: %v", n)
 			}
-			if len(nb.patches) != 1 {
-				t.Fatalf("recovery patches %v", nb.patches)
+			if len(nb.Patches) != 1 {
+				t.Fatalf("recovery patches %v", nb.Patches)
 			}
-			p := nb.patches[0]
+			p := nb.Patches[0]
 			cf := p["custom_fields"].(map[string]any)
 			if cf["last_workflow"] != names[0] || cf["desired_action"] != "none" {
 				t.Fatalf("recovery patch %v", p)
@@ -1126,8 +849,8 @@ func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
 			if end == "" {
 				state = "not yet picked up"
 			}
-			if got := nb.journalWith("its record was late, and it is " + state); len(got) != 1 {
-				t.Errorf("journals %v", nb.journals)
+			if got := nb.JournalWith("its record was late, and it is " + state); len(got) != 1 {
+				t.Errorf("journals %v", nb.Journals)
 			}
 			// A run that ended already did its work; one still going moves the
 			// device as its start would have.
@@ -1141,7 +864,7 @@ func TestFailedNetBoxWriteStartsNoSecondWorkflow(t *testing.T) {
 // A retirement whose write failed is adopted the same way, and once NetBox
 // names it, its success takes the device offline.
 func TestFailedNetBoxWriteRetiresOnce(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", nil)}, ifaces: riptideIfaces(), failPatch: true, apply: true}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", nil)}, Ifaces: riptideIfaces(), FailPatch: true, Apply: true}
 	kube := &fakeKube{power: "off"}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -1155,7 +878,7 @@ func TestFailedNetBoxWriteRetiresOnce(t *testing.T) {
 	if err := r.Reconcile(context.Background()); err == nil {
 		t.Fatal("a failed PATCH was not reported")
 	}
-	nb.failPatches(false)
+	nb.FailPatches(false)
 	for range 2 {
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
@@ -1164,14 +887,14 @@ func TestFailedNetBoxWriteRetiresOnce(t *testing.T) {
 	if kube.creates() != 1 {
 		t.Fatalf("%d retirements created", kube.creates())
 	}
-	if last := nb.patches[len(nb.patches)-1]; last["status"] != "offline" {
-		t.Fatalf("patches %v", nb.patches)
+	if last := nb.Patches[len(nb.Patches)-1]; last["status"] != "offline" {
+		t.Fatalf("patches %v", nb.Patches)
 	}
 }
 
 func TestWipeSkipsAttestOnTPM12AndManualBootWithoutBMC(t *testing.T) {
 	d := device("shale", "active", "wipe", map[string]any{"tpm_version": "1.2", "bmc_type": "none"})
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: []map[string]any{{
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: []map[string]any{{
 		"id": 1, "device": map[string]any{"id": 7}, "primary_mac_address": map[string]any{"mac_address": "ec:8e:b5:72:35:24"},
 	}}}
 	foreign := Object{"metadata": map[string]any{"name": "shale", "labels": map[string]any{"kustomize.toolkit.fluxcd.io/name": "tinkerbell"}}}
@@ -1201,14 +924,14 @@ func TestWipeSkipsAttestOnTPM12AndManualBootWithoutBMC(t *testing.T) {
 func TestRetirement(t *testing.T) {
 	old := testNow.Add(-2 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	d := device("riptide", "decommissioning", "none", map[string]any{"last_workflow": "wipe-riptide-1"})
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: riptideIfaces()}
 	// An earlier owner-asked wipe succeeded within the TTL. It is no retirement.
 	kube := &fakeKube{power: "off", objects: map[string]Object{wfBase + "wipe-riptide-1": workflowObject("wipe-riptide-1", "riptide", "wipe", old, "SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	defer done()
 	var retired []string
 	r.Retired = func(serial string) error {
-		if len(nb.patches) > 1 {
+		if len(nb.Patches) > 1 {
 			t.Error("the record was retired after the device went offline")
 		}
 		retired = append(retired, serial)
@@ -1228,18 +951,18 @@ func TestRetirement(t *testing.T) {
 	if hm["retire"] != "true" || hm["wipe"] != "true" || hm["attest"] != "false" {
 		t.Errorf("hardwareMap %v", hm)
 	}
-	if _, has := nb.patches[0]["status"]; has {
-		t.Errorf("status changed on the retire start: %v", nb.patches[0])
+	if _, has := nb.Patches[0]["status"]; has {
+		t.Errorf("status changed on the retire start: %v", nb.Patches[0])
 	}
 
 	// Second pass: the run goes; nothing happens.
-	nb.set("last_workflow", wfName)
+	nb.Set("last_workflow", wfName)
 	kube.setState(wfName, "RUNNING")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(nb.patches) != 1 {
-		t.Fatalf("patched during the run: %v", nb.patches)
+	if len(nb.Patches) != 1 {
+		t.Fatalf("patched during the run: %v", nb.Patches)
 	}
 
 	// Third pass: success → offline, objects gone.
@@ -1247,7 +970,7 @@ func TestRetirement(t *testing.T) {
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	last := nb.patches[len(nb.patches)-1]
+	last := nb.Patches[len(nb.Patches)-1]
 	if last["status"] != "offline" {
 		t.Errorf("final patch %v", last)
 	}
@@ -1261,7 +984,7 @@ func TestRetirement(t *testing.T) {
 
 func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
 	d := device("riptide", "decommissioning", "none", nil)
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -1270,8 +993,8 @@ func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
 	}
 	wfName := kube.workflows()[0]
 	assertNetboot(t, kube, true, "a retirement running")
-	nb.set("last_workflow", wfName)
-	nb.set("status", "active")
+	nb.Set("last_workflow", wfName)
+	nb.Set("status", "active")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -1283,7 +1006,7 @@ func TestLeavingDecommissioningAbandonsTheRetirement(t *testing.T) {
 
 func TestFailedRetirementJournalsOnce(t *testing.T) {
 	d := device("riptide", "decommissioning", "none", map[string]any{"last_workflow": "retire-riptide-5"})
-	nb := &fakeNetBox{devices: []map[string]any{d}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{d}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + "retire-riptide-5": workflowObject("retire-riptide-5", "riptide", "retire", testNow.UTC().Format(time.RFC3339), "FAILED")}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -1292,8 +1015,8 @@ func TestFailedRetirementJournalsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(nb.journals) != 1 || len(nb.patches) != 0 {
-		t.Fatalf("journals %d patches %d", len(nb.journals), len(nb.patches))
+	if len(nb.Journals) != 1 || len(nb.Patches) != 0 {
+		t.Fatalf("journals %d patches %d", len(nb.Journals), len(nb.Patches))
 	}
 	if n := kube.workflows(); len(n) != 1 {
 		t.Fatalf("a failed retirement was rerun: %v", n)
@@ -1301,7 +1024,7 @@ func TestFailedRetirementJournalsOnce(t *testing.T) {
 }
 
 func TestOfflineDevicesLoseTheirObjects(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		strings.Replace(hwPath, "riptide", "gone", 1): {
 			"metadata": map[string]any{"name": "gone", "labels": map[string]any{ManagedLabel: FieldManager}},
@@ -1318,7 +1041,7 @@ func TestOfflineDevicesLoseTheirObjects(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", nil)}}
 	old := testNow.Add(-8 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	fresh := testNow.Add(-time.Hour).UTC().Format(time.RFC3339)
 	kube := &fakeKube{objects: map[string]Object{
@@ -1380,7 +1103,7 @@ func TestWebhookSignature(t *testing.T) {
 func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
 	for _, action := range []string{"provision", "wipe"} {
 		t.Run(action, func(t *testing.T) {
-			nb := &fakeNetBox{devices: []map[string]any{device("optiplex", "active", action, map[string]any{"talos_class": "controlplane"})}, ifaces: riptideIfaces()}
+			nb := &fakeNetBox{Devices: []map[string]any{device("optiplex", "active", action, map[string]any{"class": "controlplane"})}, Ifaces: riptideIfaces()}
 			kube := &fakeKube{}
 			r, done := newTest(t, nb, kube)
 			defer done()
@@ -1393,7 +1116,7 @@ func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
 			if n := kube.workflows(); len(n) != 0 {
 				t.Fatalf("workflows %v", n)
 			}
-			for _, p := range nb.patches {
+			for _, p := range nb.Patches {
 				if _, ok := p["status"]; ok {
 					t.Errorf("status written: %v", p)
 				}
@@ -1401,8 +1124,8 @@ func TestBootstrapControlPlaneIsNeverWiped(t *testing.T) {
 					t.Errorf("desired_action written: %v", p)
 				}
 			}
-			if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), action+" refused") {
-				t.Errorf("journals %v", nb.journals)
+			if len(nb.Journals) != 1 || !strings.Contains(nb.Journals[0]["comments"].(string), action+" refused") {
+				t.Errorf("journals %v", nb.Journals)
 			}
 		})
 	}
@@ -1423,7 +1146,7 @@ func TestARunThatWipesWaitsForTheDiskSerial(t *testing.T) {
 		{"active", "attest", nil, ""},
 	} {
 		t.Run(c.status+"/"+c.action+"/"+fmt.Sprint(c.serial), func(t *testing.T) {
-			nb := &fakeNetBox{devices: []map[string]any{device("riptide", c.status, c.action, map[string]any{"install_disk_serial": c.serial})}, ifaces: riptideIfaces()}
+			nb := &fakeNetBox{Devices: []map[string]any{device("riptide", c.status, c.action, map[string]any{"install_disk_serial": c.serial})}, Ifaces: riptideIfaces()}
 			kube := &fakeKube{}
 			r, done := newTest(t, nb, kube)
 			defer done()
@@ -1444,13 +1167,13 @@ func TestARunThatWipesWaitsForTheDiskSerial(t *testing.T) {
 			if kube.get(hwPath) == nil {
 				t.Error("the Hardware went with the serial")
 			}
-			for _, p := range nb.patches {
+			for _, p := range nb.Patches {
 				if cf, ok := p["custom_fields"].(map[string]any); ok && cf["desired_action"] != nil {
 					t.Errorf("desired_action written: %v", p)
 				}
 			}
-			if len(nb.journals) != 1 || !strings.Contains(nb.journals[0]["comments"].(string), c.want) {
-				t.Errorf("journals %v", nb.journals)
+			if len(nb.Journals) != 1 || !strings.Contains(nb.Journals[0]["comments"].(string), c.want) {
+				t.Errorf("journals %v", nb.Journals)
 			}
 		})
 	}
@@ -1509,7 +1232,7 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 	short["status"].(map[string]any)["globalTimeout"] = 60
 	long := agedWorkflow("long", past, "", "STATE_RUNNING", "wipe-disk")
 	long["status"].(map[string]any)["globalTimeout"] = 7200
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		wfBase + "late":     overdueWorkflow("late", at(-10*time.Minute), "STATE_RUNNING", "reboot"),
 		wfBase + "recent":   overdueWorkflow("recent", at(-30*time.Second), "STATE_RUNNING", "install"),
@@ -1547,10 +1270,10 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 			t.Errorf("%s annotated = %v, want %v", name, got, want)
 		}
 	}
-	if len(nb.journals) != 2+len(ended) {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 2+len(ended) {
+		t.Fatalf("journals %v", nb.Journals)
 	}
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		c := j["comments"].(string)
 		switch {
 		case strings.Contains(c, failedJournal):
@@ -1580,7 +1303,7 @@ func TestOverdueWorkflowsAreNudged(t *testing.T) {
 // instead of adopting the old one.
 func TestWorkflowWithoutDeadlineEndsAndANewRunStarts(t *testing.T) {
 	const old = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": old})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "none", map[string]any{"last_workflow": old})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		wfBase + old: agedWorkflow(old, TemplateGlobalTimeout+2*time.Minute, "", "STATE_PENDING", ""),
 	}}
@@ -1605,18 +1328,18 @@ func TestWorkflowWithoutDeadlineEndsAndANewRunStarts(t *testing.T) {
 		t.Error("Admit would render a code for the ended run")
 	}
 	pass()
-	if len(nb.journals) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 
-	nb.set("desired_action", "provision")
+	nb.Set("desired_action", "provision")
 	pass()
 	names := kube.workflows()
 	if len(names) != 1 || names[0] == old {
 		t.Fatalf("workflows %v", names)
 	}
 	assertNetboot(t, kube, true, "the new run")
-	cf := nb.patches[len(nb.patches)-1]["custom_fields"].(map[string]any)
+	cf := nb.Patches[len(nb.Patches)-1]["custom_fields"].(map[string]any)
 	if cf["last_workflow"] != names[0] {
 		t.Errorf("last_workflow %v, want %s", cf["last_workflow"], names[0])
 	}
@@ -1637,7 +1360,7 @@ func endedWorkflow(name, action, state, failed, failedState, message string) Obj
 // the action and the Workflow's message. A run that succeeded, a run still
 // going and a retirement (which journals its own failure) are not.
 func TestFailedRunIsJournaledOnce(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		wfBase + "bad":     endedWorkflow("bad", "provision", "STATE_FAILED", "install", "STATE_FAILED", "disk is busy"),
 		wfBase + "slow":    endedWorkflow("slow", "wipe", "STATE_TIMEOUT", "install", "STATE_TIMEOUT", "action completed"),
@@ -1654,8 +1377,8 @@ func TestFailedRunIsJournaledOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(nb.journals) != 3 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 3 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	for _, name := range []string{"bad", "slow", "retired", "marked"} {
 		if _, ok := kube.get(wfBase + name).Annotations()[EndedJournaledAnnotation]; !ok {
@@ -1671,11 +1394,11 @@ func TestFailedRunIsJournaledOnce(t *testing.T) {
 	if err := restarted.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if len(nb.journals) != 3 {
-		t.Fatalf("a restart journaled again: %v", nb.journals)
+	if len(nb.Journals) != 3 {
+		t.Fatalf("a restart journaled again: %v", nb.Journals)
 	}
 	var bad, slow, retired string
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		c := j["comments"].(string)
 		switch {
 		case strings.Contains(c, "Workflow bad "):
@@ -1709,7 +1432,7 @@ func TestRetirementWithoutDeadlineIsLeftAlone(t *testing.T) {
 	const name = "retire-riptide-1"
 	wf := agedWorkflow(name, TemplateGlobalTimeout+2*time.Minute, "", "STATE_PENDING", "")
 	wf.metadata()["labels"].(map[string]any)[ActionLabel] = ActionRetire
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": name})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": name})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + name: wf}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -1719,8 +1442,8 @@ func TestRetirementWithoutDeadlineIsLeftAlone(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || names[0] != name {
 		t.Fatalf("workflows %v", names)
 	}
-	if len(nb.journals) != 0 {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 0 {
+		t.Errorf("journals %v", nb.Journals)
 	}
 }
 
@@ -1731,7 +1454,7 @@ func TestEndingSparesAWorkflowThatJustReported(t *testing.T) {
 	past := TemplateGlobalTimeout + 2*time.Minute
 	reported := agedWorkflow("racing", past, testNow.Add(20*time.Minute).UTC().Format(time.RFC3339), "STATE_RUNNING", "install")
 	reported.metadata()["resourceVersion"] = "2"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "planned", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "planned", "none", nil)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{
 		objects: map[string]Object{wfBase + "racing": agedWorkflow("racing", past, "", "STATE_RUNNING", "wipe-disk")},
 		racing:  map[string]Object{wfBase + "racing": reported},
@@ -1747,7 +1470,7 @@ func TestEndingSparesAWorkflowThatJustReported(t *testing.T) {
 		t.Fatalf("the run that reported was deleted: %v", wf)
 	}
 	assertNetboot(t, kube, true, "the run goes on")
-	if len(nb.journals) != 0 {
-		t.Errorf("journals %v", nb.journals)
+	if len(nb.Journals) != 0 {
+		t.Errorf("journals %v", nb.Journals)
 	}
 }

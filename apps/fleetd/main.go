@@ -104,7 +104,7 @@ func run(log *slog.Logger) error {
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute,
 		}
 	}
-	// The DevID listener, which every node's renewal and daily check reach,
+	// The DevID listener, which every node's renewal and hourly check reach,
 	// and the others bind first and on their own: the boot listener's
 	// certificate or address never takes them down.
 	listeners := []struct {
@@ -168,7 +168,7 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NetBox token: %w", err)
 	}
-	netbox := &fleet.NetBox{URL: netboxURL, Token: token, Client: &http.Client{Timeout: 30 * time.Second}}
+	netbox := fleet.NewNetBox(netboxURL, token, &http.Client{Timeout: 30 * time.Second})
 	kube, err := fleet.NewKube(
 		env("FLEET_KUBE_SERVER", "https://localhost:6443"),
 		env("FLEET_KUBE_CA_FILE", "/etc/tinkerbell/ca.crt"),
@@ -199,7 +199,19 @@ func newFleet() (*fleet.Reconciler, error) {
 		}
 		links = &fleet.TFTPLinks{Dir: dir, Target: target}
 	}
-	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
+	var kea *fleet.KeaReservations
+	if file := os.Getenv("FLEET_KEA_FILE"); file != "" {
+		boot := os.Getenv("FLEET_KEA_BOOT_FILE")
+		if boot == "" {
+			return nil, errors.New("FLEET_KEA_FILE needs FLEET_KEA_BOOT_FILE")
+		}
+		kea = &fleet.KeaReservations{File: file, Socket: os.Getenv("FLEET_KEA_SOCKET"), BootFile: boot}
+	}
+	dialBMC, runs, err := fleet.LoadBMC(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Kea: kea, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), BMC: dialBMC, Runs: runs, Now: time.Now}, nil
 }
 
 // serveBoot serves the boot listener, with TLS when kp is set. Until its
@@ -251,11 +263,14 @@ func confirmAcks(s *http.Server) {
 }
 
 // bootHandler serves what a netbooting machine and a first boot reach: the
-// device flow under /attest/ and the one-time config at /talos/config.
+// device flow under /attest/, and the one-time config at /talos/config or
+// /seed, by the class's payload kind.
 func bootHandler(srv *attest.Server, installer http.Handler) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/attest/", http.StripPrefix("/attest", srv.Public()))
-	mux.Handle("/talos/config", installer)
+	for path := range fleet.Routes {
+		mux.Handle(path, installer)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", http.NotFound)
 	return mux

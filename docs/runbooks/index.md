@@ -21,7 +21,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 ## Kubernetes
 
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): change `clusters/`, share a resource between the clusters, and make sure Flux applies it
-- [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access and withdraw access
+- [Get kubectl access](get-cluster-admin-access.md): sign in at Google for `kubectl` access, keep the admin certificate for break-glass, and withdraw access
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md): replace a cluster's NixOS nodes with Talos, bootstrap etcd, Cilium and Flux, and restore its backups
 - [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md): generate a cluster's Talos secrets with its imported signing key, and pin its new CA
 - [Install Cilium and Flux on Talos](install-cilium-and-flux-on-talos.md): write a new cluster's kubeconfig context, install Cilium with its BGP peering, and bootstrap Flux

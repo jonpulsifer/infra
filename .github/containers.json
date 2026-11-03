@@ -17,6 +17,8 @@
     "kthx-engine",
     "kthx-engine-verifier",
     "gcsfuse",
+    "keylime-agent",
+    "keylime-server",
     "switchboard",
     "tally",
     "tally-ocr",
@@ -86,7 +88,8 @@
       "clusters/folly/apps/spire/tpm-reattest.yaml"
     ],
     "tink-reprovision-tools": [
-      "clusters/folly/tinkerbell/template.yaml"
+      "clusters/folly/tinkerbell/template.yaml",
+      "clusters/folly/tinkerbell/template-image.yaml"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"

@@ -7,6 +7,8 @@ import (
 	"log"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 )
 
 func portMismatch(port int, want int, name string) string {
@@ -30,7 +32,7 @@ func (r *Reconciler) where(ctx context.Context, d Device, since time.Time) (int,
 	}
 	port, ok := portNumber(a.Port)
 	if !ok {
-		return 0, fmt.Sprintf("the attested port %s of %s is no Port <n>", plain(a.Port), plain(a.Switch))
+		return 0, fmt.Sprintf("the attested port %s of %s is no Port <n>", netbox.Plain(a.Port), netbox.Plain(a.Switch))
 	}
 	switches, err := r.NetBox.Switches(ctx, r.Config.Site)
 	if err != nil {
@@ -41,7 +43,7 @@ func (r *Reconciler) where(ctx context.Context, d Device, since time.Time) (int,
 			return port, ""
 		}
 	}
-	return 0, fmt.Sprintf("the attested port %d is on %s, which no NetBox switch has", port, plain(a.Switch))
+	return 0, fmt.Sprintf("the attested port %d is on %s, which no NetBox switch has", port, netbox.Plain(a.Switch))
 }
 
 // Admit is an intake pass's install, called by the verifier after the pass's
@@ -83,7 +85,7 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		if d.MAC == "" || d.Disk == "" {
 			return conflict("%s needs a primary MAC on an interface and install_disk", d.Name)
 		}
-		if r.Config.Installer(d, "provision") != "" {
+		if r.Config.WillInstall(d) {
 			if err := r.Installer.Ready(ctx, d); err != nil {
 				return err
 			}
@@ -200,7 +202,7 @@ func (r *Reconciler) provisionWhy(d Device) string {
 		return "FLEET_AUTO_PROVISION is off"
 	case r.Config.IsControlPlane(d.Class):
 		return "a control plane; the owner sets desired_action to provision by hand"
-	case r.Config.Installer(d, "provision") == "":
+	case !r.Config.WillInstall(d):
 		return "its class installs nothing here; the owner sets desired_action to provision"
 	}
 	return ""
@@ -209,13 +211,13 @@ func (r *Reconciler) provisionWhy(d Device) string {
 // missing names the declared fields a planned device lacks. Terraform
 // applies them from the nodes file, so an empty one is an apply that has not
 // run, and the owner fixes it there.
-func (d Device) missing() []string {
+func missing(d Device) []string {
 	var m []string
 	for _, f := range []struct {
 		name string
 		ok   bool
 	}{
-		{"talos_class", d.Class != ""},
+		{"class", d.Class != ""},
 		{"install_disk", d.Disk != ""},
 		{"install_disk_serial", d.DiskSerial != ""},
 		{"bmc_type", d.BMCType != ""},
@@ -237,7 +239,7 @@ func (d Device) missing() []string {
 // its expected_port. It writes the journal and nothing else.
 func (r *Reconciler) checkDeclared(ctx context.Context, d Device) error {
 	why := ""
-	if m := d.missing(); len(m) > 0 {
+	if m := missing(d); len(m) > 0 {
 		why = fmt.Sprintf("%s lacks %s; apply terraform/netbox/folly", d.Name, strings.Join(m, ", "))
 	} else if _, ok := r.Config.Classes[d.Class]; !ok {
 		why = fmt.Sprintf("%s's class %q is not in the class table", d.Name, d.Class)

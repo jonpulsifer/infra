@@ -23,7 +23,7 @@
     ];
   };
   modRoot = "apps/fleetd";
-  vendorHash = "sha256-LAs8Oar6mB2yNQPzHtcASKkdVqDPB6kfOT8FanVf8bg=";
+  vendorHash = "sha256-GX+zuWmCJqLLIGnmtwCaA9uFeo+ru300qqWLt4Z2d30=";
   subPackages = [
     "."
     "cmd/tink-attest"

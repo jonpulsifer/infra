@@ -35,7 +35,7 @@ type RenewConfig struct {
 	Roots *x509.CertPool
 	// RenewBefore is how long before the LDevID's expiry a renewal is due.
 	RenewBefore time.Duration
-	// Check runs the daily check when no renewal is due: the same evidence
+	// Check runs the hourly check when no renewal is due: the same evidence
 	// on the same routes, judged by the same policy, and no new certificate.
 	Check bool
 	// BIOS is the SMBIOS BIOS version, under which the service records PCR 0.
@@ -50,7 +50,7 @@ type RenewConfig struct {
 type RenewResult struct {
 	// Renewed is false when no renewal was due.
 	Renewed bool
-	// Checked is whether the daily check ran and passed instead, and
+	// Checked is whether the hourly check ran and passed instead, and
 	// AttestedAt the pass the service recorded.
 	Checked    bool
 	AttestedAt time.Time
@@ -62,10 +62,10 @@ type RenewResult struct {
 // NV, so the node has nothing to renew until an intake stores them.
 var ErrNoLDevID = errors.New("no LDevID or LAK certificate in NV")
 
-// ErrCheckUnsupported means the service did not open the daily check it was
+// ErrCheckUnsupported means the service did not open the hourly check it was
 // asked for, as one that predates it does. No evidence went to it, since it
 // would have issued new certificates instead.
-var ErrCheckUnsupported = errors.New("the attest service does not serve the daily check")
+var ErrCheckUnsupported = errors.New("the attest service does not serve the hourly check")
 
 // Renew asks the service to certify the node's LDevID key again when the
 // LDevID in NV expires within cfg.RenewBefore, or is gone while the LAK is
@@ -73,7 +73,7 @@ var ErrCheckUnsupported = errors.New("the attest service does not serve the dail
 // LDevID's, it reads from the service's LDevID lookup and loads under the SRK,
 // checks the answer against cfg.Roots, and stores the new certificates in NV.
 // With cfg.Check, a run with no renewal due sends the same evidence as the
-// daily check, and NV is left alone.
+// hourly check, and NV is left alone.
 func Renew(ctx context.Context, rw io.ReadWriter, cfg RenewConfig) (*RenewResult, error) {
 	logf := cfg.Logf
 	if logf == nil {

@@ -158,9 +158,9 @@ func newRetiredTest(t *testing.T, class string) (*Reconciler, *fakeNetBox, *fake
 	t.Helper()
 	cf := map[string]any{"last_workflow": retireWF}
 	if class != "" {
-		cf["talos_class"] = class
+		cf["class"] = class
 	}
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", cf)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", cf)}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{power: "off", objects: map[string]Object{wfBase + retireWF: workflowObject(retireWF, "riptide", "retire", testNow.UTC().Format(time.RFC3339), "STATE_SUCCESS")}}
 	r, done := newTest(t, nb, kube)
 	t.Cleanup(done)
@@ -189,10 +189,10 @@ func newRetiredTest(t *testing.T, class string) (*Reconciler, *fakeNetBox, *fake
 }
 
 func journaled(nb *fakeNetBox, text string) int {
-	nb.mu.Lock()
-	defer nb.mu.Unlock()
+	nb.Mu.Lock()
+	defer nb.Mu.Unlock()
 	n := 0
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		if strings.Contains(j["comments"].(string), text) {
 			n++
 		}
@@ -224,7 +224,7 @@ func TestRetirementTakesTheNodeOutOfTheCluster(t *testing.T) {
 		t.Fatalf("final patch %v", last)
 	}
 	if journaled(nb, "cordoned and drained it and deleted its Node; deleted 2 CSRs of its kubelet and its bootstrap token") != 1 {
-		t.Errorf("journals %v", nb.journals)
+		t.Errorf("journals %v", nb.Journals)
 	}
 	if kube.get(hwPath) != nil || kube.get(mPath) != nil {
 		t.Error("Hardware or Machine survived the retirement")
@@ -245,10 +245,10 @@ func TestRetirementRetriesTheNodeRemoval(t *testing.T) {
 		}
 	}
 	if p := lastPatch(nb); p != nil {
-		t.Fatalf("the device moved while the API was down: %v", nb.patches)
+		t.Fatalf("the device moved while the API was down: %v", nb.Patches)
 	}
 	if journaled(nb, "could not take riptide out of the cluster") != 1 {
-		t.Fatalf("journals %v", nb.journals)
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	if kube.get(hwPath) == nil {
 		t.Fatal("the Hardware went while the removal waits")
@@ -263,7 +263,7 @@ func TestRetirementRetriesTheNodeRemoval(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, ok := api.nodes["riptide"]; ok || lastPatch(nb)["status"] != "offline" {
-		t.Fatalf("after the API came back: nodes %v, patches %v", api.nodes, nb.patches)
+		t.Fatalf("after the API came back: nodes %v, patches %v", api.nodes, nb.Patches)
 	}
 }
 
@@ -283,7 +283,7 @@ func TestRetirementWaitsForAPodDisruptionBudget(t *testing.T) {
 		t.Fatal("the Node went while a PodDisruptionBudget refused its pod's eviction")
 	}
 	if journaled(nb, "for PodDisruptionBudgets to allow evicting apps/web from riptide") != 1 {
-		t.Fatalf("journals %v", nb.journals)
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	if kube.get(wfBase + retireWF).Annotations()[DrainStartedAnnotation] != testNow.UTC().Format(time.RFC3339) {
 		t.Fatal("the drain's start is not on the Workflow")
@@ -297,7 +297,7 @@ func TestRetirementWaitsForAPodDisruptionBudget(t *testing.T) {
 		t.Fatalf("the Node outlived the drain's wait: %v", api.nodes)
 	}
 	if journaled(nb, "removes apps/web, whose eviction PodDisruptionBudgets refused for 10m0s") != 1 {
-		t.Fatalf("journals %v", nb.journals)
+		t.Fatalf("journals %v", nb.Journals)
 	}
 }
 
@@ -310,7 +310,7 @@ func TestRetirementWithoutANodeOrCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(api.csrs) != 1 || len(api.tokens.secrets) != 0 || journaled(nb, "the cluster holds no Node for it; deleted 2 CSRs") != 1 {
-		t.Fatalf("CSRs %v tokens %v journals %v", api.csrs, api.tokens.secrets, nb.journals)
+		t.Fatalf("CSRs %v tokens %v journals %v", api.csrs, api.tokens.secrets, nb.Journals)
 	}
 
 	r, nb, _, api = newRetiredTest(t, "controlplane")
@@ -319,7 +319,7 @@ func TestRetirementWithoutANodeOrCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !slices.Equal(api.calls, []string{"POST token"}) || journaled(nb, "a control plane's Node is the owner's to delete") != 1 {
-		t.Fatalf("calls %v journals %v", api.calls, nb.journals)
+		t.Fatalf("calls %v journals %v", api.calls, nb.Journals)
 	}
 
 	r, nb, _, _ = newRetiredTest(t, "")
@@ -328,6 +328,6 @@ func TestRetirementWithoutANodeOrCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lastPatch(nb)["status"] != "offline" || journaled(nb, "delete its Node and its bootstrap token by hand") != 1 {
-		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
+		t.Fatalf("patches %v journals %v", nb.Patches, nb.Journals)
 	}
 }

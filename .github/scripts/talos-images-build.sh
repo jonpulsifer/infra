@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds a site's signed Talos boot assets with the siderolabs imager: the
-# SecureBoot installer and the SecureBoot ISO.
+# SecureBoot installer, the SecureBoot ISO, and the SecureBoot metal disk
+# image that fleet-boot writes for a Talos class.
 #
 # usage: talos-images-build.sh <inputs.json> <keys dir> <out dir> <talos.config URL>
 # The keys dir holds the imager's /secureboot files. crane and docker on PATH.
@@ -34,10 +35,11 @@ while IFS= read -r arg; do
   common+=(--extra-kernel-arg "$arg")
 done < <(jq -r '.extra_kernel_args[]' "$inputs")
 
-# The installer's UKI is what an installed disk boots. On its first boot there
-# is no STATE, so Talos fetches its config from the URL, filling in ${uuid} and
-# the ${code} that the ramdisk wrote to META; every later boot loads the config
-# from STATE. The ISO boots no installed disk and carries no URL.
+# The installer's UKI is what an installed disk boots, and so is the metal
+# image's. On its first boot there is no STATE, so Talos fetches its config from
+# the URL, filling in ${uuid} and the ${code} that the ramdisk wrote to META;
+# every later boot loads the config from STATE. The ISO boots no installed disk
+# and carries no URL.
 config=(--extra-kernel-arg "talos.config=$config_url")
 
 mkdir -p "$out"
@@ -49,8 +51,9 @@ run() {
 
 run secureboot-installer "${common[@]}" "${config[@]}"
 run secureboot-iso "${common[@]}"
+run secureboot-metal "${common[@]}" "${config[@]}"
 
-for f in installer-amd64-secureboot.tar metal-amd64-secureboot.iso; do
+for f in installer-amd64-secureboot.tar metal-amd64-secureboot.iso metal-amd64-secureboot.raw.zst; do
   [[ -s "$out/$f" ]] || {
     echo "missing output $out/$f" >&2
     exit 1

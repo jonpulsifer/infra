@@ -1,6 +1,6 @@
 //go:build cgo
 
-// The daily check on the software TPM: a running node's LAK-signed quote,
+// The hourly check on the software TPM: a running node's LAK-signed quote,
 // judged by the renewal policy, recorded in NetBox as a verdict and a time,
 // with nothing issued. Each case below says whether it may quarantine.
 package attest
@@ -52,7 +52,7 @@ func activeNode(t *testing.T) (*harness, *fakeNetBox) {
 	t.Helper()
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"], "approved_ek_hash": h.hashes["rsa"], "approved_ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "active", simMAC, map[string]any{"class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"], "approved_ek_hash": h.hashes["rsa"], "approved_ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -290,9 +290,9 @@ func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
 // folly's only control plane would move the cluster's API to the bootstrap
 // VLAN. Its failure is recorded, journaled and alerts; status and LDevID stay.
 func TestControlPlaneFailsInPlace(t *testing.T) {
-	t.Run("daily check", func(t *testing.T) {
+	t.Run("hourly check", func(t *testing.T) {
 		h, f := activeNode(t)
-		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["class"] = "controlplane" })
 		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
 		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
@@ -320,7 +320,7 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 	})
 	t.Run("renewal", func(t *testing.T) {
 		h, f := activeNode(t)
-		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["class"] = "controlplane" })
 		first := nvLDevID(t, h)
 		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.renew(simSerial); return err }())
@@ -764,9 +764,9 @@ func foreignPublic(t *testing.T, h *harness) []byte {
 
 // journaled is whether a journal entry contains s.
 func (f *fakeNetBox) journaled(s string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, j := range f.journal {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	for _, j := range f.journalLines() {
 		if strings.Contains(j, s) {
 			return true
 		}

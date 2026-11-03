@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/bmc"
 )
 
 // Reconciler makes Tinkerbell match NetBox. Every pass is idempotent: it
@@ -31,6 +33,18 @@ type Reconciler struct {
 	// Links keeps the TFTP netboot-not-allowed links of the devices' MACs,
 	// or is nil without a directory.
 	Links *TFTPLinks
+	// Kea writes each device's DHCP reservation, with the boot file while
+	// it may netboot, or is nil without a reservations file.
+	Kea *KeaReservations
+	// netboot is what this pass decided for each device's Hardware, for
+	// Kea's boot files, and lastNetboot what the pass before decided.
+	netboot, lastNetboot map[string]bool
+	// devices is this pass's device list.
+	devices []Device
+	// BMC opens a device's BMC in native mode (Config.NativeBMC), and Runs
+	// keeps each run's BMC record there; both are nil in rufio mode.
+	BMC  func(Device) (bmc.BMC, error)
+	Runs *Runs
 	// SpireNodesFile is where each pass writes the nodes SPIRE registers,
 	// or empty to write none.
 	SpireNodesFile string
@@ -173,6 +187,11 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 
 	errs := []error{csrErr}
 	keep := map[string]bool{}
+	if len(r.netboot) > 0 {
+		r.lastNetboot = r.netboot
+	}
+	r.netboot = map[string]bool{}
+	r.devices = devices
 	for _, d := range devices {
 		keep[d.Name] = true
 		if err := r.cordonQuarantined(ctx, d); err != nil {
@@ -212,7 +231,8 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 				continue
 			}
 			for _, o := range objs {
-				if !keep[o.Name()] {
+				// In native mode no device keeps a Machine.
+				if !keep[o.Name()] || (res == MachineResource && r.Config.NativeBMC()) {
 					if err := r.Kube.Delete(ctx, res, o.Name()); err != nil {
 						errs = append(errs, fmt.Errorf("delete %s %s: %w", res.Kind, o.Name(), err))
 					}
@@ -228,12 +248,18 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err := r.syncLinks(devices); err != nil {
 		errs = append(errs, err)
 	}
+	// An empty list is left alone here too: Kea keeps its last reservations.
+	if r.Kea != nil && len(devices) > 0 {
+		if err := r.Kea.Sync(devices, r.netboot); err != nil {
+			errs = append(errs, err)
+		}
+	}
 	if r.SpireNodesFile != "" && len(devices) > 0 {
 		if err := r.writeSpireNodes(devices); err != nil {
 			errs = append(errs, fmt.Errorf("SPIRE nodes: %w", err))
 		}
 	}
-	if err := r.prune(ctx); err != nil {
+	if err := r.prune(ctx, devices); err != nil {
 		errs = append(errs, err)
 	}
 	return errors.Join(errs...)
@@ -317,11 +343,19 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 	}
 	hardware := d.MAC != "" && d.Disk != ""
 	if hardware {
-		if err := r.applyHardware(ctx, d, Unfinished(workflows)); err != nil {
+		netboot := Unfinished(workflows)
+		if r.netboot != nil {
+			r.netboot[d.Name] = netboot
+		}
+		if err := r.applyHardware(ctx, d, netboot); err != nil {
 			return err
 		}
 	}
-	if d.HasBMC() {
+	// In native mode fleetd drives the BMC itself, and the pass's cleanup
+	// deletes every Machine fleetd made.
+	switch {
+	case r.Config.NativeBMC():
+	case d.HasBMC():
 		m, err := r.Config.Machine(d)
 		if err != nil {
 			return err
@@ -329,8 +363,10 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		if err := r.Kube.Apply(ctx, MachineResource, m); err != nil {
 			return fmt.Errorf("apply Machine: %w", err)
 		}
-	} else if err := r.deleteManaged(ctx, MachineResource, d.Name); err != nil {
-		return fmt.Errorf("delete Machine: %w", err)
+	default:
+		if err := r.deleteManaged(ctx, MachineResource, d.Name); err != nil {
+			return fmt.Errorf("delete Machine: %w", err)
+		}
 	}
 
 	if d.Status == "decommissioning" {
@@ -350,7 +386,7 @@ func (r *Reconciler) device(ctx context.Context, d Device) error {
 		why := "fleetd: " + d.DesiredAction + " waits: the device needs a primary MAC on an interface and install_disk"
 		return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+d.DesiredAction, d, "warning", why)
 	}
-	if why := d.Unidentified(d.DesiredAction); why != "" {
+	if why := unidentified(d, d.DesiredAction); why != "" {
 		return r.journalOnce(ctx, "unidentified/"+d.Name+"/"+d.DesiredAction, d, "warning", "fleetd: "+d.DesiredAction+" waits: "+why)
 	}
 	_, err = r.start(ctx, d, d.DesiredAction, workflows, false)
@@ -525,8 +561,9 @@ func (r *Reconciler) endWithoutDeadline(ctx context.Context, d Device, wf Object
 // Workflow it finds for its ID. A new run's Hardware allows netboot before the
 // Workflow exists, so Smee answers the firmware as soon as Rufio power-cycles
 // it; a create that fails leaves the flags on until the next pass turns them
-// off. With hookos, the machine already waits in HookOS, so Rufio stays out
-// of the run.
+// off. With hookos, the machine already waits in HookOS, so the BMC stays out
+// of the run. In native mode a netboot that fails creates no Workflow, and
+// create records the run.
 func (r *Reconciler) start(ctx context.Context, d Device, action string, workflows []Object, hookos bool) (string, error) {
 	running := firstUnfinished(workflows)
 	if running == nil && len(workflows) > 0 && unrecorded(d, action, workflows[0]) {
@@ -539,6 +576,12 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		return r.adopt(ctx, d, action, running)
 	}
 	name, err := r.create(ctx, d, action, hookos, nil)
+	if errors.Is(err, errNetbootPending) {
+		return "", nil
+	}
+	if errors.Is(err, errBootFailed) {
+		return name, nil
+	}
 	if err != nil {
 		return "", err
 	}
@@ -548,6 +591,8 @@ func (r *Reconciler) start(ctx context.Context, d Device, action string, workflo
 		comment += "; the machine attested from HookOS, where it waits, and takes it"
 	case d.ManualBoot():
 		comment += "; no BMC drives this run: power the machine on by hand, and it PXE-boots"
+	case r.netboots(d, hookos):
+		comment += "; fleetd network-booted the machine through its BMC"
 	}
 	return r.record(ctx, d, action, name, NextStatus(action, d.Status), comment)
 }
@@ -573,15 +618,49 @@ func (r *Reconciler) deleteFinished(ctx context.Context, workflows []Object) err
 }
 
 // create makes a new run of the action, with the Hardware's netboot on first,
-// and the annotations.
+// and the annotations. In native mode, a run that would netboot has fleetd
+// netboot the machine before its Workflow exists, and keeps the attempt in
+// Runs rather than on the Workflow. A netboot that fails creates no Workflow
+// and is errBootFailed, once NetBox has it; one that waits for the machine to
+// go off is errNetbootPending, and the next request's create goes on with it
+// under the same name. The device's newest netboot decides, as the newest
+// Workflow does in start: a failure of this action that NetBox does not have
+// yet is recorded again rather than tried again.
 func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos bool, annotations map[string]string) (string, error) {
+	native := r.netboots(d, hookos)
+	var name string
+	var run Run
+	if native {
+		latest, last, ok, err := r.Runs.Latest(d.Name)
+		if err != nil {
+			return "", err
+		}
+		switch {
+		case ok && last.Action == action && last.BootFailed != "" && !last.Recorded:
+			return latest, r.recordBootFailure(ctx, d, latest, last)
+		case ok && r.resumable(last, action):
+			name, run = latest, last
+		default:
+			run = r.newRun(d, action, annotations)
+		}
+	}
 	wf, err := r.Config.Workflow(d, action, r.Now(), hookos)
-	if err == nil && len(annotations) > 0 {
+	if err == nil {
+		if name != "" {
+			wf.metadata()["name"] = name
+		}
 		a := map[string]any{}
 		for k, v := range annotations {
-			a[k] = v
+			if !native || k != AttemptAnnotation {
+				a[k] = v
+			}
 		}
-		wf.metadata()["annotations"] = a
+		if native && run.Supersedes != "" {
+			a[SupersedesAnnotation] = run.Supersedes
+		}
+		if len(a) > 0 {
+			wf.metadata()["annotations"] = a
+		}
 	}
 	if err != nil {
 		Audit("fleet.workflow", r.Config.Site, d, d.LastWorkflow, "refused: "+err.Error())
@@ -592,6 +671,11 @@ func (r *Reconciler) create(ctx context.Context, d Device, action string, hookos
 	}
 	if err := r.applyHardware(ctx, d, true); err != nil {
 		return "", err
+	}
+	if native {
+		if err := r.netbootMachine(ctx, d, wf.Name(), run); err != nil {
+			return wf.Name(), err
+		}
 	}
 	if err := r.Kube.Create(ctx, WorkflowResource, wf); err != nil {
 		return "", fmt.Errorf("create Workflow %s: %w", wf.Name(), err)
@@ -643,6 +727,11 @@ func (r *Reconciler) adopt(ctx context.Context, d Device, action string, wf Obje
 // and clears desired_action only while it still holds the request the pass
 // read; a request the owner set since stays, and waits for the run.
 func (r *Reconciler) record(ctx context.Context, d Device, action, name, status, comment string) (string, error) {
+	return r.recordAs(ctx, d, action, name, status, "info", comment)
+}
+
+// recordAs is record with the journal entry's kind.
+func (r *Reconciler) recordAs(ctx context.Context, d Device, action, name, status, kind, comment string) (string, error) {
 	now, err := r.NetBox.ByID(ctx, r.Config.Site, d.ID)
 	if err != nil {
 		return "", fmt.Errorf("record Workflow %s: read %s again: %w", name, d.Name, err)
@@ -655,7 +744,7 @@ func (r *Reconciler) record(ctx context.Context, d Device, action, name, status,
 	default:
 		comment += fmt.Sprintf("; desired_action changed to %s while fleetd started it, so it stays set and waits for %s", now.DesiredAction, name)
 	}
-	if err := r.NetBox.Update(ctx, d, status, fields, "info", comment); err != nil {
+	if err := r.NetBox.Update(ctx, d, status, fields, kind, comment); err != nil {
 		return "", fmt.Errorf("record Workflow %s: %w", name, err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, name, action)
@@ -684,13 +773,24 @@ func (r *Reconciler) retire(ctx context.Context, d Device, hardware bool, workfl
 			why := "fleetd: the retirement waits: the device needs a primary MAC on an interface and install_disk"
 			return r.journalOnce(ctx, "no-hardware/"+d.Name+"/"+ActionRetire, d, "warning", why)
 		}
-		if why := d.Unidentified(ActionRetire); why != "" {
+		if why := unidentified(d, ActionRetire); why != "" {
 			return r.journalOnce(ctx, "unidentified/"+d.Name+"/"+ActionRetire, d, "warning", "fleetd: the retirement waits: "+why)
 		}
 		return r.startRetire(ctx, d, workflows)
 	}
 	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
 	if errors.Is(err, ErrNotFound) {
+		// In native mode a retirement whose netboot failed has no Workflow,
+		// and starts again after the backoff.
+		if r.Config.NativeBMC() {
+			run, ok, err := r.Runs.Get(d.LastWorkflow)
+			if err != nil {
+				return err
+			}
+			if ok && run.BootFailed != "" {
+				return r.retryNativeRetire(ctx, d, d.LastWorkflow, run, workflows)
+			}
+		}
 		// Pruned or lost before it finished: run the retirement again.
 		return r.startRetire(ctx, d, workflows)
 	}
@@ -758,6 +858,9 @@ func (r *Reconciler) retryRetire(ctx context.Context, d Device, wf Object, workf
 	}
 	n := attempt(wf) + 1
 	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{AttemptAnnotation: strconv.Itoa(n)})
+	if deferred(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -769,7 +872,7 @@ func (r *Reconciler) retryRetire(ctx context.Context, d Device, wf Object, workf
 // startRetire starts the retirement, which supersedes a run of another action
 // that is still going. A deleted run's current action goes on, writes the disk
 // and leaves the agent stuck reporting it, so fleetd deletes the run only once
-// the machine is off. With a BMC, it asks Rufio to power the machine off
+// the machine is off. With a BMC, it has the BMC power the machine off
 // (stopMachine); once the BMC reports it off, fleetd reads the run again,
 // deletes it only while it is as that read shows it, and creates the
 // retirement with a netboot. A BMC that refuses leaves the run, and the
@@ -801,7 +904,7 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 	case err != nil:
 		return err
 	case outcome == jobFailed:
-		why := fmt.Sprintf("fleetd: the retirement waits for Workflow %s (%s): the BMC did not power the machine off (Rufio Job %s failed: %s). A deleted run's current action would go on, so fleetd keeps %s, and the retirement starts on the pass after it ends. Fix the BMC; or power the machine off by hand, and %s ends at its global timeout", old, action, stopJob(old), refusal, old, old)
+		why := fmt.Sprintf("fleetd: the retirement waits for Workflow %s (%s): the BMC did not power the machine off (%s). A deleted run's current action would go on, so fleetd keeps %s, and the retirement starts on the pass after it ends. Fix the BMC; or power the machine off by hand, and %s ends at its global timeout", old, action, r.refused(old, refusal), old, old)
 		return r.journalOnce(ctx, "retire-waits/"+old, d, "warning", why)
 	case outcome != jobCompleted:
 		return nil
@@ -831,10 +934,13 @@ func (r *Reconciler) startRetire(ctx context.Context, d Device, workflows []Obje
 		return err
 	}
 	name, err := r.create(ctx, d, ActionRetire, false, map[string]string{SupersedesAnnotation: old})
+	if deferred(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	comment := fmt.Sprintf("fleetd: the retirement ends Workflow %s (%s) and starts %s: the BMC powered the machine off (Rufio Job %s), which stopped %s, and fleetd deleted it", old, action, name, stopJob(old), old)
+	comment := fmt.Sprintf("fleetd: the retirement ends Workflow %s (%s) and starts %s: the BMC powered the machine off (%s), which stopped %s, and fleetd deleted it", old, action, name, r.stopped(old), old)
 	_, err = r.record(ctx, d, ActionRetire, name, "", comment)
 	return err
 }
@@ -882,7 +988,7 @@ func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, er
 	case err != nil:
 		return false, err
 	case outcome == jobFailed:
-		why := fmt.Sprintf("fleetd: %s left decommissioning, and the cancellation could not stop the retirement Workflow %s: the BMC did not power the machine off (Rufio Job %s failed: %s). A deleted retirement's action would go on, so fleetd keeps %s, and it goes on and wipes the disk. Power the machine off by hand to stop it; %s then ends at its global timeout, and a new desired_action starts after it", d.Name, name, stopJob(name), refusal, name, name)
+		why := fmt.Sprintf("fleetd: %s left decommissioning, and the cancellation could not stop the retirement Workflow %s: the BMC did not power the machine off (%s). A deleted retirement's action would go on, so fleetd keeps %s, and it goes on and wipes the disk. Power the machine off by hand to stop it; %s then ends at its global timeout, and a new desired_action starts after it", d.Name, name, r.refused(name, refusal), name, name)
 		return false, r.journalOnce(ctx, "abandon-refused/"+name, d, "danger", why)
 	case outcome != jobCompleted:
 		return false, nil
@@ -905,29 +1011,46 @@ func (r *Reconciler) abandon(ctx context.Context, d Device, wf Object) (bool, er
 		return false, fmt.Errorf("abandon %s: %w", name, err)
 	}
 	Audit("fleet.workflow", r.Config.Site, d, name, "abandoned: the device left decommissioning")
-	why := fmt.Sprintf("fleetd: %s left decommissioning, so the BMC powered the machine off (Rufio Job %s), which stopped the retirement Workflow %s, and fleetd deleted it. The disk may be partly wiped; set desired_action to provision to install the node again", d.Name, stopJob(name), name)
+	why := fmt.Sprintf("fleetd: %s left decommissioning, so the BMC powered the machine off (%s), which stopped the retirement Workflow %s, and fleetd deleted it. The disk may be partly wiped; set desired_action to provision to install the node again", d.Name, r.stopped(name), name)
 	return true, r.journalOnce(ctx, "abandoned/"+name, d, "warning", why)
 }
 
-// prune deletes fleetd's Workflows older than the TTL.
-func (r *Reconciler) prune(ctx context.Context) error {
+// prune deletes fleetd's Workflows older than the TTL. In native mode it
+// drops each run's record once neither a Workflow nor a device's
+// last_workflow names the run, after a pass that read devices. A failed or
+// pending netboot has no Workflow, so its record stays for the TTL.
+func (r *Reconciler) prune(ctx context.Context, devices []Device) error {
 	objs, err := r.Kube.List(ctx, WorkflowResource, ManagedLabel+"="+FieldManager)
 	if err != nil {
 		return fmt.Errorf("list workflows: %w", err)
 	}
 	cutoff := r.Now().Add(-r.Config.WorkflowTTL)
+	named := map[string]bool{}
 	var errs []error
 	for _, o := range objs {
 		created := o.Created()
 		if created.IsZero() || !created.Before(cutoff) {
+			named[o.Name()] = true
 			continue
 		}
 		if err := r.Kube.Delete(ctx, WorkflowResource, o.Name()); err != nil {
+			named[o.Name()] = true
 			errs = append(errs, fmt.Errorf("prune %s: %w", o.Name(), err))
 			continue
 		}
 		r.Metrics.WorkflowsPruned.Add(1)
 	}
 	errs = append(errs, r.pruneJobs(ctx))
+	if r.Runs != nil && len(devices) > 0 {
+		for _, d := range devices {
+			named[d.LastWorkflow] = true
+		}
+		keep := func(name string, run Run) bool {
+			return named[name] || (run.BootedAt.After(cutoff) && (run.BootFailed != "" || run.pending()))
+		}
+		if err := r.Runs.Prune(keep); err != nil {
+			errs = append(errs, fmt.Errorf("prune the BMC runs: %w", err))
+		}
+	}
 	return errors.Join(errs...)
 }

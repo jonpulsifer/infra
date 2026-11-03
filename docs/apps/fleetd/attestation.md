@@ -38,7 +38,7 @@ An unexpected HookOS boot can fail intake without losing the node's identity. fl
 
 A signed confirmation admits the device in the same process after fleetd reads the binding again.
 
-fleetd requires every field that `terraform/netbox/folly` declares: `talos_class`, `install_disk`, `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` and the primary address.
+fleetd requires every field that `terraform/netbox/folly` declares: `class`, `install_disk`, `install_disk_serial`, `bmc_type`, `tpm_version`, `amt`, `secure_boot_expected`, `expected_port` and the primary address.
 
 The attested LLDP port must match `expected_port`. Missing fields or a port mismatch cause refusal and a journal entry. fleetd does not fill in missing declarations.
 
@@ -77,7 +77,7 @@ Unread worker configurations expire after two hours. Control-plane configuration
 
 ## Check the running node
 
-On a running node, `tpm-reattest` sends a LAK-signed quote each day. This check needs no approved binding. Certificate renewal starts 30 days before expiry. A `planned` device cannot renew.
+On a running node, `tpm-reattest` sends a LAK-signed quote each hour. This check needs no approved binding. Certificate renewal starts 30 days before expiry. A `planned` device cannot renew.
 
 An authenticated boot-policy failure quarantines a worker, blocks renewal and requests a cordon through `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`.
 

@@ -43,6 +43,9 @@ type ClassInputs struct {
 	// Labels are the class's node labels; TPMLabels join them on a TPM node.
 	Labels    map[string]string `json:"labels"`
 	TPMLabels map[string]string `json:"tpm_labels"`
+	// Taints are the class's node taints, key to "value:Effect", as the
+	// workload the class names declares them.
+	Taints map[string]string `json:"taints"`
 	// NodeNetwork is how the node document gives a node its static address,
 	// or nil for a cluster whose nodes take theirs by DHCP.
 	NodeNetwork *NodeNetwork `json:"node_network"`
@@ -213,12 +216,13 @@ func LoadBundle(path string, worker WorkerSecrets) error {
 	return nil
 }
 
-// Node is what a render takes from a NetBox device: its name, class,
+// Node is what a render takes from a NetBox device: its name, serial, class,
 // install disk, TPM spec version ("2.0" for a node that seals its disks) and
 // primary IPv4 address. A worker also takes its own bootstrap token, which
 // its config carries as cluster.token in place of the cluster's.
 type Node struct {
 	Name           string
+	Serial         string
 	Class          string
 	Disk           string
 	TPM            string
@@ -482,9 +486,16 @@ func nodeDocument(in ClassInputs, n Node) string {
 		"kind":       "KubeNodeConfig",
 		"labels":     labels,
 	}
+	taints := map[string]any{}
 	if in.MachineType == "controlplane" {
 		labels["node.kubernetes.io/exclude-from-external-load-balancers"] = map[string]any{"$patch": "delete"}
-		kubeNode["taints"] = map[string]any{"node-role.kubernetes.io/control-plane": map[string]any{"$patch": "delete"}}
+		taints["node-role.kubernetes.io/control-plane"] = map[string]any{"$patch": "delete"}
+	}
+	for k, v := range in.Taints {
+		taints[k] = v
+	}
+	if len(taints) > 0 {
+		kubeNode["taints"] = taints
 	}
 	docs := []any{
 		map[string]any{"apiVersion": "v1alpha1", "kind": "HostnameConfig", "auto": "off", "hostname": n.Name},

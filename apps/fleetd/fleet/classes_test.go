@@ -2,6 +2,7 @@ package fleet
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,14 +12,22 @@ import (
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
-const ubuntuImage = "ghcr.io/jonpulsifer/ubuntu-installer@sha256:ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+const (
+	nixosImage   = "https://github.com/jonpulsifer/infra/releases/download/node-images%2F1/nixos-node-amd64.img.zst"
+	nixosDigest  = "sha256:ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34"
+	debianImage  = "https://cloud.debian.org/images/cloud/trixie/20261001-1/debian-13-genericcloud-amd64-20261001-1.tar.xz"
+	debianDigest = "sha256:cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12cd34ab12"
+	testSeedURL  = "https://enroll.lolwtf.ca/seed"
+)
 
 var testClasses = classes.Table{
 	"controlplane": {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"cp-g5":        {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"worker-g5":    {OS: "talos", Template: "provision", PolicyProfile: "talos"},
 	"worker-g2":    {OS: "talos", Template: "provision", PolicyProfile: "talos"},
-	"ubuntu":       {OS: "ubuntu", Template: "provision-ubuntu", InstallerImage: ubuntuImage, PolicyProfile: "ubuntu"},
+	"debian":       {OS: "debian", Workload: "general", Template: "provision-image", PolicyProfile: "debian", PayloadKind: classes.PayloadCloudInit, Image: debianImage, ImageDigest: debianDigest, ImageFormat: "tar.xz"},
+	"nixos":        {OS: "nixos", Workload: "general", Template: "provision-image", PolicyProfile: "talos", PayloadKind: classes.PayloadNixOSImage, Image: nixosImage, ImageDigest: nixosDigest, ImageFormat: "raw.zst"},
+	"alpine":       {OS: "alpine", Workload: "general", Template: "provision-image", PolicyProfile: "talos", PayloadKind: classes.PayloadAlpineImage},
 }
 
 func mustWorkflow(t *testing.T, cfg Config, d Device, action string) Object {
@@ -32,20 +41,53 @@ func mustWorkflow(t *testing.T, cfg Config, d Device, action string) Object {
 
 func TestWorkflowFollowsTheClass(t *testing.T) {
 	talos := "ghcr.io/jonpulsifer/talos-installer-folly:v1.14.4"
-	cfg := Config{Classes: testClasses, Installs: map[string]string{"worker-g5": talos, "ubuntu": ubuntuImage}}
-	for _, tc := range []struct{ class, template, image string }{
-		{"worker-g5", "provision", talos},
-		{"ubuntu", "provision-ubuntu", ubuntuImage},
-	} {
-		spec := mustWorkflow(t, cfg, Device{Name: "n", Class: tc.class, TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "provision")["spec"].(map[string]any)
-		hm := spec["hardwareMap"].(map[string]any)
-		if spec["templateRef"] != tc.template || hm["installer_image"] != tc.image || hm["install"] != "true" {
-			t.Errorf("%s: template %v, hardwareMap %v", tc.class, spec["templateRef"], hm)
-		}
+	cfg := Config{Classes: testClasses, Installs: map[string]string{"worker-g5": talos}, ImageInstalls: map[string]bool{"debian": true}, SeedURL: testSeedURL}
+	spec := mustWorkflow(t, cfg, Device{Name: "n", Class: "worker-g5", TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "provision")["spec"].(map[string]any)
+	hm := spec["hardwareMap"].(map[string]any)
+	if spec["templateRef"] != "provision" || hm["installer_image"] != talos || hm["install"] != "true" {
+		t.Errorf("worker-g5: template %v, hardwareMap %v", spec["templateRef"], hm)
 	}
-	spec := mustWorkflow(t, cfg, Device{Name: "n", Class: "ubuntu", TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "wipe")["spec"].(map[string]any)
-	if spec["templateRef"] != "provision-ubuntu" {
-		t.Errorf("a wipe runs %v, not the class's Template", spec["templateRef"])
+	if _, ok := hm["image_url"]; ok {
+		t.Errorf("a Talos class carries image keys: %v", hm)
+	}
+	spec = mustWorkflow(t, cfg, Device{Name: "n", Class: "debian", TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "provision")["spec"].(map[string]any)
+	hm = spec["hardwareMap"].(map[string]any)
+	want := map[string]any{
+		"attest": "true", "wipe": "true", "retire": "false", "install": "true", "installer_image": "", "install_disk_serial": "30DF7020FGKL",
+		"image_url": debianImage, "image_digest": debianDigest, "image_format": "tar.xz", "payload_kind": classes.PayloadCloudInit, "os": "debian", "seed_url": testSeedURL,
+	}
+	if spec["templateRef"] != "provision-image" || fmt.Sprint(hm) != fmt.Sprint(want) {
+		t.Errorf("debian: template %v, hardwareMap\n got %v\nwant %v", spec["templateRef"], hm, want)
+	}
+	spec = mustWorkflow(t, cfg, Device{Name: "n", Class: "debian", TPM: "2.0", DiskSerial: "30DF7020FGKL"}, "wipe")["spec"].(map[string]any)
+	if hm := spec["hardwareMap"].(map[string]any); spec["templateRef"] != "provision-image" || hm["install"] != "false" || hm["image_url"] != debianImage {
+		t.Errorf("a wipe runs %v with %v, not the class's Template with install off", spec["templateRef"], hm)
+	}
+}
+
+// An image class installs only when the fleet lists it: a class the table
+// carries no whole image for, or one left out by the seed URL, runs its
+// Template with install false and no image.
+func TestImageClassInstallsOnlyWhenListed(t *testing.T) {
+	cfg := Config{Classes: testClasses, SeedURL: testSeedURL}
+	d := Device{Name: "n", Class: "nixos", TPM: "2.0", DiskSerial: "30DF7020FGKL"}
+	if hm := mustWorkflow(t, cfg, d, "provision")["spec"].(map[string]any)["hardwareMap"].(map[string]any); hm["install"] != "false" || hm["image_url"] != nixosImage || hm["installer_image"] != "" {
+		t.Errorf("unlisted: %v", hm)
+	}
+	cfg.ImageInstalls = map[string]bool{"nixos": true}
+	if hm := mustWorkflow(t, cfg, d, "provision")["spec"].(map[string]any)["hardwareMap"].(map[string]any); hm["install"] != "true" || hm["payload_kind"] != classes.PayloadNixOSImage || hm["os"] != "nixos" {
+		t.Errorf("listed: %v", hm)
+	}
+	if !cfg.WillInstall(d) || cfg.Installer(d, "provision") != "" {
+		t.Errorf("WillInstall %v, Installer %q", cfg.WillInstall(d), cfg.Installer(d, "provision"))
+	}
+	d.Class, d.TPM = "worker-g2", "1.2"
+	if cfg.WillInstall(d) {
+		t.Error("a device that attests nothing installs")
+	}
+	alpine := Device{Name: "n", Class: "alpine", TPM: "2.0", DiskSerial: "30DF7020FGKL"}
+	if hm := mustWorkflow(t, cfg, alpine, "provision")["spec"].(map[string]any)["hardwareMap"].(map[string]any); hm["install"] != "false" || hm["image_url"] != "" || hm["seed_url"] != testSeedURL {
+		t.Errorf("a class without an image: %v", hm)
 	}
 }
 
@@ -90,13 +132,13 @@ func TestWorkflowCarriesTheDiskSerial(t *testing.T) {
 }
 
 func TestAdmitRefusesAndJournalsAnUnknownClass(t *testing.T) {
-	d := declared(map[string]any{"talos_class": "worker-g9"})
+	d := declared(map[string]any{"class": "worker-g9"})
 	at := newAdmitTest(t, rackMAC, []map[string]any{d}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
 	if code, why := at.admit(testCode); code != http.StatusConflict || !strings.Contains(why, `class "worker-g9" is not in the class table`) {
 		t.Fatalf("admit: %d %s", code, why)
 	}
-	if len(at.nb.patches) != 0 || len(at.kube.workflows()) != 0 || !at.journal("not in the class table") {
-		t.Errorf("a refused admission wrote: patches %v workflows %v journals %v", at.nb.patches, at.kube.workflows(), at.nb.journals)
+	if len(at.nb.Patches) != 0 || len(at.kube.workflows()) != 0 || !at.journal("not in the class table") {
+		t.Errorf("a refused admission wrote: patches %v workflows %v journals %v", at.nb.Patches, at.kube.workflows(), at.nb.Journals)
 	}
 }
 
@@ -113,12 +155,62 @@ func TestLoadInstallerTakesAClassImageFromTheTable(t *testing.T) {
 	t.Setenv("FLEET_INSTALLS", "true")
 	t.Setenv("FLEET_CONTROLPLANE_BUNDLE", "")
 
-	cfg := Config{Classes: pinnedTalosClasses()}
+	cfg := Config{Classes: pinnedTalosClasses(), SeedURL: testSeedURL}
 	if _, err := LoadInstaller(&cfg, nil, nil, NewMetrics()); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Installs["ubuntu"] != ubuntuImage || cfg.Installs["worker-g5"] != talosImage || cfg.Installs["worker-g5"] == ubuntuImage {
+	if cfg.Installs["worker-g5"] != talosImage || cfg.Installs["nixos"] != "" || cfg.Installs["debian"] != "" {
 		t.Fatalf("installs %v", cfg.Installs)
+	}
+	if !cfg.ImageInstalls["nixos"] || !cfg.ImageInstalls["debian"] || cfg.ImageInstalls["alpine"] || cfg.ImageInstalls["worker-g5"] {
+		t.Fatalf("image installs %v", cfg.ImageInstalls)
+	}
+}
+
+// The image classes' installs need no Talos renderer, and need the seed URL.
+func TestLoadInstallerListsTheImageClassesWithoutTheTalosRenderer(t *testing.T) {
+	for _, k := range []string{"FLEET_CLASS_INPUTS", "FLEET_WORKER_SECRETS", "FLEET_TALOSCTL", "FLEET_CONTROLPLANE_BUNDLE"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("FLEET_INSTALLS", "true")
+	cfg := Config{Classes: testClasses, SeedURL: testSeedURL}
+	in, err := LoadInstaller(&cfg, nil, nil, NewMetrics())
+	if err != nil || in.Renderer != nil {
+		t.Fatalf("%v %+v", err, in)
+	}
+	if !cfg.ImageInstalls["nixos"] || !cfg.ImageInstalls["debian"] || cfg.ImageInstalls["alpine"] || len(cfg.Installs) != 0 {
+		t.Fatalf("image installs %v, installs %v", cfg.ImageInstalls, cfg.Installs)
+	}
+	cfg = Config{Classes: testClasses}
+	if _, err := LoadInstaller(&cfg, nil, nil, NewMetrics()); err != nil || len(cfg.ImageInstalls) != 0 {
+		t.Fatalf("without the seed URL: %v %v", err, cfg.ImageInstalls)
+	}
+	t.Setenv("FLEET_INSTALLS", "false")
+	cfg = Config{Classes: testClasses, SeedURL: testSeedURL}
+	if _, err := LoadInstaller(&cfg, nil, nil, NewMetrics()); err != nil || cfg.ImageInstalls != nil {
+		t.Fatalf("with installs off: %v %v", err, cfg.ImageInstalls)
+	}
+}
+
+func TestLoadConfigReadsTheSeedURL(t *testing.T) {
+	t.Setenv("FLEET_HOOKOS_URL", "http://hookos")
+	t.Setenv("FLEET_HOOKOS_CMDLINE", "console=tty0")
+	path := filepath.Join(t.TempDir(), "classes.json")
+	_ = os.WriteFile(path, []byte(`{"w": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"}}`), 0o600)
+	t.Setenv("FLEET_CLASSES", path)
+	t.Setenv("FLEET_SEED_URL", "")
+	if cfg, err := LoadConfig(); err != nil || cfg.SeedURL != "" {
+		t.Fatalf("unset: %v %q", err, cfg.SeedURL)
+	}
+	t.Setenv("FLEET_SEED_URL", testSeedURL)
+	if cfg, err := LoadConfig(); err != nil || cfg.SeedURL != testSeedURL {
+		t.Fatalf("set: %v %q", err, cfg.SeedURL)
+	}
+	for _, bad := range []string{"enroll.lolwtf.ca/seed", "ftp://enroll/seed", "https://enroll.lolwtf.ca/seed?uuid=x"} {
+		t.Setenv("FLEET_SEED_URL", bad)
+		if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), "FLEET_SEED_URL") {
+			t.Errorf("%q: %v", bad, err)
+		}
 	}
 }
 
@@ -178,7 +270,7 @@ func TestLoadConfigNeedsTheClassTable(t *testing.T) {
 		t.Fatal("a fleet without a class table loaded")
 	}
 	path := filepath.Join(t.TempDir(), "classes.json")
-	_ = os.WriteFile(path, []byte(`{"w": {"os": "talos", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"}}`), 0o600)
+	_ = os.WriteFile(path, []byte(`{"w": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"}}`), 0o600)
 	t.Setenv("FLEET_CLASSES", path)
 	cfg, err := LoadConfig()
 	if err != nil || cfg.Classes["w"].Template != "provision" {

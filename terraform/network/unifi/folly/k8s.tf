@@ -31,12 +31,19 @@ resource "unifi_network" "k8s" {
     interface_type = "none"
   }
 
-  # Each node's Talos config carries its address statically, so the pool
-  # serves only machines that netboot: firmware PXE, HookOS, and a fresh
-  # install's first boot before it applies its config. It is K8S_DHCP_CIDR,
-  # which holds no node's address.
+  # Kea on spore (nix/services/kea.nix) is the network's DHCP server: the
+  # gateway relays each request to spore's bootstrap address and Kea answers
+  # through it, with the same pool, lease, resolvers and boot file this block
+  # carried while the gateway leased the network itself. Each node's Talos
+  # config carries its address statically, so the pool serves only machines
+  # that netboot: firmware PXE, HookOS, and a fresh install's first boot
+  # before it applies its config. It is K8S_DHCP_CIDR, which holds no node's
+  # address. The block stays, disabled, as the rollback: enabled = true here
+  # and false on the relay returns the gateway's own DHCP in one apply. A
+  # removed boot block would stay live on the controller, so it is disabled
+  # in place.
   dhcp_server = {
-    enabled   = true
+    enabled   = false
     leasetime = local.one_day
     start     = cidrhost(local.dhcp_cidr, 1)
     stop      = cidrhost(local.dhcp_cidr, -2)
@@ -44,12 +51,17 @@ resource "unifi_network" "k8s" {
       enabled = true
       servers = local.dns_servers
     }
-    # A machine netboots here, from spore's bootstrap address through the
-    # policy kubernetes_to_boot in firewall.tf: the offer names that address
-    # and the signed iPXE's filename. The resolvers above are the anchors'
-    # CoreDNS, which answers enroll.lolwtf.ca with the same address.
     tftp_server = local.boot_server
-    boot        = local.boot_option
+    boot        = merge(local.boot_option, { enabled = false })
+  }
+
+  # The relay is gateway-originated traffic onto the bootstrap VLAN, so no
+  # policy admits it; spore's own firewall admits UDP 67 on that interface.
+  # Kea's replies come back on the bootstrap VLAN to the router address here,
+  # which the firewall admits ahead of the bootstrap block (firewall.tf).
+  dhcp_relay = {
+    enabled = true
+    servers = [local.boot_server]
   }
 
   lifecycle {

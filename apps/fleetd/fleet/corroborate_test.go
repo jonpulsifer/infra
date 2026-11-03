@@ -16,18 +16,18 @@ func TestRetirementWaitsForTheBMCToReportPowerOff(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(api.calls) != 1 || len(nb.patches) != 0 || kube.get(hwPath) == nil || kube.get(mPath) == nil {
-		t.Fatalf("calls %v patches %v: the retirement did not wait", api.calls, nb.patches)
+	if len(api.calls) != 1 || len(nb.Patches) != 0 || kube.get(hwPath) == nil || kube.get(mPath) == nil {
+		t.Fatalf("calls %v patches %v: the retirement did not wait", api.calls, nb.Patches)
 	}
-	if n := journaled(nb, "the BMC reports the machine on (Machine status.power); fleetd waits for the power-off"); n != 1 {
-		t.Fatalf("%d wait journals: %v", n, nb.journals)
+	if n := journaled(nb, "the BMC reports the machine on (Machine status.powerState); fleetd waits for the power-off"); n != 1 {
+		t.Fatalf("%d wait journals: %v", n, nb.Journals)
 	}
 	kube.power = "off"
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if lastPatch(nb)["status"] != "offline" || journaled(nb, "wiped the disk and powered the node off") != 1 {
-		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
+		t.Fatalf("patches %v journals %v", nb.Patches, nb.Journals)
 	}
 }
 
@@ -37,7 +37,7 @@ func TestRetirementProceedsWhenTheBMCReportsPowerOff(t *testing.T) {
 		t.Fatal(err)
 	}
 	if lastPatch(nb)["status"] != "offline" || journaled(nb, "waits for the power-off") != 0 || kube.get(mPath) != nil {
-		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
+		t.Fatalf("patches %v journals %v", nb.Patches, nb.Journals)
 	}
 }
 
@@ -48,7 +48,7 @@ func TestRetirementGivesUpOnAnUnansweringBMCOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	if journaled(nb, "has not reported the machine's power state") != 1 {
-		t.Fatalf("journals %v", nb.journals)
+		t.Fatalf("journals %v", nb.Journals)
 	}
 	r.Now = func() time.Time { return testNow.Add(PowerOffWait + time.Minute) }
 	for range 2 {
@@ -56,21 +56,21 @@ func TestRetirementGivesUpOnAnUnansweringBMCOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if journaled(nb, "has not reported riptide off for") != 1 || len(api.calls) != 1 || len(nb.patches) != 0 {
-		t.Fatalf("calls %v patches %v journals %v", api.calls, nb.patches, nb.journals)
+	if journaled(nb, "has not reported riptide off for") != 1 || len(api.calls) != 1 || len(nb.Patches) != 0 {
+		t.Fatalf("calls %v patches %v journals %v", api.calls, nb.Patches, nb.Journals)
 	}
-	if last := nb.journals[len(nb.journals)-1]; last["kind"] != "danger" {
+	if last := nb.Journals[len(nb.Journals)-1]; last["kind"] != "danger" {
 		t.Fatalf("the give-up is %v, not danger", last["kind"])
 	}
 }
 
 func TestRetirementWithoutABMCSaysTheSuccessIsUncorroborated(t *testing.T) {
 	r, nb, _, _ := newRetiredTest(t, "")
-	nb.set("bmc_type", "none")
+	nb.Set("bmc_type", "none")
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if lastPatch(nb)["status"] != "offline" || journaled(nb, "no BMC corroborates") != 1 || journaled(nb, "wiped the disk and powered the node off;") != 0 {
-		t.Fatalf("patches %v journals %v", nb.patches, nb.journals)
+		t.Fatalf("patches %v journals %v", nb.Patches, nb.Journals)
 	}
 }

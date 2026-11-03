@@ -55,6 +55,25 @@ locals {
   # rebooting a node already on the version: Create upgrades only a node
   # whose running version differs. fleet-controller renders a node of a class from the
   # class_inputs output below.
+  # The class table fleetd reads, every class with its os and workload. This
+  # root holds the Talos role and patches of each class whose os is talos;
+  # the check below keeps the two in step.
+  fleet_classes = jsondecode(file("${path.module}/../fleet/classes.json"))
+
+  # What a workload means on a Talos node: the labels a pod selects and the
+  # taints it tolerates, key => "value:Effect" as the module takes them.
+  # general sets none; a workload a pod needs, such as a sandbox node, is
+  # one more entry here and one class in the table that names it. Talos
+  # applies a taint when the kubelet registers the Node and refuses a later
+  # change, so a new taint on a registered node is applied once by hand
+  # (docs/platform/kubernetes.md).
+  workloads = {
+    general = {
+      labels = {}
+      taints = {}
+    }
+  }
+  class_workload = { for class, c in local.classes : class => local.workloads[local.fleet_classes[class].workload] }
   classes = {
     controlplane = {
       role      = "controlplane"
@@ -77,11 +96,12 @@ locals {
   # and the root applies none until NetBox holds the node active, so its
   # talos_machine is planned away and back across a reinstall, by design. A
   # control plane installs as a worker does, and joins the cluster. The
-  # install disk is the nodes file's.
+  # install disk is the nodes file's. A node of a class whose os is not
+  # talos is not this root's.
   nodes = { for name, m in local.machines : name => {
     class = m.class
     role  = local.classes[m.class].role
-  } if contains(["active", "failed"], m.status) }
+  } if contains(["active", "failed"], m.status) && lookup(local.fleet_classes, m.class, { os = "" }).os == "talos" }
 
   # The TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
@@ -121,10 +141,22 @@ locals {
     )
     tpm_patches   = module.talos.render_inputs.tpm_patches
     class_patches = [local.ephemeral_patch[class]]
-    labels        = {}
+    labels        = local.class_workload[class].labels
+    taints        = local.class_workload[class].taints
     tpm_labels    = module.talos.render_inputs.tpm_labels
     node_network  = module.talos.render_inputs.node_network
   } }
+}
+
+# Every talos class in the class table has its role here, and every class
+# here is a talos class there.
+check "classes" {
+  assert {
+    condition = (
+      sort([for class, c in local.fleet_classes : class if c.os == "talos"]) == sort(keys(local.classes))
+    )
+    error_message = "The talos classes in clusters/folly/fleet/classes.json and local.classes in talos.tf must name the same classes."
+  }
 }
 
 module "talos" {
@@ -154,6 +186,8 @@ module "talos" {
     address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
     patches            = [local.ephemeral_patch[n.class]]
+    labels             = local.class_workload[n.class].labels
+    taints             = local.class_workload[n.class].taints
     installer_image    = local.secureboot_installer
     install_generation = local.install_generation
     bootstrap_token    = contains(local.fleet_workers, name) ? local.no_join_token : null

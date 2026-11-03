@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -103,7 +104,7 @@ type session struct {
 	renew   *Record
 	akBlobs protocol.Blobs
 	ldBlobs protocol.Blobs
-	// check is a renewal session opened for the daily check, which issues
+	// check is a renewal session opened for the hourly check, which issues
 	// nothing; ldevidIssued is the LDevID on file's CA-signed issue time;
 	// devidFiles are the verified DevID's files, set when the store holds
 	// no record under the machine's name or holds it quarantined; lifted is
@@ -159,7 +160,7 @@ func checkClaim(c protocol.Machine) error {
 			return fail(reasonField, "the %s is longer than %d bytes", l.name, l.max)
 		}
 	}
-	if !validMAC(c.MAC) {
+	if !netbox.ValidMAC(c.MAC) {
 		return fail(reasonMACInvalid, "the MAC does not read as six colon-separated hex bytes")
 	}
 	return nil
@@ -450,7 +451,7 @@ func (v *Verifier) journalClaim(ctx context.Context, m Machine, comment string) 
 	}
 	v.claims[m.NetBoxID] = now
 	v.mu.Unlock()
-	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", plain(comment), m.Serial)
+	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", netbox.Plain(comment), m.Serial)
 }
 
 // bindingAuthored errs unless the device is unbound, or NetBox's changelog
@@ -675,8 +676,8 @@ func (v *Verifier) unattendedBoot(ctx context.Context, s *session, cause error) 
 	if v.NetBox != nil && s.machine.NetBoxID != 0 {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
-		comment := plain("fleetd: an unexpected HookOS boot failed attestation and was refused; nothing was recorded, and the node keeps its identity: " + detail)
-		if err := v.NetBox.journal(ctx, s.machine.NetBoxID, "warning", comment); err != nil {
+		comment := netbox.Plain("fleetd: an unexpected HookOS boot failed attestation and was refused; nothing was recorded, and the node keeps its identity: " + detail)
+		if err := v.NetBox.Journal(ctx, s.machine.NetBoxID, "warning", comment); err != nil {
 			v.Log.Warn("journal an unattended boot", "machine", s.machine.Name, "err", err)
 		}
 	}
@@ -698,7 +699,7 @@ func (v *Verifier) confirmPlanned(ctx context.Context, s *session) (Machine, err
 		return m, err
 	}
 	wrote, err := v.NetBox.Bind(ctx, m.NetBoxID, s.claim)
-	if errors.Is(err, errMACTaken) {
+	if errors.Is(err, netbox.ErrMACTaken) {
 		return Machine{}, fail(reasonMACMismatch, "%s: %v", m.Name, err)
 	}
 	if err != nil {
@@ -972,7 +973,7 @@ func confirmSigned(s *session, raw []byte) error {
 	return nil
 }
 
-// RenewStart opens a renewal, or with check the daily check: a quote nonce
+// RenewStart opens a renewal, or with check the hourly check: a quote nonce
 // for the machine whose LAK is on file. The caller resolves the DevID, from
 // the store.
 func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.DevID, check bool, remote string) (protocol.RenewStart, error) {
@@ -987,7 +988,7 @@ func (v *Verifier) RenewStart(ctx context.Context, serial string, d protocol.Dev
 		return protocol.RenewStart{}, v.reject(&m, protocol.Machine{Serial: m.Serial, MAC: m.MAC}, fail(reasonStatus, "%s is %s and gets no renewal; the owner changes that in NetBox", m.Name, m.lifecycle()))
 	}
 	// A planned device gets its identity from an intake pass against its
-	// approved binding, never from a renewal. The daily check issues
+	// approved binding, never from a renewal. The hourly check issues
 	// nothing and still runs.
 	if !check && strings.EqualFold(m.Status, statusPlanned) {
 		if v.NetBox != nil && m.NetBoxID != 0 {
@@ -1318,7 +1319,7 @@ func (v *Verifier) refuse(ctx context.Context, m *Machine, claim protocol.Machin
 	return v.quarantine(ctx, m, claim, eks, err, false)
 }
 
-// quarantine is refuse, with check marking a daily check's quarantine.
+// quarantine is refuse, with check marking a hourly check's quarantine.
 func (v *Verifier) quarantine(ctx context.Context, m *Machine, claim protocol.Machine, eks []VerifiedEK, err error, check bool) error {
 	reason := reasonOf(err)
 	if reason == reasonInternal || reason == reasonSession {

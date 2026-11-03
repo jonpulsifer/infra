@@ -14,7 +14,7 @@
       "\"machine\":\n  \"logging\":\n    \"destinations\":\n    - \"endpoint\": \"tcp://127.0.0.1:6050/\"\n      \"format\": \"json_lines\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KmsgLogConfig\"\n\"name\": \"vector\"\n\"url\": \"tcp://127.0.0.1:6051/\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"enabled\": false\n\"kind\": \"KubeProxyConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"enabled\": false\n\"kind\": \"KubeCoreDNSConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"certExtraSANs\":\n- \"optiplex\"\n- \"optiplex.lolwtf.ca\"\n- \"optiplex.folly.lolwtf.ca\"\n- \"folly.lolwtf.ca\"\n- \"10.3.0.10\"\n\"extraArgs\":\n  \"enable-aggregator-routing\": \"true\"\n\"kind\": \"KubeAPIServerConfig\"\n",
       "\"accepted\":\n  \"audiences\":\n  - \"api\"\n  - \"https://kubernetes.default.svc\"\n\"apiVersion\": \"v1alpha1\"\n\"issuer\":\n  \"issuerURL\": \"https://oidc.lolwtf.ca/folly\"\n\"kind\": \"KubeServiceAccountConfig\"\n",
-      "\"apiVersion\": \"v1alpha1\"\n\"configuration\":\n  \"anonymous\":\n    \"conditions\":\n    - \"path\": \"/livez\"\n    - \"path\": \"/readyz\"\n    - \"path\": \"/healthz\"\n    \"enabled\": true\n  \"jwt\":\n  - \"claimMappings\":\n      \"username\":\n        \"expression\": \"\\\"federated:\\\" + claims.sub\"\n    \"claimValidationRules\":\n    - \"expression\": |\n        claims.sub in [\n          \"system:serviceaccount:atlantis:atlantis\",\n          \"system:serviceaccount:mate:mate-sandbox-admin\",\n          \"system:serviceaccount:mate:mate-sandbox-reader\",\n          \"system:serviceaccount:kthx-engine:kthx-engine\"\n        ]\n      \"message\": \"only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine\n        service accounts may authenticate across clusters\"\n    \"issuer\":\n      \"audiences\":\n      - \"api\"\n      \"url\": \"https://oidc.lolwtf.ca/offsite\"\n\"kind\": \"KubeAuthenticationConfig\"\n",
+      "\"apiVersion\": \"v1alpha1\"\n\"configuration\":\n  \"anonymous\":\n    \"conditions\":\n    - \"path\": \"/livez\"\n    - \"path\": \"/readyz\"\n    - \"path\": \"/healthz\"\n    \"enabled\": true\n  \"jwt\":\n  - \"claimMappings\":\n      \"username\":\n        \"expression\": \"\\\"federated:\\\" + claims.sub\"\n    \"claimValidationRules\":\n    - \"expression\": |\n        claims.sub in [\n          \"system:serviceaccount:atlantis:atlantis\",\n          \"system:serviceaccount:mate:mate-sandbox-admin\",\n          \"system:serviceaccount:mate:mate-sandbox-reader\",\n          \"system:serviceaccount:kthx-engine:kthx-engine\"\n        ]\n      \"message\": \"only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine\n        service accounts may authenticate across clusters\"\n    \"issuer\":\n      \"audiences\":\n      - \"api\"\n      \"url\": \"https://oidc.lolwtf.ca/offsite\"\n  - \"claimMappings\":\n      \"uid\":\n        \"expression\": \"claims.sub\"\n      \"username\":\n        \"expression\": \"\\\"google:\\\" + claims.email\"\n    \"claimValidationRules\":\n    - \"expression\": \"claims.?email_verified.orValue(false) == true\"\n      \"message\": \"the Google account's email address must be verified\"\n    - \"expression\": \"claims.?hd.orValue(\\\"\\\") == \\\"pulsifer.ca\\\"\"\n      \"message\": \"only pulsifer.ca accounts may sign in\"\n    \"issuer\":\n      \"audiences\":\n      - \"629296473058-pma7b51kqo748heqk1gig79lveupa334.apps.googleusercontent.com\"\n      \"url\": \"https://accounts.google.com\"\n\"kind\": \"KubeAuthenticationConfig\"\n",
       "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"ETCD\"\n\"provisioning\":\n  \"diskSelector\":\n    \"match\": \"system_disk\"\n  \"maxSize\": \"8GiB\"\n  \"minSize\": \"8GiB\"\n",
       "\"allowedKubernetesNamespaces\":\n- \"backups\"\n\"allowedRoles\":\n- \"os:etcd:backup\"\n\"apiVersion\": \"v1alpha1\"\n\"kind\": \"KubeTalosAPIAccessConfig\"\n",
       "\"cluster\":\n  \"etcd\":\n    \"extraArgs\":\n      \"listen-metrics-urls\": \"http://0.0.0.0:2381\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeControllerManagerConfig\"\n\n---\n\"apiVersion\": \"v1alpha1\"\n\"extraArgs\":\n  \"bind-address\": \"0.0.0.0\"\n\"kind\": \"KubeSchedulerConfig\"\n"
@@ -29,6 +29,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -63,6 +64,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"
@@ -97,6 +99,7 @@
       "link": "net0",
       "prefix_length": 26
     },
+    "taints": {},
     "talos_contract": "v1.14",
     "tpm_labels": {
       "lolwtf.ca/tpm": "true"

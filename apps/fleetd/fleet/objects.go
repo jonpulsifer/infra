@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 // Labels on every Workflow: the device and the action.
@@ -58,10 +60,10 @@ var Actions = map[string]Action{
 
 var diskSerialPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 
-// Unidentified says why a run of action cannot start on the device, or ""
+// unidentified says why a run of action cannot start on the device, or ""
 // when it can: a run that wipes needs the serial its install disk reports,
 // because the Template wipes and installs only the disk that reports it.
-func (d Device) Unidentified(action string) string {
+func unidentified(d Device, action string) string {
 	if !Actions[action].Wipe {
 		return ""
 	}
@@ -72,30 +74,6 @@ func (d Device) Unidentified(action string) string {
 		return fmt.Sprintf("%s's install_disk_serial %q is malformed", d.Name, d.DiskSerial)
 	}
 	return ""
-}
-
-// Installing says whether a planned device has passed attestation: its
-// first install, or a reinstall after a provision or wipe moved it back to
-// planned. It stays planned until its node fetches its config.
-func (d Device) Installing() bool { return d.Status == "planned" && passedVerdict(d.Verdict) }
-
-// passedVerdict says whether an attest_verdict is a pass, as the verifier reads
-// it: attested, or a control plane's failed check that left it in place.
-func passedVerdict(verdict string) bool {
-	return verdict == "attested" || strings.HasPrefix(verdict, "failed-no-quarantine")
-}
-
-// HasBMC says whether the device gets a Machine now: a BMC type and an
-// address for it, which for AMT is the device's own declared address, from
-// the moment it has one, a planned device's included.
-func (d Device) HasBMC() bool {
-	return d.BMCType != "" && d.BMCType != "none" && d.BMCAddress != ""
-}
-
-// ManualBoot says whether Rufio stays out of a run: a device without a
-// Machine.
-func (d Device) ManualBoot() bool {
-	return !d.HasBMC()
 }
 
 func labels(d Device, extra map[string]string) map[string]any {
@@ -114,7 +92,8 @@ func labels(d Device, extra map[string]string) map[string]any {
 // allowPXE included, and an apply that left a flag out would unset it. The
 // script frees every iPXE image before the chain, because iPXE claims the
 // Linux initrd device whenever another image is loaded, and systemd-stub then
-// fails to register the UKI's initrd.
+// fails to register the UKI's initrd. A device with a BMC names its Machine,
+// except in native mode, which has none.
 func (c Config) Hardware(d Device, netboot bool) Object {
 	spec := map[string]any{
 		"disks": []any{map[string]any{"device": d.Disk}},
@@ -134,7 +113,7 @@ func (c Config) Hardware(d Device, netboot bool) Object {
 			},
 		}},
 	}
-	if d.HasBMC() {
+	if d.HasBMC() && !c.NativeBMC() {
 		spec["bmcRef"] = map[string]any{"apiGroup": "bmc.tinkerbell.org", "kind": "Machine", "name": d.Name}
 	}
 	return Object{
@@ -201,19 +180,40 @@ func SkipsAttest(d Device) bool {
 // bootstraps, and a control plane with no address: an install the render
 // then refuses would leave a node with no config.
 func (c Config) Installer(d Device, action string) string {
-	if action != "provision" || SkipsAttest(d) {
-		return ""
-	}
-	if c.Bootstrap != "" && d.Address == c.Bootstrap {
-		return ""
-	}
-	if c.IsControlPlane(d.Class) && d.Address == "" {
+	if !c.mayInstall(d, action) {
 		return ""
 	}
 	return c.Installs[d.Class]
 }
 
-// ControlPlaneClass is the control plane's Talos class: NetBox's talos_class
+// InstallsImage says whether a run of action on the device writes its
+// class's image: a provision of a device that attests, of a class in
+// ImageInstalls. The Talos installer's rules on the device apply alike.
+func (c Config) InstallsImage(d Device, action string) bool {
+	return c.mayInstall(d, action) && c.ImageInstalls[d.Class]
+}
+
+// WillInstall says whether the device's provision installs at all: a Talos
+// installer or its class's image.
+func (c Config) WillInstall(d Device) bool {
+	return c.Installer(d, "provision") != "" || c.InstallsImage(d, "provision")
+}
+
+// mayInstall holds the device's part of Installer and InstallsImage.
+func (c Config) mayInstall(d Device, action string) bool {
+	if action != "provision" || SkipsAttest(d) {
+		return false
+	}
+	if c.Bootstrap != "" && d.Address == c.Bootstrap {
+		return false
+	}
+	if c.IsControlPlane(d.Class) && d.Address == "" {
+		return false
+	}
+	return true
+}
+
+// ControlPlaneClass is the control plane's Talos class: NetBox's class
 // choice, the model map's and the class inputs' key.
 const ControlPlaneClass = "controlplane"
 
@@ -226,16 +226,22 @@ func (c Config) IsControlPlane(class string) bool {
 // Workflow runs the class's Template for one action, and refuses a device
 // whose class the table lacks, and a run that wipes a disk the device does not
 // identify (Unidentified). A device that boots by hand (ManualBoot), or
-// one whose machine already waits in HookOS (hookos), gets no boot mode.
+// one whose machine already waits in HookOS (hookos), gets no boot mode,
+// and in native mode no Workflow has one: fleetd netboots the machine itself.
 // toggleAllowNetboot is off: the fleet sets the Hardware's flags before the
 // Workflow exists, and Tinkerbell's toggle would be a second writer of the
 // same atomic list, racing the fleet's apply.
+//
+// An image class's Workflow carries no installer image; it carries the
+// class's image, digest and format, its payload kind and OS, and the seed
+// URL, which the provision-image Template reads, and install is true only
+// when the run writes the image (InstallsImage).
 func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (Object, error) {
 	class, ok := c.Classes[d.Class]
 	if !ok {
 		return nil, fmt.Errorf("%s's class %q is not in the class table", d.Name, d.Class)
 	}
-	if why := d.Unidentified(action); why != "" {
+	if why := unidentified(d, action); why != "" {
 		return nil, errors.New(why)
 	}
 	a := Actions[action]
@@ -246,22 +252,33 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 	if !diskSerialPattern.MatchString(serial) {
 		serial = ""
 	}
+	hm := map[string]any{
+		"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
+		"wipe":            fmt.Sprint(a.Wipe),
+		"retire":          fmt.Sprint(a.Retire),
+		"install":         fmt.Sprint(installer != ""),
+		"installer_image": installer,
+		// The Hardware's disk carries only the kernel name: Tinkerbell's
+		// CRD prunes any other field, so the serial goes here.
+		"install_disk_serial": serial,
+	}
+	if classes.ImagePayload(class.PayloadKind) {
+		hm["install"] = fmt.Sprint(c.InstallsImage(d, action))
+		hm["installer_image"] = ""
+		hm["image_url"] = class.Image
+		hm["image_digest"] = class.ImageDigest
+		hm["image_format"] = class.ImageFormat
+		hm["payload_kind"] = class.PayloadKind
+		hm["os"] = class.OS
+		hm["seed_url"] = c.SeedURL
+	}
 	spec := map[string]any{
 		"templateRef": class.Template,
 		"hardwareRef": d.Name,
-		"hardwareMap": map[string]any{
-			"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
-			"wipe":            fmt.Sprint(a.Wipe),
-			"retire":          fmt.Sprint(a.Retire),
-			"install":         fmt.Sprint(installer != ""),
-			"installer_image": installer,
-			// The Hardware's disk carries only the kernel name: Tinkerbell's
-			// CRD prunes any other field, so the serial goes here.
-			"install_disk_serial": serial,
-		},
+		"hardwareMap": hm,
 	}
 	boot := map[string]any{"toggleAllowNetboot": false}
-	if !hookos && !d.ManualBoot() {
+	if !hookos && !d.ManualBoot() && !c.NativeBMC() {
 		boot["bootMode"] = "netboot"
 	}
 	spec["bootOptions"] = boot

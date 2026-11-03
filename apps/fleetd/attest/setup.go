@@ -41,9 +41,9 @@ func loadCA(chainPath string, validity time.Duration) (*CA, error) {
 // the handlers.
 func FromEnv(log *slog.Logger) (*Server, error) {
 	site := env("ATTEST_SITE", "folly")
-	// 90 days: the running node renews from 30 days out, and a machine
+	// A year: the running node renews from 30 days out, and a machine
 	// that stops renewing loses its identity, which is the revocation.
-	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "2160h"))
+	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "8760h"))
 	if err != nil {
 		return nil, fmt.Errorf("ATTEST_CERT_VALIDITY: %w", err)
 	}
@@ -112,7 +112,7 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
 	}
-	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Log: log}
+	nb := NewNetBox(u, strings.TrimSpace(string(tok)), &http.Client{Timeout: 10 * time.Second}, log)
 	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
 	}

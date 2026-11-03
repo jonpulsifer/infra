@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.2
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.10.23
+ARG MISE_VERSION=2026.10.25
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
@@ -189,7 +189,7 @@ COPY images/mate-sandbox/gh /usr/local/bin/gh
 # so the sandbox can run a build up to a week behind the one the apex serves.
 # It is a Bun bundle: `kthx` on PATH is the shim copied in below, and
 # `kthx upgrade` would install a second copy the shim never runs.
-COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:2ceb09ce17be3378b0c9df70cc6cf867d9b4161c786f6fc36a21cc668736c99f /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
+COPY --from=ghcr.io/jonpulsifer/kthx:latest@sha256:e3fe61d97d008ea7a5814c85e173a98f8814fa9f473bf12ee28475edf9f1f512 /app/apps/kthx/dist/kthx.tgz /tmp/kthx.tgz
 RUN set -eux; \
     mkdir -m 0755 -p /usr/local/lib/kthx; \
     tar -xzf /tmp/kthx.tgz --no-same-owner -C /usr/local/lib/kthx --strip-components=1 \

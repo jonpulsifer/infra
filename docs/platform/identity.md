@@ -42,7 +42,7 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 | `spiffe://lolwtf.ca/node/<name>` | A node alias, one entry for each attestor | `tpm:pub_hash:<hash>`, or `tpm_devid:subject:cn:<name>` |
 | `spiffe://lolwtf.ca/ns/<ns>/sa/<sa>` | A pod, parented to its node's alias | `k8s:ns:<ns>`, `k8s:sa:<sa>` |
 
-The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `talos_class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
+The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
@@ -171,7 +171,7 @@ Quarantine changes the attestation verdict, not the device status.
 | A control-plane quote fails policy | Record `failed-no-quarantine: <reason>` and alert without a cordon. Fleet-owned SPIRE registration eligibility can also change. |
 | A device is `decommissioning` or `offline` | Refuse LDevID renewal. Its LDevID remains valid until expiry. |
 
-A quarantined worker gets no new identity until the owner clears the verdict. Its next daily check or renewal must prove both keys and pass policy. fleetd then restores its record and LDevID files. The owner uncordons the node.
+A quarantined worker gets no new identity until the owner clears the verdict. Its next hourly check or renewal must prove both keys and pass policy. fleetd then restores its record and LDevID files. The owner uncordons the node.
 
 Use [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) or [Retire a node](../runbooks/retire-a-node.md) for the procedures.
 
@@ -209,7 +209,7 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Renewal
 
-The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on fleetd's DevID listener, at the same `ATTEST_URL` as `devid-init`. fleetd issues the renewal from spore's YubiKey CA, whatever CA issued the LDevID on file. Otherwise it runs the daily check, which the next section describes.
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 1h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on fleetd's DevID listener, at the same `ATTEST_URL` as `devid-init`. fleetd issues the renewal from spore's YubiKey CA, whatever CA issued the LDevID on file. Otherwise it runs the hourly check, which the next section describes.
 
 1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
 2. `POST /v1/renew` with the serial answers a session and a nonce.
@@ -220,13 +220,13 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 
 `scripts/render-spire-devid-ca.sh` writes `spire-devid-ca` from `terraform/pki/certs/folly-devid-ca.pem`, and the kustomize workflow fails when the two differ. A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
 
-### Daily check
+### Hourly check
 
 On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are.
 
 A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
 
-A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 26 hours.
+A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 3 hours.
 
 ## GCP access
 

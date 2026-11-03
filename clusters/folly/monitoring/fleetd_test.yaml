@@ -163,7 +163,7 @@ tests:
               job: node-exporter
             exp_annotations:
               message: fleetd does not answer on its DevID listener
-              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its hourly check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
 
   # A worker falls back to PXE at minute 10 and its unattended boot is refused.
   - interval: 1m
@@ -253,14 +253,14 @@ tests:
               message: "optiplex's LDevID expires within 23 days"
               description: "tpm-reattest has not renewed optiplex's LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
 
-  # riptide's newest check, on capsule, is an hour old, so spore's 28-hour-old one does not count.
-  # optiplex last passed 28 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
+  # riptide's newest check, on capsule, is an hour old, so spore's 4-hour-old one does not count.
+  # optiplex last passed 4 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
   - interval: 1m
     input_series:
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
         values: 0x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
-        values: 97200x1700
+        values: 10800x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
         values: 0x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="oldbox"}'
@@ -270,18 +270,18 @@ tests:
       - series: 'kube_node_info{node="optiplex"}'
         values: 1x1700
     alert_rule_test:
-      - eval_time: 25h
+      - eval_time: 2h
         alertname: TalosAttestNotChecked
         exp_alerts: []
-      - eval_time: 28h
+      - eval_time: 4h
         alertname: TalosAttestNotChecked
         exp_alerts:
           - exp_labels:
               severity: warning
               machine: optiplex
             exp_annotations:
-              message: "optiplex has not passed a TPM quote check in 26 hours"
-              description: "fleetd has recorded no passing daily check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+              message: "optiplex has not passed a TPM quote check in 3 hours"
+              description: "fleetd has recorded no passing hourly check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
 
   # spore refused a check of riptide at minute 10: the alert fires for an hour, then clears. A pass
   # never fires.
@@ -300,7 +300,7 @@ tests:
               machine: riptide
               verdict: refused
             exp_annotations:
-              message: "riptide's daily check ended in refused"
+              message: "riptide's hourly check ended in refused"
               description: "quarantine: the TPM quoted a boot that misses fleetd's renewal policy: NetBox's attest_verdict reads quarantined, and fleetd serves no LDevID for it and cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u fleetd on spore."
       - eval_time: 80m
         alertname: TalosAttestCheckFailed
@@ -332,7 +332,7 @@ tests:
               machine: optiplex
             exp_annotations:
               message: "optiplex's PCR 0 changed at the same BIOS version"
-              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next hourly check clears this."
 
   # optiplex, the control plane, failed in place on spore, and no anchor has a newer record: critical.
   # riptide failed in place on forge, then passed on capsule later: the newer record clears it. A

@@ -92,8 +92,11 @@ func (r *Reconciler) bmcJob(ctx context.Context, name string) (outcome, why stri
 // stopMachine asks the BMC to power the device's machine off to stop run,
 // once per run, audits why, and returns the stop Job's outcome. It waits up to
 // Config.BMCJobWait for Rufio, and a Job still running is the next pass's to
-// read.
+// read. In native mode fleetd asks the BMC itself (stopNative).
 func (r *Reconciler) stopMachine(ctx context.Context, d Device, run, reason string) (outcome, why string, err error) {
+	if r.Config.NativeBMC() {
+		return r.stopNative(ctx, d, run, reason)
+	}
 	name := stopJob(run)
 	outcome, why, err = r.bmcJob(ctx, name)
 	if errors.Is(err, ErrNotFound) {
@@ -214,15 +217,19 @@ const (
 
 // retryAt is when fleetd starts a retirement again after wf ended at its BMC
 // job.
-func retryAt(wf Object) time.Time {
+func retryAt(wf Object) time.Time { return backoff(attempt(wf), endedAt(wf)) }
+
+// backoff is when a retirement's attempt that ended at its BMC job at ended
+// starts again.
+func backoff(attempt int, ended time.Time) time.Time {
 	wait := retryFirst
-	for range attempt(wf) - 1 {
+	for range attempt - 1 {
 		if wait *= 2; wait >= retryMax {
 			wait = retryMax
 			break
 		}
 	}
-	return endedAt(wf).Add(wait)
+	return ended.Add(wait)
 }
 
 // PowerOffWait bounds how long a retirement whose Workflow reported success
@@ -235,49 +242,80 @@ const PowerOffWait = 15 * time.Minute
 // so the wait holds across a restart.
 const PowerWaitAnnotation = "lolwtf.ca/power-wait-started-at"
 
-// machinePower is the power state Rufio's Machine reports: status.power, "on",
+// machinePower is the power state Rufio's Machine reports: status.powerState, "on",
 // "off" or "unknown", empty before Rufio has read it.
 func machinePower(m Object) string {
 	st, _ := m["status"].(map[string]any)
-	p, _ := st["power"].(string)
+	p, _ := st["powerState"].(string)
 	return strings.ToLower(p)
 }
 
 // corroborated says whether the BMC agrees with a retirement Workflow's
 // success. The Tinkerbell channel is unauthenticated and the agent's identity
 // is its MAC, so a SUCCESS state alone is a report any host on the network can
-// make; the Machine's power status, which Rufio reads from the BMC, is not.
-// A machine the BMC reports on, or does not answer for, waits: journaled once,
-// and past PowerOffWait journaled once more as danger. Later passes read it
-// again. The caller asks only for a device with a BMC.
+// make; the BMC's power state is not: the Machine's status, which Rufio reads
+// from the BMC, or in native mode fleetd's own read of the BMC. A machine the
+// BMC reports on, or does not answer for, waits: journaled once, and past
+// PowerOffWait journaled once more as danger. Later passes read it again. The
+// caller asks only for a device with a BMC.
 func (r *Reconciler) corroborated(ctx context.Context, d Device, wf Object) (bool, error) {
-	m, err := r.Kube.Get(ctx, MachineResource, d.Name)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return false, fmt.Errorf("read Machine %s: %w", d.Name, err)
+	power, source, check := "", "Machine status.powerState", "its Machine "+d.Name
+	if r.Config.NativeBMC() {
+		power, source, check = r.nativePower(ctx, d), "read from the BMC", "its BMC at "+d.BMCAddress
+	} else {
+		m, err := r.Kube.Get(ctx, MachineResource, d.Name)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return false, fmt.Errorf("read Machine %s: %w", d.Name, err)
+		}
+		power = machinePower(m)
 	}
-	power := machinePower(m)
-	if err == nil && power == "off" {
+	if power == "off" {
 		return true, nil
 	}
 	report := "reports the machine " + power
 	if power == "" {
 		report = "has not reported the machine's power state"
 	}
-	started, perr := time.Parse(time.RFC3339, wf.Annotations()[PowerWaitAnnotation])
-	if perr != nil {
-		started = r.Now().UTC()
-		err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{PowerWaitAnnotation: started.Format(time.RFC3339)})
-		if err != nil && !errors.Is(err, ErrNotFound) {
-			return false, fmt.Errorf("mark the power-off wait on %s: %w", wf.Name(), err)
-		}
+	started, err := r.powerWaitStart(ctx, wf)
+	if err != nil {
+		return false, err
 	}
-	why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC %s (Machine status.power); fleetd waits for the power-off before it takes the node out of the cluster", wf.Name(), report)
+	why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC %s (%s); fleetd waits for the power-off before it takes the node out of the cluster", wf.Name(), report, source)
 	if err := r.journalOnce(ctx, "power-waits/"+wf.Name(), d, "info", why); err != nil {
 		return false, err
 	}
 	if r.Now().Sub(started) >= PowerOffWait {
-		why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC has not reported %s off for %s (it %s). The success may not be the agent's: the device stays decommissioning, and fleetd keeps reading the BMC. Check the machine and its Machine %s; power it off by hand, or move the device to offline after you have wiped it", wf.Name(), d.Name, PowerOffWait, strings.TrimPrefix(report, "reports "), d.Name)
+		why := fmt.Sprintf("fleetd: Workflow %s reported success, and the BMC has not reported %s off for %s (it %s). The success may not be the agent's: the device stays decommissioning, and fleetd keeps reading the BMC. Check the machine and %s; power it off by hand, or move the device to offline after you have wiped it", wf.Name(), d.Name, PowerOffWait, strings.TrimPrefix(report, "reports "), check)
 		return false, r.journalOnce(ctx, "power-gaveup/"+wf.Name(), d, "danger", why)
 	}
 	return false, nil
+}
+
+// powerWaitStart is when fleetd first found the BMC not reporting the
+// machine off after wf's success, marked on first sight so the wait holds
+// across a restart: on wf's PowerWaitAnnotation, or in native mode in Runs.
+func (r *Reconciler) powerWaitStart(ctx context.Context, wf Object) (time.Time, error) {
+	now := r.Now().UTC().Truncate(time.Second)
+	if r.Config.NativeBMC() {
+		run, _, err := r.Runs.Get(wf.Name())
+		if err != nil {
+			return now, err
+		}
+		if !run.PowerWaitStartedAt.IsZero() {
+			return run.PowerWaitStartedAt, nil
+		}
+		if run.Node == "" {
+			run.Node, run.Action = wf.Labels()[NodeLabel], wf.Labels()[ActionLabel]
+		}
+		run.PowerWaitStartedAt = now
+		return now, r.Runs.Put(wf.Name(), run)
+	}
+	if started, err := time.Parse(time.RFC3339, wf.Annotations()[PowerWaitAnnotation]); err == nil {
+		return started, nil
+	}
+	err := r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{PowerWaitAnnotation: now.Format(time.RFC3339)})
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return now, fmt.Errorf("mark the power-off wait on %s: %w", wf.Name(), err)
+	}
+	return now, nil
 }

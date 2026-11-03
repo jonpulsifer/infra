@@ -44,7 +44,7 @@ func (f *fakeKube) completeJob(name string) {
 // run, so the deleted run's action cannot go on.
 func TestSupersedePowersOffBeforeTheDelete(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -62,7 +62,7 @@ func TestSupersedePowersOffBeforeTheDelete(t *testing.T) {
 // after the run ends.
 func TestRetirementWaitsWhenTheBMCRefusesPowerOff(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}, bmc: "refuse"}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -74,12 +74,12 @@ func TestRetirementWaitsWhenTheBMCRefusesPowerOff(t *testing.T) {
 	if names := kube.workflows(); len(names) != 1 || names[0] != prov || kube.deletes(prov) != 0 {
 		t.Fatalf("a run the BMC could not stop was deleted: %v", names)
 	}
-	if kube.posts(jobBase) != 1 || len(nb.patches) != 0 {
-		t.Fatalf("Job posts %d, patches %v", kube.posts(jobBase), nb.patches)
+	if kube.posts(jobBase) != 1 || len(nb.Patches) != 0 {
+		t.Fatalf("Job posts %d, patches %v", kube.posts(jobBase), nb.Patches)
 	}
 	want := "fleetd: the retirement waits for Workflow " + prov + " (provision): the BMC did not power the machine off (Rufio Job stop-" + prov + " failed: failed to perform PowerAction: 500 Internal Server Error)"
-	if len(nb.journals) != 1 || !strings.HasPrefix(nb.journals[0]["comments"].(string), want) {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.Journals) != 1 || !strings.HasPrefix(nb.Journals[0]["comments"].(string), want) {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 
 	kube.setState(prov, "STATE_SUCCESS")
@@ -99,7 +99,7 @@ func TestRetirementWaitsWhenTheBMCRefusesPowerOff(t *testing.T) {
 // pass that finds it complete supersedes.
 func TestSupersedeWaitsForThePowerOff(t *testing.T) {
 	const prov = "provision-riptide-1"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + prov: installing(prov)}, bmc: "down"}
 	r, done := newTest(t, nb, kube)
 	defer done()
@@ -108,16 +108,16 @@ func TestSupersedeWaitsForThePowerOff(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if kube.deletes(prov) != 0 || kube.creates() != 0 || len(nb.journals) != 0 || kube.posts(jobBase) != 1 {
-		t.Fatalf("deletes %d creates %d journals %v", kube.deletes(prov), kube.creates(), nb.journals)
+	if kube.deletes(prov) != 0 || kube.creates() != 0 || len(nb.Journals) != 0 || kube.posts(jobBase) != 1 {
+		t.Fatalf("deletes %d creates %d journals %v", kube.deletes(prov), kube.creates(), nb.Journals)
 	}
 	kube.completeJob("stop-" + prov)
 	if err := r.Reconcile(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	names := kube.workflows()
-	if len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") || len(nb.journalWith("the BMC powered the machine off")) != 1 {
-		t.Fatalf("workflows %v journals %v", names, nb.journals)
+	if len(names) != 1 || !strings.HasPrefix(names[0], "retire-riptide-") || len(nb.JournalWith("the BMC powered the machine off")) != 1 {
+		t.Fatalf("workflows %v journals %v", names, nb.Journals)
 	}
 }
 
@@ -153,7 +153,7 @@ func failedNetbootJob(objects map[string]Object, wf string) {
 func TestRetirementThatFailedAtItsBMCJobIsExplainedAndRetried(t *testing.T) {
 	const retire, prov = "retire-riptide-1699999990", "provision-riptide-1699999900"
 	failedAt := testNow.Add(-time.Minute)
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": retire})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": retire})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{wfBase + retire: bootFailed(retire, ActionRetire, failedAt, map[string]any{SupersedesAnnotation: prov})}}
 	failedNetbootJob(kube.objects, retire)
 	r, done := newTest(t, nb, kube)
@@ -165,10 +165,10 @@ func TestRetirementThatFailedAtItsBMCJobIsExplainedAndRetried(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(nb.journals) != 1 || kube.creates() != 0 {
-		t.Fatalf("journals %v creates %d", nb.journals, kube.creates())
+	if len(nb.Journals) != 1 || kube.creates() != 0 {
+		t.Fatalf("journals %v creates %d", nb.Journals, kube.creates())
 	}
-	got := nb.journals[0]["comments"].(string)
+	got := nb.Journals[0]["comments"].(string)
 	for _, want := range []string{
 		"Workflow " + retire + " ended FAILED before any action ran: its BMC job netboot-" + retire + " failed: failed to perform PowerAction: 500 Internal Server Error",
 		"kubectl -n tinkerbell get machine riptide",
@@ -182,8 +182,8 @@ func TestRetirementThatFailedAtItsBMCJobIsExplainedAndRetried(t *testing.T) {
 	if strings.Contains(got, `action ""`) || strings.Contains(got, "console") {
 		t.Errorf("journal %q names an empty action or the console", got)
 	}
-	if nb.journals[0]["kind"] != "danger" {
-		t.Errorf("kind %v", nb.journals[0]["kind"])
+	if nb.Journals[0]["kind"] != "danger" {
+		t.Errorf("kind %v", nb.Journals[0]["kind"])
 	}
 
 	now = failedAt.Add(retryFirst)
@@ -198,20 +198,20 @@ func TestRetirementThatFailedAtItsBMCJobIsExplainedAndRetried(t *testing.T) {
 	if got := kube.get(wfBase + retry).Annotations()[AttemptAnnotation]; got != "2" {
 		t.Errorf("attempt %q", got)
 	}
-	if len(nb.patches) != 1 || nb.patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retry {
-		t.Fatalf("patches %v", nb.patches)
+	if len(nb.Patches) != 1 || nb.Patches[0]["custom_fields"].(map[string]any)["last_workflow"] != retry {
+		t.Fatalf("patches %v", nb.Patches)
 	}
-	if len(nb.journalWith("fleetd started "+retry+" to try again (attempt 2)")) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.JournalWith("fleetd started "+retry+" to try again (attempt 2)")) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
-	nb.set("last_workflow", retry)
+	nb.Set("last_workflow", retry)
 	for range 2 {
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if kube.creates() != 1 || len(nb.patches) != 1 {
-		t.Fatalf("the retry ran twice: creates %d patches %v", kube.creates(), nb.patches)
+	if kube.creates() != 1 || len(nb.Patches) != 1 {
+		t.Fatalf("the retry ran twice: creates %d patches %v", kube.creates(), nb.Patches)
 	}
 }
 
@@ -220,24 +220,24 @@ func TestRetirementThatFailedAtItsBMCJobIsExplainedAndRetried(t *testing.T) {
 func TestARetryWhoseRecordFailedIsAdopted(t *testing.T) {
 	const retire = "retire-riptide-1699999990"
 	failedAt := testNow.Add(-time.Hour)
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": retire})}, ifaces: riptideIfaces(), apply: true}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "decommissioning", "none", map[string]any{"last_workflow": retire})}, Ifaces: riptideIfaces(), Apply: true}
 	kube := &fakeKube{objects: map[string]Object{wfBase + retire: bootFailed(retire, ActionRetire, failedAt, nil)}}
 	failedNetbootJob(kube.objects, retire)
 	r, done := newTest(t, nb, kube)
 	defer done()
-	nb.failPatches(true)
+	nb.FailPatches(true)
 	if err := r.Reconcile(context.Background()); err == nil {
 		t.Fatal("a refused record did not fail the pass")
 	}
-	nb.failPatches(false)
+	nb.FailPatches(false)
 	for range 2 {
 		if err := r.Reconcile(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 	}
 	names := kube.workflows()
-	if len(names) != 1 || kube.creates() != 1 || len(nb.journalWith("its record was late")) != 1 {
-		t.Fatalf("workflows %v creates %d journals %v", names, kube.creates(), nb.journals)
+	if len(names) != 1 || kube.creates() != 1 || len(nb.JournalWith("its record was late")) != 1 {
+		t.Fatalf("workflows %v creates %d journals %v", names, kube.creates(), nb.Journals)
 	}
 }
 
@@ -245,7 +245,7 @@ func TestARetryWhoseRecordFailedIsAdopted(t *testing.T) {
 // boot job that never existed is named by Tinkerbell's own message.
 func TestRunThatFailedAtItsBMCJobNamesTheJob(t *testing.T) {
 	const prov, gone = "provision-riptide-1699999990", "wipe-riptide-1699999980"
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": prov})}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", "active", "none", map[string]any{"last_workflow": prov})}, Ifaces: riptideIfaces()}
 	kube := &fakeKube{objects: map[string]Object{
 		wfBase + prov: bootFailed(prov, "provision", testNow.Add(-time.Hour), nil),
 		wfBase + gone: bootFailed(gone, "wipe", testNow.Add(-2*time.Hour), nil),
@@ -258,13 +258,13 @@ func TestRunThatFailedAtItsBMCJobNamesTheJob(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(nb.journals) != 2 || kube.creates() != 0 {
-		t.Fatalf("journals %v creates %d", nb.journals, kube.creates())
+	if len(nb.Journals) != 2 || kube.creates() != 0 {
+		t.Fatalf("journals %v creates %d", nb.Journals, kube.creates())
 	}
-	if len(nb.journalWith("its BMC job netboot-"+prov+" failed: failed to perform PowerAction: 500 Internal Server Error")) != 1 ||
-		len(nb.journalWith("Fix the BMC, then set desired_action to run it again")) != 2 ||
-		len(nb.journalWith(`its BMC job netboot-`+gone+` does not exist, and Tinkerbell says "job failed"`)) != 1 {
-		t.Fatalf("journals %v", nb.journals)
+	if len(nb.JournalWith("its BMC job netboot-"+prov+" failed: failed to perform PowerAction: 500 Internal Server Error")) != 1 ||
+		len(nb.JournalWith("Fix the BMC, then set desired_action to run it again")) != 2 ||
+		len(nb.JournalWith(`its BMC job netboot-`+gone+` does not exist, and Tinkerbell says "job failed"`)) != 1 {
+		t.Fatalf("journals %v", nb.Journals)
 	}
 }
 
