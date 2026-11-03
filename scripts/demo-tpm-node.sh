@@ -36,6 +36,7 @@ cert() { # <nv index> <label>: pull a DER certificate out of TPM NV and describe
 }
 
 act "1. Who is this machine (SMBIOS, what NetBox keys on)"
+# shellcheck disable=SC2016  # the pod expands $f
 x 'for f in sys_vendor product_name product_serial product_uuid bios_version bios_date; do printf "   %-16s %s\n" "$f" "$(cat /sys/class/dmi/id/$f)"; done'
 say "fleetd finds the NetBox device by product_serial; product_uuid is what Talos later fetches its config under."
 pause
@@ -113,5 +114,6 @@ pause
 
 act "7. fleetd's record of this node"
 serial=$(x 'cat /sys/class/dmi/id/product_serial')
+# shellcheck disable=SC2016  # the pod expands $ATTEST_URL
 x 'wget -qO- "$ATTEST_URL/verdict/'"$serial"'"' | jq .
 say "status, attested_at and ldevid_serial are what the spire-nodes.json export and the alerts read."
