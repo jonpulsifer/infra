@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,12 +23,17 @@ import (
 // and the signature verifies with the AK fleetd holds for the machine.
 func TestBootRequestsAreSignedByTheSessionsAK(t *testing.T) {
 	h := newHarness(t, harnessOpts{})
+	var handed []BootSession
+	h.v.Booted = func(_ context.Context, s BootSession) { handed = append(handed, s) }
 	res, err := h.run(simSerial, simMAC)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Session == nil || res.Session.ID == "" || len(res.Session.Nonce) == 0 {
 		t.Fatalf("no session in %+v", res)
+	}
+	if len(handed) != 1 || handed[0].ID != res.Session.ID || handed[0].Machine != "testbox" || !bytes.Equal(handed[0].Nonce, res.Session.Nonce) {
+		t.Fatalf("handed over %+v", handed)
 	}
 	code, body := h.get(strings.Replace(protocol.PathDevID, "{serial}", simSerial, 1))
 	if code != http.StatusOK {
@@ -46,6 +52,10 @@ func TestBootRequestsAreSignedByTheSessionsAK(t *testing.T) {
 		t.Fatal(err)
 	}
 	ak := key.(*ecdsa.PublicKey)
+	handedKey, err := x509.ParsePKIXPublicKey(handed[0].AK)
+	if err != nil || !ak.Equal(handedKey) {
+		t.Fatalf("the handed-over AK is not the session's: %v", err)
+	}
 
 	var seqs []uint64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

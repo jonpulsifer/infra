@@ -22,7 +22,7 @@ fleet-boot is folly's own RAM boot image, a kernel and a NixOS systemd initrd pa
 2. fleet-boot waits for a default route and steps the clock over SNTP, from an answer that echoes its request.
 3. It attests with the `apps/fleetd/client` package, as `tink-attest` does: with the MAC of the NIC the firmware's `BootCurrent` entry names, then each NIC with a default route while fleetd refuses the claim. A verdict stops the tries; another failure gets five, 30 seconds apart.
 4. It asks for the run at `/attest/v1/boot/<session>/run`. The session's AK signs each request over the nonce, the route, a sequence number and the body.
-5. With no run, or no boot route, the machine waits, attested.
+5. With no run, or no boot route, the machine waits, attested. fleetd serves the route under its [boot executor](../../apps/fleetd/lifecycle.md#executors).
 
 ## Steps
 

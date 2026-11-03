@@ -30,6 +30,9 @@ type Kube struct {
 	Server    string
 	Namespace string
 	Client    *http.Client
+	// Workflows, when set, takes every Workflow call in place of the API:
+	// the boot executor's attempt records (Attempts).
+	Workflows WorkflowStore
 }
 
 // Resource names a namespaced custom resource.
@@ -79,6 +82,15 @@ func NewKube(server, caFile, certFile, keyFile, namespace string) (*Kube, error)
 			}},
 		},
 	}, nil
+}
+
+// workflows is the store a Workflow call goes to under the boot executor,
+// or nil when the call goes to the API.
+func (k *Kube) workflows(r Resource) WorkflowStore {
+	if k.Workflows != nil && r == WorkflowResource {
+		return k.Workflows
+	}
+	return nil
 }
 
 func (k *Kube) path(r Resource, name string) string {
@@ -251,6 +263,9 @@ func (o Object) Condition(kind string) (status, message string, at time.Time, ok
 // carries metadata.annotations alone, so no other field and no other
 // writer's annotation is touched. A missing object is ErrNotFound.
 func (k *Kube) Annotate(ctx context.Context, r Resource, name string, annotations map[string]string) error {
+	if w := k.workflows(r); w != nil {
+		return w.Annotate(ctx, name, annotations)
+	}
 	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
 	if err != nil {
 		return err
@@ -271,6 +286,9 @@ func (k *Kube) Apply(ctx context.Context, r Resource, obj Object) error {
 
 // Create posts a new object.
 func (k *Kube) Create(ctx context.Context, r Resource, obj Object) error {
+	if w := k.workflows(r); w != nil {
+		return w.Create(ctx, obj)
+	}
 	body, err := json.Marshal(obj)
 	if err != nil {
 		return err
@@ -281,6 +299,9 @@ func (k *Kube) Create(ctx context.Context, r Resource, obj Object) error {
 
 // Get reads one object, or ErrNotFound.
 func (k *Kube) Get(ctx context.Context, r Resource, name string) (Object, error) {
+	if w := k.workflows(r); w != nil {
+		return w.Get(ctx, name)
+	}
 	var obj Object
 	if err := k.do(ctx, http.MethodGet, k.path(r, name), "", nil, &obj); err != nil {
 		return nil, err
@@ -290,6 +311,9 @@ func (k *Kube) Get(ctx context.Context, r Resource, name string) (Object, error)
 
 // List reads the objects that match a label selector.
 func (k *Kube) List(ctx context.Context, r Resource, selector string) ([]Object, error) {
+	if w := k.workflows(r); w != nil {
+		return w.List(ctx, selector)
+	}
 	var list struct {
 		Items []Object `json:"items"`
 	}
@@ -307,6 +331,9 @@ func (k *Kube) List(ctx context.Context, r Resource, selector string) ([]Object,
 // given, so a write since that read keeps it and answers ErrConflict. A
 // missing object is no error.
 func (k *Kube) DeleteUnchanged(ctx context.Context, r Resource, name, resourceVersion string) error {
+	if w := k.workflows(r); w != nil {
+		return w.DeleteUnchanged(ctx, name, resourceVersion)
+	}
 	body, err := json.Marshal(map[string]any{
 		"apiVersion":    "v1",
 		"kind":          "DeleteOptions",
@@ -324,6 +351,9 @@ func (k *Kube) DeleteUnchanged(ctx context.Context, r Resource, name, resourceVe
 
 // Delete removes an object; a missing one is no error.
 func (k *Kube) Delete(ctx context.Context, r Resource, name string) error {
+	if w := k.workflows(r); w != nil {
+		return w.Delete(ctx, name)
+	}
 	err := k.do(ctx, http.MethodDelete, k.path(r, name), "", nil, nil)
 	if errors.Is(err, ErrNotFound) {
 		return nil

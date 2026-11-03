@@ -4,7 +4,7 @@
 # (nix/services/tinkerbell.nix) for nothing: with Smee on, its per-MAC script boots the same HookOS,
 # and with it off the chain only cost each boot a failed request. The fleet-boot item boots the
 # lab's own RAM boot image (./fleet-boot.nix) instead, which attests and runs what fleetd's boot
-# executor answers; only somebody at the console picks it.
+# executor answers. menu_default in clusters/folly/talos/netboot.json picks the default item.
 # .github/workflows/talos-images.yml signs iPXE with the Talos UKI key. The firmware verifies every
 # image iPXE loads.
 {
@@ -17,6 +17,10 @@ let
   spore = lab.bootstrap.hosts.spore;
   hookos = callPackage ./hookos-folly.nix { };
   fleetBoot = callPackage ./fleet-boot.nix { };
+  # The item a netboot takes when nobody picks one, which spore's fleetd executor follows
+  # (nix/lib/checks.nix).
+  menuDefault =
+    (builtins.fromJSON (builtins.readFile ../../clusters/folly/talos/netboot.json)).menu_default;
   # The DHCP file and next-server name dnsmasq's TFTP; boot-url names nginx, at the same address.
   #
   # sanboot takes no relative URL, so the script sets boot-url. imgfree runs before the HookOS chain:
@@ -34,7 +38,7 @@ let
     item fleetboot Boot fleet-boot, attest and run what fleetd answers
     item enroll Enroll the lab's Secure Boot keys (firmware in Setup Mode)
     item exit Back to the firmware
-    choose --timeout 10000 --default hookos target || set target hookos
+    choose --timeout 10000 --default ${menuDefault} target || set target ${menuDefault}
     goto ''${target}
     :hookos
     imgfree

@@ -45,9 +45,20 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	r, err := newFleet()
+	_, attempts, err := fleet.LoadExecutor(time.Now)
 	if err != nil {
 		return err
+	}
+	r, err := newFleet(attempts)
+	if err != nil {
+		return err
+	}
+	var boot *fleet.BootServer
+	if attempts != nil {
+		boot = &fleet.BootServer{Attempts: attempts, Config: r.Config, Device: r.Device}
+		srv.V.Booted = func(ctx context.Context, s attest.BootSession) {
+			boot.BindBoot(ctx, fleet.BootSession{ID: s.ID, Node: s.Machine, AK: s.AK, Nonce: s.Nonce, Created: s.At})
+		}
 	}
 	srv.V.Installer = attest.InstallerFunc(func(ctx context.Context, req attest.InstallRequest) error {
 		return r.Admit(ctx, fleet.RenderRequest{Serial: req.Serial, UUID: req.UUID, Node: req.Node, Class: req.Class, Code: req.Code})
@@ -128,10 +139,10 @@ func run(log *slog.Logger) error {
 		log.Info("listening", "addr", l.addr)
 		go func() { errc <- s.Serve(ln) }()
 	}
-	boot := server(bootHandler(srv, r.Installer))
-	confirmAcks(boot)
-	servers = append(servers, boot)
-	go serveBoot(ctx, log, boot, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
+	bootServer := server(bootHandler(srv, r.Installer, boot))
+	confirmAcks(bootServer)
+	servers = append(servers, bootServer)
+	go serveBoot(ctx, log, bootServer, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
 	go srv.V.RunBackfill(ctx, 10*time.Minute)
 	go r.Loop(ctx, trigger)
 	if r.Installer != nil {
@@ -153,8 +164,9 @@ func run(log *slog.Logger) error {
 }
 
 // newFleet builds the reconciler and its installer from the FLEET_*
-// environment.
-func newFleet() (*fleet.Reconciler, error) {
+// environment. With attempts, the boot executor's records keep the runs in
+// place of Tinkerbell's Workflows.
+func newFleet(attempts *fleet.Attempts) (*fleet.Reconciler, error) {
 	cfg, err := fleet.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -178,6 +190,9 @@ func newFleet() (*fleet.Reconciler, error) {
 	)
 	if err != nil {
 		return nil, fmt.Errorf("Tinkerbell API client: %w", err)
+	}
+	if attempts != nil {
+		kube.Workflows = attempts
 	}
 	cluster, err := fleet.LoadCluster()
 	if err != nil {
@@ -263,11 +278,15 @@ func confirmAcks(s *http.Server) {
 }
 
 // bootHandler serves what a netbooting machine and a first boot reach: the
-// device flow under /attest/, and the one-time config at /talos/config or
-// /seed, by the class's payload kind.
-func bootHandler(srv *attest.Server, installer http.Handler) http.Handler {
+// device flow under /attest/, with fleet-boot's routes under the boot
+// executor, and the one-time config at /talos/config or /seed, by the
+// class's payload kind.
+func bootHandler(srv *attest.Server, installer http.Handler, boot *fleet.BootServer) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/attest/", http.StripPrefix("/attest", srv.Public()))
+	if boot != nil {
+		mux.Handle("POST /attest/v1/boot/", http.StripPrefix("/attest", boot.Handler()))
+	}
 	for path := range fleet.Routes {
 		mux.Handle(path, installer)
 	}

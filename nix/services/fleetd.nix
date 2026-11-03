@@ -193,6 +193,14 @@ in
       default = null;
       description = "The NetBox user that terraform/netbox/folly writes as, behind the netbox-folly-terraform token. fleetd honours a device's approved EK binding only when NetBox's changelog shows this user made its newest change. Null, no binding counts and every planned machine waits.";
     };
+    executor = lib.mkOption {
+      type = lib.types.enum [
+        "tinkerbell"
+        "boot"
+      ];
+      default = "tinkerbell";
+      description = "What runs a device's runs: tinkerbell, Tinkerbell's Workflows from HookOS; boot, fleet-boot (../images/fleet-boot.nix), with each run an attempt record in fleetd's state directory. The iPXE menu's default (clusters/folly/talos/netboot.json menu_default) must boot the same.";
+    };
     autoProvision = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -372,6 +380,8 @@ in
         FLEET_KEA_FILE = lib.mkIf keaOn "${keaFleetDir}/reservations.json";
         FLEET_KEA_SOCKET = lib.mkIf keaOn "/run/kea/kea-dhcp4.socket";
         FLEET_KEA_BOOT_FILE = lib.mkIf keaOn "talos/${site}/ipxe-amd64-secureboot.efi";
+        FLEET_EXECUTOR = cfg.executor;
+        FLEET_ATTEMPTS_FILE = lib.mkIf (cfg.executor == "boot") "${stateDir}/attempts.json";
         FLEET_INTERVAL = "2m";
         FLEET_SPIRE_NODES_FILE = "${stateDir}/spire-nodes.json";
         FLEET_BMC = cfg.bmc;

@@ -3,7 +3,7 @@ title: fleetd lifecycle
 description: How fleetd schedules installation, disk actions and retirement.
 ---
 
-fleetd reads owner requests from NetBox and runs one Tinkerbell Workflow per device at a time.
+fleetd reads owner requests from NetBox and runs one Tinkerbell Workflow per device at a time, or under the boot executor one fleet-boot attempt.
 
 ## Requests
 
@@ -76,6 +76,12 @@ If retirement interrupts another run, fleetd first requests power-off through th
 Without a BMC, or if power-off fails, retirement waits. Deleting a Workflow alone does not stop its executing action.
 
 If retirement fails at its netboot, no disk action runs. fleetd journals the BMC's response, with the Rufio Job's name in `rufio` mode. Retry delays double from five minutes to four hours while the device stays `decommissioning`.
+
+## Executors
+
+`homelab.fleetd.executor` on spore, `FLEET_EXECUTOR`, picks what runs a run. It is `tinkerbell` by default: HookOS runs the Workflow's Template. Under `boot`, [fleet-boot](../../platform/nixos/fleet-boot.md) runs the same steps, and fleetd keeps the run as an attempt record in its state directory in place of a Workflow. The attempt takes the session of the machine's intake pass, and fleet-boot's requests over it are signed by that session's AK, so its reports never rest on a MAC. The rules on this page hold under both: one run per device, the overdue end, and a failure that waits for a new request.
+
+`menu_default` in `clusters/folly/talos/netboot.json` must boot the same image as the executor; the `fleet-boot-image` check fails otherwise. A device that cannot attest, such as a TPM 1.2 node, gets no session, so under `boot` its run never starts and ends as overdue.
 
 ## Configuration access
 
