@@ -5,8 +5,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -157,4 +160,44 @@ func sendQueue(c net.Conn) (int, error) {
 		return 0, err
 	}
 	return n, qerr
+}
+
+// deliverHTTP is the Deliver of a fetch over HTTP: it writes the config whole
+// as the answer and returns once the node has acknowledged every byte, or
+// says why it did not. A failure has reset the connection, so only an
+// acknowledged retry delivers the config.
+func deliverHTTP(w http.ResponseWriter, r *http.Request, start time.Time) func(Pending, []byte) error {
+	return func(p Pending, cfg []byte) error {
+		h := w.Header()
+		h.Set("Content-Type", p.contentType())
+		h.Set("Cache-Control", "no-store")
+		h.Set("Content-Length", strconv.Itoa(len(cfg)))
+		if err := armReset(r, true); err != nil {
+			log.Printf("talos-config: %s's fetch: make a close a reset: %v", p.Node, err)
+		}
+		w.WriteHeader(http.StatusOK)
+		n, err := w.Write(cfg)
+		if err == nil {
+			err = http.NewResponseController(w).Flush()
+		}
+		if err == nil && n != len(cfg) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			err = fmt.Errorf("the write ended after %d of %d bytes: %w", n, len(cfg), err)
+		} else {
+			// Write and Flush return once fleetd's kernel takes the bytes,
+			// whether the node gets any of them or not.
+			err = awaitAck(r, ackDeadline(r, start))
+		}
+		// A partial write and an unacknowledged answer end alike, whichever
+		// comes first on a given network and socket buffer.
+		if err != nil {
+			return resetConn(r, err)
+		}
+		if err := armReset(r, false); err != nil {
+			log.Printf("talos-config: %s's fetch: make a close graceful again: %v", p.Node, err)
+		}
+		return nil
+	}
 }

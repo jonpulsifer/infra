@@ -61,20 +61,18 @@ func TestADeletedWorkflowDropsItsUnreadConfig(t *testing.T) {
 
 func TestAnEndedWorkflowMarksAHeldConfigWithdrawn(t *testing.T) {
 	it := renderedForTest(t)
-	if _, _, ok := it.in.Configs.Claim(testUUID, testCode, it.now); !ok {
-		t.Fatal("no claim")
-	}
+	end := holdFetch(t, it.in.Configs, it.now)
 	it.kube.setState(provWF, "STATE_FAILED")
 	it.in.Tick(context.Background())
 	it.in.Tick(context.Background())
 	p, ok := it.in.Configs.pending[testUUID]
-	if !ok || p.Withdrawn.IsZero() || !p.claimed {
+	if !ok || p.WithdrawnAt().IsZero() || !p.claimed {
 		t.Fatalf("a config a fetch holds was dropped or not marked withdrawn: %+v %v", p, ok)
 	}
 	if len(it.nb.journalWith("a fetch was writing it")) != 1 || it.in.Metrics.ConfigEnded.Load() != 1 {
 		t.Fatalf("journals %v", it.nb.journals)
 	}
-	if it.in.Configs.Unclaim(testUUID, testCode) {
+	if out := end(errBrokeOff); out.Stays {
 		t.Fatal("the fetch's end kept a withdrawn config")
 	}
 }
