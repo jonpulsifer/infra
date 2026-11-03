@@ -53,6 +53,12 @@ A DaemonSet that should run on every node tolerates the taint in its chart value
 
 A push to `main` rebuilds them when the version, the extensions, the kernel arguments, the public keys, `clusters/folly/talos/netboot.json` or the pipeline change. Nothing builds while `netboot.json` pins the all-zero agent digest, which the containers workflow's delivery replaces. The nodes still run the Image Factory installer that `terraform/modules/talos-cluster/main.tf` names. [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md) is the procedure.
 
+## People
+
+A person reaches either API server by signing in at Google. `clusters/base/config/kube-login.json` names the provider, its OAuth client ID and the hosted domain. Each Talos root reads it into the API server's `AuthenticationConfiguration`, beside the peer cluster's issuer, and maps a verified account of that domain to the user `google:<email>`. `clusters/base/cluster-access-rbac.yaml` binds those users to roles. `mise run kube:login <site>` writes the kubeconfig, as [Get kubectl access](../runbooks/get-cluster-admin-access.md) describes.
+
+The OAuth client is a Desktop client in the GCP project `homelab-ng`, made in the console: Google's Terraform resources make IAP clients, whose redirect URIs are fixed, or Workforce Identity Federation clients, which do not sign a Google account in. Its ID is in the file and its secret, which Google does not treat as confidential for a Desktop client, is `credential` in the 1Password item `kube-login-google`. Revoke access by removing the binding; disable every sign-in by deleting the client. The admin certificate from `talosctl` is the break-glass path.
+
 ## Rules
 
 - Deploy a new containerd handler to every node from `main` before a workload names its RuntimeClass. The kubelet rejects a pod whose handler is missing.
@@ -75,7 +81,7 @@ A push to `main` rebuilds them when the version, the extensions, the kernel argu
 - [Talos Linux](kubernetes/talos.md)
 - [How changes ship](how-changes-ship.md)
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
-- [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
+- [Get kubectl access](../runbooks/get-cluster-admin-access.md)
 - [Operate Postgres](../runbooks/operate-postgres.md)
 - [Install Talos on a node](../runbooks/install-talos-on-a-node.md)
 - [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md)

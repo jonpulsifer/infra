@@ -11,6 +11,30 @@ locals {
   # offsite admits these folly service-account tokens.
   peer_issuer = "https://oidc.${local.dns_zone}/folly"
 
+  # People sign in at Google with kubelogin (scripts/kube-login.sh); the API
+  # server maps a verified account of the hosted domain to google:<email>, and
+  # clusters/base/cluster-access-rbac.yaml says what that user may do. An
+  # empty client_id leaves Google out of the authenticators.
+  kube_login = jsondecode(file("${path.module}/../../base/config/kube-login.json"))
+  google     = local.kube_login.providers.google
+  google_jwt = local.google.client_id == "" ? [] : [{
+    issuer = { url = local.google.issuer, audiences = [local.google.client_id] }
+    claimValidationRules = [
+      {
+        expression = "claims.?email_verified.orValue(false) == true"
+        message    = "the Google account's email address must be verified"
+      },
+      {
+        expression = "claims.?hd.orValue(\"\") == \"${local.google.hosted_domain}\""
+        message    = "only ${local.google.hosted_domain} accounts may sign in"
+      },
+    ]
+    claimMappings = {
+      username = { expression = "\"google:\" + claims.email" }
+      uid      = { expression = "claims.sub" }
+    }
+  }]
+
   cluster_patches = [
     # gVisor and hostUsers: false pods need user namespaces, which Talos
     # caps at 0. The other two keep the limits the workloads run under.
@@ -68,7 +92,8 @@ locals {
       accepted   = { audiences = ["api", "https://kubernetes.default.svc"] }
     }),
     # A configuration file replaces Talos's anonymous flag, so the probe paths
-    # are restated. The jwt entry admits the peer cluster's listed accounts.
+    # are restated. The first jwt entry admits the peer cluster's listed
+    # accounts; the rest are the identity providers people sign in at.
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "KubeAuthenticationConfig"
@@ -77,7 +102,7 @@ locals {
           enabled    = true
           conditions = [{ path = "/livez" }, { path = "/readyz" }, { path = "/healthz" }]
         }
-        jwt = [{
+        jwt = concat([{
           issuer = { url = local.peer_issuer, audiences = ["api"] }
           claimValidationRules = [{
             expression = <<-CEL
@@ -91,7 +116,7 @@ locals {
             message    = "only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine service accounts may authenticate across clusters"
           }]
           claimMappings = { username = { expression = "\"federated:\" + claims.sub" } }
-        }]
+        }], local.google_jwt)
       }
     }),
     # Fixed at first provisioning: a full EPHEMERAL cannot take etcd with it,

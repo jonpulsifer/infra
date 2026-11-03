@@ -51,7 +51,7 @@ Use this runbook when a cluster moves to Talos, and before a talosconfig certifi
    ```
 
 6. Delete the directory.
-7. Add the context to your workstation, as [Get cluster admin access](get-cluster-admin-access.md#get-a-kubeconfig) describes.
+7. Add the context to your workstation, as [Get cluster admin access](get-cluster-admin-access.md#break-glass-the-admin-certificate) describes.
 
 ## Issue the Rowbutt talosconfig
 

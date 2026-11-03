@@ -1,0 +1,11 @@
+{
+  "_comment": "The identity providers people sign in at for kubectl access. Both Talos roots read it into the API server's AuthenticationConfiguration, and scripts/kube-login.sh reads it to write a kubeconfig. client_id is public; secret is a 1Password reference the login task reads, never a value. An empty client_id leaves the provider out of the API servers.",
+  "providers": {
+    "google": {
+      "issuer": "https://accounts.google.com",
+      "client_id": "629296473058-pma7b51kqo748heqk1gig79lveupa334.apps.googleusercontent.com",
+      "hosted_domain": "pulsifer.ca",
+      "secret": "op://homelab/kube-login-google/credential"
+    }
+  }
+}
