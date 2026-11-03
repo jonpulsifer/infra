@@ -483,7 +483,7 @@ func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
 		it.now = it.now.Add(3 * time.Hour)
 		it.in.Tick(ctx)
 	}
-	if u := it.in.Configs.Unreleased(); len(u) != 1 || u[0].Fetched.IsZero() {
+	if u := it.in.Configs.Unreleased(); len(u) != 1 || u[0].FetchedAt().IsZero() {
 		t.Fatalf("a release NetBox refused was dropped: %+v", u)
 	}
 	if n := journalCount(it.nb, "danger"); n != 1 {
@@ -926,16 +926,14 @@ func TestAConfigIsServedOnceToConcurrentFetches(t *testing.T) {
 		t.Fatal(code)
 	}
 	c := it.in.Configs
-	if _, _, ok := c.Claim(testUUID, testCode, it.now); !ok {
-		t.Fatal("the first fetch got nothing")
-	}
-	if _, _, ok := c.Claim(testUUID, testCode, it.now); ok {
+	end := holdFetch(t, c, it.now)
+	if out := c.Serve(fetchOf(it.now, func(Pending, []byte) error { return nil })); out.Kind != Absent {
 		t.Fatal("a second fetch got the config while the first wrote it")
 	}
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("a concurrent GET answered %d", w.Code)
 	}
-	c.Unclaim(testUUID, testCode)
+	end(errBrokeOff)
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
 		t.Fatalf("the GET after the first broke off answered %d", w.Code)
 	}
@@ -1023,7 +1021,7 @@ func TestConfigsSurviveARestart(t *testing.T) {
 		t.Fatal(w.Code)
 	}
 	it.in.Configs = restart()
-	if u := it.in.Configs.Unreleased(); len(u) != 1 || u[0].Fetched.IsZero() {
+	if u := it.in.Configs.Unreleased(); len(u) != 1 || u[0].FetchedAt().IsZero() {
 		t.Fatalf("the served config's release was lost: %+v", u)
 	}
 	if _, _, ok := it.in.Configs.Get(testUUID, testCode, it.now); ok || !it.in.Configs.Spent(testUUID, testCode) {

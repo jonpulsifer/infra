@@ -68,7 +68,9 @@ func TestAdmitJournalsNoHookOSBootForAnythingElse(t *testing.T) {
 			at.kube.setState(run, tc.state)
 			at.node()["custom_fields"].(map[string]any)["desired_action"] = tc.desired
 			if tc.fetched {
-				if _, ok := at.r.Installer.Configs.Burn(boxUUID, testCode, testNow); !ok {
+				f := fetchOf(testNow, func(Pending, []byte) error { return nil })
+				f.UUID = boxUUID
+				if out := at.r.Installer.Configs.Serve(f); out.Kind != Delivered {
 					t.Fatal("no config to fetch")
 				}
 			}

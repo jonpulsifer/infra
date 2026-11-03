@@ -43,17 +43,53 @@ type Pending struct {
 	Workflow string
 	Rendered time.Time
 	TTL      time.Duration
-	// Fetched is when the node fetched it; a fetched config's bytes are
+	// fetched is when the node fetched it; a fetched config's bytes are
 	// gone, and it waits only for its release in NetBox.
-	Fetched time.Time
-	// Withdrawn is when the device left planned or NetBox while a fetch
-	// held the config. The fetch ends it: its Burn records what the node
-	// got, and its Unclaim drops it.
-	Withdrawn time.Time
+	fetched time.Time
+	// withdrawn is when the device left planned or NetBox while a fetch
+	// held the config. The fetch ends it: its burn records what the node
+	// got, and its unclaim drops it.
+	withdrawn time.Time
 	// claimed is a fetch that is writing the config now; no other fetch
 	// gets it meanwhile, and neither the TTL nor a withdrawal drops it.
 	claimed bool
 }
+
+// pendingJSON is Pending as Dir keeps it, with the fetch and withdrawal
+// times under the names an earlier fleetd wrote.
+type pendingJSON struct {
+	UUID      string
+	Code      string
+	Serial    string
+	Node      string
+	Class     string
+	Kind      string
+	Workflow  string
+	Rendered  time.Time
+	TTL       time.Duration
+	Fetched   time.Time
+	Withdrawn time.Time
+}
+
+func (p Pending) MarshalJSON() ([]byte, error) {
+	return json.Marshal(pendingJSON{p.UUID, p.Code, p.Serial, p.Node, p.Class, p.Kind, p.Workflow, p.Rendered, p.TTL, p.fetched, p.withdrawn})
+}
+
+func (p *Pending) UnmarshalJSON(b []byte) error {
+	var j pendingJSON
+	if err := json.Unmarshal(b, &j); err != nil {
+		return err
+	}
+	*p = Pending{UUID: j.UUID, Code: j.Code, Serial: j.Serial, Node: j.Node, Class: j.Class, Kind: j.Kind, Workflow: j.Workflow, Rendered: j.Rendered, TTL: j.TTL, fetched: j.Fetched, withdrawn: j.Withdrawn}
+	return nil
+}
+
+// FetchedAt is when the node fetched the config, zero while it waits.
+func (p Pending) FetchedAt() time.Time { return p.fetched }
+
+// WithdrawnAt is when a withdrawal found a fetch holding the config, zero
+// otherwise.
+func (p Pending) WithdrawnAt() time.Time { return p.withdrawn }
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
 
@@ -213,14 +249,11 @@ func (c *Configs) Load() error {
 			log.Printf("talos-config: skip %s: %v", name, err)
 			continue
 		}
-		if f.Pending.Fetched.IsZero() && !f.Pending.Withdrawn.IsZero() {
-			// The fetch that held it ended with the process.
-			c.burn(f.Pending.UUID, f.Pending.Code, f.Pending.Withdrawn)
-			c.keep(uuid)
+		if c.settleCrashedClaim(f.Pending) {
 			continue
 		}
 		c.pending[uuid] = f.Pending
-		if f.Pending.Fetched.IsZero() {
+		if f.Pending.fetched.IsZero() {
 			c.bytes[uuid] = f.Config
 		}
 	}
@@ -277,11 +310,11 @@ func (c *Configs) Put(p Pending, cfg []byte) error {
 		if old.Code == p.Code {
 			return ErrBurned
 		}
-		if old.Fetched.IsZero() {
+		if old.fetched.IsZero() {
 			c.burn(old.UUID, old.Code, p.Rendered)
 		}
 	}
-	p.Fetched = time.Time{}
+	p.fetched = time.Time{}
 	old, hadOld := c.pending[p.UUID]
 	oldBytes := c.bytes[p.UUID]
 	c.pending[p.UUID] = p
@@ -313,20 +346,20 @@ func (c *Configs) Get(uuid, code string, now time.Time) (Pending, []byte, bool) 
 	defer c.mu.Unlock()
 	c.init()
 	p, ok := c.pending[uuid]
-	if !ok || p.Code != code || !p.Fetched.IsZero() || p.expired(now) {
+	if !ok || p.Code != code || !p.fetched.IsZero() || p.expired(now) {
 		return Pending{}, nil, false
 	}
 	return p, c.bytes[uuid], true
 }
 
-// Claim is Get for one fetch at a time: a config another fetch is writing
+// claim is Get for one fetch at a time: a config another fetch is writing
 // answers nothing until that fetch burns it or gives it back.
-func (c *Configs) Claim(uuid, code string, now time.Time) (Pending, []byte, bool) {
+func (c *Configs) claim(uuid, code string, now time.Time) (Pending, []byte, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
 	p, ok := c.pending[uuid]
-	if !ok || p.Code != code || !p.Fetched.IsZero() || p.claimed || !p.Withdrawn.IsZero() || p.expired(now) {
+	if !ok || p.Code != code || !p.fetched.IsZero() || p.claimed || !p.withdrawn.IsZero() || p.expired(now) {
 		return Pending{}, nil, false
 	}
 	p.claimed = true
@@ -334,21 +367,21 @@ func (c *Configs) Claim(uuid, code string, now time.Time) (Pending, []byte, bool
 	return p, c.bytes[uuid], true
 }
 
-// Unclaim gives a config back after a fetch that did not deliver it, and
+// unclaim gives a config back after a fetch that did not deliver it, and
 // says whether it stays for another fetch. A config withdrawn during the
 // fetch is dropped and burned now.
-func (c *Configs) Unclaim(uuid, code string) bool {
+func (c *Configs) unclaim(uuid, code string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
 	p, ok := c.pending[uuid]
-	if !ok || p.Code != code || !p.Fetched.IsZero() {
+	if !ok || p.Code != code || !p.fetched.IsZero() {
 		return false
 	}
-	if !p.Withdrawn.IsZero() {
+	if !p.withdrawn.IsZero() {
 		delete(c.pending, uuid)
 		delete(c.bytes, uuid)
-		c.burn(uuid, code, p.Withdrawn)
+		c.burn(uuid, code, p.withdrawn)
 		c.keep(uuid)
 		return false
 	}
@@ -357,19 +390,128 @@ func (c *Configs) Unclaim(uuid, code string) bool {
 	return true
 }
 
-// Burn marks the machine's config served: its bytes go, its code is burned,
+// settleCrashedClaim resolves a record Load reads whose fetch ended with the
+// process while a withdrawal held it: the config is burned, as the fetch's
+// unclaim would have done. It says whether it settled the record.
+func (c *Configs) settleCrashedClaim(p Pending) bool {
+	if !p.fetched.IsZero() || p.withdrawn.IsZero() {
+		return false
+	}
+	c.burn(p.UUID, p.Code, p.withdrawn)
+	c.keep(p.UUID)
+	return true
+}
+
+// Fetch is one node's ask for its config and the three things Serve cannot
+// know itself.
+type Fetch struct {
+	UUID, Code string
+	Now        time.Time
+	// Serves says whether the path asked serves a config of the payload kind.
+	Serves func(kind string) bool
+	// Check says whether the config is still wanted.
+	Check func(Pending) Verdict
+	// Deliver writes the config whole and returns once the node has
+	// acknowledged it, or says why it did not.
+	Deliver func(Pending, []byte) error
+}
+
+// VerdictKind is the answer of a Fetch's Check.
+type VerdictKind int
+
+const (
+	// Wanted keeps the fetch going.
+	Wanted VerdictKind = iota
+	// Gone is a device NetBox no longer holds, or one that left planned.
+	Gone
+	// Unavailable is a NetBox that does not answer: the config stays.
+	Unavailable
+)
+
+// Verdict is a Check's answer. Settle, when set, runs once Serve has given
+// the config back, so a withdrawal it makes finds it unclaimed.
+type Verdict struct {
+	Kind   VerdictKind
+	Settle func()
+}
+
+// OutcomeKind says how a Serve ended.
+type OutcomeKind int
+
+const (
+	// Absent is no config for the machine and code, or one another fetch holds.
+	Absent OutcomeKind = iota
+	// WrongPath is a config the path does not serve; it stays.
+	WrongPath
+	// Refused is a config the Check found gone; it was given back and settled.
+	Refused
+	// Unreachable is a Check that could not tell; the config was given back.
+	Unreachable
+	// Undelivered is a write the node did not acknowledge whole.
+	Undelivered
+	// Replaced is a config a newer render replaced during the fetch.
+	Replaced
+	// Delivered is a config the node got whole; it is burned.
+	Delivered
+)
+
+// Outcome is what Serve did.
+type Outcome struct {
+	Kind    OutcomeKind
+	Pending Pending
+	// Err is the delivery's failure.
+	Err error
+	// Stays is whether a config given back is still there for another
+	// fetch, or was withdrawn during this one and is dropped.
+	Stays bool
+}
+
+// Serve runs one fetch: it claims the config, asks Check whether it is still
+// wanted, has Deliver write it, and burns it once the node acknowledged
+// every byte. Any other end gives the config back. The caller maps the
+// outcome to an answer and a journal.
+func (c *Configs) Serve(f Fetch) Outcome {
+	p, cfg, ok := c.claim(f.UUID, f.Code, f.Now)
+	if !ok {
+		return Outcome{Kind: Absent}
+	}
+	if !f.Serves(p.Kind) {
+		c.unclaim(f.UUID, f.Code)
+		return Outcome{Kind: WrongPath, Pending: p}
+	}
+	switch v := f.Check(p); v.Kind {
+	case Gone:
+		c.unclaim(f.UUID, f.Code)
+		if v.Settle != nil {
+			v.Settle()
+		}
+		return Outcome{Kind: Refused, Pending: p}
+	case Unavailable:
+		return Outcome{Kind: Unreachable, Pending: p, Stays: c.unclaim(f.UUID, f.Code)}
+	}
+	if err := f.Deliver(p, cfg); err != nil {
+		return Outcome{Kind: Undelivered, Pending: p, Err: err, Stays: c.unclaim(f.UUID, f.Code)}
+	}
+	served, ok := c.consume(f.UUID, f.Code, f.Now)
+	if !ok {
+		return Outcome{Kind: Replaced, Pending: p}
+	}
+	return Outcome{Kind: Delivered, Pending: served}
+}
+
+// consume marks the machine's config served: its bytes go, its code is burned,
 // and its record waits for Released. ok is false when the config is no
 // longer the one asked for. A config withdrawn during the fetch burns too,
-// with Withdrawn set.
-func (c *Configs) Burn(uuid, code string, at time.Time) (Pending, bool) {
+// with withdrawn set.
+func (c *Configs) consume(uuid, code string, at time.Time) (Pending, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
 	p, ok := c.pending[uuid]
-	if !ok || p.Code != code || !p.Fetched.IsZero() {
+	if !ok || p.Code != code || !p.fetched.IsZero() {
 		return Pending{}, false
 	}
-	p.Fetched, p.claimed = at, false
+	p.fetched, p.claimed = at, false
 	c.pending[uuid] = p
 	delete(c.bytes, uuid)
 	c.served[burnKey(uuid, code)] = Served{At: at, Node: p.Node, Serial: p.Serial, Workflow: p.Workflow}
@@ -393,7 +535,7 @@ func (c *Configs) Released(p Pending) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
-	if cur, ok := c.pending[p.UUID]; ok && cur.Code == p.Code && !cur.Fetched.IsZero() {
+	if cur, ok := c.pending[p.UUID]; ok && cur.Code == p.Code && !cur.fetched.IsZero() {
 		delete(c.pending, p.UUID)
 		c.keep(p.UUID)
 	}
@@ -405,63 +547,105 @@ func (c *Configs) Holds(uuid string) (Pending, bool) {
 	defer c.mu.Unlock()
 	c.init()
 	p, ok := c.pending[uuid]
-	return p, ok && p.Fetched.IsZero()
+	return p, ok && p.fetched.IsZero()
 }
 
-// Expire drops and burns every unread config past its TTL, and returns them.
-// The TTL bounds when a fetch may start: a config a fetch holds ends in its
-// Burn or Unclaim, and a later pass expires it if it stays.
-func (c *Configs) Expire(now time.Time) []Pending {
+// Event is something that happened to a pending config outside a fetch: the
+// caller journals it.
+type Event struct {
+	Kind    EventKind
+	Pending Pending
+	// Reason is the sentence a Sweep's predicate gave for the withdrawal.
+	Reason string
+}
+
+// EventKind says what an Event is.
+type EventKind int
+
+const (
+	// Expired is an unread config dropped and burned past its TTL.
+	Expired EventKind = iota + 1
+	// Withdrawn is an unread config dropped and burned because its device
+	// left planned or NetBox, or its Workflow ended.
+	Withdrawn
+	// WithdrawnWhileFetching is a config a fetch holds, marked withdrawn:
+	// the fetch may have written it, and its end drops it.
+	WithdrawnWhileFetching
+)
+
+// Tick drops and burns every unread config past its TTL, and returns them as
+// Expired events. The TTL bounds when a fetch may start: a config a fetch
+// holds ends in its consume or unclaim, and a later pass expires it if it
+// stays.
+func (c *Configs) Tick(now time.Time) []Event {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
-	var out []Pending
+	var out []Event
 	for uuid, p := range c.pending {
-		if p.Fetched.IsZero() && !p.claimed && p.expired(now) {
+		if p.fetched.IsZero() && !p.claimed && p.expired(now) {
 			delete(c.pending, uuid)
 			delete(c.bytes, uuid)
 			c.burn(p.UUID, p.Code, now)
 			c.keep(uuid)
-			out = append(out, p)
+			out = append(out, Event{Kind: Expired, Pending: p})
 		}
 	}
 	return out
 }
 
-// Drop drops and burns the unread config of the machine with the serial, and
-// returns it. A config a fetch holds is marked withdrawn instead, and
-// fetching says so: the fetch may have written it, and its end drops it.
-func (c *Configs) Drop(serial string, now time.Time) (p Pending, fetching, ok bool) {
+// Withdraw drops and burns the unread config of the machine with the serial,
+// and says so. A config a fetch holds is marked withdrawn instead, and the
+// event says so: the fetch may have written it, and its end drops it. ok is
+// false when the machine has no unread config to withdraw.
+func (c *Configs) Withdraw(serial string, now time.Time) (ev Event, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
 	for uuid, p := range c.pending {
-		if p.Serial != serial || !p.Fetched.IsZero() || !p.Withdrawn.IsZero() {
+		if p.Serial != serial || !p.fetched.IsZero() || !p.withdrawn.IsZero() {
 			continue
 		}
 		if p.claimed {
-			p.Withdrawn = now
+			p.withdrawn = now
 			c.pending[uuid] = p
 			c.keep(uuid)
-			return p, true, true
+			return Event{Kind: WithdrawnWhileFetching, Pending: p}, true
 		}
 		delete(c.pending, uuid)
 		delete(c.bytes, uuid)
 		c.burn(p.UUID, p.Code, now)
 		c.keep(uuid)
-		return p, false, true
+		return Event{Kind: Withdrawn, Pending: p}, true
 	}
-	return Pending{}, false, false
+	return Event{}, false
 }
 
-// Unread lists the configs no node has fetched and none withdrew.
-func (c *Configs) Unread() []Pending {
+// Sweep withdraws each unread config for which why gives a reason, and
+// returns the events with their reasons.
+func (c *Configs) Sweep(now time.Time, why func(Pending) string) []Event {
+	var out []Event
+	for _, p := range c.unread() {
+		reason := why(p)
+		if reason == "" {
+			continue
+		}
+		if ev, ok := c.Withdraw(p.Serial, now); ok {
+			ev.Reason = reason
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// unread lists the configs no node has fetched and none withdrew.
+func (c *Configs) unread() []Pending {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.init()
 	var out []Pending
 	for _, p := range c.pending {
-		if p.Fetched.IsZero() && p.Withdrawn.IsZero() {
+		if p.fetched.IsZero() && p.withdrawn.IsZero() {
 			out = append(out, p)
 		}
 	}
@@ -475,7 +659,7 @@ func (c *Configs) Unreleased() []Pending {
 	c.init()
 	var out []Pending
 	for _, p := range c.pending {
-		if !p.Fetched.IsZero() {
+		if !p.fetched.IsZero() {
 			out = append(out, p)
 		}
 	}
@@ -490,8 +674,8 @@ func (c *Configs) Stats() (unread int, oldestUnread time.Time, unreleased int, o
 	defer c.mu.Unlock()
 	c.init()
 	for _, p := range c.pending {
-		if p.Fetched.IsZero() {
-			if !p.Withdrawn.IsZero() {
+		if p.fetched.IsZero() {
+			if !p.withdrawn.IsZero() {
 				continue
 			}
 			unread++
@@ -501,8 +685,8 @@ func (c *Configs) Stats() (unread int, oldestUnread time.Time, unreleased int, o
 			continue
 		}
 		unreleased++
-		if oldestUnreleased.IsZero() || p.Fetched.Before(oldestUnreleased) {
-			oldestUnreleased = p.Fetched
+		if oldestUnreleased.IsZero() || p.fetched.Before(oldestUnreleased) {
+			oldestUnreleased = p.fetched
 		}
 	}
 	return
