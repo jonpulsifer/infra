@@ -51,17 +51,19 @@ locals {
     }
   }
 
-  # A static address goes on the node's one physical NIC, which Talos names
+  # A static address goes on the node's one onboard NIC, which Talos names
   # by this alias whatever the kernel calls it. The selector matches every
-  # physical link, so it names one only on a box with a single NIC; on a box
-  # with two, Talos skips the alias and the node keeps its default DHCP.
+  # physical link that is not on USB: a USB NIC's bus path starts with usb-,
+  # and the network sensor's capture NIC on shale is one. A fixed alias
+  # whose selector matches two links names neither, and the node has no
+  # address.
   node_link          = "net0"
   node_prefix_length = tonumber(split("/", local.topology.K8S_NODE_CIDR)[1])
   node_link_alias = var.static_addresses ? [yamlencode({
     apiVersion = "v1alpha1"
     kind       = "LinkAliasConfig"
     name       = local.node_link
-    selector   = { match = "true" }
+    selector   = { match = "!glob(\"usb-*\", link.bus_path)" }
   })] : []
 
   # Control plane: no kube-proxy and no Talos CoreDNS (the bootstrap root's
