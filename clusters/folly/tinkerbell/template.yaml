@@ -74,7 +74,7 @@ spec:
           WIPED_FILE: /tmp/fleet/wiped
         actions:
           - name: wipe-disk
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:058832d63431a22eef0e135d7a8ea0b26f11db6cb7a04a3ffd46f7938b712124
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
             timeout: 900
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -330,7 +330,7 @@ spec:
           # config from /talos/config by it and creates STATE itself. The installer reads stdin to
           # EOF, and a container docker runs without -i has none.
           - name: install
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:058832d63431a22eef0e135d7a8ea0b26f11db6cb7a04a3ffd46f7938b712124
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
             timeout: 600
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -428,7 +428,7 @@ spec:
           # node powers off, so its next-boot only deletes them, and a failure there is logged and does
           # not stop the power-off. A run that only attests leaves the firmware's boot order alone.
           - name: next-boot
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:058832d63431a22eef0e135d7a8ea0b26f11db6cb7a04a3ffd46f7938b712124
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
             timeout: 120
             command:
               - /bin/sh
@@ -501,7 +501,7 @@ spec:
                 log "Boot$n ($what) is the next boot and first in BootOrder ($got_order)"
           # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
-            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:058832d63431a22eef0e135d7a8ea0b26f11db6cb7a04a3ffd46f7938b712124
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
             timeout: 120
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
@@ -518,6 +518,6 @@ spec:
                 # Hardware state that never leaves its provision, and no attestation from the next boot.
                 docker rm -f provision-reboot >/dev/null 2>&1 || true
                 docker run -d --rm --privileged --name provision-reboot \
-                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:058832d63431a22eef0e135d7a8ea0b26f11db6cb7a04a3ffd46f7938b712124 \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19 \
                   sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
                 for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done
