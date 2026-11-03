@@ -32,14 +32,27 @@
     "payload_kind": "talos-machineconfig",
     "reattest": false
   },
-  "ubuntu": {
-    "description": "Ubuntu Server from Canonical's cloud image. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA at the CA level, with no shim or GRUB digest pins. dbx and SBAT are read at attestation and alert on a change. The installer image is set once CI builds it.",
-    "os": "ubuntu",
+  "nixos": {
+    "description": "A NixOS node from the lab's signed disk image (nix/images/node-nixos.nix). .github/workflows/node-images.yml pins the image here by URL and digest after each build. Boots a UKI signed by the lab's key, so the talos profile holds it; its first boot reads the seed fleetd serves at /seed. No in-node check yet, so reattest is off.",
+    "os": "nixos",
     "workload": "general",
-    "template": "provision-ubuntu",
-    "policy_profile": "ubuntu",
+    "template": "provision-image",
+    "policy_profile": "talos",
+    "secure_boot": true,
+    "payload_kind": "nixos-image",
+    "reattest": false
+  },
+  "debian": {
+    "description": "Debian from the dated genericcloud release, written as a disk image with a NoCloud seed fleetd renders. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA at the CA level, with no shim or GRUB digest pins. The pin is the release's tar.xz and its sha256, set by hand from cloud.debian.org's SHA512SUMS. No in-node check yet, so reattest is off.",
+    "os": "debian",
+    "workload": "general",
+    "template": "provision-image",
+    "policy_profile": "debian",
     "secure_boot": true,
     "payload_kind": "cloud-init-nocloud",
-    "reattest": false
+    "reattest": false,
+    "image": "https://cloud.debian.org/images/cloud/trixie/20261026-2643/debian-13-genericcloud-amd64-20261026-2643.tar.xz",
+    "image_digest": "sha256:c3489247bbe45073156a5c2d4e8bd60825634d2e74dd47a605326b38c329f3c0",
+    "image_format": "tar.xz"
   }
 }
