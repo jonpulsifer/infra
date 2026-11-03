@@ -17,7 +17,7 @@ The `decommissioning` status requests retirement separately from `desired_action
 
 ## BMC mode
 
-`homelab.fleetd.bmc` in `nix/services/fleetd.nix` sets `FLEET_BMC`, which says who drives each machine's baseboard management controller (BMC). The default is `rufio`.
+`homelab.fleetd.bmc` in `nix/services/fleetd.nix` sets `FLEET_BMC`, which says who drives each machine's baseboard management controller (BMC). The default is `rufio`; spore sets `native` in `nix/hosts/spore.nix`.
 
 | Need | `rufio` | `native` |
 | --- | --- | --- |

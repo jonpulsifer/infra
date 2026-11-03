@@ -50,6 +50,10 @@ in
   # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
   homelab.fleetd.installs = true;
 
+  # fleetd powers, stops and network-boots each node through its AMT itself and makes no Rufio
+  # Machine. "rufio" switches back (nix/services/fleetd.nix).
+  homelab.fleetd.bmc = "native";
+
   # UniFi's DHCP names the iPXE and the iPXE's menu boots HookOS, so Smee's proxy offer, which
   # riptide's firmware raced against UniFi's, and its per-MAC script add nothing a node can see.
   # rsyslog takes over HookOS's syslog. Smee stays in tinkerbell.nix for the switch back.

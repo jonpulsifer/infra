@@ -12,7 +12,7 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that reins
 | kube-apiserver and etcd | Store the `Hardware`, `Template`, `Workflow` and Rufio `Machine` objects. etcd listens on localhost. | spore, port 6443 |
 | Smee | Off on spore, by `homelab.tinkerbell.smee.enable`. On, it answers PXE on `bootstrap` as a proxy DHCP server unless `homelab.tinkerbell.smee.dhcp` is off, serves each MAC's iPXE script on port 7080 and receives HookOS's syslog | `SPORE_BOOTSTRAP_IP` |
 | Tink server and controller | Run workflows. The HookOS agent connects to `enroll.lolwtf.ca:42113` over TLS, with the enrollment name's certificate from `nix/services/fleetd.nix`. | `SPORE_BOOTSTRAP_IP` |
-| Rufio | Drives each node's BMC in fleetd's `rufio` mode, the default: Intel AMT over HTTP digest auth on port 16992 | spore |
+| Rufio | Drives each node's BMC in fleetd's `rufio` mode: Intel AMT over HTTP digest auth on port 16992. spore runs the `native` mode, so Rufio holds no `Machine` | spore |
 | fleetd | Makes the `Hardware`, `Machine` and `Workflow` objects from NetBox and from intake passes. In its `native` BMC mode it drives each BMC itself and makes no `Machine` ([BMC mode](../../apps/fleetd/lifecycle.md#bmc-mode)) | spore |
 
 ## Boot path
