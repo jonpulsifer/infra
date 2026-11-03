@@ -149,13 +149,16 @@ resource "unifi_device" "usw_24_poe" {
     }
   }
 
-  # The sensor port mirrors the uplink and carries no network of its own.
+  # The sensor port mirrors the uplink. The controller stores a mirror port
+  # as forward native, and the mirror mode is what stops it forwarding. Only
+  # these attributes: the provider leaves the rest of a new block unknown
+  # after apply, which fails the apply.
   port_override {
     index            = local.sensor_port
     name             = "sensor"
     op_mode          = "mirror"
     mirror_port_idx  = local.uplink_port
-    forward          = "disabled"
+    forward          = "native"
     isolation        = true
     tagged_vlan_mgmt = "block_all"
   }
