@@ -111,7 +111,31 @@ func TestRunWritesTheCodeToATalosImage(t *testing.T) {
 	if got := readADV(meta)[METADownloadURLCode]; string(got) != e.Code {
 		t.Errorf("META 0x0b %q", got)
 	}
+	if !m.ran("blockdev --flushbufs " + m.disk) {
+		t.Error("the read-back did not drop the disk's buffers")
+	}
 	if len(m.efiVars.entries) != 1 || m.efiVars.entries[0].Label != "fleet talos" {
 		t.Errorf("entries %+v", m.efiVars.entries)
+	}
+}
+
+// Talos keeps a byte of each tag, so a tag above 255 reads as its low byte;
+// it cannot hide from the code a key Talos would read as 0x0b.
+func TestADVTagsAreBytes(t *testing.T) {
+	block, err := marshalADV(map[uint8][]byte{0x0a: []byte("x")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite tag 0x0a as 0x10b, as a foreign writer might, and reseal.
+	binary.BigEndian.PutUint32(block[4:], 0x10b)
+	copy(block[ADVLength-36:ADVLength-4], make([]byte, 32))
+	sum := sha256.Sum256(block)
+	copy(block[ADVLength-36:ADVLength-4], sum[:])
+	tags, err := unmarshalADV(block)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(tags[0x0b]) != "x" {
+		t.Errorf("tags %v: 0x10b must read as 0x0b, as Talos reads it", tags)
 	}
 }

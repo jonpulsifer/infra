@@ -31,6 +31,7 @@ on:
       - .github/scripts/talos-installer-verify.sh
       - .github/scripts/talos-installer-verify_test.sh
       - .github/scripts/talos-uki-config-verify.sh
+      - .github/scripts/talos-uki-testlib.sh
       - .github/scripts/talos-metal-verify.sh
       - .github/scripts/talos-metal-verify_test.sh
       - .github/scripts/talos-netboot-build.sh
@@ -363,22 +364,26 @@ jobs:
           image="$INSTALLER_REPO@$DIGEST"
           # The release the build job published, its tag's slash encoded.
           metal="https://github.com/$GITHUB_REPOSITORY/releases/download/talos-$SITE%2F$VERSION-$GITHUB_RUN_ID/metal-amd64-secureboot.raw.zst"
+          # Each build's metal image hashes differently and lives in its own
+          # release, so it moves only with the installer: a build whose
+          # installer every Talos class already pins, beside an image, pins
+          # nothing.
+          if jq -e --arg image "$image" '[.[] | select(.os == "talos") | .installer_image == $image and (.image // "") != ""] | all' "$CLASSES" >/dev/null; then
+            echo "$CLASSES already pins $image and a metal image beside it"
+            exit 0
+          fi
           jq --arg image "$image" --arg metal "$metal" --arg digest "$METAL_DIGEST" \
             'with_entries(if .value.os == "talos" then .value.installer_image = $image | .value.image = $metal | .value.image_digest = $digest | .value.image_format = "raw.zst" else . end)' \
             "$CLASSES" >"$RUNNER_TEMP/classes.json"
-          if cmp -s "$CLASSES" "$RUNNER_TEMP/classes.json"; then
-            echo "$CLASSES already pins $image"
-            exit 0
-          fi
           cp "$RUNNER_TEMP/classes.json" "$CLASSES"
           git config user.name "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]"
           git config user.email "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git checkout -B "$BRANCH_NAME"
-          git commit -am "fix(cd): pin the Talos $VERSION installer by digest" -m "$image"
+          git commit -am "fix(cd): pin the Talos $VERSION installer and metal image" -m "$image" -m "$metal $METAL_DIGEST"
           git push origin "$BRANCH_NAME" --force
-          title="fix(cd): pin the Talos $VERSION installer by digest"
-          body="Automated pin of the installer this build pushed, for fleetd's class table."
+          title="fix(cd): pin the Talos $VERSION installer and metal image"
+          body="Automated pin of the installer this build pushed, and of the metal disk image it published for fleet-boot, by URL and sha256, for fleetd's class table."
           if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --head "$BRANCH_NAME" --base main
           else

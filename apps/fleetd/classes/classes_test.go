@@ -72,6 +72,10 @@ func TestLoadChecksTheImageFields(t *testing.T) {
 	if err := load(t, strings.Replace(talos, `"image_format": "raw.zst"`, `"image_format": ""`, 1)); err == nil || !strings.Contains(err.Error(), "go together") {
 		t.Errorf("a Talos class with half an image: %v", err)
 	}
+	noInstaller := `{"c": {"os": "talos", "workload": "general", "template": "provision", "policy_profile": "talos", "payload_kind": "talos-machineconfig"` + all + `}}`
+	if err := load(t, noInstaller); err == nil || !strings.Contains(err.Error(), "installer_image") {
+		t.Errorf("a Talos class with an image and no installer: %v", err)
+	}
 }
 
 func TestInstallsNeedsTheWholeImage(t *testing.T) {

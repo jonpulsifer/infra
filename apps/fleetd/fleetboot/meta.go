@@ -36,7 +36,7 @@ const METADownloadURLCode = 0x0b
 const MetaPartition = "META"
 
 // unmarshalADV reads one Talos ADV block.
-func unmarshalADV(b []byte) (map[uint32][]byte, error) {
+func unmarshalADV(b []byte) (map[uint8][]byte, error) {
 	if len(b) != ADVLength {
 		return nil, fmt.Errorf("an ADV block is %d bytes, not %d", len(b), ADVLength)
 	}
@@ -49,7 +49,7 @@ func unmarshalADV(b []byte) (map[uint32][]byte, error) {
 	if sum := sha256.Sum256(c); !bytes.Equal(sum[:], want) {
 		return nil, errors.New("the ADV checksum does not match")
 	}
-	tags := map[uint32][]byte{}
+	tags := map[uint8][]byte{}
 	data := b[4 : len(b)-36]
 	for len(data) >= 8 {
 		tag := binary.BigEndian.Uint32(data[0:4])
@@ -60,18 +60,20 @@ func unmarshalADV(b []byte) (map[uint32][]byte, error) {
 		if uint64(len(data)) < uint64(size)+8 {
 			return nil, fmt.Errorf("tag %d's value runs past the block", tag)
 		}
-		tags[tag] = append([]byte{}, data[8:8+size]...)
+		// go-adv keeps a byte of the tag, so Talos reads a tag above 255 as
+		// its low byte, which then holds the value; so does this.
+		tags[uint8(tag)] = append([]byte{}, data[8:8+size]...)
 		data = data[8+size:]
 	}
 	return tags, nil
 }
 
 // marshalADV writes one Talos ADV block, its tags in ascending order.
-func marshalADV(tags map[uint32][]byte) ([]byte, error) {
+func marshalADV(tags map[uint8][]byte) ([]byte, error) {
 	b := make([]byte, ADVLength)
 	binary.BigEndian.PutUint32(b[0:4], advMagic1)
 	binary.BigEndian.PutUint32(b[len(b)-4:], advMagic2)
-	keys := make([]uint32, 0, len(tags))
+	keys := make([]uint8, 0, len(tags))
 	for k := range tags {
 		if k == 0 {
 			return nil, errors.New("tag 0 marks the end and holds no value")
@@ -85,7 +87,7 @@ func marshalADV(tags map[uint32][]byte) ([]byte, error) {
 		if len(v)+8 > len(data) {
 			return nil, fmt.Errorf("the ADV overflows by %d bytes", len(v)+8-len(data))
 		}
-		binary.BigEndian.PutUint32(data[0:4], k)
+		binary.BigEndian.PutUint32(data[0:4], uint32(k))
 		binary.BigEndian.PutUint32(data[4:8], uint32(len(v)))
 		copy(data[8:], v)
 		data = data[8+len(v):]
@@ -98,7 +100,7 @@ func marshalADV(tags map[uint32][]byte) ([]byte, error) {
 // readADV reads the tags of the META partition at r: the first copy that
 // holds, then the second, and none from a partition with neither, as an
 // image's blank META is.
-func readADV(r io.ReaderAt) map[uint32][]byte {
+func readADV(r io.ReaderAt) map[uint8][]byte {
 	b := make([]byte, ADVLength)
 	for _, off := range []int64{0, ADVLength} {
 		if _, err := r.ReadAt(b, off); err != nil {
@@ -108,7 +110,7 @@ func readADV(r io.ReaderAt) map[uint32][]byte {
 			return tags
 		}
 	}
-	return map[uint32][]byte{}
+	return map[uint8][]byte{}
 }
 
 // SetMETA sets key to value in the META partition of length bytes at rw and
@@ -117,7 +119,7 @@ func readADV(r io.ReaderAt) map[uint32][]byte {
 func SetMETA(rw interface {
 	io.ReaderAt
 	io.WriterAt
-}, length int64, key uint32, value []byte) error {
+}, length int64, key uint8, value []byte) error {
 	if length < 2*ADVLength+syslinuxADV {
 		return fmt.Errorf("a %d-byte META partition holds no two ADV copies", length)
 	}

@@ -80,6 +80,12 @@ func ImagePayload(kind string) bool {
 	return false
 }
 
+// WritesImage says whether a class of the payload kind may carry a disk
+// image that an install writes: an image payload's, which its seed then
+// follows by URL, or a Talos class's metal image, whose seed is the install
+// code in META.
+func WritesImage(kind string) bool { return ImagePayload(kind) || kind == PayloadTalosConfig }
+
 // Installs says whether the class carries a complete image: its payload is
 // an image and image, image_digest and image_format are all set. A Talos
 // class installs through the class inputs, not through this.
@@ -157,10 +163,15 @@ func (c Class) validateImage() error {
 	if set != 3 {
 		return fmt.Errorf("image, image_digest and image_format go together")
 	}
-	if !ImagePayload(c.PayloadKind) && c.PayloadKind != PayloadTalosConfig {
+	if !WritesImage(c.PayloadKind) {
 		return fmt.Errorf("image is for a %s, %s, %s or %s class, not a %s one", PayloadNixOSImage, PayloadAlpineImage, PayloadCloudInit, PayloadTalosConfig, c.PayloadKind)
 	}
-	if c.InstallerImage != "" && c.PayloadKind != PayloadTalosConfig {
+	switch talos := c.PayloadKind == PayloadTalosConfig; {
+	case talos && c.InstallerImage == "":
+		// Tinkerbell installs a Talos class only through its installer, so
+		// the image goes beside one.
+		return fmt.Errorf("a Talos class's image goes with its installer_image")
+	case !talos && c.InstallerImage != "":
 		return fmt.Errorf("an image class installs its image, not an installer_image")
 	}
 	if u, err := url.Parse(c.Image); err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
