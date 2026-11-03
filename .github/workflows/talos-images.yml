@@ -1,7 +1,7 @@
 name: talos-images
 # Builds folly's signed Talos boot assets with the siderolabs imager, and its
-# signed netboot iPXE and HookOS with Nix, using the Secure Boot keys in
-# 1Password, then publishes them. A pull request only checks the inputs: the
+# signed netboot iPXE, HookOS and fleet-boot with Nix, using the Secure Boot
+# keys in 1Password, then publishes them. A pull request only checks the inputs: the
 # build needs the keys.
 on:
   push:
@@ -11,6 +11,15 @@ on:
       - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
+      - nix/images/fleet-boot.nix
+      # The fleet-boot binary the fleet-boot UKI carries, and what it imports.
+      - apps/fleetd/package.nix
+      - apps/fleetd/go.mod
+      - apps/fleetd/go.sum
+      - apps/fleetd/cmd/fleet-boot/**
+      - apps/fleetd/client/**
+      - apps/fleetd/protocol/**
+      - apps/fleetd/lldp/**
       # HookOS's fleet_attest_url reads this.
       - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
@@ -98,7 +107,9 @@ jobs:
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
             git show "$rev:clusters/folly/config/anchor-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
-              nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
+              nix/images/ipxe-folly.nix nix/images/hookos-folly.nix nix/images/fleet-boot.nix \
+              apps/fleetd/package.nix apps/fleetd/go.mod apps/fleetd/go.sum apps/fleetd/cmd/fleet-boot \
+              apps/fleetd/client apps/fleetd/protocol apps/fleetd/lldp \
               terraform/network/tailscale/fleet.tf.json \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
               .github/workflows/talos-images.yml
@@ -201,7 +212,7 @@ jobs:
           bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" >"$RUNNER_TEMP/inputs.json"
           bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$CONFIG_URL"
 
-      - name: Build and sign iPXE and HookOS
+      - name: Build and sign iPXE, HookOS and fleet-boot
         run: |
           set -euo pipefail
           bash .github/scripts/talos-netboot-build.sh \
@@ -231,16 +242,17 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: iPXE and HookOS must verify against the committed certificates
+      - name: iPXE, HookOS and fleet-boot must verify against the committed certificates
         run: |
           set -euo pipefail
           bash .github/scripts/talos-netboot-verify.sh "$ROOT/secureboot" "$ROOT/netboot.json" "$RUNNER_TEMP/out" \
             | tee "$RUNNER_TEMP/netboot.txt"
           {
-            echo "### HookOS command line"
+            echo "### HookOS and fleet-boot command lines"
             echo '```'
-            sed -n 's/^.*: command line: //p' "$RUNNER_TEMP/netboot.txt"
+            sed -n 's/^.*\/\([^/]*\)\.efi: command line: /\1: /p' "$RUNNER_TEMP/netboot.txt"
             echo '```'
+            sed -n 's/^.*\/\(fleet-boot[^/]*\.efi\): \([0-9]*\) bytes$/fleet-boot UKI: \2 bytes/p' "$RUNNER_TEMP/netboot.txt"
           } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Keep the installer for a look when a check fails
@@ -266,7 +278,7 @@ jobs:
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
       # once. The mirror on each anchor takes the newest release of the version.
-      - name: Publish the ISO, iPXE and HookOS
+      - name: Publish the ISO, iPXE, HookOS and fleet-boot
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -277,7 +289,8 @@ jobs:
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
             "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
-            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
+            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi" \
+            "$RUNNER_TEMP/out/fleet-boot-amd64-secureboot-uki.efi"
           echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"
 
   # fleetd installs only an image pinned by digest, so each build pins the

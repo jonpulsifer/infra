@@ -41,10 +41,12 @@ type Config struct {
 
 // Result is what a pass leaves. InstallCode is the confirm's install code,
 // empty when the service gave none; it is a secret and is never logged.
+// Session is the session that passed, for the boot's later requests.
 type Result struct {
 	Verdict     protocol.Verdict
 	NVIndexes   []uint32
 	InstallCode string
+	Session     *Session
 }
 
 // RefusedError is the service's refusal.
@@ -200,7 +202,7 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		return nil, err
 	}
 	logf("verdict %s", verdict.Verdict)
-	res = &Result{Verdict: verdict}
+	res = &Result{Verdict: verdict, Session: &Session{ID: started.Session, Nonce: started.Nonce, akPublic: akPub, akPrivate: akPriv}}
 
 	if cfg.StoreNV {
 		for _, w := range []struct {

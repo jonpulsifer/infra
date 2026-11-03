@@ -1,6 +1,7 @@
 # Talos boot server for folly's bootstrap VLAN, on spore. A timer mirrors the SecureBoot ISO,
-# netboot iPXE and HookOS UKI from the talos-folly/<version> GitHub release, checks each signed image
-# against its committed signing cert, and keeps the previous release as prev. dnsmasq serves the
+# netboot iPXE, HookOS UKI and, when the release has one, the fleet-boot UKI from the
+# talos-folly/<version> GitHub release, checks each signed image against its committed signing
+# cert, and keeps the previous release as prev. dnsmasq serves the
 # iPXE over TFTP and nginx serves the rest at spore's bootstrap address, which the Kubernetes
 # network's DHCP names (terraform/network/unifi/folly/k8s.tf). fleetd (./fleetd.nix) serves the
 # enrollment name's HTTPS at the same address, and ./hookos-syslog.nix receives HookOS's syslog there.
@@ -29,6 +30,9 @@ let
   ipxe = "ipxe-amd64-secureboot.efi";
   # Signed with the HookOS key; iPXE's menu fetches it over HTTP.
   hookos = "hookos-amd64-secureboot-uki.efi";
+  # The lab's own RAM boot image (../images/fleet-boot.nix), signed with the HookOS key too. A
+  # release built before the image existed has none, and the mirror publishes it without.
+  fleetBoot = "fleet-boot-amd64-secureboot-uki.efi";
   signingCert = ../../clusters/${site}/talos/secureboot/uki-signing-cert.pem;
   hookosCert = ../../clusters/${site}/talos/secureboot/hookos-signing-cert.pem;
   # The pipeline's check: exactly one signature, and sbverify against the committed certificate.
@@ -219,6 +223,7 @@ in
         "/".return = "404";
         "= /talos/${site}/${iso}" = readOnlyLocation "${siteDir}/current/${iso}";
         "= /talos/${site}/${hookos}" = readOnlyLocation "${siteDir}/current/${hookos}";
+        "= /talos/${site}/${fleetBoot}" = readOnlyLocation "${siteDir}/current/${fleetBoot}";
       };
     };
   };
@@ -403,13 +408,23 @@ in
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
         fetch --output "$stage/${hookos}" "$release_url/${hookos}"
         ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${hookos}"
+        if fetch --output "$stage/${fleetBoot}" "$release_url/${fleetBoot}"; then
+          ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${fleetBoot}"
+        else
+          rm -f "$stage/${fleetBoot}"
+          echo "release $tag has no ${fleetBoot}"
+        fi
+        boot_image=""
+        if [ -s "$stage/${fleetBoot}" ]; then
+          boot_image=${fleetBoot}
+        fi
         fetch --output "$stage/${iso}" "$release_url/${iso}"
         test -s "$stage/${iso}"
         printf '%s\n' ${talosVersion} > "$stage/version"
         printf '%s\n' "$tag" > "$stage/tag"
 
         # Two builds of the same inputs can publish the same files.
-        id=$(cd "$stage" && sha256sum ${iso} ${ipxe} ${hookos} | sha256sum | cut -d ' ' -f 1)
+        id=$(cd "$stage" && sha256sum ${iso} ${ipxe} ${hookos} $boot_image | sha256sum | cut -d ' ' -f 1)
         release="$releases/$id"
         if [ -e "$release" ]; then
           install -m 0644 "$stage/tag" "$release/tag"
