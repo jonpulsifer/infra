@@ -17,7 +17,7 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | nginx `talos-boot` | Serves the ISO and HookOS on port 80 at `SPORE_BOOTSTRAP_IP` | spore |
 | HookOS syslog | rsyslog on UDP 514 at `SPORE_BOOTSTRAP_IP`, into spore's journal under the identifier `hookos` (`hookos-syslog.nix`). [Tinkerbell](tinkerbell.md#logs-and-pxe-state) says how to read it | spore |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
-| fleetd's boot listener | Serves `enroll.lolwtf.ca` on port 443 at `SPORE_BOOTSTRAP_IP` with a Let's Encrypt certificate from DNS-01: the device flow under `/attest/` and a node's first config at `/talos/config`. The anchors' CoreDNS answers the name with `SPORE_BOOTSTRAP_IP` | spore |
+| fleetd's boot listener | Serves `enroll.lolwtf.ca` on port 443 at `SPORE_BOOTSTRAP_IP` with a Let's Encrypt certificate from DNS-01: the device flow under `/attest/` and a node's first config at `/talos/config`, or at `/seed` for a NixOS or Alpine class. The anchors' CoreDNS answers the name with `SPORE_BOOTSTRAP_IP` | spore |
 | `talos-boot-check` | Exports whether spore serves the boot files and the enrollment name, each minute | spore |
 
 The boot check passes when dnsmasq is active and nginx serves HookOS at spore's bootstrap address. The HTTPS check passes when fleetd answers `/healthz` for `enroll.lolwtf.ca` at that address with a certificate that public roots trust.

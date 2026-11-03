@@ -23,8 +23,8 @@ It checks the machine's identity, authorizes installation, and checks the runnin
 2. Its Trusted Platform Module (TPM) proves possession of the approved endorsement keys (EKs).
 3. fleetd checks the boot evidence and the device's declaration in NetBox.
 4. fleetd issues device certificates and authorizes an eligible installation.
-5. Tinkerbell wipes the declared disk and installs Talos.
-6. Talos fetches its configuration once. fleetd then marks the device `active`.
+5. Tinkerbell wipes the declared disk and installs the class's operating system.
+6. The node fetches its configuration once: a Talos class its machine config, a `nixos-image` or `alpine-image` class its seed, the JSON that names the profile it switches into, its address and the fleet's endpoints. fleetd then marks the device `active`.
 7. The running node sends a signed boot check each hour.
 
 The device certificates are the Local Device Identity (LDevID) and Local Attestation Key (LAK) certificates. The LAK signs later boot checks.

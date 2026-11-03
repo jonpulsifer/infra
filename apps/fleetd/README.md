@@ -60,7 +60,8 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_WEBHOOK_SECRET_FILE` | none | NetBox's event-rule secret; without it `/webhook` answers 503 and fleetd only polls |
 | `FLEET_SPIRE_NODES_FILE` | none | The file each pass writes with the nodes SPIRE registers and the ones it bans: `{"nodes": [{"name", "ek_hashes"}], "revoked": [{"name", "ek_hashes", "ldevids"}]}`. `nodes` holds each `active` device with a passing verdict; `revoked` holds each machine on record whose device is `decommissioning`, `offline` or gone, with its LDevID's SHA-1 fingerprint until its `notAfter`. Not written while NetBox lists no device, or while the store cannot be read |
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
-| `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them nothing renders |
+| `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them no Talos class renders |
+| `FLEET_SEED_INPUTS` | none | The seed inputs: the node prefix, gateway, resolvers and DNS zone, the enrollment and DevID origins, the SPIRE server and trust domain, the SSH authorized keys, and the profile each seed payload kind names. Without it no `nixos-image` or `alpine-image` class renders |
 | `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
 | `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's. With a renderer, `FLEET_CONFIG_TTL` is at most `4h`, so a worker's token fits the cluster's 8-hour cap |
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state, and the ledger of bootstrap tokens, across a restart; without it they live in memory alone |
@@ -222,6 +223,20 @@ pending kubelet client request that a node bootstrap token made; CEL cannot read
 subject, so the name check is fleetd's.
 
 ## Config
+
+A class's `payload_kind` picks what an install renders and where its first boot fetches it. A
+`talos-machineconfig` class renders the Talos config below through talosctl and serves it at
+`/talos/config`. A `nixos-image` or `alpine-image` class renders a seed, one JSON document the
+image's first boot reads once, and serves it at `/seed` with the same query as
+`application/json`; it is rendered without a bootstrap token, needs only `FLEET_SEED_INPUTS` and
+the node's address, and otherwise follows every rule below. The seed carries `version` (1), the
+node's `name`, `serial`, `class`, `os`, `workload` and `payload_kind`, the `profile` the node
+switches into (the class's `profiles` entry with `${name}`, `${class}` and `${workload}` filled:
+a flake attribute for NixOS, an apkovl URL for Alpine), `network` (`address` with its prefix,
+`gateway`, `resolvers`, `dns_zone`), `fleet` (`enroll_url`, and the node's `devid_url` and
+`verdict_url`), `spire` (`server`, `trust_domain`) and `ssh_authorized_keys`. A seed asked for at
+`/talos/config`, or a Talos config at `/seed`, is 404 and stays. A `cloud-init-nocloud` class is
+refused at admission: fleetd renders no such payload.
 
 `GET /talos/config?uuid=<uuid>&code=<code>` answers the config whole with `Cache-Control: no-store`.
 The first response whose every byte the node acknowledged burns it. A written answer is in

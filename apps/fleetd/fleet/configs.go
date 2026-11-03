@@ -29,11 +29,15 @@ const burnFor = 24 * time.Hour
 // Pending is a rendered config that waits for its node's first boot: who it
 // is for, when it was rendered and how long it waits.
 type Pending struct {
-	UUID     string
-	Code     string
-	Serial   string
-	Node     string
-	Class    string
+	UUID   string
+	Code   string
+	Serial string
+	Node   string
+	Class  string
+	// Kind is the class's payload kind at the render, which picks the path
+	// that serves the config and its content type; a record from before it
+	// was kept is a Talos config.
+	Kind     string
 	Workflow string
 	Rendered time.Time
 	TTL      time.Duration
@@ -50,6 +54,22 @@ type Pending struct {
 }
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
+
+// what names the config in a journal: a Talos config, or a seed.
+func (p Pending) what() string {
+	if SeedKind(p.Kind) {
+		return "seed"
+	}
+	return "Talos config"
+}
+
+// contentType is the type the config is served as.
+func (p Pending) contentType() string {
+	if SeedKind(p.Kind) {
+		return "application/json"
+	}
+	return "text/yaml"
+}
 
 // Served is a config fleetd served: when, and for which node and run. It is
 // kept for burnFor under a hash of the machine's UUID and the code, so a node
