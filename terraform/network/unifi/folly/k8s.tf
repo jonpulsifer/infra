@@ -57,8 +57,8 @@ resource "unifi_network" "k8s" {
 
   # The relay is gateway-originated traffic onto the bootstrap VLAN, so no
   # policy admits it; spore's own firewall admits UDP 67 on that interface.
-  # Kea's replies come back on the bootstrap VLAN, where the gateway's dnsmasq
-  # accepts them only because it serves DHCP there too (bootstrap.tf).
+  # Kea's replies come back on the bootstrap VLAN to the router address here,
+  # which the firewall admits ahead of the bootstrap block (firewall.tf).
   dhcp_relay = {
     enabled = true
     servers = [local.boot_server]

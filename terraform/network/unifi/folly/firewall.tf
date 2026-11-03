@@ -552,10 +552,45 @@ resource "unifi_firewall_policy" "folly_pbx_to_handset" {
   }
 }
 
+# The gateway relays the Kubernetes network's DHCP to Kea on spore (k8s.tf),
+# and Kea answers the relay at the network's router address, on the bootstrap
+# VLAN. That answer is Bootstrap-to-Gateway traffic, and the gateway's input
+# chain for the pair has no rule for established flows ahead of the block
+# below, so without this policy every offer dies at the gateway and no machine
+# on a node port gets an address.
+resource "unifi_firewall_policy" "bootstrap_dhcp_reply" {
+  name                 = "Allow Boot DHCP Replies to Gateway"
+  action               = "ALLOW"
+  protocol             = "udp"
+  ip_version           = "IPV4"
+  create_allow_respond = false
+  enabled              = true
+  logging              = false
+
+  source = {
+    matching_target    = "IP"
+    ips                = ["${local.boot_server}/32"]
+    port_matching_type = "ANY"
+    zone_id            = unifi_firewall_zone.bootstrap.id
+  }
+
+  destination = {
+    matching_target    = "IP"
+    ips                = ["${local.topology.ROUTER_IP}/32"]
+    port               = "67"
+    port_matching_type = "SPECIFIC"
+    zone_id            = data.unifi_firewall_zone.gateway.id
+  }
+}
+
 # The bootstrap network holds only spore's boot address.
 # From there it reaches the anchors on its own subnet, which the switch carries
 # and the gateway never filters, and the internet; nothing else on the LAN or
 # in the cluster's VIP range.
+#
+# The controller appends a new policy at the end of its zone pair and the
+# provider cannot reorder, so this block is recreated whenever the DHCP reply
+# policy above changes, which lands it behind that policy.
 resource "unifi_firewall_policy" "bootstrap_block_gateway" {
   name                 = "Block Bootstrap to Gateway"
   action               = "BLOCK"
@@ -575,6 +610,12 @@ resource "unifi_firewall_policy" "bootstrap_block_gateway" {
     matching_target    = "ANY"
     port_matching_type = "ANY"
     zone_id            = data.unifi_firewall_zone.gateway.id
+  }
+
+  depends_on = [unifi_firewall_policy.bootstrap_dhcp_reply]
+
+  lifecycle {
+    replace_triggered_by = [unifi_firewall_policy.bootstrap_dhcp_reply]
   }
 }
 
