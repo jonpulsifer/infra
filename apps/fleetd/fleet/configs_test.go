@@ -123,6 +123,30 @@ func TestServeOutcomes(t *testing.T) {
 			t.Fatalf("the withdrawal found the config still held: %+v", settled)
 		}
 	})
+	t.Run("gone gives the config back once", func(t *testing.T) {
+		c := put(t)
+		f := fetchOf(testNow, func(Pending, []byte) error { t.Fatal("delivered"); return nil })
+		var end func(error) Outcome
+		f.Check = func(Pending) Verdict {
+			return Verdict{Kind: Gone, Settle: func() {
+				// A fetch that claims between the give-back and the
+				// withdrawal must keep the config the withdrawal marks.
+				end = holdFetch(t, c, testNow)
+				if ev, ok := c.Withdraw("MXL0172Q6L", testNow); !ok || ev.Kind != WithdrawnWhileFetching {
+					t.Fatalf("the withdrawal: %+v %v", ev, ok)
+				}
+			}}
+		}
+		if out := c.Serve(f); out.Kind != Refused {
+			t.Fatalf("%+v", out)
+		}
+		if out := end(nil); out.Kind != Delivered {
+			t.Fatalf("the concurrent fetch lost the config to a second give-back: %+v", out)
+		}
+		if _, ok := c.Served(testUUID, testCode); !ok {
+			t.Fatal("the concurrent fetch left no served record")
+		}
+	})
 	t.Run("unavailable", func(t *testing.T) {
 		c := put(t)
 		f := fetchOf(testNow, func(Pending, []byte) error { t.Fatal("delivered"); return nil })

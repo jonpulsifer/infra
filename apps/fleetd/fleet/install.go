@@ -462,14 +462,12 @@ func (i *Installer) WithdrawGone(devices []Device) {
 	for _, d := range devices {
 		live[strings.ToLower(d.Serial)] = true
 	}
-	for _, ev := range i.Configs.Sweep(i.Now(), func(p Pending) string {
+	i.Configs.Sweep(i.Now, func(p Pending) string {
 		if live[strings.ToLower(p.Serial)] {
 			return ""
 		}
 		return "gone"
-	}) {
-		i.journalGone(ev)
-	}
+	}, i.journalGone)
 }
 
 // dropGone drops the config of a device NetBox no longer holds, which has no
@@ -521,8 +519,6 @@ func (i *Installer) releaseOnce(ctx context.Context, p Pending) {
 // missingLookupEvery spaces the NetBox lookups that fetches for UUIDs with no
 // config cause, across every UUID, since the endpoint is unauthenticated.
 const missingLookupEvery = time.Second
-
-// notFound journals a 404 the owner must act on, and logs any other. A
 
 // notFound journals a 404 the owner must act on, and logs any other. A
 // fetch with a code other than the one rendered for the machine is
@@ -816,7 +812,7 @@ func (i *Installer) withdrawEnded(ctx context.Context) {
 	if i.Kube == nil {
 		return
 	}
-	for _, ev := range i.Configs.Sweep(i.Now(), func(p Pending) string {
+	i.Configs.Sweep(i.Now, func(p Pending) string {
 		wf, err := i.Kube.Get(ctx, WorkflowResource, p.Workflow)
 		switch {
 		case errors.Is(err, ErrNotFound):
@@ -827,9 +823,7 @@ func (i *Installer) withdrawEnded(ctx context.Context) {
 			return "ended " + stateWord(wf)
 		}
 		return ""
-	}) {
-		i.dropEnded(ctx, ev)
-	}
+	}, func(ev Event) { i.dropEnded(ctx, ev) })
 }
 
 // dropEnded journals the withdrawal of a config whose Workflow ended as the

@@ -621,21 +621,19 @@ func (c *Configs) Withdraw(serial string, now time.Time) (ev Event, ok bool) {
 	return Event{}, false
 }
 
-// Sweep withdraws each unread config for which why gives a reason, and
-// returns the events with their reasons.
-func (c *Configs) Sweep(now time.Time, why func(Pending) string) []Event {
-	var out []Event
+// Sweep withdraws each unread config for which why gives a reason, and hands
+// each event, with its reason, to done before it goes on to the next.
+func (c *Configs) Sweep(now func() time.Time, why func(Pending) string, done func(Event)) {
 	for _, p := range c.unread() {
 		reason := why(p)
 		if reason == "" {
 			continue
 		}
-		if ev, ok := c.Withdraw(p.Serial, now); ok {
+		if ev, ok := c.Withdraw(p.Serial, now()); ok {
 			ev.Reason = reason
-			out = append(out, ev)
+			done(ev)
 		}
 	}
-	return out
 }
 
 // unread lists the configs no node has fetched and none withdrew.
