@@ -21,6 +21,7 @@ import (
 type Host interface {
 	Run(ctx context.Context, name string, args ...string) ([]byte, error)
 	IsBlockDevice(path string) bool
+	IsMountpoint(path string) bool
 	Mount(source, target, fstype, data string) error
 	// Remount makes a mounted file system writable.
 	Remount(target string) error
@@ -62,6 +63,14 @@ type Executor struct {
 	Now      func() time.Time
 
 	wiped bool
+	// esp is the EFI system partition the install wrote, for next-boot.
+	esp *installedESP
+}
+
+// installedESP is the install disk's EFI system partition after the write.
+type installedESP struct {
+	disk Disk
+	Partition
 }
 
 func (e *Executor) logf(format string, args ...any) {
@@ -77,19 +86,28 @@ func (e *Executor) now() time.Time {
 	return time.Now()
 }
 
-// StepTimeouts are the Templates' action timeouts: the wipe gets the
-// provision Template's 900 s, which a retirement's erase needs, and the
-// install the image Template's 900 s to download and write.
+// StepTimeouts are the image Template's action timeouts: 300 s to wipe,
+// 900 s to download and write, 120 s each to set the boot entry and reboot,
+// 1,440 s in all under the Templates' global timeout of 1,800 s. A
+// retirement's wipe gets RetireWipeTimeout for its erase, and installs
+// nothing.
 var StepTimeouts = map[string]time.Duration{
-	protocol.StepWipe:     900 * time.Second,
+	protocol.StepWipe:     300 * time.Second,
 	protocol.StepInstall:  900 * time.Second,
 	protocol.StepNextBoot: 120 * time.Second,
 	protocol.StepReboot:   120 * time.Second,
 }
 
-func (e *Executor) timeout(step string) time.Duration {
+// RetireWipeTimeout is the provision Template's wipe timeout, which a
+// retirement's erase needs.
+const RetireWipeTimeout = 900 * time.Second
+
+func (e *Executor) timeout(step string, r protocol.BootRun) time.Duration {
 	if d, ok := e.Timeouts[step]; ok {
 		return d
+	}
+	if step == protocol.StepWipe && r.Retire {
+		return RetireWipeTimeout
 	}
 	return StepTimeouts[step]
 }
@@ -97,13 +115,10 @@ func (e *Executor) timeout(step string) time.Duration {
 // stepFunc runs one step and answers what it did, for the report.
 type stepFunc func(ctx context.Context, r protocol.BootRun) (string, error)
 
-// Run takes the run's steps in order and reports each. The reboot, when
-// the run gets there, follows its own report of success.
+// Run takes the run's steps in order and reports each. A run whose install
+// inputs are refused fails at the wipe's start, before anything is wiped. The
+// reboot, when the run gets there, follows its own report of success.
 func (e *Executor) Run(ctx context.Context, r protocol.BootRun) error {
-	if err := preflight(r, e.Code); err != nil {
-		e.report(ctx, r, protocol.StepWipe, protocol.PhaseFailed, err.Error())
-		return err
-	}
 	steps := []struct {
 		name string
 		fn   stepFunc
@@ -113,17 +128,26 @@ func (e *Executor) Run(ctx context.Context, r protocol.BootRun) error {
 		{protocol.StepNextBoot, e.nextBoot},
 		{protocol.StepReboot, e.announceReboot},
 	}
-	for _, s := range steps {
+	for i, s := range steps {
 		if err := e.report(ctx, r, s.name, protocol.PhaseStarted, ""); err != nil {
 			return fmt.Errorf("fleetd did not take %s's start, so the run stops before it: %w", s.name, err)
 		}
 		e.logf("%s: started", s.name)
-		sctx, cancel := context.WithTimeout(ctx, e.timeout(s.name))
-		what, err := s.fn(sctx, r)
-		cancel()
+		var what string
+		var err error
+		if i == 0 {
+			err = preflight(r, e.Code)
+		}
+		if err == nil {
+			sctx, cancel := context.WithTimeout(ctx, e.timeout(s.name, r))
+			what, err = s.fn(sctx, r)
+			cancel()
+		}
 		if err != nil {
 			e.logf("%s: FAILED: %v", s.name, err)
-			e.report(ctx, r, s.name, protocol.PhaseFailed, err.Error())
+			if rerr := e.report(ctx, r, s.name, protocol.PhaseFailed, err.Error()); rerr != nil {
+				return fmt.Errorf("%s: %w; fleetd did not take the failure: %v", s.name, err, rerr)
+			}
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
 		e.logf("%s: %s", s.name, what)

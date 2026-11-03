@@ -96,6 +96,8 @@ type machine struct {
 	run      map[string]func(args []string) ([]byte, error)
 	mounts   []string
 	rebooted string
+	// remountErr is efivarfs refusing to turn writable.
+	remountErr error
 }
 
 func newMachine(t *testing.T, diskBytes int64) *machine {
@@ -173,7 +175,7 @@ func (m *machine) Run(_ context.Context, name string, args ...string) ([]byte, e
 	}
 	switch name {
 	case "blkid":
-		return nil, errors.New("exit status 2")
+		return nil, exitErr(2)
 	case "efibootmgr":
 		return m.efiVars.run(args)
 	}
@@ -193,7 +195,18 @@ func (m *machine) Mount(source, target, fstype, _ string) error {
 	return nil
 }
 
-func (m *machine) Remount(string) error        { return nil }
+func (m *machine) IsMountpoint(path string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, mnt := range m.mounts {
+		if strings.Fields(mnt)[1] == path {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *machine) Remount(string) error        { return m.remountErr }
 func (m *machine) Unmount(string) error        { return nil }
 func (m *machine) ClearImmutable(string) error { return nil }
 func (m *machine) Sync()                       {}
@@ -340,3 +353,9 @@ func (r *reports) phases() []string {
 }
 
 var errUnsupported = errors.New("exit status 1")
+
+// exitErr is a command that exited with a status.
+type exitErr int
+
+func (e exitErr) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e exitErr) ExitCode() int { return int(e) }

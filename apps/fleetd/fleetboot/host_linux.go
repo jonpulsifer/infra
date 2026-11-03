@@ -20,6 +20,13 @@ func (LinuxHost) IsBlockDevice(path string) bool {
 	return err == nil && fi.Mode()&os.ModeDevice != 0 && fi.Mode()&os.ModeCharDevice == 0
 }
 
+// IsMountpoint says whether a file system is mounted at path, from the
+// mount table.
+func (LinuxHost) IsMountpoint(path string) bool {
+	b, err := os.ReadFile("/proc/self/mountinfo")
+	return err == nil && mountpointIn(b, path)
+}
+
 func (LinuxHost) Mount(source, target, fstype, data string) error {
 	return syscall.Mount(source, target, fstype, syscall.MS_NOSUID|syscall.MS_NODEV, data)
 }

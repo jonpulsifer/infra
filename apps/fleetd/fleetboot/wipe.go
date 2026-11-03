@@ -2,6 +2,7 @@ package fleetboot
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -74,9 +75,13 @@ func (e *Executor) wipe(ctx context.Context, r protocol.BootRun) (string, error)
 		}
 	}
 	_, _ = e.Host.Run(ctx, "blockdev", "--rereadpt", d.Path)
-	// blkid exits 2 when it finds nothing.
-	if out, err := e.Host.Run(ctx, "blkid", "-p", d.Path); err == nil {
+	// blkid exits 2 when it finds nothing; anything else proves nothing.
+	out, err := e.Host.Run(ctx, "blkid", "-p", d.Path)
+	switch code := exitCode(err); {
+	case err == nil:
 		return "", fmt.Errorf("%s still has a signature: %s", d.Path, strings.TrimSpace(string(out)))
+	case code != 2:
+		return "", fmt.Errorf("blkid could not check %s for a signature (%v): %s", d.Path, err, strings.TrimSpace(string(out)))
 	}
 	e.wiped = true
 	return "wiped " + d.Path, nil
@@ -103,7 +108,9 @@ func zeroAt(path string, offset, length int64) error {
 // probeEFIVars writes and removes a 1 KiB variable. efivarfs takes a
 // variable in one write: its 4-byte attributes, then the data.
 func (e *Executor) probeEFIVars() error {
-	e.mountEFIVars()
+	if err := e.mountEFIVars(); err != nil {
+		return fmt.Errorf("%v; nothing wiped", err)
+	}
 	probe := filepath.Join(e.EFIVars, probeVariable)
 	data := append([]byte{7, 0, 0, 0}, make([]byte, 1024)...)
 	if err := os.WriteFile(probe, data, 0o644); err != nil {
@@ -118,10 +125,29 @@ func (e *Executor) probeEFIVars() error {
 }
 
 // mountEFIVars mounts efivarfs where it is missing and makes it writable:
-// it has one superblock, so any earlier read-only mount holds for all.
-func (e *Executor) mountEFIVars() {
-	_ = e.Host.Mount("efivarfs", e.EFIVars, "efivarfs", "")
-	_ = e.Host.Remount(e.EFIVars)
+// it has one superblock, so any earlier read-only mount holds for all. Its
+// errors say which of the two failed, apart from a firmware that refuses a
+// write.
+func (e *Executor) mountEFIVars() error {
+	if !e.Host.IsMountpoint(e.EFIVars) {
+		if err := e.Host.Mount("efivarfs", e.EFIVars, "efivarfs", ""); err != nil {
+			return fmt.Errorf("efivarfs did not mount (%v)", err)
+		}
+	}
+	if err := e.Host.Remount(e.EFIVars); err != nil {
+		return fmt.Errorf("efivarfs stays read-only (%v)", err)
+	}
+	return nil
+}
+
+// exitCode is a failed command's exit status, or -1 when it did not exit,
+// as when it was not found or its context ended.
+func exitCode(err error) int {
+	var x interface{ ExitCode() int }
+	if errors.As(err, &x) {
+		return x.ExitCode()
+	}
+	return -1
 }
 
 // remaining is how long is left before deadline, as of now.

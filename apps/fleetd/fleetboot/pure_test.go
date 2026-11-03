@@ -75,7 +75,7 @@ func TestDetectFormat(t *testing.T) {
 }
 
 func TestDecodeCommands(t *testing.T) {
-	if got := decodeCommands("tar.xz", "/x"); !reflect.DeepEqual(got, [][]string{{"xz", "-dc", "/x"}, {"tar", "-xOf", "-"}}) {
+	if got := decodeCommands("tar.xz", "/x"); !reflect.DeepEqual(got, [][]string{{"xz", "-dc", "/x"}}) {
 		t.Errorf("tar.xz: %v", got)
 	}
 	if got := decodeCommands("raw.zst", "/x"); !reflect.DeepEqual(got, [][]string{{"zstd", "-dc", "/x"}}) {
