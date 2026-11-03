@@ -33,6 +33,13 @@ locals {
     { for node, m in local.nodes : tostring(m.switch_port) => node },
   )
 
+  # The uplink to the gateway, read from the live switch, and the sensor port:
+  # the USB NIC of the Zeek and Suricata sensor on shale
+  # (clusters/folly/apps/sensor/). The switch copies every frame of the
+  # uplink, both directions, onto the sensor port, which forwards nothing.
+  uplink_port = 25
+  sensor_port = 23
+
   switch = local.clients.switches["USW 24 PoE"]
 }
 
@@ -142,10 +149,28 @@ resource "unifi_device" "usw_24_poe" {
     }
   }
 
+  # The sensor port mirrors the uplink. The controller stores a mirror port
+  # as forward native, and the mirror mode is what stops it forwarding. Only
+  # these attributes: the provider leaves the rest of a new block unknown
+  # after apply, which fails the apply.
+  port_override {
+    index            = local.sensor_port
+    name             = "sensor"
+    op_mode          = "mirror"
+    mirror_port_idx  = local.uplink_port
+    forward          = "native"
+    isolation        = true
+    tagged_vlan_mgmt = "block_all"
+  }
+
   lifecycle {
     precondition {
       condition     = length(setintersection(keys(local.node_ports), [for p in values(local.anchor_ports) : tostring(p)])) == 0
       error_message = "A node's switch_port in clusters/folly/inventory/nodes.yaml, or a free node port, is an anchor's port."
+    }
+    precondition {
+      condition     = !contains(concat(keys(local.node_ports), [for p in values(local.anchor_ports) : tostring(p)]), tostring(local.sensor_port)) && local.sensor_port != local.uplink_port
+      error_message = "The sensor port is a node's, an anchor's or the uplink's port."
     }
   }
 }

@@ -19,7 +19,7 @@ shale is a worker node in the folly [Kubernetes](../platform/kubernetes.md) clus
 
 ## What it runs
 
-shale runs pods. The `data` volume at `/var/mnt/data` holds the `local-path` volumes on shale.
+shale runs pods. The `data` volume at `/var/mnt/data` holds the `local-path` volumes on shale. A USB NIC, cabled to the switch's mirror port, is the capture interface of the [network sensor](../platform/observability/network-sensor.md).
 
 ## Reach
 

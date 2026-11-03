@@ -52,7 +52,7 @@ sections:
       - platform/build-and-release.md
       - platform/cloud.md
       - path: platform/observability.md
-        children: [platform/observability/alerting.md]
+        children: [platform/observability/alerting.md, platform/observability/network-sensor.md]
   - title: Hosts
     index: hosts/index.md
     items:

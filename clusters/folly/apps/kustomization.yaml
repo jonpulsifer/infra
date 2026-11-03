@@ -15,6 +15,7 @@ resources:
   - mate-sandbox
   - netbench
   - pbx
+  - sensor
   - smiirl
   - spire
   - tally
