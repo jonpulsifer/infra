@@ -83,7 +83,7 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		if d.MAC == "" || d.Disk == "" {
 			return conflict("%s needs a primary MAC on an interface and install_disk", d.Name)
 		}
-		if r.Config.Installer(d, "provision") != "" {
+		if r.Config.WillInstall(d) {
 			if err := r.Installer.Ready(ctx, d); err != nil {
 				return err
 			}
@@ -200,7 +200,7 @@ func (r *Reconciler) provisionWhy(d Device) string {
 		return "FLEET_AUTO_PROVISION is off"
 	case r.Config.IsControlPlane(d.Class):
 		return "a control plane; the owner sets desired_action to provision by hand"
-	case r.Config.Installer(d, "provision") == "":
+	case !r.Config.WillInstall(d):
 		return "its class installs nothing here; the owner sets desired_action to provision"
 	}
 	return ""

@@ -51,7 +51,7 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `FLEET_SITE`, `FLEET_NAMESPACE` | `folly`, `tinkerbell` | The NetBox site and Tinkerbell's namespace |
-| `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind. A class's `installer_image` wins over the class inputs' image, and fleetd refuses to start while an installing class's image is not pinned by digest |
+| `FLEET_CLASSES` | required, `/etc/fleetd/classes.json` for the verifier | The class table: each class's Template, installer image, policy profile and payload kind. A class's `installer_image` wins over the class inputs' image, and fleetd refuses to start while an installing class's image is not pinned by digest. An image class (`nixos-image`, `alpine-image` or `cloud-init-nocloud`) carries `image`, an http(s) URL, `image_digest`, `sha256:` and 64 hex digits of the downloaded file, and `image_format`, one of `raw`, `raw.zst`, `raw.gz` and `tar.xz`: all three or none, no `installer_image`, and the class installs only with all three |
 | `FLEET_NETBOX_URL`, `FLEET_NETBOX_TOKEN_FILE` | required | NetBox and a token that changes devices and adds journal entries |
 | `FLEET_KUBE_SERVER`, `FLEET_KUBE_CA_FILE`, `FLEET_KUBE_CERT_FILE`, `FLEET_KUBE_KEY_FILE` | `https://localhost:6443`, `/etc/tinkerbell/…` | Tinkerbell's API and a client certificate that manages `hardware`, `machines` and `workflows` |
 | `FLEET_CLUSTER_SERVER`, `FLEET_CLUSTER_CA_FILE`, `FLEET_CLUSTER_TOKEN_FILE` | none | The site cluster's API, its CA and the token of fleetd's account in `clusters/folly/tinkerbell-access/fleet-controller-cordon.yaml`; all three or none. Without them no worker renders, a quarantine is journaled for the owner to cordon, and a retirement leaves the Node to the owner |
@@ -61,8 +61,9 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `FLEET_SPIRE_NODES_FILE` | none | The file each pass writes with the nodes SPIRE registers and the ones it bans: `{"nodes": [{"name", "ek_hashes"}], "revoked": [{"name", "ek_hashes", "ldevids"}]}`. `nodes` holds each `active` device with a passing verdict; `revoked` holds each machine on record whose device is `decommissioning`, `offline` or gone, with its LDevID's SHA-1 fingerprint until its `notAfter`. Not written while NetBox lists no device, or while the store cannot be read |
 | `FLEET_INTERVAL`, `FLEET_WORKFLOW_TTL` | `2m`, `168h` | Time between passes, and the age at which fleetd deletes its Workflows |
 | `FLEET_CLASS_INPUTS`, `FLEET_WORKER_SECRETS`, `FLEET_TALOSCTL` | none | The class inputs, the worker subset of the secrets bundle and talosctl; all three or none. Without them no Talos class renders |
-| `FLEET_SEED_INPUTS` | none | The seed inputs: the node prefix, gateway, resolvers and DNS zone, the enrollment and DevID origins, the SPIRE server and trust domain, the SSH authorized keys, and the profile each seed payload kind names. Without it no `nixos-image` or `alpine-image` class renders |
-| `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs |
+| `FLEET_SEED_INPUTS` | none | The seed inputs: the node prefix, gateway, resolvers and DNS zone, the enrollment and DevID origins, the SPIRE server and trust domain, the SSH authorized keys, and the profile each seed payload kind names. Without it no `nixos-image`, `alpine-image` or `cloud-init-nocloud` class renders |
+| `FLEET_SEED_URL` | none | The seed's URL, the boot listener's `/seed` behind the enrollment name, which an image class's Workflow carries as `seed_url` for the install to write to the disk or fetch the seed from. Without it no image class installs, and the log says so once at start |
+| `FLEET_INSTALLS` | `false` | Whether a rendered class's provision installs: a Talos class with the renderer, an image class with its whole image in the table and `FLEET_SEED_URL` |
 | `FLEET_CONFIG_TTL`, `FLEET_CONTROLPLANE_CONFIG_TTL` | `2h`, `30m` | How long an unread config waits, and a control plane's. With a renderer, `FLEET_CONFIG_TTL` is at most `4h`, so a worker's token fits the cluster's 8-hour cap |
 | `FLEET_CONFIG_DIR` | none | A tmpfs directory, mode 0700, that keeps each config's record, bytes and burn state, and the ledger of bootstrap tokens, across a restart; without it they live in memory alone |
 | `FLEET_CONTROLPLANE_BUNDLE`, `FLEET_BOOTSTRAP_ADDRESS` | none | The full secrets bundle, which lets a joining control plane render, and the address of the control plane the Talos root bootstraps, which never installs from here |
@@ -235,8 +236,19 @@ switches into (the class's `profiles` entry with `${name}`, `${class}` and `${wo
 a flake attribute for NixOS, an apkovl URL for Alpine), `network` (`address` with its prefix,
 `gateway`, `resolvers`, `dns_zone`), `fleet` (`enroll_url`, and the node's `devid_url` and
 `verdict_url`), `spire` (`server`, `trust_domain`) and `ssh_authorized_keys`. A seed asked for at
-`/talos/config`, or a Talos config at `/seed`, is 404 and stays. A `cloud-init-nocloud` class is
-refused at admission: fleetd renders no such payload.
+`/talos/config`, or a Talos config at `/seed`, is 404 and stays.
+
+A `cloud-init-nocloud` class renders its seed as a tar, served at `/seed` as `application/x-tar`
+under the same gates and rules, with three members for the NoCloud data source: `meta-data`
+(`instance-id` the serial, `local-hostname` the name), `user-data` (`#cloud-config` with the
+hostname and FQDN in the DNS zone, one user `jawn` with the seed inputs' SSH keys, passwordless sudo
+and a locked password, no password SSH, no package update, and the JSON seed above written to
+`/var/lib/fleet/seed.json` mode 0600 with an empty `profile`) and `network-config` (version 2: the
+first `en*` interface with the node's static address, default route and resolvers, searching the
+DNS zone). Each member is mode 0644 with a zero mtime, so one seed renders to the same bytes. The
+install fetches it in HookOS and unpacks it into `/var/lib/cloud/seed/nocloud/` on the written
+root, so a cloud-init class's device turns `active` when the install wrote its seed, not at the
+node's first boot as a NixOS or Alpine class's does.
 
 `GET /talos/config?uuid=<uuid>&code=<code>` answers the config whole with `Cache-Control: no-store`.
 The first response whose every byte the node acknowledged burns it. A written answer is in
@@ -315,6 +327,13 @@ Workflow's `hardwareMap` carries the serial as `install_disk_serial`, because Ti
 CRD keeps only a disk's `device`. The Template refuses to wipe or install unless the disk at
 `install_disk` reports that serial, no other disk reports it, and it is neither removable nor on
 USB.
+
+Every Workflow's `hardwareMap` carries `attest`, `wipe`, `retire`, `install`, `installer_image` and
+`install_disk_serial`. An image class's Workflow carries `installer_image` empty and, for every
+action, `image_url`, `image_digest` and `image_format` from the class, `payload_kind`, `os` and
+`seed_url` from `FLEET_SEED_URL`; its `install` is `true` only for a provision when `FLEET_INSTALLS`
+is on, the class carries its whole image and the seed URL is set. The `provision-image` Template
+reads them as `IMAGE_URL`, `IMAGE_DIGEST`, `IMAGE_FORMAT`, `PAYLOAD_KIND`, `OS` and `SEED_URL`.
 
 ## One run per machine
 
