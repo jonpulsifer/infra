@@ -85,6 +85,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install the signature and disk tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool mtools zstd
+      # systemd-repart assembles the image under `unshare --map-root-user` inside the Nix
+      # sandbox, and the runner's kernel refuses an unprivileged user namespace by default,
+      # so the build dies writing uid_map without this.
+      - name: Allow user namespaces for systemd-repart
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
