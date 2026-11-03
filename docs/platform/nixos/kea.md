@@ -18,7 +18,7 @@ Kea is the DHCPv4 server on [spore](../../hosts/spore.md) for folly's Kubernetes
 
 ## Boot path
 
-A machine on a node port broadcasts a DHCP request. The UDM forwards it to spore's bootstrap address with the network's router as the relay address, Kea picks the subnet from that address, and the answer goes back through the UDM: a pool address, the anchors' resolvers, and `SPORE_BOOTSTRAP_IP` with the signed iPXE as the boot file. The UDM's relay is dnsmasq, which accepts Kea's answer only because the UDM also serves DHCP on the bootstrap VLAN, where the answer arrives (`terraform/network/unifi/folly/bootstrap.tf`). A client's unicast renewal reaches Kea directly, through the Lab-to-Boot policy's UDP 67. The rest of the path is [Talos boot](talos-boot.md#boot-path): PXE firmware fetches the iPXE over TFTP, the iPXE fetches HookOS over HTTP, and HookOS attests against [fleetd](../../apps/fleetd.md).
+A machine on a node port broadcasts a DHCP request. The UDM forwards it to spore's bootstrap address with the network's router as the relay address, Kea picks the subnet from that address, and the answer goes back through the UDM: a pool address, the anchors' resolvers, and `SPORE_BOOTSTRAP_IP` with the signed iPXE as the boot file. The answer reaches the UDM on the bootstrap VLAN, where the `bootstrap_dhcp_reply` policy in `terraform/network/unifi/folly/firewall.tf` admits it ahead of the bootstrap block. A client's unicast renewal reaches Kea directly, through the Lab-to-Boot policy's UDP 67. The rest of the path is [Talos boot](talos-boot.md#boot-path): PXE firmware fetches the iPXE over TFTP, the iPXE fetches HookOS over HTTP, and HookOS attests against [fleetd](../../apps/fleetd.md).
 
 ## Reservations
 
@@ -53,8 +53,7 @@ The directory `/var/lib/kea/fleet` is group-writable and setgid `kea`, and Kea's
 - `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `K8S_DHCP_CIDR`, `ROUTER_IP`
 - `clusters/folly/config/anchor-topology.json`: `SPORE_BOOTSTRAP_IP`, `NS1_IP`, `NS2_IP`
 - `terraform/network/unifi/folly/k8s.tf`: the relay, and the UDM's disabled DHCP for the network
-- `terraform/network/unifi/folly/bootstrap.tf`: the UDM's DHCP on the bootstrap VLAN, which lets its dnsmasq accept Kea's replies
-- `terraform/network/unifi/folly/firewall.tf`: `kubernetes_to_boot`, UDP 67 for unicast renewals
+- `terraform/network/unifi/folly/firewall.tf`: `bootstrap_dhcp_reply`, which admits Kea's answers to the relay, and `kubernetes_to_boot`, UDP 67 for unicast renewals
 
 ## Related
 
