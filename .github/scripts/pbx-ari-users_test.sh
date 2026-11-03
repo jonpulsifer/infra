@@ -38,6 +38,7 @@ check() {
 check 'read-only users pass' 0 'switchboard grafana' "$(users 'Yes|switchboard' 'Yes|grafana')"
 check 'one user that can write fails' 1 'users that can write: admin' "$(users 'Yes|switchboard' 'No|admin')"
 check 'read-only users with ACL column pass' 0 'switchboard grafana' "$(users_with_acl 'Yes|switchboard' 'Yes|grafana')"
+check 'ACL presence cannot substitute for read-only' 1 'users that can write: admin' $'r/o?  ACL?  Username\n----  ----  --------\nNo    Yes   admin'
 check 'writable user with ACL column fails' 1 'users that can write: admin' "$(users_with_acl 'Yes|switchboard' 'No|admin')"
 check 'malformed ACL row fails' 1 'not the output' $'r/o?  ACL?  Username\n----  ----  --------\nYes  switchboard'
 check 'no users fails' 1 'no users' "$(users)"
