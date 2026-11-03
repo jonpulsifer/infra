@@ -1,0 +1,17 @@
+# Who may act as cluster admin after signing in at an identity provider the API
+# server trusts (clusters/base/config/kube-login.json). The user name is the
+# provider's prefix and the verified email, as the KubeAuthenticationConfig in
+# clusters/<site>/talos/patches.tf maps it. The admin client certificate from
+# talosctl is in system:masters and needs no binding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: owner-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: google:jonathan@pulsifer.ca

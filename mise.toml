@@ -20,6 +20,8 @@ helm = "latest"
 jq = "latest"
 k9s = "latest"
 kubectl = "latest"
+# kubectl oidc-login, the exec plugin scripts/kube-login.sh puts in a kubeconfig.
+kubelogin = "latest"
 kustomize = "latest"
 powershell = "latest"
 promtool = "latest"
@@ -165,6 +167,10 @@ run = "bash scripts/attest.sh approve"
 [tasks."attest:pending"]
 description = "List the intakes that wait on fleetd for an approved EK binding"
 run = "bash scripts/attest.sh pending"
+
+[tasks."kube:login"]
+description = "Write ~/.kube/<site>.yaml with a user that signs in at Google, as gcloud get-credentials would (args: <folly|offsite> [--merge])"
+run = "bash scripts/kube-login.sh"
 
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
