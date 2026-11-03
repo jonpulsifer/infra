@@ -102,7 +102,7 @@ nodes:
   surge:
     model: hp-elitedesk-800-g5-desktop-mini
     serial: MXL0443HPB
-    class: worker-g5
+    class: nixos
     switch_port: 12
     address: 10.3.0.14
     bmc: amt
