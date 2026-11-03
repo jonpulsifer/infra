@@ -3,7 +3,7 @@
   "providers": {
     "google": {
       "issuer": "https://accounts.google.com",
-      "client_id": "",
+      "client_id": "629296473058-pma7b51kqo748heqk1gig79lveupa334.apps.googleusercontent.com",
       "hosted_domain": "pulsifer.ca",
       "secret": "op://homelab/kube-login-google/credential"
     }
