@@ -19,11 +19,11 @@ The `decommissioning` status requests retirement separately from `desired_action
 
 Git owns the class table at `clusters/folly/fleet/classes.json`. fleetd reads it through `FLEET_CLASSES`.
 
-Each class declares its operating system, Workflow template, installer image, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior. Every installing class pins its installer image by digest. `.github/workflows/talos-images.yml` writes the Talos classes' pin after each build, and fleetd prefers it over the tag `class-inputs.json` carries for the Talos root.
+Each class declares its operating system, workload, Workflow template, boot-policy profile, Secure Boot requirement, payload kind and reattestation behavior, and what its install writes: a Talos class pins its installer image by digest, and an image class (`nixos`, `debian`) pins a disk image by URL, digest and format (`image`, `image_digest`, `image_format`). `.github/workflows/talos-images.yml` writes the Talos classes' pin after each build, and fleetd prefers it over the tag `class-inputs.json` carries for the Talos root; `.github/workflows/node-images.yml` writes the `nixos` class's pin the same way; the `debian` pin is the dated genericcloud release, set by hand from its `SHA512SUMS`. A class with no complete pin installs nothing.
 
 An unknown class is refused and journaled. The verifier also refuses a missing profile or a Secure Boot mismatch.
 
-The `talos` profile applies to Talos classes. The `ubuntu` profile accepts Microsoft's UEFI CA 2011 and 2023 and Canonical's Master CA after the PCR 7 separator. It pins no shim or GRUB digest.
+The `talos` profile applies to the Talos classes and to `nixos`, whose image boots a UKI signed by the same lab key. The `debian` profile accepts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA after the PCR 7 separator. It pins no shim or GRUB digest. The `ubuntu` profile, Canonical's CA in the same shape, stays on disk with no class.
 
 fleetd records SHA-256 hashes of dbx and shim's `SbatLevel` in `dbx_hash` and `sbat_level`. A change produces a journal warning, without quarantine.
 
