@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # kube-login.sh <folly|offsite>
 #
-# Writes ~/.kube/<site>.yaml, a kubeconfig whose user signs in at Google through
-# kubelogin, the way `gcloud container clusters get-credentials` writes one for
-# GKE. The server and port come from the site's cluster-topology.json, the CA
+# Adds the site's cluster, a user that signs in at Google through kubelogin and
+# the context <site> to ~/.kube/config (or $KUBECONFIG), and selects the context,
+# the way `gcloud container clusters get-credentials` does for GKE. The server and port come from the site's cluster-topology.json, the CA
 # from clusters/<site>/config/kubernetes-ca.crt, the issuer and client ID from
 # clusters/base/config/kube-login.json, and the client secret from the
 # 1Password reference that file names, read at write time and kept only in
-# the 0600 kubeconfig.
+# the kubeconfig, which the script leaves at mode 0600.
 #
 # The first kubectl call opens a browser at Google; kubelogin keeps the tokens
 # under ~/.kube/cache/oidc-login and refreshes them without a new sign-in.
@@ -48,10 +48,14 @@ fi
 secret_ref=$(jq -er .providers.google.secret "$login")
 secret=$(op read "$secret_ref")
 
-out=$HOME/.kube/$site.yaml
+out=${KUBECONFIG:-$HOME/.kube/config}
+case "$out" in *:*)
+  echo "KUBECONFIG names more than one file; set it to the one to write" >&2
+  exit 1
+  ;;
+esac
 umask 077
-mkdir -p "$HOME/.kube"
-rm -f "$out"
+mkdir -p "$(dirname "$out")"
 cfg() { KUBECONFIG=$out kubectl config "$@" >/dev/null; }
 cfg set-cluster "$site" --server="https://$host:$port" --certificate-authority="$ca" --embed-certs=true
 # One extra param only: kubelogin hashes its token-cache key with gob, and the extra
@@ -72,6 +76,6 @@ cfg set-credentials "google@$site" \
   --exec-arg=--oidc-auth-request-extra-params=prompt=consent
 cfg set-context "$site" --cluster="$site" --user="google@$site"
 cfg use-context "$site"
+chmod 600 "$out"
 
-echo "wrote $out"
-echo "export KUBECONFIG=$out && kubectl get nodes"
+echo "context $site is current in $out"

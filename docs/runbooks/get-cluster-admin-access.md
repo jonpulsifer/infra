@@ -3,7 +3,7 @@ title: Get kubectl access
 description: Get kubectl access to folly and offsite by signing in at Google, keep the admin certificate from talosctl for break-glass, and withdraw access.
 ---
 
-Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, or to withdraw it. `mise run kube:login <site>` writes a kubeconfig whose user signs in at Google through kubelogin, the way `gcloud container clusters get-credentials` does for GKE. The API server maps the signed-in account to the user `google:<email>`, and `clusters/base/cluster-access-rbac.yaml` says what that user may do. The admin client certificate from `talosctl kubeconfig`, which is in `system:masters`, stays for break-glass.
+Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, or to withdraw it. `mise run kube:login <site>` adds the cluster, a user that signs in at Google through kubelogin and the context `<site>` to `~/.kube/config`, the way `gcloud container clusters get-credentials` does for GKE. The API server maps the signed-in account to the user `google:<email>`, and `clusters/base/cluster-access-rbac.yaml` says what that user may do. The admin client certificate from `talosctl kubeconfig`, which is in `system:masters`, stays for break-glass.
 
 `<site>` is `folly` or `offsite`.
 
@@ -15,18 +15,17 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
 
 ## Sign in
 
-1. Write the kubeconfig for the cluster.
+1. Add the cluster to your kubeconfig.
 
    ```bash
    mise run kube:login <site>
    ```
 
-   Result: `wrote ~/.kube/<site>.yaml`.
+   Result: `context <site> is current in ~/.kube/config`. With `KUBECONFIG` set to one file, the script writes that file instead.
 
 2. Use it. The first call opens a browser at Google.
 
    ```bash
-   export KUBECONFIG=~/.kube/<site>.yaml
    kubectl get nodes
    ```
 
