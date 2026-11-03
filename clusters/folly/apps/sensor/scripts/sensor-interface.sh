@@ -9,6 +9,6 @@ while :; do
       */usb*) basename "$dir"; exit 0 ;;
     esac
   done
-  echo "sensor: waiting for a USB NIC on $(hostname)" >&2
+  echo "sensor: waiting for a USB NIC on $(cat /proc/sys/kernel/hostname)" >&2
   sleep 15
 done
