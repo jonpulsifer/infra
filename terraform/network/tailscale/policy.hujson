@@ -39,6 +39,13 @@
 			"target": ["100.73.219.127"],
 			"attr":   ["mullvad"],
 		},
+		{
+			// tsidp on spore publishes its OpenID discovery document and keys
+			// over Funnel, so the Kubernetes API servers, which are not on the
+			// tailnet, can verify its tokens (nix/services/tsidp.nix).
+			"target": ["tag:tsidp"],
+			"attr":   ["funnel"],
+		},
 	],
 
 	"tagOwners": {
@@ -53,6 +60,7 @@
 		"tag:ci":           ["autogroup:admin"],
 		"tag:gcp":          ["autogroup:admin"],
 		"tag:kthx-ingress": ["tag:k8s-operator"],
+		"tag:tsidp":        ["autogroup:admin"],
 	},
 
 	"grants": [
@@ -115,6 +123,16 @@
 			"src": ["autogroup:members"],
 			"dst": ["tag:kthx-ingress"],
 			"ip":  ["tcp:443"],
+		},
+		{
+			// The owner registers OAuth clients in tsidp's admin UI. Network
+			// reach comes from the owner-to-tagged grant above; this grant is
+			// the application capability tsidp checks.
+			"src": ["autogroup:owner"],
+			"dst": ["tag:tsidp"],
+			"app": {
+				"tailscale.com/cap/tsidp": [{"allow_admin_ui": true}],
+			},
 		},
 	],
 
@@ -180,6 +198,11 @@
 			// tag and the port, not the membership grant itself.
 			"src":    "jonathan@pulsifer.ca",
 			"accept": ["tag:kthx-ingress:443"],
+			"proto":  "tcp",
+		},
+		{
+			"src":    "jonathan@pulsifer.ca",
+			"accept": ["tag:tsidp:443"],
 			"proto":  "tcp",
 		},
 		{

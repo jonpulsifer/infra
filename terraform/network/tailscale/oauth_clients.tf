@@ -32,3 +32,34 @@ resource "onepassword_item" "forge_tailscale_oauth" {
     "tailscale",
   ]
 }
+
+# tsidp on spore enrolls its own tsnet node with this client's secret as its auth
+# key (nix/services/tsidp.nix). The owner copies the escrowed secret from
+# 1Password into spore's SOPS file as tsidp/authkey.
+resource "tailscale_oauth_client" "tsidp_enrollment" {
+  description = "tsidp enrollment"
+  scopes      = ["auth_keys"]
+  tags        = ["tag:tsidp"]
+
+  depends_on = [tailscale_acl.this]
+}
+
+resource "onepassword_item" "tsidp_tailscale_oauth" {
+  vault    = local.vault_id
+  title    = "tailscale OAuth (tsidp)"
+  category = "login"
+  username = tailscale_oauth_client.tsidp_enrollment.id
+
+  password_wo         = tailscale_oauth_client.tsidp_enrollment.key
+  password_wo_version = 1
+
+  lifecycle {
+    replace_triggered_by = [tailscale_oauth_client.tsidp_enrollment]
+  }
+
+  tags = [
+    "spore",
+    "nixos",
+    "tailscale",
+  ]
+}
