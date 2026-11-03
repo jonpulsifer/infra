@@ -68,6 +68,7 @@ cfg set-credentials "google@$site" \
   --exec-arg=--oidc-extra-scope=email \
   --exec-arg=--oidc-extra-scope=profile \
   --exec-arg=--oidc-auth-request-extra-params=access_type=offline \
+  --exec-arg=--oidc-auth-request-extra-params=prompt=consent \
   --exec-arg="--oidc-auth-request-extra-params=hd=$hosted_domain"
 cfg set-context "$site" --cluster="$site" --user="google@$site"
 cfg use-context "$site"
