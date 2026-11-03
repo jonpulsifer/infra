@@ -59,7 +59,13 @@ beyond them.
   `kubectl --context <site> -n velero get backups.velero.io`.
   An unqualified `get backups` can select CloudNativePG backups instead.
   If the reader account cannot list Velero backups, read the Velero server
-  and node-agent logs. For pod-volume failures, check the node agent's
-  `csidrivers.storage.k8s.io` access in
-  `clusters/base/platform/velero/node-agent-rbac.yaml`.
+  and node-agent logs. For pod-volume failures, inspect the failed
+  `podvolumebackups.velero.io` status message and the node-agent logs on both
+  clusters. Check the node agent's service account against
+  `clusters/base/platform/velero/node-agent-rbac.yaml`: volume-path lookup
+  reads CSI drivers and the `node-agent` DaemonSet; the backup creates and
+  deletes hosting pods in `velero`. Trace the remaining backup and cleanup
+  path before changing RBAC. After Flux applies a fix, check the next
+  scheduled backup's phase and pod-volume results on both clusters; an
+  earlier failed backup does not become healthy.
 - For a change under `clusters/base/`, also use the `multi-cluster` skill.
