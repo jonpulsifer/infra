@@ -17,13 +17,15 @@ Tinkerbell is the provisioning stack on [spore](../../hosts/spore.md) that reins
 
 ## Boot path
 
-Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace: the `provision` Template and the BMC credential Secrets. fleetd keeps one `Hardware` per NetBox device and one `Machine` per device with a BMC. Setting a device's `desired_action` in NetBox starts a run:
+Flux on folly applies `clusters/folly/tinkerbell/` to the `tinkerbell` namespace: the `provision` and `provision-image` Templates and the BMC credential Secrets. fleetd keeps one `Hardware` per NetBox device and one `Machine` per device with a BMC. Setting a device's `desired_action` in NetBox starts a run:
 
 1. fleetd turns the `Hardware`'s `allowPXE` on and creates a `Workflow` for the device, and Rufio powers the node off, sets a one-time PXE boot and powers it on.
 2. UniFi's offer names the signed iPXE at spore's bootstrap address, which dnsmasq serves. iPXE's menu chains the signed HookOS UKI from nginx.
 3. HookOS's agent image sets the clock from spore's NTP and [attests the node](../../apps/fleetd.md) before tink-agent waits. An intake pass of a `provision` gets the install code. The agent then takes its actions from the Tink server over TLS; its signed command line names the server and `tinkerbell_tls=true`, so no host on the Kubernetes network can stand in for it. The agent itself holds no credential, so fleetd corroborates a retirement's reported success with the BMC's power state.
 4. The `provision` Template wipes the `Hardware`'s disk when the run asks for it, installs Talos with the code when it asks for that, sets the next boot, and reboots. Its actions run `images/tink-reprovision-tools`, which carries the disk, EFI and Docker tools, so the boot VLAN needs no package mirror.
 5. The run finishes, and fleetd's next pass turns `allowPXE` off. A wiped node netboots [iPXE's menu](talos-boot.md#netboot-images), whose default boots HookOS, which attests, and the agent waits for the next Workflow. An installed node boots its disk.
+
+A class whose payload is a disk image runs the `provision-image` Template (`template-image.yaml`) in place of `provision`. It wipes the same way, then downloads the class's image into RAM, checks its sha256 against the class's digest, and writes it to the disk. For a `nixos-image` or `alpine-image` payload it puts `fleet-seed.json` (the seed URL, the node's UUID and the install code) on the image's EFI system partition, and the node's first boot fetches its seed. For a `cloud-init-nocloud` payload it fetches the seed in HookOS and extracts it to `var/lib/cloud/seed/nocloud` on the root partition, so the device turns `active` when the install wrote the seed. `next-boot` creates a `fleet <os>` firmware entry for the image's loader, which sits at the removable path.
 
 A node with no `Hardware` or no running `Workflow` takes step 5 directly when it PXE-boots on the Kubernetes network. A declared `planned` device that attests there is admitted, and fleetd starts its provision without a boot mode, since the machine already waits in HookOS.
 
@@ -71,7 +73,7 @@ ssh spore.lolwtf.ca sudo kubectl --kubeconfig /etc/tinkerbell/kubeconfig -n tink
 - `nix/services/tinkerbell.nix`: the pinned binary, flags, the Smee switch, firewall, unit and Flux's Role
 - `nix/services/hookos-syslog.nix`: HookOS's syslog receiver
 - `nix/services/fleetd.nix` and `apps/fleetd/`: fleetd, and the `netboot-not-allowed` TFTP links
-- `clusters/folly/tinkerbell/`: the `provision` Template and the BMC Secrets
+- `clusters/folly/tinkerbell/`: the `provision` and `provision-image` Templates and the BMC Secrets
 - `clusters/folly/flux-system/tinkerbell.yaml`: the Flux Kustomizations
 - `clusters/folly/tinkerbell-access/`: the kubeconfig, from the 1Password item `spore tinkerbell api`
 - `scripts/tinkerbell-certs.sh`: the API's certificates
