@@ -245,3 +245,43 @@ func TestSetMACMakesAnInterfaceWhenThereIsNone(t *testing.T) {
 		t.Fatalf("interfaces %+v", f.Ifaces)
 	}
 }
+
+// The attestation read fails closed: a security field that is not a string,
+// and a last_updated that does not parse, are errors, never empty values.
+func TestSoleBySerialFailsClosed(t *testing.T) {
+	for name, cf := range map[string]map[string]any{
+		"verdict is a list":         {"attest_verdict": []string{"quarantined: pcr"}},
+		"approved hash is a number": {"approved_ek_hash": 7},
+		"ek hash is an object":      {"ek_hash_ecc": map[string]any{"a": 1}},
+		"ldevid serial is a bool":   {"ldevid_serial": true},
+	} {
+		f := &netboxtest.Fake{Devices: []map[string]any{device(1, "a", "ONE", "active", cf)}}
+		if _, ok, err := newClient(t, f).SoleBySerial(context.Background(), "ONE"); err == nil || ok {
+			t.Errorf("%s: read as a device: %v %v", name, ok, err)
+		}
+	}
+	bad := device(1, "a", "ONE", "active", map[string]any{"attest_verdict": []string{"quarantined: pcr"}, "approved_ek_hash": 7, "approved_ek_hash_ecc": "cd"})
+	bad["last_updated"] = "garbage"
+	if _, _, err := newClient(t, &netboxtest.Fake{Devices: []map[string]any{bad}}).SoleBySerial(context.Background(), "ONE"); err == nil {
+		t.Error("the reviewed input read as a device")
+	}
+	late := device(1, "a", "ONE", "active", nil)
+	late["last_updated"] = "garbage"
+	if _, _, err := newClient(t, &netboxtest.Fake{Devices: []map[string]any{late}}).SoleBySerial(context.Background(), "ONE"); err == nil {
+		t.Error("an unparseable last_updated read as a device")
+	}
+	str := device(1, "a", "ONE", "active", nil)
+	str["status"] = "active"
+	if _, _, err := newClient(t, &netboxtest.Fake{Devices: []map[string]any{str}}).SoleBySerial(context.Background(), "ONE"); err == nil {
+		t.Error("a status that is not an object read as a device")
+	}
+	// null and absent stay empty, and the lenient read keeps its tolerance.
+	ok := device(1, "a", "ONE", "active", map[string]any{"attest_verdict": nil})
+	if d, found, err := newClient(t, &netboxtest.Fake{Devices: []map[string]any{ok}}).SoleBySerial(context.Background(), "ONE"); err != nil || !found || d.Verdict != "" {
+		t.Errorf("null verdict: %+v %v %v", d, found, err)
+	}
+	raw, _ := json.Marshal(device(1, "a", "ONE", "active", map[string]any{"attest_verdict": []string{"x"}}))
+	if d, err := netbox.ParseDevice(raw); err != nil || d.Verdict != "" {
+		t.Errorf("fleet's decode stays tolerant: %+v %v", d, err)
+	}
+}

@@ -298,7 +298,7 @@ func (f *Fake) Handler() http.Handler {
 			return
 		}
 		for _, m := range f.MACs {
-			if fmt.Sprint(m["id"]) == fmt.Sprint(p["primary_mac_address"]) {
+			if fmt.Sprint(m["id"]) == fmt.Sprint(p["primary_mac_address"]) && fmt.Sprint(m["assigned_object_id"]) == fmt.Sprint(i["id"]) {
 				i["primary_mac_address"] = map[string]any{"id": m["id"], "mac_address": m["mac_address"]}
 				writeJSON(w, http.StatusOK, i)
 				return

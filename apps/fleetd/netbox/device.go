@@ -3,6 +3,7 @@ package netbox
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -237,4 +238,39 @@ func Plain(s string) string {
 		}
 		return r
 	}, s))
+}
+
+// strictStrings are the custom fields the attestation service trusts: each
+// must be a JSON string or null.
+var strictStrings = []string{"ek_hash", "ek_hash_ecc", "approved_ek_hash", "approved_ek_hash_ecc", "attest_verdict", "last_attested", "attest_consumed_at", "ldevid_serial", "lak_serial", "sku", "bios_version"}
+
+// ParseDeviceStrict is ParseDevice for a reader that fails closed. A security
+// field that is present and neither null nor a string, a status that is
+// neither null nor an object, and a last_updated that does not parse are
+// errors, so a malformed record never reads as an empty one.
+func ParseDeviceStrict(raw json.RawMessage) (Device, error) {
+	d, err := ParseDevice(raw)
+	if err != nil {
+		return Device{}, err
+	}
+	for _, k := range strictStrings {
+		if err := json.Unmarshal(orNull(d.Fields[k]), new(*string)); err != nil {
+			return Device{}, fmt.Errorf("custom field %s: %w", k, err)
+		}
+	}
+	var r struct {
+		Status      *struct{}  `json:"status"`
+		LastUpdated *time.Time `json:"last_updated"`
+	}
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return Device{}, err
+	}
+	return d, nil
+}
+
+func orNull(raw json.RawMessage) json.RawMessage {
+	if raw == nil {
+		return json.RawMessage("null")
+	}
+	return raw
 }

@@ -148,7 +148,7 @@ func (c *Client) Devices(ctx context.Context, q url.Values) ([]Device, error) {
 // This is the strict lookup: NetBox must report exactly one hit, and two
 // hits, or a count that disagrees with the results, are an error. No hit is
 // ok == false. The match is NetBox's own, so it is as loose as NetBox's
-// serial filter.
+// serial filter. The read fails closed: see ParseDeviceStrict.
 func (c *Client) SoleBySerial(ctx context.Context, serial string) (Device, bool, error) {
 	var page Page[json.RawMessage]
 	if err := c.Do(ctx, http.MethodGet, "/api/dcim/devices/?limit=2&serial="+url.QueryEscape(serial), nil, &page); err != nil {
@@ -164,7 +164,7 @@ func (c *Client) SoleBySerial(ctx context.Context, serial string) (Device, bool,
 	if *page.Count != 1 || len(results) != 1 {
 		return Device{}, false, fmt.Errorf("NetBox has %d devices with serial %s", *page.Count, serial)
 	}
-	d, err := ParseDevice(results[0])
+	d, err := ParseDeviceStrict(results[0])
 	if err != nil {
 		return Device{}, false, err
 	}

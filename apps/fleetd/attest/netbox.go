@@ -209,12 +209,6 @@ func intakeName(claim protocol.Machine) string {
 // device the owner entered, and journals a MAC it wrote. The stub keeps its
 // name and stays planned until its node fetches its config. It reports whether it wrote the MAC; a MAC
 // already on file that is the claim's is no write, and another is
-// errMACTaken.
-
-// Bind puts a box's MAC on the declared stub it attested as, the planned
-// device the owner entered, and journals a MAC it wrote. The stub keeps its
-// name and stays planned until its node fetches its config. It reports whether it wrote the MAC; a MAC
-// already on file that is the claim's is no write, and another is
 // netbox.ErrMACTaken.
 func (n *NetBox) Bind(ctx context.Context, deviceID int, claim protocol.Machine) (bool, error) {
 	mac := normalMAC(claim.MAC)
@@ -501,7 +495,6 @@ func (n *NetBox) journalLater(ctx context.Context, deviceID int, kind, comment, 
 // Backfill writes a pass fleetd holds to a device whose verdict is
 // empty, as after the verdict fields were created in NetBox. A non-empty
 // verdict, and a device being decommissioned or offline, are never touched.
-
 // It reports whether it wrote.
 func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
 	d, ok, err := n.device(ctx, r.Serial)
