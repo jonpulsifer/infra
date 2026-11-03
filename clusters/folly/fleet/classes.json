@@ -40,7 +40,10 @@
     "policy_profile": "talos",
     "secure_boot": true,
     "payload_kind": "nixos-image",
-    "reattest": false
+    "reattest": false,
+    "image": "https://github.com/jonpulsifer/infra/releases/download/node-images%2F41568598309/nixos-node-amd64.img.zst",
+    "image_digest": "sha256:c87e650ebaaf6ee4d65420e2be8ff058e4bc3aabf52efa6564363ff81be22a23",
+    "image_format": "raw.zst"
   },
   "debian": {
     "description": "Debian from the dated genericcloud release, written as a disk image with a NoCloud seed fleetd renders. It boots under stock shim, so the profile trusts Microsoft's UEFI CA 2011 and 2023 and Debian's Secure Boot CA at the CA level, with no shim or GRUB digest pins. The pin is the release's tar.xz and its sha256, set by hand from cloud.debian.org's SHA512SUMS. No in-node check yet, so reattest is off.",
