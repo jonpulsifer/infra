@@ -188,7 +188,7 @@ in
       enable = lib.mkOption {
         type = lib.types.bool;
         default = true;
-        description = "Render the seed a NixOS or Alpine class's first boot reads, from the site's topology and this host's SPIRE server. Off, a seed class is refused at admission.";
+        description = "Render the seed a NixOS or Alpine class's first boot reads, and the cloud-init tar a cloud-init class's install unpacks, from the site's topology and this host's SPIRE server, and give each image class's Workflow the seed URL. Off, a seed class is refused at admission and no image class installs.";
       };
       profiles = lib.mkOption {
         type = lib.types.attrsOf lib.types.str;
@@ -358,8 +358,11 @@ in
         FLEET_CONFIG_DIR = "${runDir}/configs";
         FLEET_INSTALLS = lib.boolToString cfg.installs;
         FLEET_AUTO_PROVISION = lib.boolToString cfg.autoProvision;
-        # The seed a NixOS or Alpine class renders, served once at /seed by the install code.
+        # The seed a NixOS, Alpine or cloud-init class renders, served once at /seed by the
+        # install code, and the URL an image class's Workflow carries so the install writes it
+        # to the disk, or fetches the seed itself.
         FLEET_SEED_INPUTS = lib.mkIf cfg.seeds.enable "${seedInputs}";
+        FLEET_SEED_URL = lib.mkIf cfg.seeds.enable "https://${host}/seed";
         # The Talos root bootstraps etcd on the control plane at the API server's address: no
         # provision or wipe runs there, and it never installs from here.
         FLEET_BOOTSTRAP_ADDRESS = topology.API_SERVER_IP;

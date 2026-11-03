@@ -10,7 +10,7 @@ fleetd exposes device, administration and monitoring endpoints. Use this page to
 | Surface | Address | Who can reach it |
 | --- | --- | --- |
 | Device flow | `https://enroll.lolwtf.ca/attest/v1/attest` and the session routes under it | HookOS on a netbooting machine, at spore's bootstrap address |
-| Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` for a Talos class, `https://enroll.lolwtf.ca/seed?uuid=<uuid>&code=<code>` for a `nixos-image` or `alpine-image` class | A node's first boot from disk |
+| Install config | `https://enroll.lolwtf.ca/talos/config?uuid=<uuid>&code=<code>` for a Talos class, `https://enroll.lolwtf.ca/seed?uuid=<uuid>&code=<code>` for a `nixos-image`, `alpine-image` or `cloud-init-nocloud` class | A node's first boot from disk; for a `cloud-init-nocloud` class, the install in HookOS |
 | LDevID and verdict lookups, renewal and hourly check | `http://<SPORE_IP>:8444/devid/<serial>`, `/verdict/<serial>`, `POST /v1/renew` | folly's `K8S_NODE_CIDR` and `CILIUM_POD_CIDR` |
 | Webhook and metrics | `http://<SPORE_IP>:8446/webhook`, `/healthz`, `/metrics` | NetBox's event rule and the Anchor network |
 | Admin API | `https://spore.<tailnet>:8445`, `GET /machines` | Tailnet logins in `ATTEST_APPROVERS` |

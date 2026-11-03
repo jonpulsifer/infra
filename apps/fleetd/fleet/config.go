@@ -17,9 +17,12 @@ package fleet
 
 import (
 	"fmt"
+	"log"
 	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -66,6 +69,14 @@ type Config struct {
 	// Installs maps each class the fleet renders to its Talos installer
 	// image, from the class inputs.
 	Installs map[string]string
+	// ImageInstalls names each image class whose provision installs: the
+	// class table carries its whole image, FLEET_INSTALLS is on and SeedURL
+	// is set.
+	ImageInstalls map[string]bool
+	// SeedURL is where an image class's install, or the installed node's
+	// first boot, fetches its seed: the boot listener's /seed, from
+	// FLEET_SEED_URL. Without it no image class installs.
+	SeedURL string
 	// Bootstrap is the address of the control plane the Talos root
 	// bootstraps etcd on, from FLEET_BOOTSTRAP_ADDRESS.
 	Bootstrap string
@@ -128,6 +139,13 @@ func LoadConfig() (Config, error) {
 		}
 		c.Bootstrap = a.String()
 	}
+	if v := os.Getenv("FLEET_SEED_URL"); v != "" {
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return c, fmt.Errorf("FLEET_SEED_URL %q is not an http(s) URL without a query", v)
+		}
+		c.SeedURL = v
+	}
 	return c, nil
 }
 
@@ -153,10 +171,13 @@ func LoadCluster() (*Cluster, error) {
 	return c, nil
 }
 
-// LoadInstaller reads the render's environment. The renderer runs only with
-// all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL;
-// without them nothing renders, and no install code is answered. A Workflow
-// installs only with the renderer and FLEET_INSTALLS=true.
+// LoadInstaller reads the render's environment. The Talos renderer runs only
+// with all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and
+// FLEET_TALOSCTL; without them no Talos class renders, and no install code
+// is answered for one. A Talos Workflow installs only with the renderer and
+// FLEET_INSTALLS=true; an image class's installs with FLEET_INSTALLS=true, a
+// whole image in the class table and FLEET_SEED_URL, and needs no Talos
+// renderer.
 //
 // FLEET_CONTROLPLANE_BUNDLE, the full secrets bundle, lets a control-plane
 // class render and install too. It needs the renderer and
@@ -187,6 +208,12 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 			return nil, err
 		}
 		in.Seeds = &SeedRenderer{Inputs: inputs, Classes: cfg.Classes}
+	}
+	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
+	// installs, and nothing renders, since no run asks for a config.
+	installs := env("FLEET_INSTALLS", "false") == "true"
+	if installs {
+		cfg.ImageInstalls = imageInstalls(cfg.Classes, cfg.SeedURL)
 	}
 	inputsFile, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
 	if inputsFile == "" && workers == "" && bin == "" {
@@ -229,9 +256,7 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		t.BundlePath, in.ControlPlanes, in.Bootstrap = bundle, true, boot.String()
 		cfg.Bootstrap = in.Bootstrap
 	}
-	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
-	// installs, and nothing renders, since no run asks for a config.
-	if env("FLEET_INSTALLS", "false") != "true" {
+	if !installs {
 		return in, nil
 	}
 	cfg.Installs = map[string]string{}
@@ -257,4 +282,29 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		}
 	}
 	return in, nil
+}
+
+// imageInstalls names the image classes whose provision installs: each with
+// a whole image in the table, when the seed URL is set. Without the seed URL
+// no image class installs, and the log says so once.
+func imageInstalls(table classes.Table, seedURL string) map[string]bool {
+	installs := map[string]bool{}
+	var whole []string
+	for name, c := range table {
+		if c.Installs() {
+			whole = append(whole, name)
+		}
+	}
+	if len(whole) == 0 {
+		return installs
+	}
+	if seedURL == "" {
+		sort.Strings(whole)
+		log.Printf("FLEET_SEED_URL is not set, so the image classes %s install nothing: their install writes the seed URL to the disk", strings.Join(whole, ", "))
+		return installs
+	}
+	for _, name := range whole {
+		installs[name] = true
+	}
+	return installs
 }

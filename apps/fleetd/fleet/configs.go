@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 // An install code is 32 random bytes as base64url without padding, and a
@@ -55,9 +57,13 @@ type Pending struct {
 
 func (p Pending) expired(now time.Time) bool { return now.Sub(p.Rendered) > p.TTL }
 
-// what names the config in a journal: a Talos config, or a seed.
+// what names the config in a journal: a Talos config, a seed, or a
+// cloud-init seed.
 func (p Pending) what() string {
-	if SeedKind(p.Kind) {
+	switch {
+	case p.Kind == classes.PayloadCloudInit:
+		return "cloud-init seed"
+	case SeedKind(p.Kind):
 		return "seed"
 	}
 	return "Talos config"
@@ -65,7 +71,10 @@ func (p Pending) what() string {
 
 // contentType is the type the config is served as.
 func (p Pending) contentType() string {
-	if SeedKind(p.Kind) {
+	switch {
+	case p.Kind == classes.PayloadCloudInit:
+		return "application/x-tar"
+	case SeedKind(p.Kind):
 		return "application/json"
 	}
 	return "text/yaml"

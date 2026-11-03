@@ -377,11 +377,56 @@ func TestSeedGates(t *testing.T) {
 		t.Errorf("without the Talos renderer: %d %s", code, why)
 	}
 
-	// A payload fleetd does not render is refused before anything starts.
-	it = newInstallTest(t, "planned", map[string]any{"class": map[string]any{"value": "ubuntu", "label": "ubuntu"}})
-	req.Class = "ubuntu"
-	if code, why := it.render(req); code != http.StatusServiceUnavailable || !strings.Contains(why, "does not render") {
-		t.Errorf("a cloud-init class: %d %s", code, why)
+	// A cloud-init class has the same gates.
+	debian := map[string]any{"class": map[string]any{"value": "debian", "label": "debian"}}
+	req.Class = "debian"
+	it = newInstallTest(t, "planned", debian)
+	it.in.Seeds = nil
+	if code, why := it.render(req); code != http.StatusServiceUnavailable || !strings.Contains(why, "seed inputs") {
+		t.Errorf("a cloud-init class without the seed inputs: %d %s", code, why)
+	}
+	it = newInstallTest(t, "planned", debian)
+	it.nb.devices[0]["primary_ip4"] = nil
+	if code, why := it.render(req); code != http.StatusConflict || !strings.Contains(why, "no address") {
+		t.Errorf("a cloud-init class without an address: %d %s", code, why)
+	}
+}
+
+// A cloud-init class renders its seed as a tar, served at /seed as
+// application/x-tar and not at the Talos path; the install unpacks it onto
+// the disk, so the device goes active when the install fetched it.
+func TestACloudInitClassRendersATarServedAtSeed(t *testing.T) {
+	it := newInstallTest(t, "planned", map[string]any{"class": map[string]any{"value": "debian", "label": "debian"}})
+	req := goodRequest()
+	req.Class = "debian"
+	if code, why := it.render(req); code != http.StatusCreated {
+		t.Fatalf("render: %d %s", code, why)
+	}
+	if it.rend.calls != 0 || len(it.tokens.minted) != 0 {
+		t.Fatalf("a cloud-init seed went through the Talos renderer (%d calls) or minted a token (%v)", it.rend.calls, it.tokens.minted)
+	}
+	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "rendered the debian cloud-init seed") {
+		t.Errorf("the render's journal: %v", it.nb.journals)
+	}
+	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || !it.held(testCode) {
+		t.Fatalf("the Talos path answered a cloud-init seed with %d, held %v", w.Code, it.held(testCode))
+	}
+	w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil)
+	if w.Code != http.StatusOK || w.Header().Get("Content-Type") != "application/x-tar" || w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("the fetch: %d %v", w.Code, w.Header())
+	}
+	members := tarMembers(t, w.Body.Bytes())
+	if !strings.Contains(members["user-data"], `fqdn: "riptide.lolwtf.ca"`) || !strings.Contains(members["network-config"], `- "10.3.0.12/26"`) || !strings.Contains(members["meta-data"], `local-hostname: "riptide"`) {
+		t.Fatalf("the tar: %v", members)
+	}
+	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
+		t.Fatalf("the release patch: %v", p)
+	}
+	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "fetched its cloud-init seed") {
+		t.Errorf("the release's journal: %v", it.nb.journals)
+	}
+	if w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
+		t.Fatalf("a second fetch answered %d", w.Code)
 	}
 }
 

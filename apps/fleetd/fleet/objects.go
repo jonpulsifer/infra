@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 // Labels on every Workflow: the device and the action.
@@ -201,16 +203,37 @@ func SkipsAttest(d Device) bool {
 // bootstraps, and a control plane with no address: an install the render
 // then refuses would leave a node with no config.
 func (c Config) Installer(d Device, action string) string {
-	if action != "provision" || SkipsAttest(d) {
-		return ""
-	}
-	if c.Bootstrap != "" && d.Address == c.Bootstrap {
-		return ""
-	}
-	if c.IsControlPlane(d.Class) && d.Address == "" {
+	if !c.mayInstall(d, action) {
 		return ""
 	}
 	return c.Installs[d.Class]
+}
+
+// InstallsImage says whether a run of action on the device writes its
+// class's image: a provision of a device that attests, of a class in
+// ImageInstalls. The Talos installer's rules on the device apply alike.
+func (c Config) InstallsImage(d Device, action string) bool {
+	return c.mayInstall(d, action) && c.ImageInstalls[d.Class]
+}
+
+// WillInstall says whether the device's provision installs at all: a Talos
+// installer or its class's image.
+func (c Config) WillInstall(d Device) bool {
+	return c.Installer(d, "provision") != "" || c.InstallsImage(d, "provision")
+}
+
+// mayInstall holds the device's part of Installer and InstallsImage.
+func (c Config) mayInstall(d Device, action string) bool {
+	if action != "provision" || SkipsAttest(d) {
+		return false
+	}
+	if c.Bootstrap != "" && d.Address == c.Bootstrap {
+		return false
+	}
+	if c.IsControlPlane(d.Class) && d.Address == "" {
+		return false
+	}
+	return true
 }
 
 // ControlPlaneClass is the control plane's Talos class: NetBox's class
@@ -230,6 +253,11 @@ func (c Config) IsControlPlane(class string) bool {
 // toggleAllowNetboot is off: the fleet sets the Hardware's flags before the
 // Workflow exists, and Tinkerbell's toggle would be a second writer of the
 // same atomic list, racing the fleet's apply.
+//
+// An image class's Workflow carries no installer image; it carries the
+// class's image, digest and format, its payload kind and OS, and the seed
+// URL, which the provision-image Template reads, and install is true only
+// when the run writes the image (InstallsImage).
 func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (Object, error) {
 	class, ok := c.Classes[d.Class]
 	if !ok {
@@ -246,19 +274,30 @@ func (c Config) Workflow(d Device, action string, now time.Time, hookos bool) (O
 	if !diskSerialPattern.MatchString(serial) {
 		serial = ""
 	}
+	hm := map[string]any{
+		"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
+		"wipe":            fmt.Sprint(a.Wipe),
+		"retire":          fmt.Sprint(a.Retire),
+		"install":         fmt.Sprint(installer != ""),
+		"installer_image": installer,
+		// The Hardware's disk carries only the kernel name: Tinkerbell's
+		// CRD prunes any other field, so the serial goes here.
+		"install_disk_serial": serial,
+	}
+	if classes.ImagePayload(class.PayloadKind) {
+		hm["install"] = fmt.Sprint(c.InstallsImage(d, action))
+		hm["installer_image"] = ""
+		hm["image_url"] = class.Image
+		hm["image_digest"] = class.ImageDigest
+		hm["image_format"] = class.ImageFormat
+		hm["payload_kind"] = class.PayloadKind
+		hm["os"] = class.OS
+		hm["seed_url"] = c.SeedURL
+	}
 	spec := map[string]any{
 		"templateRef": class.Template,
 		"hardwareRef": d.Name,
-		"hardwareMap": map[string]any{
-			"attest":          fmt.Sprint(a.Attest && !SkipsAttest(d)),
-			"wipe":            fmt.Sprint(a.Wipe),
-			"retire":          fmt.Sprint(a.Retire),
-			"install":         fmt.Sprint(installer != ""),
-			"installer_image": installer,
-			// The Hardware's disk carries only the kernel name: Tinkerbell's
-			// CRD prunes any other field, so the serial goes here.
-			"install_disk_serial": serial,
-		},
+		"hardwareMap": hm,
 	}
 	boot := map[string]any{"toggleAllowNetboot": false}
 	if !hookos && !d.ManualBoot() {

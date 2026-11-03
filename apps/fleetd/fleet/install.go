@@ -23,7 +23,8 @@ import (
 // NetBox and Tinkerbell, and renders by the class's payload kind: a Talos
 // config with the class inputs, the worker secrets and a bootstrap token it
 // creates for the worker alone, or the full bundle for a joining control
-// plane; or a seed, the JSON a NixOS or Alpine image's first boot reads. It
+// plane; or a seed, the JSON a NixOS or Alpine image's first boot reads, or
+// the cloud-init tar a cloud-init image's install unpacks onto the disk. It
 // keeps the bytes in memory for GET /talos/config?uuid=<uuid>&code=<code>,
 // or GET /seed with the same query for a seed. The first GET whose every
 // byte the node acknowledged burns it and sets the device active; a GET
@@ -242,7 +243,9 @@ func (i *Installer) payload(class string) string {
 	return classes.PayloadTalosConfig
 }
 
-// gates are the device's render gates, by its class's payload kind.
+// gates are the device's render gates, by its class's payload kind. A seed
+// class, a cloud-init one included, needs the seed inputs and the node's
+// address.
 func (i *Installer) gates(ctx context.Context, d Device) error {
 	switch kind := i.payload(d.Class); {
 	case SeedKind(kind):
@@ -307,8 +310,8 @@ func (i *Installer) Warm(ctx context.Context) {
 }
 
 // Routes are the paths the installer serves, each for its payload kinds: a
-// Talos config at /talos/config, a seed at /seed. A config asked for at the
-// other path is not found and stays.
+// Talos config at /talos/config, a seed at /seed, the cloud-init tar
+// included. A config asked for at the other path is not found and stays.
 var Routes = map[string]func(kind string) bool{
 	"/talos/config": func(kind string) bool { return kind == "" || kind == classes.PayloadTalosConfig },
 	"/seed":         SeedKind,

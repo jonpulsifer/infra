@@ -213,11 +213,12 @@ func TestAdmitProvisionsADeclaredDevice(t *testing.T) {
 }
 
 // A declared device of a seed class is admitted the same way: its class's
-// Template runs with the class's image, and its seed waits under the code,
-// rendered by the seed renderer with no bootstrap token.
+// Template runs with the class's image and the seed URL, no installer image,
+// and its seed waits under the code, rendered by the seed renderer with no
+// bootstrap token.
 func TestAdmitProvisionsASeedClassDevice(t *testing.T) {
 	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "nixos"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
-	at.r.Config.Installs["nixos"] = imageWriter
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"nixos": true}, testSeedURL
 	if code, why := at.admit(testCode); code != http.StatusCreated {
 		t.Fatalf("admit: %d %s", code, why)
 	}
@@ -227,7 +228,9 @@ func TestAdmitProvisionsASeedClassDevice(t *testing.T) {
 	}
 	spec := at.kube.get(wfBase + names[0])["spec"].(map[string]any)
 	hm := spec["hardwareMap"].(map[string]any)
-	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != imageWriter {
+	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != "" ||
+		hm["image_url"] != nixosImage || hm["image_digest"] != nixosDigest || hm["image_format"] != "raw.zst" ||
+		hm["payload_kind"] != "nixos-image" || hm["os"] != "nixos" || hm["seed_url"] != testSeedURL {
 		t.Errorf("template %v, hardwareMap %v", spec["templateRef"], hm)
 	}
 	if !at.held(testCode) || at.rend.calls != 0 {
@@ -236,6 +239,53 @@ func TestAdmitProvisionsASeedClassDevice(t *testing.T) {
 	p, cfg, _ := at.r.Installer.Configs.Get(boxUUID, testCode, testNow)
 	if !SeedKind(p.Kind) || !strings.Contains(string(cfg), `"profile": "github:jonpulsifer/infra#swell"`) {
 		t.Fatalf("the pending config: %+v %s", p, cfg)
+	}
+}
+
+// A declared device of a cloud-init class is admitted alike: its Workflow
+// carries the class's image and the seed URL, and its cloud-init tar waits
+// under the code.
+func TestAdmitProvisionsACloudInitClassDevice(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "debian"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"debian": true}, testSeedURL
+	if code, why := at.admit(testCode); code != http.StatusCreated {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	names := at.kube.workflows()
+	if len(names) != 1 || !strings.HasPrefix(names[0], "provision-swell-") {
+		t.Fatalf("workflows %v", names)
+	}
+	spec := at.kube.get(wfBase + names[0])["spec"].(map[string]any)
+	hm := spec["hardwareMap"].(map[string]any)
+	if spec["templateRef"] != "provision-image" || hm["install"] != "true" || hm["installer_image"] != "" ||
+		hm["image_url"] != debianImage || hm["image_digest"] != debianDigest || hm["image_format"] != "tar.xz" ||
+		hm["payload_kind"] != "cloud-init-nocloud" || hm["os"] != "debian" || hm["seed_url"] != testSeedURL {
+		t.Errorf("template %v, hardwareMap %v", spec["templateRef"], hm)
+	}
+	if !at.held(testCode) || at.rend.calls != 0 {
+		t.Fatalf("held %v, Talos renders %d", at.held(testCode), at.rend.calls)
+	}
+	p, cfg, _ := at.r.Installer.Configs.Get(boxUUID, testCode, testNow)
+	members := tarMembers(t, cfg)
+	if p.Kind != "cloud-init-nocloud" || !strings.Contains(members["user-data"], `hostname: "swell"`) || !strings.Contains(members["meta-data"], `instance-id: "`+boxSerial+`"`) {
+		t.Fatalf("the pending config: %+v %v", p, members)
+	}
+	if !at.journal("rendered the debian cloud-init seed") {
+		t.Errorf("journals %v", at.nb.journals)
+	}
+}
+
+// An image class whose seed gates fail starts no run: the gates run before
+// the Workflow, as a Talos class's do.
+func TestAdmitRunsTheSeedGatesBeforeAnImageProvision(t *testing.T) {
+	at := newAdmitTest(t, rackMAC, []map[string]any{declared(map[string]any{"class": "debian"})}, []map[string]any{nic(nodeNIC, nodeID, "eth0", rackMAC)})
+	at.r.Config.ImageInstalls, at.r.Config.SeedURL = map[string]bool{"debian": true}, testSeedURL
+	at.r.Installer.Seeds = nil
+	if code, why := at.admit(testCode); code != http.StatusServiceUnavailable || !strings.Contains(why, "seed inputs") {
+		t.Fatalf("admit: %d %s", code, why)
+	}
+	if n := at.kube.workflows(); len(n) != 0 || at.held(testCode) {
+		t.Fatalf("a run started without the seed inputs: %v held %v", n, at.held(testCode))
 	}
 }
 
