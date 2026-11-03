@@ -11,17 +11,17 @@ fleet-boot is folly's own RAM boot image, a kernel and a NixOS systemd initrd pa
 | --- | --- | --- |
 | `nix/images/fleet-boot.nix` | Builds the kernel, the initrd and the unsigned UKI | Nix |
 | `fleet-boot.target` | The initrd's default unit: udev, networkd's DHCP, resolved and `fleet-boot.service`. No root is mounted | the machine |
-| `apps/fleetd/cmd/fleet-boot` | Sets the clock, attests, asks for the run and reports each step | the machine |
+| `apps/fleetd/cmd/fleet-boot` | Sets the clock, attests and asks for the run | the machine |
 | `.github/workflows/talos-images.yml` | Builds the UKI, signs it with the HookOS key and publishes it in the Talos release | GitHub Actions |
 | `talos-boot-mirror` | Mirrors and checks the UKI, which nginx serves beside HookOS | spore |
 
 ## Boot
 
 1. iPXE chains `fleet-boot-amd64-secureboot-uki.efi` from spore. Its signed command line names `fleet_attest_url`, `fleet_ntp_server` and `syslog_host`, the same values as HookOS's.
-2. fleet-boot steps the clock from `fleet_ntp_server` over SNTP and writes the RTC.
-3. It attests from the NIC that holds the default route with the `apps/fleetd/client` package, as `tink-attest` does, and keeps the install code in memory. A verdict stops the tries; another failure gets five, 30 seconds apart.
+2. fleet-boot waits for a default route, then steps the clock from `fleet_ntp_server` over SNTP, checking that the answer echoes its request, and writes the RTC.
+3. It attests with the `apps/fleetd/client` package, as `tink-attest` does: with the MAC of the NIC the firmware's `BootCurrent` entry names, then each NIC that holds a default route while fleetd refuses the claim. A verdict stops the tries; another failure gets five, 30 seconds apart.
 4. It asks fleetd for the run at `/attest/v1/boot/<session>/run`. The session's AK signs each request over the nonce, the route, a sequence number and the body.
-5. A fleetd that holds no run, or serves no boot route, leaves the machine waiting, attested.
+5. fleet-boot logs the run and runs no step; a fleetd that holds no run, or serves no boot route, leaves the machine waiting, attested.
 
 fleet-boot logs to the journal, to `tty0` and `ttyS0`, and over syslog to spore, where rsyslog keeps the lines under the identifier `hookos` with the program `fleet-boot`.
 
@@ -29,7 +29,7 @@ fleet-boot logs to the journal, to `tty0` and `ttyS0`, and over syslog to spore,
 
 - A change to the fleet-boot binary or the packages it imports rebuilds the Talos release.
 - The image carries the tools the steps run: sgdisk, util-linux, xz, zstd, gzip, GNU tar, efibootmgr and nvme-cli. GNU tar reads the sparse member of a cloud image tarball.
-- `fleet_boot.kernel` in `clusters/folly/talos/netboot.json` pins the kernel package set. The `fleet-boot-image` check in `nix/lib/checks.nix` fails on another series, on a missing `fleet-boot.target`, or on a fleetd, NTP server or syslog receiver HookOS does not name.
+- `fleet_boot.kernel` in `clusters/folly/talos/netboot.json` pins the kernel package set. The `fleet-boot-image` check in `nix/lib/checks.nix` fails when nixpkgs has no such set, on a missing `fleet-boot.target`, or on a fleetd, NTP server or syslog receiver HookOS does not name.
 - The HookOS key signs it, so a fleet-boot boot never measures Talos's PCR 7.
 
 ## Where it lives

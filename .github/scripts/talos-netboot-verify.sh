@@ -63,10 +63,15 @@ if [[ " $boot " != *" rd.systemd.unit=fleet-boot.target "* ]]; then
   echo "$fleetboot: the command line does not boot fleet-boot.target" >&2
   exit 1
 fi
+# word_of <command line> <key> prints the first key=value word, the one the
+# programs reading it take.
+word_of() {
+  tr ' ' '\n' <<<"$1" | grep -m1 "^$2=" || true
+}
 for key in fleet_attest_url fleet_ntp_server syslog_host; do
-  want=$(tr ' ' '\n' <<<"$cmdline" | grep "^$key=" || true)
-  if [[ -z "$want" || " $boot " != *" $want "* ]]; then
-    echo "$fleetboot: the command line's $key differs from HookOS's" >&2
+  want=$(word_of "$cmdline" "$key")
+  if [[ "$want" == "$key=" || -z "$want" || "$(word_of "$boot" "$key")" != "$want" ]]; then
+    echo "$fleetboot: the command line's $key is empty or differs from HookOS's" >&2
     exit 1
   fi
 done

@@ -50,8 +50,12 @@ func TestBootRequestsAreSignedByTheSessionsAK(t *testing.T) {
 	var seqs []uint64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req protocol.BootRequest
+		// The handler runs off the test's goroutine, so it reports with
+		// Errorf and answers, and never stops the goroutine with Fatalf.
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Error(err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
 		route := protocol.PathBootRun
 		if strings.HasSuffix(r.URL.Path, "/report") {
@@ -62,7 +66,9 @@ func TestBootRequestsAreSignedByTheSessionsAK(t *testing.T) {
 		}
 		sig, err := tpm2.DecodeSignature(bytes.NewBuffer(req.Signature))
 		if err != nil || sig.ECC == nil {
-			t.Fatalf("signature: %v", err)
+			t.Errorf("signature: %v", err)
+			http.Error(w, "bad signature", http.StatusForbidden)
+			return
 		}
 		if !ecdsa.Verify(ak, protocol.BootDigest(res.Session.Nonce, route, req.Seq, req.Report), sig.ECC.R, sig.ECC.S) {
 			t.Errorf("request %d is not signed by the session's AK", req.Seq)

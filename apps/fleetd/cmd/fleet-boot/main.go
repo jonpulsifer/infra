@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 const (
 	tpmDevice = "/dev/tpmrm0"
 	eventLog  = "/sys/kernel/security/tpm0/binary_bios_measurements"
+	efiVars   = "/sys/firmware/efi/efivars"
 )
 
 func main() {
@@ -43,15 +45,16 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 	if url == "" {
 		return errors.New("the command line names no fleet_attest_url; this boot does not attest")
 	}
-	setClock(ntp, log)
 	if err := mountSecurityfs(); err != nil {
 		return fmt.Errorf("mount securityfs: %w", err)
 	}
-	mac, err := bootMAC(time.Minute)
+	macs, err := bootMACs(ctx, efiVars, time.Minute)
 	if err != nil {
 		return err
 	}
-	rw, err := openTPM(30 * time.Second)
+	// The clock waits for the route the NTP server is reached over.
+	setClock(ntp, log)
+	rw, err := openTPM(ctx, 30*time.Second)
 	if err != nil {
 		return err
 	}
@@ -60,23 +63,28 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 	if err != nil {
 		return fmt.Errorf("event log: %w", err)
 	}
-	m := client.LocalMachine(client.ReadTrim("/sys/class/dmi/id/product_serial"), client.ReadTrim("/sys/class/dmi/id/product_uuid"), mac)
-	if m.Serial == "" {
+	serial, uuid := client.ReadTrim("/sys/class/dmi/id/product_serial"), client.ReadTrim("/sys/class/dmi/id/product_uuid")
+	if serial == "" {
 		return errors.New("no SMBIOS serial")
 	}
-	log.Printf("attesting serial %s mac %s against %s", m.Serial, m.MAC, url)
 	httpc := &http.Client{Timeout: 2 * time.Minute}
-	res, err := attest(ctx, 5, 30*time.Second, log.Printf, func(ctx context.Context) (*client.Result, error) {
-		ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		defer cancel()
-		return client.Run(ctx, rw, client.Config{
-			BaseURL:  url,
-			HTTP:     httpc,
-			Machine:  m,
-			EventLog: evlog,
-			StoreNV:  true,
-			Logf:     log.Printf,
-			Network:  client.Network(m.MAC, log.Printf),
+	res, err := eachMAC(macs, log.Printf, func(mac string) (*client.Result, error) {
+		m := client.LocalMachine(serial, uuid, mac)
+		log.Printf("attesting serial %s mac %s against %s", m.Serial, m.MAC, url)
+		// One LLDP listener serves every try with this MAC.
+		network := once(client.Network(m.MAC, log.Printf))
+		return attest(ctx, 5, 30*time.Second, log.Printf, func(ctx context.Context) (*client.Result, error) {
+			ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			return client.Run(ctx, rw, client.Config{
+				BaseURL:  url,
+				HTTP:     httpc,
+				Machine:  m,
+				EventLog: evlog,
+				StoreNV:  true,
+				Logf:     log.Printf,
+				Network:  network,
+			})
 		})
 	})
 	if err != nil {
@@ -128,6 +136,35 @@ func attest(ctx context.Context, tries int, pause time.Duration, logf func(strin
 	return nil, fmt.Errorf("the machine did not attest in %d tries: %w", tries, err)
 }
 
+// eachMAC attests with each candidate boot MAC in turn while fleetd refuses
+// the claim (400), which a MAC NetBox does not hold for the serial draws, and
+// stops at a pass or any other answer.
+func eachMAC(macs []string, logf func(string, ...any), try func(mac string) (*client.Result, error)) (*client.Result, error) {
+	var err error
+	for _, mac := range macs {
+		var res *client.Result
+		if res, err = try(mac); err == nil {
+			return res, nil
+		}
+		var refused *client.RefusedError
+		if !errors.As(err, &refused) || refused.Status != http.StatusBadRequest {
+			return nil, err
+		}
+		logf("fleetd refused the claim with mac %s; trying the next NIC", mac)
+	}
+	return nil, err
+}
+
+// once answers what f answered the first time, as often as it is asked.
+func once[T any](f func() T) func() T {
+	var v T
+	var o sync.Once
+	return func() T {
+		o.Do(func() { v = f() })
+		return v
+	}
+}
+
 // runAsker is the run request of a passed session.
 type runAsker interface {
 	Run(context.Context) (protocol.BootRun, error)
@@ -160,7 +197,7 @@ func askRun(ctx context.Context, b runAsker, tries int, pause time.Duration, log
 
 // openTPM waits for the TPM's resource manager, which appears once the
 // TPM's driver has probed.
-func openTPM(wait time.Duration) (interface {
+func openTPM(ctx context.Context, wait time.Duration) (interface {
 	Read([]byte) (int, error)
 	Write([]byte) (int, error)
 	Close() error
@@ -174,6 +211,10 @@ func openTPM(wait time.Duration) (interface {
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("open %s: %w", tpmDevice, err)
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
 	}
 }

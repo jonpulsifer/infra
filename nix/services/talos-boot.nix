@@ -400,20 +400,32 @@ in
       fi
       release_url="https://github.com/jonpulsifer/infra/releases/download/''${tag//\//%2F}"
 
+      # A served release has fleet-boot's UKI, or the mark that its release has none.
       if [ "$(cat "$site_dir/current/tag" 2>/dev/null || true)" = "$tag" ] && [ -s "$site_dir/current/${iso}" ] \
-        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ]; then
+        && [ -s "$site_dir/current/${ipxe}" ] && [ -s "$site_dir/current/${hookos}" ] \
+        && { [ -s "$site_dir/current/${fleetBoot}" ] || [ -e "$site_dir/current/no-fleet-boot" ]; }; then
         echo "current release $tag is unchanged"
       else
         fetch --output "$stage/${ipxe}" "$release_url/${ipxe}"
         ${pkgs.bash}/bin/bash ${verifyUki} ${signingCert} "$stage/${ipxe}"
         fetch --output "$stage/${hookos}" "$release_url/${hookos}"
         ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${hookos}"
-        if fetch --output "$stage/${fleetBoot}" "$release_url/${fleetBoot}"; then
-          ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${fleetBoot}"
-        else
-          rm -f "$stage/${fleetBoot}"
-          echo "release $tag has no ${fleetBoot}"
-        fi
+        # Only a 404 means the release has no fleet-boot; any other failure fails the run, and
+        # the release served stays.
+        status=$(curl --location --silent --show-error --retry 3 --max-time 1800 \
+          --output "$stage/${fleetBoot}" --write-out '%{http_code}' "$release_url/${fleetBoot}") || status=000
+        case "$status" in
+          200) ${pkgs.bash}/bin/bash ${verifyUki} ${hookosCert} "$stage/${fleetBoot}" ;;
+          404)
+            rm -f "$stage/${fleetBoot}"
+            : > "$stage/no-fleet-boot"
+            echo "release $tag has no ${fleetBoot}"
+            ;;
+          *)
+            echo "fetching ${fleetBoot} from $tag answered $status" >&2
+            exit 1
+            ;;
+        esac
         boot_image=""
         if [ -s "$stage/${fleetBoot}" ]; then
           boot_image=${fleetBoot}
