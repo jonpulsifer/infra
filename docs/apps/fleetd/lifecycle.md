@@ -84,6 +84,7 @@ Only a `planned` device can fetch its configuration. Leaving that state, disappe
 ## Related
 
 - [fleetd overview](../fleetd.md)
+- [fleet-boot](../../platform/nixos/fleet-boot.md), the lab's own boot image, which attests as HookOS does
 - [Provision a node](../../runbooks/provision-a-node.md)
 - [Reprovision a node](../../runbooks/reprovision-a-node.md)
 - [Retire a node](../../runbooks/retire-a-node.md)

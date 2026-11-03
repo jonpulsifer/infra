@@ -1,9 +1,9 @@
 ---
 title: Talos boot
-description: The boot server on spore that serves folly's signed iPXE, HookOS and SecureBoot ISO on the bootstrap VLAN, beside fleetd's enrollment name.
+description: The boot server on spore that serves folly's signed iPXE, HookOS, fleet-boot and SecureBoot ISO on the bootstrap VLAN, beside fleetd's enrollment name.
 ---
 
-Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed iPXE, HookOS UKI and SecureBoot ISO to machines on the Kubernetes network, from spore's address on the `bootstrap` VLAN. [fleetd](../../apps/fleetd.md) serves the enrollment name's HTTPS at the same address, and [Tinkerbell](tinkerbell.md), also on spore, decides which machine boots what.
+Talos boot is the part of [spore](../../hosts/spore.md) that serves folly's signed iPXE, HookOS UKI, [fleet-boot](fleet-boot.md) UKI and SecureBoot ISO to machines on the Kubernetes network, from spore's address on the `bootstrap` VLAN. [fleetd](../../apps/fleetd.md) serves the enrollment name's HTTPS at the same address, and [Tinkerbell](tinkerbell.md), also on spore, decides which machine boots what.
 
 The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.nix` and set to `folly`. The boot services take their state paths, metric labels, release tag and committed per-site files from it, so the paths in this page read `<site>` where they say `folly`.
 
@@ -14,7 +14,7 @@ The site is the NixOS option `homelab.site`, declared in `nix/profiles/anchor.ni
 | `bootstrap` VLAN interface | Gives spore its `SPORE_BOOTSTRAP_IP`, tagged on `end0` | spore |
 | dnsmasq TFTP | Serves the signed iPXE, `talos/folly/ipxe-amd64-secureboot.efi`, from `/var/lib/tftpboot` | spore |
 | `netboot-not-allowed` links | Serve the same iPXE at `<mac>/netboot-not-allowed` for each MAC NetBox holds, the name Smee offers while `allowPXE` is off, for firmware that takes Smee's offer over UniFi's (riptide's does; shale's does not). Smee is off on spore, so nothing asks for them; [fleetd](../../apps/fleetd.md) still makes and removes them under `/var/lib/tftpboot` on each reconcile pass | spore |
-| nginx `talos-boot` | Serves the ISO and HookOS on port 80 at `SPORE_BOOTSTRAP_IP` | spore |
+| nginx `talos-boot` | Serves the ISO, HookOS and fleet-boot on port 80 at `SPORE_BOOTSTRAP_IP` | spore |
 | HookOS syslog | rsyslog on UDP 514 at `SPORE_BOOTSTRAP_IP`, into spore's journal under the identifier `hookos` (`hookos-syslog.nix`). [Tinkerbell](tinkerbell.md#logs-and-pxe-state) says how to read it | spore |
 | `talos-boot-mirror` (the mirror) | Fetches and checks the release each hour | spore |
 | fleetd's boot listener | Serves `enroll.lolwtf.ca` on port 443 at `SPORE_BOOTSTRAP_IP` with a Let's Encrypt certificate from DNS-01: the device flow under `/attest/` and a node's first config at `/talos/config`, or at `/seed` for a NixOS or Alpine class. The anchors' CoreDNS answers the name with `SPORE_BOOTSTRAP_IP` | spore |
@@ -39,6 +39,7 @@ iPXE displays a menu with a 10-second timeout.
 | Item | Action |
 | --- | --- |
 | `hookos` (default) | Load `${boot-url}/hookos-amd64-secureboot-uki.efi` with the command line from `nix/images/hookos-folly.nix`. Hardware scripts use the same command line. |
+| `fleetboot` | Load `${boot-url}/fleet-boot-amd64-secureboot-uki.efi` with the command line from `nix/images/fleet-boot.nix`. |
 | `enroll` | Use sanboot to load the signed ISO. |
 | `exit` | Return to firmware. An item that cannot load also returns to firmware. |
 
@@ -66,10 +67,11 @@ HookOS is one UKI for every node, signed with the HookOS key. Its signed command
 | --- | --- |
 | `/talos/folly/metal-amd64-secureboot.iso` | `current/metal-amd64-secureboot.iso` |
 | `/talos/folly/hookos-amd64-secureboot-uki.efi` | `current/hookos-amd64-secureboot-uki.efi` |
+| `/talos/folly/fleet-boot-amd64-secureboot-uki.efi` | `current/fleet-boot-amd64-secureboot-uki.efi` |
 
 ## The mirror
 
-Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads its ISO, iPXE and HookOS. It skips the download while it already serves that release's tag. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for iPXE, and the HookOS certificate for HookOS. A new release moves `current` to `prev`. A failed run changes neither.
+Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads its ISO, iPXE and HookOS, and fleet-boot when the release has it. It skips the download while it already serves that release's tag. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for iPXE, and the HookOS certificate for HookOS and fleet-boot. A new release moves `current` to `prev`. A failed run changes neither.
 
 A Talos version bump fails the mirror until that version's release exists. spore serves the old release until then. A release without the ISO, iPXE or HookOS also fails it.
 
@@ -105,14 +107,15 @@ The cluster cannot reach the bootstrap VLAN, so spore's node exporter carries `t
 - `terraform/network/unifi/folly/firewall.tf`: the policies `kubernetes_to_boot`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks
-- `clusters/folly/talos/netboot.json`: the HookOS release and the agent image digest
-- `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`: the unsigned iPXE, with its menu, and HookOS
+- `clusters/folly/talos/netboot.json`: the HookOS release, the agent image digest and fleet-boot's kernel series
+- `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`, `nix/images/fleet-boot.nix`: the unsigned iPXE, with its menu, HookOS and fleet-boot
 - `images/tink-agent-autoid/`: the agent image
 - `.github/scripts/talos-uki-verify.sh`: the signature check, shared with the image pipeline
 
 ## Related
 
 - [Tinkerbell](tinkerbell.md)
+- [fleet-boot](fleet-boot.md)
 - [fleetd](../../apps/fleetd.md)
 - [Netboot](netboot.md)
 - [Lab DNS and time](../network/ingress-and-dns.md#lab-dns-and-time)

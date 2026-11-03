@@ -437,4 +437,49 @@ in
     require "fleet-unique-uids" (
       clashing == [ ]
     ) "hosts with two normal users sharing a uid: ${lib.concatStringsSep ", " clashing}";
+
+  # The lab's own RAM boot image must reach the fleetd, NTP server and syslog receiver HookOS does,
+  # boot its own target rather than look for a root, and keep the kernel series netboot.json pins.
+  # The drvPath makes the image evaluate without building it.
+  fleet-boot-image =
+    let
+      image = pkgs.callPackage ../images/fleet-boot.nix { };
+      hookos = pkgs.callPackage ../images/hookos-folly.nix { };
+      pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
+      words = lib.splitString " " image.cmdline;
+      shared = lib.filter (
+        w:
+        lib.any (k: lib.hasPrefix "${k}=" w) [
+          "fleet_attest_url"
+          "fleet_ntp_server"
+          "syslog_host"
+        ]
+      ) (lib.splitString " " hookos.cmdline);
+      units = image.config.boot.initrd.systemd.units;
+      failures =
+        lib.optional (lib.length shared != 3) "HookOS's command line lost a key fleet-boot shares"
+        ++ map (w: "fleet-boot's command line lacks ${w}, which HookOS's has") (
+          lib.filter (w: !(lib.elem w words)) shared
+        )
+        ++ lib.optional (
+          !(lib.elem "rd.systemd.unit=fleet-boot.target" words)
+        ) "fleet-boot does not boot fleet-boot.target"
+        ++ lib.optional (
+          !(units ? "fleet-boot.target" && units ? "fleet-boot.service")
+        ) "the initrd defines no fleet-boot target or service"
+        ++ lib.optional (lib.any (lib.hasPrefix "worker_id=") words) "fleet-boot's command line names a worker"
+        ++ lib.optional (
+          !(pkgs ? ${pins.fleet_boot.kernel})
+        ) "netboot.json's fleet_boot.kernel names no nixpkgs kernel package set";
+    in
+    pkgs.runCommand "check-fleet-boot-image"
+      {
+        drvPath = builtins.unsafeDiscardOutputDependency image.drvPath;
+      }
+      (
+        if failures == [ ] then
+          "touch $out"
+        else
+          throw "check 'fleet-boot-image' failed: ${lib.concatStringsSep "; " failures}"
+      );
 }

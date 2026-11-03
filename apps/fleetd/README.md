@@ -4,7 +4,8 @@ fleetd attests a folly machine's TPM and boot chain, issues it an LDevID and a L
 from the DevID CA, turns NetBox's `kubernetes-node` devices into Tinkerbell objects, and renders
 and serves the Talos config each install fetches. `attest/` is the verifier, `fleet/` the
 reconciler and installer, and `main.go` wires them into one process. `cmd/tink-attest` is the
-client HookOS and the `tpm-reattest` DaemonSet run. See [fleetd](https://wiki.lolwtf.ca/apps/fleetd/)
+client HookOS and the `tpm-reattest` DaemonSet run, and `cmd/fleet-boot` the program of the lab's
+own RAM boot image (`nix/images/fleet-boot.nix`), which attests with the same `client` package. See [fleetd](https://wiki.lolwtf.ca/apps/fleetd/)
 on the wiki.
 
 ## Run
