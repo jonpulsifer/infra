@@ -59,6 +59,8 @@ func preflight(r protocol.BootRun, code string) error {
 		return fmt.Errorf("the image format %q is unknown; nothing wiped", r.ImageFormat)
 	case !classes.ImagePayload(r.PayloadKind) && r.PayloadKind != classes.PayloadTalosConfig:
 		return fmt.Errorf("the payload kind %q is not an image's; nothing wiped", r.PayloadKind)
+	case r.PayloadKind == classes.PayloadTalosConfig:
+		// A Talos image's seed is the code in META; its config URL is in its UKI.
 	case !strings.HasPrefix(r.SeedURL, "https://"):
 		return fmt.Errorf("the seed URL %q is not https; nothing wiped", r.SeedURL)
 	case !seedURLPattern.MatchString(r.SeedURL):

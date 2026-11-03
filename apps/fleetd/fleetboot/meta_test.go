@@ -92,7 +92,7 @@ func TestRunWritesTheCodeToATalosImage(t *testing.T) {
 	run := imageRun()
 	run.Disk, run.ImageURL, run.ImageFormat = m.disk, srv.URL+"/metal.raw", "raw"
 	run.ImageDigest = "sha256:" + hex.EncodeToString(sum[:])
-	run.PayloadKind, run.OS = "talos-machineconfig", "talos"
+	run.PayloadKind, run.OS, run.SeedURL = "talos-machineconfig", "talos", ""
 	run.InstallerImage = "ghcr.io/jonpulsifer/talos-installer-folly@sha256:" + strings.Repeat("1", 64)
 	e := m.executor(&reports{})
 	e.HTTP = srv.Client()
