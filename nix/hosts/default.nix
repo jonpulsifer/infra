@@ -67,6 +67,14 @@
     module = ../images/netboot.nix;
     artifact = "netbootBundle";
   };
+  # The disk image a folly `nixos` class installs. .github/workflows/node-images.yml builds it, signs
+  # its UKI and pins the release in clusters/folly/fleet/classes.json.
+  node-nixos = {
+    kind = "image";
+    baseline = "fleet";
+    module = ../images/node-nixos.nix;
+    artifact = "image";
+  };
   wsl = {
     kind = "image";
     module = ../images/wsl.nix;

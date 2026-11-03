@@ -24,7 +24,7 @@ It checks the machine's identity, authorizes installation, and checks the runnin
 3. fleetd checks the boot evidence and the device's declaration in NetBox.
 4. fleetd issues device certificates and authorizes an eligible installation.
 5. Tinkerbell wipes the declared disk and installs the class's operating system.
-6. The node fetches its configuration once: a Talos class its machine config, a `nixos-image` or `alpine-image` class its seed, the JSON that names the profile it switches into, its address and the fleet's endpoints. fleetd then marks the device `active`. A `cloud-init-nocloud` class's install fetches its seed, a tar of the NoCloud files, in HookOS and writes it onto the disk, so the device is `active` before the node's first boot.
+6. The node fetches its configuration once: a Talos class its machine config, a `nixos-image` or `alpine-image` class its seed, the JSON that names the profile it switches into, its address and the fleet's endpoints. fleetd then marks the device `active`. [NixOS node image](../platform/nixos/node-image.md) says how a NixOS node's first boot reads its seed. A `cloud-init-nocloud` class's install fetches its seed, a tar of the NoCloud files, in HookOS and writes it onto the disk, so the device is `active` before the node's first boot.
 7. The running node sends a signed boot check each hour.
 
 The device certificates are the Local Device Identity (LDevID) and Local Attestation Key (LAK) certificates. The LAK signs later boot checks.
