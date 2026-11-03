@@ -13,18 +13,6 @@ func TestPortNumber(t *testing.T) {
 	}
 }
 
-func TestPlain(t *testing.T) {
-	for in, want := range map[string]string{
-		"Port 7":                        "Port 7",
-		"Port 7 **[pwn](http://x)**":    "Port 7    pwn  http://x",
-		"`rack`|\\x\n<img src=y>~~_a_#": "rack   x  img src=y    a",
-	} {
-		if got := plain(in); got != want {
-			t.Errorf("plain(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestFresh(t *testing.T) {
 	now := testNow
 	for at, want := range map[time.Time]bool{

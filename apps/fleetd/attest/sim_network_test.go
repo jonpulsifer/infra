@@ -77,9 +77,9 @@ func TestAttestedAddressMustBeTheSource(t *testing.T) {
 		t.Fatalf("NetBox after the pass: %+v", cf)
 	}
 	waitFor(t, "the journal entry", func() bool {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		for _, j := range f.journal {
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		for _, j := range f.journalLines() {
 			if strings.Contains(j, "the attested address 192.0.2.5 is not the address the evidence came from (127.0.0.1)") {
 				return true
 			}

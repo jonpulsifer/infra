@@ -9,6 +9,8 @@ import (
 	"slices"
 	"sort"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 )
 
 // SpireNode is one node the SPIRE server registers: the CN of its LDevID and
@@ -64,7 +66,7 @@ func SpireNodesOf(devices []Device, ids []Identity, now time.Time) SpireNodes {
 	byName := map[string]Device{}
 	for _, d := range devices {
 		byName[d.Name] = d
-		if d.Status != "active" || !passedVerdict(d.Verdict) || !spireName.MatchString(d.Name) {
+		if d.Status != "active" || !netbox.PassedVerdict(d.Verdict) || !spireName.MatchString(d.Name) {
 			continue
 		}
 		hashes := []string{}

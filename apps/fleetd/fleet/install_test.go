@@ -73,11 +73,11 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 		cf["last_workflow"] = provWF
 	}
 	cf["smbios_uuid"] = testUUID
-	nb := &fakeNetBox{devices: []map[string]any{device("riptide", status, "none", cf)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("riptide", status, "none", cf)}, Ifaces: riptideIfaces()}
 	wf := workflowObject(provWF, "riptide", "provision", "2023-11-14T22:13:20Z", "STATE_RUNNING")
 	wf["spec"] = map[string]any{"hardwareMap": map[string]any{"install": "true"}}
 	kube := &fakeKube{objects: map[string]Object{wfBase + provWF: wf}}
-	nbs := httptest.NewServer(nb.handler())
+	nbs := httptest.NewServer(nb.Handler())
 	ks := httptest.NewServer(kube.handler())
 	t.Cleanup(func() { nbs.Close(); ks.Close() })
 	it := &installTest{nb: nb, kube: kube, now: testNow}
@@ -86,7 +86,7 @@ func newInstallTest(t *testing.T, status string, cf map[string]any) *installTest
 	it.in = &Installer{
 		Tokens:   it.tokens,
 		Site:     "folly",
-		NetBox:   &NetBox{URL: nbs.URL, Token: "nbt_x.y", Client: nbs.Client()},
+		NetBox:   NewNetBox(nbs.URL, "nbt_x.y", nbs.Client()),
 		Kube:     &Kube{Server: ks.URL, Namespace: "tinkerbell", Client: ks.Client()},
 		Classes:  testClasses,
 		Renderer: it.rend,
@@ -246,19 +246,19 @@ func TestRenderKeepsOneConfigPerMachine(t *testing.T) {
 }
 
 func lastPatch(nb *fakeNetBox) map[string]any {
-	nb.mu.Lock()
-	defer nb.mu.Unlock()
-	if len(nb.patches) == 0 {
+	nb.Mu.Lock()
+	defer nb.Mu.Unlock()
+	if len(nb.Patches) == 0 {
 		return nil
 	}
-	return nb.patches[len(nb.patches)-1]
+	return nb.Patches[len(nb.Patches)-1]
 }
 
 func journalCount(nb *fakeNetBox, kind string) int {
-	nb.mu.Lock()
-	defer nb.mu.Unlock()
+	nb.Mu.Lock()
+	defer nb.Mu.Unlock()
 	n := 0
-	for _, j := range nb.journals {
+	for _, j := range nb.Journals {
 		if j["kind"] == kind {
 			n++
 		}
@@ -287,7 +287,7 @@ func TestServedConfigIsBurnedAndTheDeviceGoesActive(t *testing.T) {
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("a second fetch answered %d", w.Code)
 	}
-	it.nb.set("status", map[string]any{"value": "planned"})
+	it.nb.Set("status", map[string]any{"value": "planned"})
 	if code, reason := it.render(goodRequest()); code != http.StatusConflict {
 		t.Fatalf("a replayed render: %d %s", code, reason)
 	}
@@ -310,8 +310,8 @@ func TestASeedClassRendersASeedServedAtSeed(t *testing.T) {
 	if it.rend.calls != 0 || len(it.tokens.minted) != 0 {
 		t.Fatalf("a seed went through the Talos renderer (%d calls) or minted a token (%v)", it.rend.calls, it.tokens.minted)
 	}
-	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "rendered the nixos seed") {
-		t.Errorf("the render's journal: %v", it.nb.journals)
+	if !strings.Contains(it.nb.Journals[len(it.nb.Journals)-1]["comments"].(string), "rendered the nixos seed") {
+		t.Errorf("the render's journal: %v", it.nb.Journals)
 	}
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || !it.held(testCode) {
 		t.Fatalf("the Talos path answered a seed with %d, held %v", w.Code, it.held(testCode))
@@ -329,8 +329,8 @@ func TestASeedClassRendersASeedServedAtSeed(t *testing.T) {
 	if p == nil || p["status"] != "active" {
 		t.Fatalf("the release patch: %v", p)
 	}
-	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "fetched its seed") {
-		t.Errorf("the release's journal: %v", it.nb.journals)
+	if !strings.Contains(it.nb.Journals[len(it.nb.Journals)-1]["comments"].(string), "fetched its seed") {
+		t.Errorf("the release's journal: %v", it.nb.Journals)
 	}
 	if w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("a second fetch answered %d", w.Code)
@@ -366,7 +366,7 @@ func TestSeedGates(t *testing.T) {
 	}
 
 	it = newInstallTest(t, "planned", nixos)
-	it.nb.devices[0]["primary_ip4"] = nil
+	it.nb.Devices[0]["primary_ip4"] = nil
 	if code, why := it.render(req); code != http.StatusConflict || !strings.Contains(why, "no address") {
 		t.Errorf("without an address: %d %s", code, why)
 	}
@@ -386,7 +386,7 @@ func TestSeedGates(t *testing.T) {
 		t.Errorf("a cloud-init class without the seed inputs: %d %s", code, why)
 	}
 	it = newInstallTest(t, "planned", debian)
-	it.nb.devices[0]["primary_ip4"] = nil
+	it.nb.Devices[0]["primary_ip4"] = nil
 	if code, why := it.render(req); code != http.StatusConflict || !strings.Contains(why, "no address") {
 		t.Errorf("a cloud-init class without an address: %d %s", code, why)
 	}
@@ -405,8 +405,8 @@ func TestACloudInitClassRendersATarServedAtSeed(t *testing.T) {
 	if it.rend.calls != 0 || len(it.tokens.minted) != 0 {
 		t.Fatalf("a cloud-init seed went through the Talos renderer (%d calls) or minted a token (%v)", it.rend.calls, it.tokens.minted)
 	}
-	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "rendered the debian cloud-init seed") {
-		t.Errorf("the render's journal: %v", it.nb.journals)
+	if !strings.Contains(it.nb.Journals[len(it.nb.Journals)-1]["comments"].(string), "rendered the debian cloud-init seed") {
+		t.Errorf("the render's journal: %v", it.nb.Journals)
 	}
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound || !it.held(testCode) {
 		t.Fatalf("the Talos path answered a cloud-init seed with %d, held %v", w.Code, it.held(testCode))
@@ -422,8 +422,8 @@ func TestACloudInitClassRendersATarServedAtSeed(t *testing.T) {
 	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
 		t.Fatalf("the release patch: %v", p)
 	}
-	if !strings.Contains(it.nb.journals[len(it.nb.journals)-1]["comments"].(string), "fetched its cloud-init seed") {
-		t.Errorf("the release's journal: %v", it.nb.journals)
+	if !strings.Contains(it.nb.Journals[len(it.nb.Journals)-1]["comments"].(string), "fetched its cloud-init seed") {
+		t.Errorf("the release's journal: %v", it.nb.Journals)
 	}
 	if w := it.fetchAt("/seed", http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("a second fetch answered %d", w.Code)
@@ -475,7 +475,7 @@ func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
 		t.Fatal(code)
 	}
 	ctx := context.Background()
-	it.nb.failPatch = true
+	it.nb.FailPatch = true
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
 		t.Fatal(w.Code)
 	}
@@ -492,7 +492,7 @@ func TestFailedReleaseIsKeptAndJournaledOnce(t *testing.T) {
 	if it.in.Metrics.unreleased != 1 || it.in.Metrics.pending != 0 {
 		t.Fatalf("unreleased %d, pending %d", it.in.Metrics.unreleased, it.in.Metrics.pending)
 	}
-	it.nb.failPatch = false
+	it.nb.FailPatch = false
 	it.in.Tick(ctx)
 	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
 		t.Fatalf("the retried release: %v", p)
@@ -512,12 +512,12 @@ func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
 	wrong := strings.Repeat("W", 43)
 	// A UUID NetBox does not hold is looked up once a window and never
 	// journaled; a malformed one is not looked up.
-	pages := it.nb.pages
+	pages := it.nb.Pages
 	it.fetch(http.MethodGet, other, wrong, nil)
 	it.fetch(http.MethodGet, other, wrong, nil)
 	it.fetch(http.MethodGet, "-", "-", nil)
-	if it.nb.pages != pages+1 || journalCount(it.nb, "warning") != 0 {
-		t.Fatalf("a 404 for a machine NetBox does not hold: %d lookups, %d journal entries", it.nb.pages-pages, journalCount(it.nb, "warning"))
+	if it.nb.Pages != pages+1 || journalCount(it.nb, "warning") != 0 {
+		t.Fatalf("a 404 for a machine NetBox does not hold: %d lookups, %d journal entries", it.nb.Pages-pages, journalCount(it.nb, "warning"))
 	}
 	if code, _ := it.render(goodRequest()); code != 201 {
 		t.Fatal(code)
@@ -549,13 +549,13 @@ func TestNotFoundIsJournaledOnlyForAHeldMachineAndRateLimited(t *testing.T) {
 // journal, and each later window counts again without a second entry.
 func TestAFetchForAConfigFleetdDoesNotHoldIsJournaledOnce(t *testing.T) {
 	it := newInstallTest(t, "planned", nil)
-	pages := it.nb.pages
+	pages := it.nb.Pages
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatalf("answered %d", w.Code)
 	}
-	got := it.nb.journalWith("the node asked for its config, and fleetd holds none for it")
+	got := it.nb.JournalWith("the node asked for its config, and fleetd holds none for it")
 	if len(got) != 1 || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
-		t.Fatalf("journals %v, missing %d", it.nb.journals, it.in.Metrics.ConfigMissing.Load())
+		t.Fatalf("journals %v, missing %d", it.nb.Journals, it.in.Metrics.ConfigMissing.Load())
 	}
 	for _, want := range []string{"a reboot of spore since the render of " + provWF + " drops it", "Set desired_action to provision"} {
 		if !strings.Contains(got[0], want) {
@@ -565,10 +565,10 @@ func TestAFetchForAConfigFleetdDoesNotHoldIsJournaledOnce(t *testing.T) {
 	if p := lastPatch(it.nb); p != nil {
 		t.Fatalf("the 404 changed the device: %v", p)
 	}
-	lookups := it.nb.pages - pages
+	lookups := it.nb.Pages - pages
 	it.now = it.now.Add(notFoundEvery - time.Second)
 	it.fetch(http.MethodGet, testUUID, testCode, nil)
-	if it.nb.pages-pages != lookups || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
+	if it.nb.Pages-pages != lookups || journalCount(it.nb, "warning") != 1 || it.in.Metrics.ConfigMissing.Load() != 1 {
 		t.Fatal("a second ask within the window reached NetBox")
 	}
 	it.now = it.now.Add(time.Second)
@@ -593,26 +593,26 @@ func TestAMissingConfigIsJournaledOnlyForAPlannedProvision(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			it := newInstallTest(t, tc.status, tc.cf)
 			if name == "no smbios on file" {
-				it.nb.set("smbios_uuid", nil)
+				it.nb.Set("smbios_uuid", nil)
 			}
 			it.fetch(http.MethodGet, testUUID, testCode, nil)
-			if len(it.nb.journals) != 0 || it.in.Metrics.ConfigMissing.Load() != 0 {
-				t.Fatalf("journals %v", it.nb.journals)
+			if len(it.nb.Journals) != 0 || it.in.Metrics.ConfigMissing.Load() != 0 {
+				t.Fatalf("journals %v", it.nb.Journals)
 			}
 		})
 	}
 	it := newInstallTest(t, "active", nil)
-	pages := it.nb.pages
+	pages := it.nb.Pages
 	for _, uuid := range []string{"00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", "00000000-0000-0000-0000-000000000003"} {
 		it.fetch(http.MethodGet, uuid, testCode, nil)
 	}
-	if it.nb.pages-pages != 1 {
-		t.Fatalf("three unknown UUIDs in one second made %d lookups", it.nb.pages-pages)
+	if it.nb.Pages-pages != 1 {
+		t.Fatalf("three unknown UUIDs in one second made %d lookups", it.nb.Pages-pages)
 	}
 	it.now = it.now.Add(missingLookupEvery)
 	it.fetch(http.MethodGet, "00000000-0000-0000-0000-000000000002", testCode, nil)
-	if it.nb.pages-pages != 2 {
-		t.Fatalf("a UUID refused by the global limit was not looked up a second later: %d lookups", it.nb.pages-pages)
+	if it.nb.Pages-pages != 2 {
+		t.Fatalf("a UUID refused by the global limit was not looked up a second later: %d lookups", it.nb.Pages-pages)
 	}
 }
 
@@ -650,12 +650,12 @@ func TestReleaseLeavesAStatusTheOwnerChanged(t *testing.T) {
 	if code, _ := it.render(goodRequest()); code != 201 {
 		t.Fatal(code)
 	}
-	it.nb.failPatches(true)
+	it.nb.FailPatches(true)
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
 		t.Fatal(w.Code)
 	}
-	it.nb.set("status", map[string]any{"value": "decommissioning"})
-	it.nb.failPatches(false)
+	it.nb.Set("status", map[string]any{"value": "decommissioning"})
+	it.nb.FailPatches(false)
 	it.in.Tick(context.Background())
 	p := lastPatch(it.nb)
 	if p == nil || p["status"] != nil || p["custom_fields"] == nil {
@@ -673,15 +673,15 @@ func TestAFetchServesOnlyAPlannedDevice(t *testing.T) {
 		if code, _ := it.render(goodRequest()); code != 201 {
 			t.Fatal(code)
 		}
-		it.nb.set("status", map[string]any{"value": "decommissioning"})
+		it.nb.Set("status", map[string]any{"value": "decommissioning"})
 		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 			t.Fatalf("a decommissioning node fetched its config: %d", w.Code)
 		}
 		if it.held(testCode) || !it.in.Configs.Spent(testUUID, testCode) {
 			t.Fatal("the config was not dropped and burned")
 		}
-		if len(it.nb.journalWith("the device is decommissioning, so fleetd dropped the Talos config")) != 1 {
-			t.Fatalf("journals %v", it.nb.journals)
+		if len(it.nb.JournalWith("the device is decommissioning, so fleetd dropped the Talos config")) != 1 {
+			t.Fatalf("journals %v", it.nb.Journals)
 		}
 	})
 	t.Run("NetBox down", func(t *testing.T) {
@@ -694,7 +694,7 @@ func TestAFetchServesOnlyAPlannedDevice(t *testing.T) {
 		}))
 		defer down.Close()
 		good := it.in.NetBox
-		it.in.NetBox = &NetBox{URL: down.URL, Token: "nbt_x.y", Client: down.Client()}
+		it.in.NetBox = NewNetBox(down.URL, "nbt_x.y", down.Client())
 		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusServiceUnavailable {
 			t.Fatalf("a fetch NetBox could not vouch for answered %d", w.Code)
 		}
@@ -711,9 +711,9 @@ func TestAFetchServesOnlyAPlannedDevice(t *testing.T) {
 		if code, _ := it.render(goodRequest()); code != 201 {
 			t.Fatal(code)
 		}
-		it.nb.mu.Lock()
-		it.nb.devices = nil
-		it.nb.mu.Unlock()
+		it.nb.Mu.Lock()
+		it.nb.Devices = nil
+		it.nb.Mu.Unlock()
 		if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 			t.Fatalf("a deleted device's node fetched its config: %d", w.Code)
 		}
@@ -807,14 +807,14 @@ func TestControlPlaneRendersOnlyBehindTheGate(t *testing.T) {
 		t.Fatalf("the bootstrap control plane: %d", code)
 	}
 	it.in.Bootstrap = "10.3.0.10"
-	it.nb.devices[0]["primary_ip4"] = nil
+	it.nb.Devices[0]["primary_ip4"] = nil
 	if code, _ := it.render(req); code != http.StatusConflict {
 		t.Fatalf("a control plane with no address: %d", code)
 	}
 	if it.rend.calls != 0 {
 		t.Fatal("a refused control plane rendered")
 	}
-	it.nb.devices[0]["primary_ip4"] = map[string]any{"address": "10.3.0.12/26"}
+	it.nb.Devices[0]["primary_ip4"] = map[string]any{"address": "10.3.0.12/26"}
 	if code, reason := it.render(req); code != http.StatusCreated {
 		t.Fatalf("a joining control plane: %d %s", code, reason)
 	}
@@ -954,7 +954,7 @@ func TestTheConfigIsAnsweredBeforeItsRelease(t *testing.T) {
 	}
 	hang := make(chan struct{})
 	// The fetch's read of the device answers; the release's writes hang.
-	reads := it.nb.handler()
+	reads := it.nb.Handler()
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			reads.ServeHTTP(w, r)
@@ -965,7 +965,7 @@ func TestTheConfigIsAnsweredBeforeItsRelease(t *testing.T) {
 	}))
 	defer slow.Close()
 	good := *it.in.NetBox
-	it.in.NetBox = &NetBox{URL: slow.URL, Token: "nbt_x.y", Client: slow.Client()}
+	it.in.NetBox = NewNetBox(slow.URL, "nbt_x.y", slow.Client())
 	done := make(chan int, 1)
 	go func() {
 		w := httptest.NewRecorder()
@@ -1018,7 +1018,7 @@ func TestConfigsSurviveARestart(t *testing.T) {
 		t.Fatalf("the record's mode: %v %v", fi, err)
 	}
 	// Served, then NetBox refuses the release, then a restart.
-	it.nb.failPatch = true
+	it.nb.FailPatch = true
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
 		t.Fatal(w.Code)
 	}
@@ -1029,7 +1029,7 @@ func TestConfigsSurviveARestart(t *testing.T) {
 	if _, _, ok := it.in.Configs.Get(testUUID, testCode, it.now); ok || !it.in.Configs.Spent(testUUID, testCode) {
 		t.Fatal("a served code came back after a restart")
 	}
-	it.nb.failPatch = false
+	it.nb.FailPatch = false
 	it.in.Tick(context.Background())
 	if _, err := os.Stat(filepath.Join(dir, testUUID+".json")); !os.IsNotExist(err) {
 		t.Fatalf("the released record stayed: %v", err)
@@ -1038,7 +1038,7 @@ func TestConfigsSurviveARestart(t *testing.T) {
 		t.Fatal("a restart forgot the spent code")
 	}
 	// A config past its TTL at a restart expires on the next pass.
-	it.nb.set("status", map[string]any{"value": "planned"})
+	it.nb.Set("status", map[string]any{"value": "planned"})
 	req := goodRequest()
 	req.Code = strings.Repeat("Y", 43)
 	if code, why := it.render(req); code != 201 {
@@ -1065,7 +1065,7 @@ func TestTheTTLDoesNotDropAConfigUnderAFetch(t *testing.T) {
 	it.in.Now = func() time.Time { return time.Unix(0, clock.Load()).UTC() }
 	reached, release := make(chan struct{}), make(chan struct{})
 	var once sync.Once
-	reads := it.nb.handler()
+	reads := it.nb.Handler()
 	held := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			once.Do(func() { close(reached); <-release })
@@ -1073,7 +1073,7 @@ func TestTheTTLDoesNotDropAConfigUnderAFetch(t *testing.T) {
 		reads.ServeHTTP(w, r)
 	}))
 	defer held.Close()
-	it.in.NetBox = &NetBox{URL: held.URL, Token: "nbt_x.y", Client: held.Client()}
+	it.in.NetBox = NewNetBox(held.URL, "nbt_x.y", held.Client())
 	done := make(chan int, 1)
 	go func() {
 		w := httptest.NewRecorder()
@@ -1088,8 +1088,8 @@ func TestTheTTLDoesNotDropAConfigUnderAFetch(t *testing.T) {
 		t.Fatalf("the fetch answered %d", code)
 	}
 	it.in.Drain()
-	if len(it.nb.journalWith("provision the node again")) != 0 || it.in.Metrics.Expired.Load() != 0 {
-		t.Fatalf("the TTL dropped a config under a fetch: %v", it.nb.journals)
+	if len(it.nb.JournalWith("provision the node again")) != 0 || it.in.Metrics.Expired.Load() != 0 {
+		t.Fatalf("the TTL dropped a config under a fetch: %v", it.nb.Journals)
 	}
 	if p := lastPatch(it.nb); p == nil || p["status"] != "active" {
 		t.Fatalf("the release: %v", p)
@@ -1123,9 +1123,9 @@ func TestAServedConfigAskedForAgainIsJournaledOncePerRun(t *testing.T) {
 			t.Fatalf("a re-fetch answered %d", w.Code)
 		}
 	}
-	got := it.nb.journalWith("the node asked again for the config fleetd served it at " + timestamp(served) + " for Workflow " + provWF)
+	got := it.nb.JournalWith("the node asked again for the config fleetd served it at " + timestamp(served) + " for Workflow " + provWF)
 	if len(got) != 1 || it.in.Metrics.ConfigRefetched.Load() != 3 || it.in.Metrics.ConfigMissing.Load() != 0 {
-		t.Fatalf("journals %v, refetched %d, missing %d", it.nb.journals, it.in.Metrics.ConfigRefetched.Load(), it.in.Metrics.ConfigMissing.Load())
+		t.Fatalf("journals %v, refetched %d, missing %d", it.nb.Journals, it.in.Metrics.ConfigRefetched.Load(), it.in.Metrics.ConfigMissing.Load())
 	}
 	for _, want := range []string{"a power loss or a reset before it was written to disk", "Set desired_action to provision"} {
 		if !strings.Contains(got[0], want) {
@@ -1135,7 +1135,7 @@ func TestAServedConfigAskedForAgainIsJournaledOncePerRun(t *testing.T) {
 	// Past the lookup window, the run is still journaled once.
 	it.now = it.now.Add(notFoundEvery)
 	it.fetch(http.MethodGet, testUUID, testCode, nil)
-	if len(it.nb.journalWith("asked again")) != 1 || it.in.Metrics.ConfigRefetched.Load() != 4 {
+	if len(it.nb.JournalWith("asked again")) != 1 || it.in.Metrics.ConfigRefetched.Load() != 4 {
 		t.Fatal("a second journal entry for one run")
 	}
 }
@@ -1148,7 +1148,7 @@ func TestAReFetchBeforeTheReleaseNamesTheServedConfig(t *testing.T) {
 	if code, _ := it.render(goodRequest()); code != 201 {
 		t.Fatal(code)
 	}
-	it.nb.failPatch = true
+	it.nb.FailPatch = true
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusOK {
 		t.Fatal(w.Code)
 	}
@@ -1156,11 +1156,11 @@ func TestAReFetchBeforeTheReleaseNamesTheServedConfig(t *testing.T) {
 	if w := it.fetch(http.MethodGet, testUUID, testCode, nil); w.Code != http.StatusNotFound {
 		t.Fatal(w.Code)
 	}
-	if len(it.nb.journalWith("asked again for the config fleetd served it")) != 1 || len(it.nb.journalWith("a reboot of spore")) != 0 {
-		t.Fatalf("journals %v", it.nb.journals)
+	if len(it.nb.JournalWith("asked again for the config fleetd served it")) != 1 || len(it.nb.JournalWith("a reboot of spore")) != 0 {
+		t.Fatalf("journals %v", it.nb.Journals)
 	}
 	it.fetch(http.MethodGet, testUUID, strings.Repeat("Z", 43), nil)
-	got := it.nb.journalWith("fleetd holds none for it")
+	got := it.nb.JournalWith("fleetd holds none for it")
 	if len(got) != 1 || !strings.Contains(got[0], "fleetd served the config of "+provWF+" at "+timestamp(testNow)) || strings.Contains(got[0], "a reboot of spore") {
 		t.Fatalf("the missing-config journal: %v", got)
 	}

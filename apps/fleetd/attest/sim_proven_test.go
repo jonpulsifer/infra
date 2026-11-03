@@ -95,14 +95,14 @@ func TestNetBoxPinsAuthorizeNothing(t *testing.T) {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		f.mu.Lock()
-		journaled := strings.Contains(strings.Join(f.journal, "\n"), "not the ones an earlier pass proved")
-		f.mu.Unlock()
+		f.Mu.Lock()
+		journaled := strings.Contains(strings.Join(f.journalLines(), "\n"), "not the ones an earlier pass proved")
+		f.Mu.Unlock()
 		if journaled {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the device was not journaled: %q", f.journal)
+			t.Fatalf("the device was not journaled: %q", f.journalLines())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

@@ -260,7 +260,7 @@ func TestNetBoxRecordWritesDBXAndSBAT(t *testing.T) {
 	deadline := time.Now().Add(5 * time.Second)
 	for !journalHas(f, "the dbx hash is "+three+", was "+one) {
 		if time.Now().After(deadline) {
-			t.Fatalf("no warning in the journal: %q", f.journal)
+			t.Fatalf("no warning in the journal: %q", f.journalLines())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -274,9 +274,9 @@ func TestNetBoxRecordWritesDBXAndSBAT(t *testing.T) {
 }
 
 func journalHas(f *fakeNetBox, s string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.ContainsFunc(f.journal, func(j string) bool { return strings.Contains(j, s) })
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	return slices.ContainsFunc(f.journalLines(), func(j string) bool { return strings.Contains(j, s) })
 }
 
 var _ = os.Stat

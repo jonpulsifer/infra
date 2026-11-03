@@ -169,7 +169,7 @@ func TestAnAcknowledgedAnswerBurns(t *testing.T) {
 				t.Fatal("an acknowledged answer did not burn")
 			}
 			if journalCount(it.nb, "success") != 1 || it.in.Metrics.Released.Load() != 1 {
-				t.Fatalf("the release did not run: %v", it.nb.journals)
+				t.Fatalf("the release did not run: %v", it.nb.Journals)
 			}
 			if code, _ := s.mustGet(t); code != http.StatusNotFound {
 				t.Fatalf("a second fetch answered %d", code)
@@ -192,8 +192,8 @@ func TestAnAnswerCutMidBodyDoesNotBurn(t *testing.T) {
 	if !it.held(testCode) || it.in.Configs.Spent(testUUID, testCode) {
 		t.Fatal("a cut answer burned the config")
 	}
-	if len(it.nb.journalWith("the peer did not acknowledge all of it")) != 1 || journalCount(it.nb, "success") != 0 {
-		t.Fatalf("journals %v", it.nb.journals)
+	if len(it.nb.JournalWith("the peer did not acknowledge all of it")) != 1 || journalCount(it.nb, "success") != 0 {
+		t.Fatalf("journals %v", it.nb.Journals)
 	}
 	code, body := s.mustGet(t)
 	if code != http.StatusOK || !bytes.Equal(body, bigConfig) || it.held(testCode) || journalCount(it.nb, "success") != 1 {
@@ -224,8 +224,8 @@ func TestAnAnswerUnacknowledgedAtTheDeadlineDoesNotBurn(t *testing.T) {
 			if !it.held(testCode) {
 				t.Fatal("an unacknowledged answer burned the config")
 			}
-			if got := it.nb.journalWith("fleetd reset the connection"); len(got) != 1 {
-				t.Fatalf("journals %v", it.nb.journals)
+			if got := it.nb.JournalWith("fleetd reset the connection"); len(got) != 1 {
+				t.Fatalf("journals %v", it.nb.Journals)
 			}
 			// The reader comes back after the deadline.
 			rest, err := io.ReadAll(c)
@@ -272,7 +272,7 @@ func TestAWithdrawalDuringAFetchIsJournaledTruthfully(t *testing.T) {
 			s := it.serve(t, 30*time.Second, false)
 			c := stalledGet(t, s.Listener.Addr().String())
 			defer c.Close()
-			it.nb.set("status", map[string]any{"value": "decommissioning"})
+			it.nb.Set("status", map[string]any{"value": "decommissioning"})
 			ctx := context.Background()
 			d, err := it.in.NetBox.BySerial(ctx, "folly", "MXL0172Q6L")
 			if err != nil {
@@ -281,8 +281,8 @@ func TestAWithdrawalDuringAFetchIsJournaledTruthfully(t *testing.T) {
 			if err := it.in.Withdraw(ctx, d); err != nil {
 				t.Fatal(err)
 			}
-			if len(it.nb.journalWith("a fetch was writing its Talos config")) != 1 || len(it.nb.journalWith("the node gets no config")) != 0 {
-				t.Fatalf("the withdrawal's journal: %v", it.nb.journals)
+			if len(it.nb.JournalWith("a fetch was writing its Talos config")) != 1 || len(it.nb.JournalWith("the node gets no config")) != 0 {
+				t.Fatalf("the withdrawal's journal: %v", it.nb.Journals)
 			}
 			if reads {
 				if _, err := io.Copy(io.Discard, c); err != nil {
@@ -297,9 +297,9 @@ func TestAWithdrawalDuringAFetchIsJournaledTruthfully(t *testing.T) {
 			if _, held := it.in.Configs.Holds(testUUID); held || !it.in.Configs.Spent(testUUID, testCode) {
 				t.Fatal("the withdrawn config was not dropped and burned")
 			}
-			got := it.nb.journalWith("the node fetched the config fleetd withdrew at")
+			got := it.nb.JournalWith("the node fetched the config fleetd withdrew at")
 			if reads != (len(got) == 1) || journalCount(it.nb, "success") != 0 {
-				t.Fatalf("the fetch's end: %v", it.nb.journals)
+				t.Fatalf("the fetch's end: %v", it.nb.Journals)
 			}
 			if p := lastPatch(it.nb); p != nil && p["status"] != nil {
 				t.Fatalf("a withdrawn config's fetch changed the status: %v", p)
@@ -353,7 +353,7 @@ func TestAnHTTP2AnswerDoesNotBurn(t *testing.T) {
 	r = r.WithContext(ConnContext(context.Background(), a))
 	it.in.ServeHTTP(httptest.NewRecorder(), r)
 	it.in.Drain()
-	if !it.held(testCode) || !strings.Contains(strings.Join(it.nb.journalWith("did not acknowledge"), ""), "HTTP/2.0") {
-		t.Fatalf("an HTTP/2 answer burned the config, or went unjournaled: %v", it.nb.journals)
+	if !it.held(testCode) || !strings.Contains(strings.Join(it.nb.JournalWith("did not acknowledge"), ""), "HTTP/2.0") {
+		t.Fatalf("an HTTP/2 answer burned the config, or went unjournaled: %v", it.nb.Journals)
 	}
 }

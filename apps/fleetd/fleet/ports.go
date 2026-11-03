@@ -20,18 +20,6 @@ func portNumber(portID string) (int, bool) {
 	return n, true
 }
 
-// plain strips what NetBox's journal would render as Markdown, and control
-// characters, from text a machine or a switch supplied, as the verifier's
-// plain does.
-func plain(s string) string {
-	return strings.TrimSpace(strings.Map(func(r rune) rune {
-		if r < ' ' || r == 0x7f || strings.ContainsRune("*_`#[]()<>|~\\", r) {
-			return ' '
-		}
-		return r
-	}, s))
-}
-
 // checkPort journals once an installing or active node whose intake pass,
 // younger than AttestedPortTTL, attested a switch port other than its
 // expected_port: the port check admits a machine, and a move after it is the

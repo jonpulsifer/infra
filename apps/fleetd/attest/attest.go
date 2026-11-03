@@ -23,6 +23,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/classes"
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -159,7 +160,7 @@ func checkClaim(c protocol.Machine) error {
 			return fail(reasonField, "the %s is longer than %d bytes", l.name, l.max)
 		}
 	}
-	if !validMAC(c.MAC) {
+	if !netbox.ValidMAC(c.MAC) {
 		return fail(reasonMACInvalid, "the MAC does not read as six colon-separated hex bytes")
 	}
 	return nil
@@ -450,7 +451,7 @@ func (v *Verifier) journalClaim(ctx context.Context, m Machine, comment string) 
 	}
 	v.claims[m.NetBoxID] = now
 	v.mu.Unlock()
-	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", plain(comment), m.Serial)
+	v.NetBox.journalLater(ctx, m.NetBoxID, "warning", netbox.Plain(comment), m.Serial)
 }
 
 // bindingAuthored errs unless the device is unbound, or NetBox's changelog
@@ -675,8 +676,8 @@ func (v *Verifier) unattendedBoot(ctx context.Context, s *session, cause error) 
 	if v.NetBox != nil && s.machine.NetBoxID != 0 {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 		defer cancel()
-		comment := plain("fleetd: an unexpected HookOS boot failed attestation and was refused; nothing was recorded, and the node keeps its identity: " + detail)
-		if err := v.NetBox.journal(ctx, s.machine.NetBoxID, "warning", comment); err != nil {
+		comment := netbox.Plain("fleetd: an unexpected HookOS boot failed attestation and was refused; nothing was recorded, and the node keeps its identity: " + detail)
+		if err := v.NetBox.Journal(ctx, s.machine.NetBoxID, "warning", comment); err != nil {
 			v.Log.Warn("journal an unattended boot", "machine", s.machine.Name, "err", err)
 		}
 	}
@@ -698,7 +699,7 @@ func (v *Verifier) confirmPlanned(ctx context.Context, s *session) (Machine, err
 		return m, err
 	}
 	wrote, err := v.NetBox.Bind(ctx, m.NetBoxID, s.claim)
-	if errors.Is(err, errMACTaken) {
+	if errors.Is(err, netbox.ErrMACTaken) {
 		return Machine{}, fail(reasonMACMismatch, "%s: %v", m.Name, err)
 	}
 	if err != nil {
