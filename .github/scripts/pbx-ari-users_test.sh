@@ -15,6 +15,16 @@ users() {
   for row in "$@"; do printf '%-4s  %s\n' "${row%%|*}" "${row#*|}"; done
 }
 
+users_with_acl() {
+  local row access name
+  printf 'r/o?  ACL?  Username\n----  ----  --------\n'
+  for row in "$@"; do
+    access=${row%%|*}
+    name=${row#*|}
+    printf '%-4s  %-4s  %s\n' "$access" No "$name"
+  done
+}
+
 check() {
   local name=$1 want_status=$2 want_text=$3 text=$4 out status=0
   out=$("$awk_bin" -f "$reader" <<<"$text") || status=$?
@@ -27,7 +37,11 @@ check() {
 
 check 'read-only users pass' 0 'switchboard grafana' "$(users 'Yes|switchboard' 'Yes|grafana')"
 check 'one user that can write fails' 1 'users that can write: admin' "$(users 'Yes|switchboard' 'No|admin')"
+check 'read-only users with ACL column pass' 0 'switchboard grafana' "$(users_with_acl 'Yes|switchboard' 'Yes|grafana')"
+check 'writable user with ACL column fails' 1 'users that can write: admin' "$(users_with_acl 'Yes|switchboard' 'No|admin')"
+check 'malformed ACL row fails' 1 'not the output' $'r/o?  ACL?  Username\n----  ----  --------\nYes  switchboard'
 check 'no users fails' 1 'no users' "$(users)"
+check 'no users with ACL column fails' 1 'no users' "$(users_with_acl)"
 check 'an ARI config error fails' 1 'not the output' 'Error getting ARI configuration'
 check 'empty output fails' 1 'not the output' ''
 
