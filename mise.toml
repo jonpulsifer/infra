@@ -331,7 +331,7 @@ hide = true
 # A script outside these paths or without an sh/bash shebang is never checked,
 # and nothing reports it.
 run = """
-grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' scripts/* .github/scripts/* images/*/gh clusters/offsite/apps/elevenlabs/*.sh nix/services/spire/*.sh 2>/dev/null
+grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' scripts/* .github/scripts/* images/*/gh images/fleet-boot-alpine/* clusters/offsite/apps/elevenlabs/*.sh nix/services/spire/*.sh 2>/dev/null
 """
 
 [tasks.format]

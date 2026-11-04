@@ -1,0 +1,14 @@
+[
+  {
+    "_comment": "The context is the repo root because the image builds apps/fleetd's fleet-boot. Delivery pins the digest in clusters/folly/talos/netboot.json, which rebuilds the netboot release.",
+    "image": "fleet-boot-alpine",
+    "context": ".",
+    "file": "images/fleet-boot-alpine/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/fleet-boot-alpine",
+      "apps/fleetd",
+      "packages/pkcs11signer"
+    ]
+  }
+]

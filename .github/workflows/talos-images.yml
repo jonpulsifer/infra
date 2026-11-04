@@ -1,7 +1,8 @@
 name: talos-images
 # Builds folly's signed Talos boot assets with the siderolabs imager (the
 # installer, the ISO and the metal disk image fleet-boot writes), and its
-# signed netboot iPXE, HookOS and fleet-boot with Nix, using the Secure Boot
+# signed netboot iPXE, HookOS and fleet-boot with Nix, and the Alpine
+# fleet-boot UKI from the image netboot.json pins, using the Secure Boot
 # keys in 1Password, then publishes them. A pull request only checks the inputs: the
 # build needs the keys.
 on:
@@ -228,7 +229,7 @@ jobs:
           bash .github/scripts/talos-netboot-build.sh \
             "$KEYS/uki-signing-key.pem" "$KEYS/uki-signing-cert.pem" \
             "$HOOKOS_KEYS/hookos-signing-key.pem" "$HOOKOS_KEYS/hookos-signing-cert.pem" \
-            "$RUNNER_TEMP/out"
+            "$RUNNER_TEMP/out" "$ROOT/netboot.json"
 
       - name: Remove the keys
         if: always()
@@ -262,7 +263,7 @@ jobs:
             echo '```'
             sed -n 's/^.*\/\([^/]*\)\.efi: command line: /\1: /p' "$RUNNER_TEMP/netboot.txt"
             echo '```'
-            sed -n 's/^.*\/\(fleet-boot[^/]*\.efi\): \([0-9]*\) bytes$/fleet-boot UKI: \2 bytes/p' "$RUNNER_TEMP/netboot.txt"
+            sed -n 's/^.*\/\(fleet-boot[^/]*\.efi\): \([0-9]*\) bytes$/\1: \2 bytes/p' "$RUNNER_TEMP/netboot.txt"
           } >>"$GITHUB_STEP_SUMMARY"
 
       # fleet-boot writes this image for a Talos class and puts the install
@@ -303,6 +304,7 @@ jobs:
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
       # once. The mirror on each anchor takes the newest release of the version.
+      # The Alpine fleet-boot UKI is there once netboot.json pins its image.
       - name: Publish the ISO, metal image, iPXE, HookOS and fleet-boot
         env:
           GH_TOKEN: ${{ github.token }}
@@ -310,13 +312,19 @@ jobs:
           set -euo pipefail
           tag="talos-$SITE/$VERSION-$GITHUB_RUN_ID"
           notes="Signed Talos $VERSION boot assets for $SITE, built from $GITHUB_SHA."
+          assets=(
+            "$RUNNER_TEMP/out/metal-amd64-secureboot.iso"
+            "$RUNNER_TEMP/out/metal-amd64-secureboot.raw.zst"
+            "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi"
+            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
+            "$RUNNER_TEMP/out/fleet-boot-amd64-secureboot-uki.efi"
+          )
+          if [[ -s "$RUNNER_TEMP/out/fleet-boot-alpine-amd64-secureboot-uki.efi" ]]; then
+            assets+=("$RUNNER_TEMP/out/fleet-boot-alpine-amd64-secureboot-uki.efi")
+          fi
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
-            "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
-            "$RUNNER_TEMP/out/metal-amd64-secureboot.raw.zst" \
-            "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
-            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi" \
-            "$RUNNER_TEMP/out/fleet-boot-amd64-secureboot-uki.efi"
+            "${assets[@]}"
           echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"
 
   # fleetd installs only an image pinned by digest, so each build pins the

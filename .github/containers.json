@@ -3,6 +3,7 @@
   "build": [
     "ddnsd",
     "flameboss",
+    "fleet-boot-alpine",
     "netbench",
     "rackstat",
     "atlantis",
@@ -33,6 +34,9 @@
     ],
     "atlantis": [
       "clusters/offsite/apps/atlantis/helm-release.yaml"
+    ],
+    "fleet-boot-alpine": [
+      "clusters/folly/talos/netboot.json"
     ],
     "flameboss": [
       "clusters/folly/monitoring/flameboss.yaml"

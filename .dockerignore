@@ -1,6 +1,7 @@
 # The context of every image built from the repo root: the apps that prune the
 # Bun workspace, images/mate-sandbox, which compiles packages/mate-hands, and
-# images/tink-agent-autoid, which builds apps/fleetd's client beside its entry.sh.
+# images/tink-agent-autoid and images/fleet-boot-alpine, which build apps/fleetd's
+# client and fleet-boot beside their own files.
 # Ship just those trees, and the agent profile that apps/mate bakes; everything
 # else (k8s, terraform, nix, .git, build output) stays out of context.
 *
@@ -15,6 +16,7 @@
 !images/mate-sandbox/kthx
 !images/mate-sandbox/mise.toml
 !images/tink-agent-autoid/entry.sh
+!images/fleet-boot-alpine
 
 # Even within the whitelisted trees, never send dependency/build artifacts.
 **/node_modules

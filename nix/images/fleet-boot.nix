@@ -20,8 +20,9 @@ let
   fleet = import ../lib/fleet.nix;
   pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
   spore = lab.bootstrap.hosts.spore;
-  cmdline = lib.concatStringsSep " " [
-    "rd.systemd.unit=fleet-boot.target"
+  # The words any image that runs fleet-boot takes, which the Alpine image
+  # (../../images/fleet-boot-alpine) bakes as its whole command line.
+  bootCmdline = lib.concatStringsSep " " [
     "syslog_host=${spore}"
     "fleet_attest_url=https://enroll.${fleet.dnsZone}/attest"
     "fleet_ntp_server=${spore}"
@@ -30,6 +31,7 @@ let
     "console=ttyS0,115200"
     "console=tty0"
   ];
+  cmdline = "rd.systemd.unit=fleet-boot.target " + bootCmdline;
 
   # The fleetd module's own build, so the vendor hash is package.nix's; static, with no cgo.
   fleetBoot = (callPackage ../../apps/fleetd/package.nix { }).overrideAttrs (old: {
@@ -159,7 +161,7 @@ in
 runCommand "fleet-boot-uki"
   {
     passthru = {
-      inherit cmdline fleetBoot;
+      inherit cmdline bootCmdline fleetBoot;
       # The initrd's NixOS configuration, for nix/lib/checks.nix.
       config = system;
       kernelVersion = system.boot.kernelPackages.kernel.version;
