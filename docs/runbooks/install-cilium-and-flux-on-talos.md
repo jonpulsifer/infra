@@ -63,7 +63,7 @@ Cilium's values need the Prometheus Operator CRDs, and its chart renders the `ci
 
    ```bash
    kubectl --context <site> create -k \
-     "https://github.com/kubernetes-sigs/gateway-api/config/crd/experimental?ref=$(yq '.spec.ref.tag' clusters/<site>/networking/git-repository-gateway-api.yaml)"
+     "https://github.com/kubernetes-sigs/gateway-api/config/crd/experimental?ref=$(yq '.spec.ref.tag' clusters/base/networking/gateway-api-crds/git-repository.yaml)"
    kubectl --context <site> wait --for condition=established crd/gatewayclasses.gateway.networking.k8s.io --timeout 5m
    ```
 

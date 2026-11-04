@@ -1,4 +1,5 @@
 ---
+# local-path volumes on each node's data volume, for both clusters.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -6,22 +7,15 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./clusters/base/storage
+  path: ./clusters/base/platform/local-path-provisioner
   prune: true
   sourceRef:
     kind: GitRepository
     name: infra
-  decryption:
-    provider: sops
-    secretRef:
-      name: sops-age
   dependsOn:
+    # Holds NODE_DATA_ROOT, the hostPath of the data volume.
     - name: config
   postBuild:
     substituteFrom:
       - kind: ConfigMap
         name: cluster-settings
-      - kind: ConfigMap
-        name: cluster-topology
-      - kind: Secret
-        name: cluster-secrets

@@ -9,7 +9,9 @@ metadata:
 spec:
   interval: 1h0m0s
   path: ./clusters/offsite/apps/restore-drill
-  prune: true
+  # Off while this moves into another Kustomization, so the hand-over deletes
+  # nothing. The next change removes this file.
+  prune: false
   sourceRef:
     kind: GitRepository
     name: infra

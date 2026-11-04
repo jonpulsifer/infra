@@ -9,8 +9,10 @@ resources:
   - external-secrets-operator.yaml
   - gcp-secret-manager.yaml
   - kyverno.yaml
+  - monitoring-crds.yaml
   - onepassword-connect.yaml
   - sandbox.yaml
+  - storage.yaml
   - kthx-engine-datastore-store.yaml
   - kthx-engine-policy.yaml
   - valkey-operator.yaml

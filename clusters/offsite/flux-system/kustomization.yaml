@@ -8,9 +8,7 @@ resources:
   - config.yaml
   - etcd-snapshot.yaml
   - garage.yaml
-  - monitoring-crds.yaml
   - monitoring.yaml
   - networking.yaml
   - oauth2-proxy.yaml
   - restore-drill.yaml
-  - storage.yaml
