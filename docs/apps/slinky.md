@@ -28,7 +28,7 @@ Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cl
 
 Three Helm charts from `ghcr.io/slinkyproject/charts` run in two namespaces. `slurm-operator-crds` and `slurm-operator` install the `slinky.slurm.net` kinds and the operator into `slinky`. The `slurm` chart turns its values into a `Controller`, a `RestApi`, a `LoginSet`, a `NodeSet` and a `Token` in `slurm`, and the operator turns those into pods. The webhook certificate comes from folly's cert-manager.
 
-The `NodeSet` is a StatefulSet-like set of `slurmd` pods. Slurm sizes each node from its container limits. The `Token` keeps a root JWT for the REST API in the Secret `slurm-token-root`. The demo scripts are a ConfigMap that the login pod mounts at `/opt/demos`.
+The `NodeSet` is a StatefulSet-like set of `slurmd` pods. A `slurmd` registers the host's CPUs and memory unless the `NodeSet` pins them, so the values set `CPUs` and `RealMemory` inside the container limits. Two workers may share a Kubernetes node. The `Token` keeps a root JWT for the REST API in the Secret `slurm-token-root`. The demo scripts are a ConfigMap that the login pod mounts at `/opt/demos`.
 
 The `slurm` namespace runs the `privileged` pod-security profile, because `slurmd` puts each job step in a cgroup of its own.
 

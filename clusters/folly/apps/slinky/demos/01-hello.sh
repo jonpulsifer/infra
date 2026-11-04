@@ -3,15 +3,15 @@
 # Each line names the Kubernetes node under the slurmd pod that ran it.
 set -euo pipefail
 
-nodes=$(sinfo -h -o %D | head -1)
+nodes=$(sinfo -h -t idle -o %D | head -1)
 
-echo "== one task on each of the $nodes nodes"
-srun --nodes="$nodes" --ntasks-per-node=1 --label \
+echo "== one task on each of the $nodes idle nodes"
+srun --nodes="$nodes" --ntasks-per-node=1 --label --time=1 \
   bash -c 'echo "$(hostname) on ${SLURMD_NODENAME:-?}, cpus $(nproc)"'
 
 echo
 echo "== two tasks on two nodes, each with one CPU"
-srun --nodes=2 --ntasks=2 --label bash -c 'echo "task $SLURM_PROCID of $SLURM_NTASKS on $(hostname)"'
+srun --nodes=2 --ntasks=2 --label --time=1 bash -c 'echo "task $SLURM_PROCID of $SLURM_NTASKS on $(hostname)"'
 
 echo
 echo "== the job records the scheduler kept"
