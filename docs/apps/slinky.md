@@ -20,7 +20,9 @@ Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cl
 ## Limits
 
 - Each of the six workers offers one core, 2 CPUs on the hyper-threaded nodes, and 1 GB, so the cluster has 12 CPUs and a job spreads over nodes rather than CPUs. A job that asks for more nodes than exist waits forever.
+- No shared filesystem. A batch job's output file lands on the worker that ran it, not in the login pod. Use `srun` to see output, or send `sbatch` output to `/dev/null`.
 - No accounting. `sacct` has no database to read, and there is no federation with a second cluster.
+- Slurm allocates whole cores, so one task runs on each worker at a time whatever its thread count.
 - The login pod's root keys are the owner's GitHub keys, copied into `clusters/folly/apps/slinky/helm-release-slurm.yaml`. A key change at GitHub needs a change there too.
 - The operator pins Slurm 26.05 through the `slurm` chart's image tags.
 
