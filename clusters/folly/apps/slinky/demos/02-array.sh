@@ -1,17 +1,15 @@
 #!/usr/bin/env bash
-# A job array: twice as many one-CPU tasks as the cluster has idle CPUs,
-# each sleeping a few seconds. Watch the queue drain in two waves.
+# A job array: twice as many one-core tasks as the cluster has nodes, each
+# sleeping a few seconds. Watch the queue drain in two waves. A task's
+# output lands on the worker that ran it: the cluster has no shared
+# filesystem, so this demo sends it to /dev/null.
 set -euo pipefail
 
-out=/tmp/demo-array
-mkdir -p "$out"
-rm -f "$out"/*.out
-
-cpus=$(sinfo -h -o %C | cut -d/ -f2)
-jobid=$(sbatch --parsable --array="1-$((cpus * 2))" --cpus-per-task=1 --job-name=array \
-  --output="$out/%A_%a.out" \
+nodes=$(sinfo -h -t idle -o %D | head -1)
+jobid=$(sbatch --parsable --array="1-$((nodes * 2))" --cpus-per-task=1 --job-name=array \
+  --output=/dev/null \
   --wrap='echo "task $SLURM_ARRAY_TASK_ID on $(hostname)"; sleep 8')
-echo "== submitted array job $jobid: $((cpus * 2)) tasks over $cpus CPUs"
+echo "== submitted array job $jobid: $((nodes * 2)) tasks over $nodes nodes"
 
 for _ in $(seq 12); do
   echo "-- $(date +%T)"
@@ -21,5 +19,4 @@ for _ in $(seq 12); do
 done
 
 echo
-echo "== output, one file per task"
-cat "$out"/*.out
+echo "== the array is done; each worker holds its own tasks' output"
