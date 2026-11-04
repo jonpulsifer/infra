@@ -78,14 +78,14 @@ A key never leaves its card. Its PIN policy is once and its touch policy is neve
 - `terraform/pki/devid-ca.tf` gives each committed CSR a 5-year CA certificate, `folly-devid-ca-<host>.pem` in the same directory.
 - `folly-devid-ca.pem` in the same directory bundles every issuing DevID CA, for a verifier that takes one trust file. A `folly-devid-ca-<name>-chain.pem` beside a CA is its chain up to the FML root, and stays out of the bundle. spore's SPIRE server lists each CA file in `homelab.spire.devid.caChains`, as [Identity](identity.md) says.
 - `mise run pki:verify` fails when the bundle misses a CA, or a CA or chain file does not chain to the FML intermediate.
-- `nix/services/devid-ca-yubikey.nix` runs pcscd and the ykcs11 PKCS#11 module on an anchor that sets `homelab.devidCa.yubikey.enable`. Members of the `devid-ca` group, fleetd on spore, may use the card and read its PIN.
+- `nix/services/yubikey-piv.nix` runs pcscd and the ykcs11 PKCS#11 module on an anchor that sets `homelab.yubikey.enable`. Members of the `yubikey` group, fleetd on spore, may use the card and read its PIN.
 - `packages/pkcs11signer` is the Go `crypto.Signer` that signs on the card. It finds the key whose public key matches the CA certificate. [fleetd](../apps/fleetd.md) signs every LDevID with it on spore's YubiKey.
 
 | Variable | Value |
 | --- | --- |
-| `ATTEST_CA_PKCS11_MODULE` | The ykcs11 module, `homelab.devidCa.yubikey.pkcs11Module` |
-| `ATTEST_CA_PKCS11_TOKEN` | The token label, `YubiKey PIV #<serial>`, `homelab.devidCa.yubikey.tokenLabel` |
-| `ATTEST_CA_PKCS11_PIN_FILE` | The PIN, `homelab.devidCa.yubikey.pinFile` |
+| `ATTEST_CA_PKCS11_MODULE` | The ykcs11 module, `homelab.yubikey.pkcs11Module` |
+| `ATTEST_CA_PKCS11_TOKEN` | The token label, `YubiKey PIV #<serial>`, `homelab.yubikey.tokenLabel` |
+| `ATTEST_CA_PKCS11_PIN_FILE` | The PIN, `homelab.yubikey.pinFile` |
 | `ATTEST_CA_CERT` | A PEM file whose first certificate is the CA's |
 
 Until `scripts/pki/devid-ca.sh` or the YubiKey runbook commits one, `terraform/pki/certs/` holds no DevID CA. [Make a YubiKey a DevID CA](../runbooks/set-up-a-devid-ca-yubikey.md) makes one.
@@ -115,7 +115,7 @@ A rotation of folly's Kubernetes CA leaves each worker in `fleet_workers` withou
 - `clusters/<site>/talos/patches.tf`: the issuer and the rule for tokens from the other cluster
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: `fml-pool`
 - `clusters/folly/talos/secureboot/`: the public halves of the Talos Secure Boot keys
-- `terraform/pki/devid-ca.tf`, `scripts/devid-ca-yubikey.sh` and `nix/services/devid-ca-yubikey.nix`: the hardware DevID CAs
+- `terraform/pki/devid-ca.tf`, `scripts/devid-ca-yubikey.sh` and `nix/services/yubikey-piv.nix`: the hardware DevID CAs
 
 ## Related
 

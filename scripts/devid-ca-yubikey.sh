@@ -15,8 +15,8 @@ readonly algorithm="RSA2048"
 readonly default_pin="123456"
 readonly default_puk="12345678"
 readonly default_mgmt_key="010203040506070801020304050607080102030405060708"
-# nix/services/devid-ca-yubikey.nix links the module here.
-readonly ykcs11="/etc/devid-ca/libykcs11.so"
+# nix/services/yubikey-piv.nix links the module here.
+readonly ykcs11="/etc/yubikey/libykcs11.so"
 
 die() {
   echo "error: $*" >&2
@@ -121,9 +121,9 @@ target() {
   printf '%s.%s' "$1" "$tailnet"
 }
 
-# host_config <host> prints the host's homelab.devidCa.yubikey as JSON.
+# host_config <host> prints the host's homelab.yubikey as JSON.
 host_config() {
-  nix eval --json "$root#nixosConfigurations.$1.config.homelab.devidCa.yubikey" \
+  nix eval --json "$root#nixosConfigurations.$1.config.homelab.yubikey" \
     --apply 'c: { inherit (c) enable slot serial; }'
 }
 
@@ -153,13 +153,13 @@ init_key() {
   local item="devid-ca-$host"
   local cn="folly-devid-ca-$host"
   [[ ! -e "$csr" ]] || die "${csr#"$root/"} exists; this host's CA is initialized"
-  ! grep -q '^devid-ca:' "$sops_file" || die "$sops_file already holds devid-ca secrets"
+  ! grep -q '^yubikey:' "$sops_file" || die "$sops_file already holds yubikey secrets"
   ! op item get "$item" --vault "$vault" >/dev/null 2>&1 || die "1Password item '$item' exists"
 
-  echo "==> reading homelab.devidCa.yubikey of $host" >&2
+  echo "==> reading homelab.yubikey of $host" >&2
   local config slot
   config="$(host_config "$host")"
-  [[ "$(jq -r .enable <<<"$config")" == true ]] || die "set homelab.devidCa.yubikey.enable on $host and deploy it first"
+  [[ "$(jq -r .enable <<<"$config")" == true ]] || die "set homelab.yubikey.enable on $host and deploy it first"
   slot="$(jq -er .slot <<<"$config")"
 
   local tgt serial info fw
@@ -217,9 +217,9 @@ init_key() {
     [[ "$stored" == "$(sha256sum <"$work/$f")" ]] || die "1Password item '$item' does not hold $f as generated; the card is unchanged"
   done
   for f in piv-pin piv-puk piv-mgmt-key; do
-    jq -Rs . <"$work/$f" | sops set --value-stdin "$sops_file" "[\"devid-ca\"][\"$f\"]"
+    jq -Rs . <"$work/$f" | sops set --value-stdin "$sops_file" "[\"yubikey\"][\"$f\"]"
   done
-  (($(grep -A3 '^devid-ca:' "$sops_file" | grep -c 'ENC\[') == 3)) || die "$sops_file does not hold three encrypted devid-ca values"
+  (($(grep -A3 '^yubikey:' "$sops_file" | grep -c 'ENC\[') == 3)) || die "$sops_file does not hold three encrypted yubikey values"
 
   echo "==> setting the PIV secrets and generating an $algorithm key in slot $slot on the card" >&2
   local subject="CN=$cn,O=$org"
@@ -248,7 +248,7 @@ EOF
 
 Done: ${csr#"$root/"} holds the CSR of $cn.
 Next:
-  1. In nix/hosts/$host.nix, set homelab.devidCa.yubikey.serial = $serial;
+  1. In nix/hosts/$host.nix, set homelab.yubikey.serial = $serial;
   2. Commit the CSR, ${sops_file#"$root/"} and nix/hosts/$host.nix, and open a pull request.
   3. Comment 'atlantis plan -d terraform/pki', then 'atlantis apply'.
   4. Run: mise run devid:yubikey:install $host
@@ -265,13 +265,13 @@ install_cert() {
   local sops_file="$root/nix/secrets/$host.sops.yaml"
   local cert="$certs_dir/folly-devid-ca-$host.pem"
 
-  echo "==> reading homelab.devidCa.yubikey of $host" >&2
+  echo "==> reading homelab.yubikey of $host" >&2
   local config slot id serial
   config="$(host_config "$host")"
   slot="$(jq -er .slot <<<"$config")"
   id="$(slot_id "$slot")"
   serial="$(jq -r '.serial // empty' <<<"$config")"
-  [[ -n "$serial" ]] || die "set homelab.devidCa.yubikey.serial in nix/hosts/$host.nix"
+  [[ -n "$serial" ]] || die "set homelab.yubikey.serial in nix/hosts/$host.nix"
 
   echo "==> reading the issued certificate from terraform/pki state" >&2
   local pem
@@ -283,8 +283,8 @@ install_cert() {
   local tgt pin mgmt_key
   tgt="$(target "$host")"
   [[ "$(the_yubikey "$tgt")" == "$serial" ]] || die "the YubiKey on $host is not serial $serial"
-  pin="$(sops decrypt --extract '["devid-ca"]["piv-pin"]' "$sops_file")"
-  mgmt_key="$(sops decrypt --extract '["devid-ca"]["piv-mgmt-key"]' "$sops_file")"
+  pin="$(sops decrypt --extract '["yubikey"]["piv-pin"]' "$sops_file")"
+  mgmt_key="$(sops decrypt --extract '["yubikey"]["piv-mgmt-key"]' "$sops_file")"
 
   echo "==> writing the certificate into slot $slot and signing through PKCS#11" >&2
   remote "$tgt" <<EOF
