@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file.
+description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file; tsidp on spore signs people on the tailnet in to kubectl.
 ---
 
 SPIRE gives folly nodes and their pods identities in the trust domain `lolwtf.ca`. Its server runs on [spore](../hosts/spore.md).
@@ -252,6 +252,23 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 - The discovery provider reads its keys through the Workload API as `spire-oidc/oidc-discovery-provider`. Without that entry, `spire.lolwtf.ca` serves no keys and every exchange fails.
 - `iam.workloadIdentityPoolProviders` in `terraform/gcp/projects/homelab-ng/policy.tf` lists the issuer. A new issuer needs an entry there first.
 
+## People on the tailnet
+
+tsidp, Tailscale's OIDC provider, signs a person on the tailnet in for kubectl. `nix/services/tsidp.nix` runs it on spore as a tailnet node of its own. `providers.tailscale.hostname` in `clusters/base/config/kube-login.json` names the node, and the issuer is `https://<hostname>.<tailnet>`.
+
+| Path | Reached through | Used by |
+| --- | --- | --- |
+| `/authorize`, the admin UI, client registration | The tailnet only | kubelogin's browser sign-in, the owner |
+| `/token` | The tailnet, and Funnel with the client's secret | kubelogin |
+| `/.well-known/openid-configuration`, `/.well-known/jwks.json` | The tailnet and Funnel | Both API servers, which have no tailnet |
+
+An ID token names the user by the login in `email` and by `userid:<n>` in `sub`, with no groups. It lasts 5 minutes. tsidp keeps refresh tokens in memory for 30 days, so a restart signs everyone out. A refresh needs no tailnet, so someone removed from the tailnet keeps refreshing over Funnel until that restart; the RBAC binding is the gate.
+
+- `/var/lib/tsidp` holds the node key, the signing key and the registered clients. tsidp never rotates the signing key, so the API servers keep the keys they fetched. Losing the directory needs a new client and a new node.
+- `tsidp/authkey` in `nix/secrets/spore.sops.yaml` is the secret of the OAuth client `tsidp_enrollment` in `terraform/network/tailscale/`, escrowed in 1Password as `tailscale OAuth (tsidp)`, with `?ephemeral=false&preauthorized=true` appended. The node is not ephemeral, so it keeps its identity across restarts, and it advertises `tag:tsidp`. tsidp reads the key only to register the node, so a new key needs no restart unless the node is unregistered. spore's build fails while the file lacks it.
+- The node must be named exactly `<hostname>`, since the issuer in every token is its name. tsnet registers as `idp-1` when a device named `idp` is still in the tailnet, after `/var/lib/tsidp` is lost or the node enrols again. If the admin console shows `idp-1`, delete the stale `idp` device and restart tsidp. `tsidp-check` reads the discovery document through Funnel every 5 minutes, and `SporeTsidpIssuerUnreachable` fires when its issuer is not the expected one.
+- `terraform/network/tailscale/policy.hujson` declares `tag:tsidp`, its `funnel` node attribute and the owner's `tailscale.com/cap/tsidp` grant `allow_admin_ui`.
+
 ## Live state
 
 riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
@@ -262,6 +279,7 @@ riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and sur
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
 - `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
 - `nix/hosts/spore.nix`: the EK allow list `ekHashes` and the `workloads`
+- `nix/services/tsidp.nix`: tsidp, with its kubectl client in `clusters/base/config/kube-login.json`
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`

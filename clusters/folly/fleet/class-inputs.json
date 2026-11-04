@@ -42,7 +42,8 @@
   },
   "worker-g2": {
     "class_patches": [
-      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n\"provisioning\":\n  \"maxSize\": \"128GiB\"\n"
+      "\"apiVersion\": \"v1alpha1\"\n\"kind\": \"VolumeConfig\"\n\"name\": \"EPHEMERAL\"\n\"provisioning\":\n  \"maxSize\": \"128GiB\"\n",
+      "\"machine\":\n  \"kernel\":\n    \"modules\":\n    - \"name\": \"usbnet\"\n    - \"name\": \"ax88179_178a\"\n"
     ],
     "cluster_endpoint": "https://folly.lolwtf.ca:6443",
     "cluster_name": "folly",

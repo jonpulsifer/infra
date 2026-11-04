@@ -44,6 +44,7 @@ in
     ../services/spore-native-boot.nix
     ../services/talos-boot.nix
     ../services/tinkerbell.nix
+    ../services/tsidp.nix
     ../system/sops.nix
   ];
 
@@ -63,6 +64,10 @@ in
   # Kea answers the Kubernetes network's DHCP once the UDM relays it here
   # (terraform/network/unifi/folly/k8s.tf). With Smee off it is the only DHCP server on the VLAN.
   homelab.kea.enable = true;
+
+  # The tailnet's OIDC provider, a tailnet node of its own that kubectl signs in at
+  # (nix/services/tsidp.nix).
+  homelab.tsidp.enable = true;
 
   # terraform/netbox/folly writes as this NetBox user once the owner switches its token to the user's own.
   # Until then its writes record as admin and no approved EK binding counts.

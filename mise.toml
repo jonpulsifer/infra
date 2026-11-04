@@ -39,6 +39,7 @@ uv = "latest"
 opentofu = "1.13.2"
 terraform = "latest"
 terraform-docs = "latest"
+trivy = "latest"
 velero = "latest"
 vim = "latest"
 d2 = "0.9.0"
@@ -169,7 +170,7 @@ description = "List the intakes that wait on fleetd for an approved EK binding"
 run = "bash scripts/attest.sh pending"
 
 [tasks."kube:login"]
-description = "Add the cluster and a user that signs in at Google to ~/.kube/config and select its context, as gcloud get-credentials does (args: <folly|offsite>)"
+description = "Add the cluster and a user that signs in at Google or Tailscale to ~/.kube/config and select its context, as gcloud get-credentials does (args: <folly|offsite> [--provider google|tailscale])"
 run = "bash scripts/kube-login.sh"
 
 [tasks."k8s:render-apps"]
