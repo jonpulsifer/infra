@@ -168,6 +168,14 @@ spec:
           annotations:
             message: tsidp on spore is down
             description: "tsidp.service is not active on spore. A Tailscale sign-in for kubectl fails, and an API server that restarts cannot fetch tsidp's keys (nix/services/tsidp.nix)."
+        - alert: SporeTsidpIssuerUnreachable
+          expr: (tsidp_issuer_serving{instance="spore"} == 0) or absent(tsidp_issuer_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp's issuer does not answer through Funnel
+            description: "tsidp-check on spore cannot fetch tsidp's discovery document through Funnel, or it names another issuer. The API servers cannot fetch tsidp's keys. Check journalctl -u tsidp for the URL it started at; a node named idp-1 means a stale idp device (docs/platform/identity.md)."
         - alert: SporePxeHttpDown
           expr: (nginx_up{instance="spore"} == 0) or absent(nginx_up{instance="spore"})
           for: 5m

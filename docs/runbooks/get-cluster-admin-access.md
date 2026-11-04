@@ -22,7 +22,7 @@ Use this runbook to get `kubectl` access to the `folly` and `offsite` clusters, 
    mise run kube:login <site> --provider <provider>
    ```
 
-   Result: `context <site> is current in ~/.kube/config`, with the user `<provider>@<site>`. With `KUBECONFIG` set to one file, the script writes that file instead.
+   Result: `context <site> is current in ~/.kube/config, as the user <provider>@<site>`. The other provider's user for the site leaves the file. With `KUBECONFIG` set to one file, the script writes that file instead.
 
 2. Use it. The first call opens a browser at the provider.
 
@@ -90,6 +90,7 @@ A lost workstation also holds the admin certificates and the talosconfig, which 
 | `kube:login` says the file names no `<provider>` `client_id` | The OAuth client is not declared yet | Put its ID in `clusters/base/config/kube-login.json` and its secret in the 1Password item, as [Kubernetes](../platform/kubernetes.md#people) says |
 | The browser shows `redirect_uri_mismatch` | Google: the OAuth client is not a Desktop client. Tailscale: the tsidp client lacks the redirect URI | Google: create a Desktop client. Tailscale: add `http://localhost:8000` and `http://localhost:18000` to the client in tsidp's admin UI |
 | tsidp answers `not allowed over funnel` or does not resolve | Your machine is off the tailnet | Connect to the tailnet and sign in again |
+| `SporeTsidpIssuerUnreachable` fires, or `journalctl -u tsidp` on spore shows `idp-1` in the URL it started at | A stale `idp` device kept the name, so tokens carry an issuer the API servers do not trust | Delete the stale `idp` device in the Tailscale admin console, then `sudo systemctl restart tsidp` on spore |
 | kubectl prints `Unauthorized` after a sign-in | The API server does not trust the issuer or the account: the client ID in the file is not the one the token names, the account is outside the hosted domain, the API server cannot fetch tsidp's keys over Funnel, or the Talos root has not applied the file | Read the API server's log with `talosctl --context <site> logs kube-apiserver`, then plan and apply `clusters/<site>/talos` |
 | kubectl prints `forbidden` | No binding names `<provider>:<email or login>` | Add it to `clusters/base/cluster-access-rbac.yaml` |
 | kubectl prints `You must be logged in to the server` with the admin kubeconfig | The admin certificate expired | Run step 2 of [Break-glass](#break-glass-the-admin-certificate) again |

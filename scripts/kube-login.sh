@@ -5,7 +5,8 @@
 # tailnet with --provider tailscale, through kubelogin and the context <site> to
 # ~/.kube/config (or $KUBECONFIG), and selects the context, the way
 # `gcloud container clusters get-credentials` does for GKE. The user is
-# <provider>@<site>. The server and port come from the site's
+# <provider>@<site>, and the other provider's user for the site goes, so no stale
+# client secret stays behind. The server and port come from the site's
 # cluster-topology.json, the CA from clusters/<site>/config/kubernetes-ca.crt,
 # the provider's client ID from clusters/base/config/kube-login.json, and the
 # client secret from the 1Password reference that file names, read at write time
@@ -77,10 +78,12 @@ secret=$(op read "$(jq -er ".providers.$provider.secret" "$login")")
 # hosted domain is enforced by the API server, not asked of Google. tsidp needs none.
 case "$provider" in
   google)
+    other=tailscale
     issuer=$(jq -er .providers.google.issuer "$login")
     extra=(--exec-arg=--oidc-auth-request-extra-params=prompt=consent)
     ;;
   tailscale)
+    other=google
     tailnet=$(jq -er .locals.fleet.tailnet "$repo/terraform/network/tailscale/fleet.tf.json")
     issuer=https://$(jq -er .providers.tailscale.hostname "$login").$tailnet
     extra=()
@@ -112,6 +115,7 @@ cfg set-credentials "$user" \
   ${extra[@]+"${extra[@]}"}
 cfg set-context "$site" --cluster="$site" --user="$user"
 cfg use-context "$site"
+cfg delete-user "$other@$site" 2>/dev/null || true
 chmod 600 "$out"
 
-echo "context $site is current in $out"
+echo "context $site is current in $out, as the user $user"

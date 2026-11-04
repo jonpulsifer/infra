@@ -2,7 +2,8 @@
 # and a singleton kind may appear once per file.
 
 locals {
-  dns_zone = jsondecode(file("${path.module}/../../../terraform/network/tailscale/fleet.tf.json")).locals.fleet.dns_zone
+  fleet    = jsondecode(file("${path.module}/../../../terraform/network/tailscale/fleet.tf.json")).locals.fleet
+  dns_zone = local.fleet.dns_zone
 
   # With the imported signing key, the published JWKS under this issuer stays
   # valid, so GCP workload identity, the kthx engine's token to kthx and
@@ -41,10 +42,9 @@ locals {
   # fetch its discovery document and keys through Funnel. tsidp sends no
   # email_verified; the rule reads it because an email user name must, and
   # the identity provider a person signs in to Tailscale with sets the login.
-  tailnet   = jsondecode(file("${path.module}/../../../terraform/network/tailscale/fleet.tf.json")).locals.fleet.tailnet
   tailscale = local.kube_login.providers.tailscale
   tailscale_jwt = local.tailscale.client_id == "" ? [] : [{
-    issuer = { url = "https://${local.tailscale.hostname}.${local.tailnet}", audiences = [local.tailscale.client_id] }
+    issuer = { url = "https://${local.tailscale.hostname}.${local.fleet.tailnet}", audiences = [local.tailscale.client_id] }
     claimValidationRules = [{
       expression = "claims.?email_verified.orValue(true) == true"
       message    = "the Tailscale login's email address must not be marked unverified"
