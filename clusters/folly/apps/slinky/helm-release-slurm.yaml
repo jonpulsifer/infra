@@ -71,6 +71,9 @@ spec:
     nodesets:
       folly:
         replicas: 6
+        # Without this the operator requires one slurmd per Kubernetes node,
+        # and three of the six would never schedule.
+        oversubscribeNode: true
         slurmd:
           # Slurm sizes each node from the container's limits: 1 CPU, 1 GB.
           # The requests stay small, so idle workers cost the cluster little.
@@ -81,16 +84,6 @@ spec:
             limits:
               cpu: 1
               memory: 1Gi
-        podSpec:
-          affinity:
-            podAntiAffinity:
-              preferredDuringSchedulingIgnoredDuringExecution:
-                - weight: 100
-                  podAffinityTerm:
-                    topologyKey: kubernetes.io/hostname
-                    labelSelector:
-                      matchLabels:
-                        app.kubernetes.io/name: slurmd
     partitions:
       all:
         enabled: true
