@@ -6,6 +6,10 @@ metadata:
   labels:
     app.kubernetes.io/name: suricata
     app.kubernetes.io/part-of: sensor
+  annotations:
+    # The scripts and the disable list are read at start, so a change to
+    # the ConfigMap rolls the pod.
+    configmap.reloader.stakater.com/reload: sensor-scripts
 spec:
   replicas: 1
   # One capture per interface: the old pod leaves before the new one starts.
@@ -82,12 +86,14 @@ spec:
               drop: [ALL]
               # suricata-update reads the same 0600 config.
               add: [DAC_OVERRIDE]
+          # suricata-update holds the whole ET Open set in memory while it
+          # merges; 512Mi got it killed.
           resources:
             requests:
               cpu: 10m
-              memory: 64Mi
+              memory: 128Mi
             limits:
-              memory: 512Mi
+              memory: 1536Mi
           volumeMounts:
             - name: scripts
               mountPath: /scripts
