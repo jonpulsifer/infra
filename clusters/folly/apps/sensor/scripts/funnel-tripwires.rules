@@ -1,0 +1,6 @@
+# A folly host other than the Funnel fetchers opening TLS to tsidp's name,
+# idp.<tailnet>.ts.net, which only Funnel serves over the internet. The hostname
+# is providers.tailscale.hostname in clusters/base/config/kube-login.json
+# (docs/platform/identity.md).
+# suricata-run.sh fills FUNNEL_FETCHERS and loads this file beside ET Open.
+alert tls [$HOME_NET,!$FUNNEL_FETCHERS] any -> $EXTERNAL_NET any (msg:"LOCAL TLS to tsidp over Funnel from a host that does not fetch its keys"; flow:established,to_server; tls.sni; content:".ts.net"; endswith; nocase; pcre:"/^idp\.[a-z0-9-]+\.ts\.net$/i"; classtype:policy-violation; sid:1000001; rev:2;)

@@ -1,0 +1,80 @@
+---
+# promtool tests for the tsidp tripwire alerts in spore.yaml, run by `mise run k8s:check-rules`.
+rule_files:
+  - spore.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A refused /authorize over Funnel at minute 5, a refused /token (invalid_client) at minute 20,
+  # and invalid_grant refusals on /token from minute 5, which do not alert.
+  - interval: 1m
+    input_series:
+      - series: 'tsidp_refused_requests_total{instance="spore",via="funnel",path="authorize",error="other"}'
+        values: 0x4 1x30
+      - series: 'tsidp_refused_requests_total{instance="spore",via="funnel",path="discovery",error="other"}'
+        values: 0x35
+      - series: 'tsidp_refused_requests_total{instance="spore",via="unknown",path="token",error="invalid_client"}'
+        values: 0x19 1x15
+      - series: 'tsidp_refused_requests_total{instance="spore",via="unknown",path="token",error="invalid_grant"}'
+        values: 0x4 2x10 5x20
+      - series: 'tsidp_refused_requests_total{instance="spore",via="unknown",path="other",error="other"}'
+        values: 0x4 3x30
+      - series: 'tsidp_tripwires_last_success_timestamp_seconds{instance="spore"}'
+        values: 0+60x35
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              via: funnel
+              path: authorize
+              error: other
+            exp_annotations:
+              message: "tsidp refused a request over Funnel to authorize"
+              description: "Someone off the tailnet asked tsidp for /authorize, the admin UI, /clients or /register through Funnel, which only the discovery document and keys are for. `journalctl -u tsidp` on spore has the request."
+      - eval_time: 18m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TsidpRequestRefused
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: TsidpRequestRefused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              via: unknown
+              path: token
+              error: invalid_client
+            exp_annotations:
+              message: "tsidp refused a request to token (invalid_client)"
+              description: "tsidp answered 401 or 403 on token, reachable through Funnel as well as the tailnet. A kubeconfig with a replaced client secret does this; anything else is a guess at a code, token or secret. `journalctl -u tsidp` on spore has the request."
+      - eval_time: 30m
+        alertname: TsidpTripwiresStale
+        exp_alerts: []
+
+  # The success stamp stops moving at minute 5.
+  - interval: 1m
+    input_series:
+      - series: 'tsidp_tripwires_last_success_timestamp_seconds{instance="spore"}'
+        values: 0+60x4 240x40
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: TsidpTripwiresStale
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: TsidpTripwiresStale
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: "tsidp's refusal counts on spore are stale"
+              description: "tsidp-tripwires.service has not read tsidp's journal for over 10 minutes, so TsidpFunnelUnexpectedRequest and TsidpRequestRefused see nothing. `journalctl -u tsidp-tripwires` on spore says why (nix/services/tsidp-tripwires.nix)."

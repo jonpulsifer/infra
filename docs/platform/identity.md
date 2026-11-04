@@ -269,6 +269,35 @@ An ID token names the user by the login in `email` and by `userid:<n>` in `sub`,
 - The node must be named exactly `<hostname>`, since the issuer in every token is its name. tsnet registers as `idp-1` when a device named `idp` is still in the tailnet, after `/var/lib/tsidp` is lost or the node enrols again. If the admin console shows `idp-1`, delete the stale `idp` device and restart tsidp. `tsidp-check` reads the discovery document through Funnel every 5 minutes, and `SporeTsidpIssuerUnreachable` fires when its issuer is not the expected one.
 - `terraform/network/tailscale/policy.hujson` declares `tag:tsidp`, its `funnel` node attribute and the owner's `tailscale.com/cap/tsidp` grant `allow_admin_ui`.
 
+### When to switch to the passthrough
+
+tsidp serves the API servers its discovery document and keys through Funnel. Funnel's HTTP crosses folly's uplink only inside WireGuard, so the signals come from the network sensor and from tsidp's own journal.
+
+| Signal | Declared in | Shows in |
+| --- | --- | --- |
+| `FunnelTripwire::Funnel_TLS`: a folly host other than the API server and spore opens TLS to `idp.<tailnet>` | `clusters/folly/apps/sensor/scripts/funnel-tripwires.zeek` | Zeek's `notice` stream |
+| Suricata sid 1000001, the same match | `clusters/folly/apps/sensor/scripts/funnel-tripwires.rules` | Suricata's EVE alerts |
+| `FunnelTripwire::Spore_Internet_UDP`: 30 or more UDP flows between spore and the internet in 10 minutes, not counting DNS, NTP or STUN | `funnel-tripwires.zeek` | Zeek's `notice` stream |
+| `TsidpFunnelUnexpectedRequest`: tsidp refuses a Funnel request to `/authorize`, the admin UI, `/clients` or `/register` | `nix/services/tsidp-tripwires.nix`, `clusters/folly/monitoring/spore.yaml` | Alertmanager |
+| `TsidpRequestRefused`: tsidp refuses `/token`, `/introspect` or `/userinfo` with an error other than `invalid_grant` | the same | Alertmanager |
+| `TsidpTripwiresStale`: the journal count has not run for 10 minutes | the same | Alertmanager |
+
+Nothing alerts on a VictoriaLogs query, so the sensor's signals wait for these queries in Grafana's VictoriaLogs data source:
+
+```text
+{namespace="sensor",container="zeek"} | unpack_json fields (_path, note, msg, src) | filter _path:=notice note:~"FunnelTripwire"
+{namespace="sensor",container="suricata"} | unpack_json fields (event_type, src_ip, alert.signature_id, tls.sni) | filter event_type:=alert alert.signature_id:=1000001
+```
+
+Any signal that the API servers' fetches, spore's own issuer check or a replaced kubeconfig secret does not explain means the Funnel comes off. tsidp is then reached through a TLS passthrough on spore: spore's Anchor address forwards TCP 443 to tsidp's tailnet address, and the API servers resolve tsidp's name to spore.
+
+- tsidp logs no request it answers, only refusals, so nothing counts the discovery and key fetches. The flow count stands in, and misses Funnel traffic that a DERP relay carries over TCP.
+- Tailscale publishes no list of Funnel ingress addresses, so the flow count takes any internet address.
+- `flow_threshold` in `funnel-tripwires.zeek` holds the threshold and the hour it was measured from: 1 to 11 flows per window with tsidp running, and 14 while tailscaled and tsidp started. The name match is `idp`, `providers.tailscale.hostname` in `clusters/base/config/kube-login.json`, under any tailnet, because neither that file nor the tailnet reaches the sensor's manifests.
+- tsidp writes a refused client secret into its journal; the tripwire exports only the route, the path and the error code.
+- A tsidp restart drops every refresh token, so each signed-in user's next kubectl call gets `invalid_grant` on `/token` and signs in again. That is expected: tsidp logs that 400 only at debug, and `TsidpRequestRefused` leaves out `invalid_grant`.
+- The journal tripwire runs only while `services.tsidp` is enabled on spore.
+
 ## Live state
 
 riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
@@ -285,7 +314,8 @@ riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and sur
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
-- `clusters/folly/monitoring/spore.yaml`: the scrape and the SPIRE alerts
+- `clusters/folly/monitoring/spore.yaml`: the scrape, the SPIRE alerts and the tsidp tripwires
+- `nix/services/tsidp-tripwires.nix`: tsidp's refusals as node-exporter metrics
 - `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`, `API_SERVER_HOSTNAME`, `API_SERVER_PORT`
 
 ## Related

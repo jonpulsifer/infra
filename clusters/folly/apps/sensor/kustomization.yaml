@@ -13,6 +13,8 @@ configMapGenerator:
       - scripts/quiet-nic.sh
       - scripts/zeek-run.sh
       - scripts/sensor.zeek
+      - scripts/funnel-tripwires.zeek
+      - scripts/funnel-tripwires.rules
       - scripts/suricata-run.sh
       - scripts/suricata-update-loop.sh
       - scripts/suricata-disable.conf
