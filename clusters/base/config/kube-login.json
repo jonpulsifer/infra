@@ -9,7 +9,7 @@
     },
     "tailscale": {
       "hostname": "idp",
-      "client_id": "",
+      "client_id": "536d59a4c34c461c777acd385334382f",
       "secret": "op://homelab/kube-login-tailscale/credential"
     }
   }
