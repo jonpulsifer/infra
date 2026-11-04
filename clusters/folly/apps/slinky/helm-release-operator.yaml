@@ -1,0 +1,28 @@
+---
+# The operator turns each slinky.slurm.net object into pods and Slurm state.
+# Its webhook certificate comes from folly's cert-manager.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: slurm-operator
+  namespace: slinky
+  labels:
+    source.toolkit.fluxcd.io/kind: OCIRepository
+spec:
+  interval: 24h
+  chartRef:
+    kind: OCIRepository
+    name: slurm-operator
+  dependsOn:
+    - name: slurm-operator-crds
+  values:
+    operator:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+    webhook:
+      resources:
+        requests:
+          cpu: 20m
+          memory: 64Mi

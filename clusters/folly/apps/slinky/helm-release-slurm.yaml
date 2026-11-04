@@ -1,0 +1,113 @@
+---
+# One Slurm cluster, named folly, with three slurmd workers so a multi-node
+# job lands one task on each Kubernetes node. No accounting: sacct needs
+# slurmdbd and a MariaDB, which the demos do without.
+apiVersion: helm.toolkit.fluxcd.io/v2
+kind: HelmRelease
+metadata:
+  name: slurm
+  namespace: slurm
+  labels:
+    source.toolkit.fluxcd.io/kind: OCIRepository
+spec:
+  interval: 24h
+  chartRef:
+    kind: OCIRepository
+    name: slurm
+    namespace: slinky
+  dependsOn:
+    - name: slurm-operator
+      namespace: slinky
+  values:
+    clusterName: folly
+    asciiArt: false
+    controller:
+      slurmctld:
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+      persistence:
+        resources:
+          requests:
+            storage: 2Gi
+      metrics:
+        enabled: true
+        serviceMonitor:
+          enabled: true
+          labels:
+            release: prom-stack
+    restapi:
+      slurmrestd:
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+    loginsets:
+      folly:
+        replicas: 1
+        # The owner's GitHub keys, the same list nix/system/user.nix installs.
+        rootSshAuthorizedKeys: |
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJewr6lJtffl+uZpnWXTIE5Sd3VeytQRGXKMBv1s5R/v
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHsqFnVhphlUzbS7ZIPTvB8FnaTKbqBWeapE4K3RSmXV
+        login:
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+          volumeMounts:
+            - name: demos
+              mountPath: /opt/demos
+              readOnly: true
+        podSpec:
+          volumes:
+            - name: demos
+              configMap:
+                name: slinky-demos
+                defaultMode: 0755
+        service:
+          spec:
+            type: LoadBalancer
+    nodesets:
+      folly:
+        replicas: 3
+        slurmd:
+          # Slurm sizes each node from the container's limits: 2 CPUs, 2 GB.
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2
+              memory: 2Gi
+        podSpec:
+          affinity:
+            podAntiAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+                - weight: 100
+                  podAffinityTerm:
+                    topologyKey: kubernetes.io/hostname
+                    labelSelector:
+                      matchLabels:
+                        app.kubernetes.io/name: slurmd
+    partitions:
+      all:
+        enabled: true
+    extraObjects:
+      # A JWT for root that the operator refreshes, for slurmrestd from
+      # outside the login pod. The REST demo reads it from this Secret.
+      - apiVersion: slinky.slurm.net/v1beta1
+        kind: Token
+        metadata:
+          name: root
+          namespace: slurm
+        spec:
+          username: root
+          jwtKeyRef:
+            name: slurm-auth-jwt
+            key: jwt.key
+          lifetime: 24h
+          refresh: true
+          secretRef:
+            name: slurm-token-root
+            key: token

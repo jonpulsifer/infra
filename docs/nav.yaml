@@ -26,6 +26,7 @@ sections:
           - path: apps/fleetd.md
             children: [apps/fleetd/lifecycle.md, apps/fleetd/attestation.md, apps/fleetd/operations.md]
           - apps/keylime.md
+          - apps/slinky.md
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform
@@ -138,6 +139,7 @@ sections:
           - runbooks/operate-the-office-phone.md
           - runbooks/screen-callers-on-the-office-phone.md
           - runbooks/operate-the-offsite-pbx.md
+          - runbooks/run-a-slurm-demo.md
       - group: Every change
         items:
           - runbooks/test-a-change.md

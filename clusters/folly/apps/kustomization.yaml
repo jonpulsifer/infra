@@ -16,6 +16,7 @@ resources:
   - netbench
   - pbx
   - sensor
+  - slinky
   - smiirl
   - spire
   - tally
