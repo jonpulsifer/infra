@@ -16,12 +16,18 @@ spec:
   dependsOn:
     - name: slurm-operator-crds
   values:
+    # The chart's image tag defaults to its appVersion, which the OCI chart
+    # carries as 1.2.4+<sha>: a build suffix no image reference may hold.
     operator:
+      image:
+        tag: 1.2.4
       resources:
         requests:
           cpu: 50m
           memory: 128Mi
     webhook:
+      image:
+        tag: 1.2.4
       resources:
         requests:
           cpu: 20m
