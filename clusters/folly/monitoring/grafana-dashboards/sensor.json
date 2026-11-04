@@ -578,6 +578,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -593,7 +600,8 @@
               "alert.signature": "Signature",
               "alert.severity": "Severity",
               "alert.category": "Category",
-              "alerts": "Alerts"
+              "alerts": "Alerts",
+              "Value": "Alerts"
             }
           }
         },
@@ -657,6 +665,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -673,7 +688,8 @@
               "dest_ip": "Destination",
               "dest_port": "Port",
               "proto": "Proto",
-              "alerts": "Alerts"
+              "alerts": "Alerts",
+              "Value": "Alerts"
             }
           }
         },
@@ -926,6 +942,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -941,7 +964,8 @@
               "id.orig_h": "Originator",
               "sent": "Sent",
               "received": "Received",
-              "conns": "Connections"
+              "conns": "Connections",
+              "Value": "Connections"
             }
           }
         },
@@ -1030,6 +1054,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -1045,7 +1076,8 @@
               "id.resp_h": "Responder",
               "id.resp_p": "Port",
               "service": "Service",
-              "conns": "Connections"
+              "conns": "Connections",
+              "Value": "Connections"
             }
           }
         },
@@ -1109,6 +1141,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -1122,7 +1161,8 @@
             "indexByName": {},
             "renameByName": {
               "conn_state": "State",
-              "conns": "Connections"
+              "conns": "Connections",
+              "Value": "Connections"
             }
           }
         },
@@ -1187,6 +1227,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -1201,7 +1248,8 @@
             "renameByName": {
               "query": "Query",
               "qtype_name": "Type",
-              "queries": "Queries"
+              "queries": "Queries",
+              "Value": "Queries"
             }
           }
         },
@@ -1265,6 +1313,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -1279,7 +1334,8 @@
             "renameByName": {
               "server_name": "Server name",
               "version": "TLS",
-              "sessions": "Sessions"
+              "sessions": "Sessions",
+              "Value": "Sessions"
             }
           }
         },
@@ -1343,6 +1399,13 @@
       ],
       "transformations": [
         {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns",
+            "valueLabel": "__name__"
+          }
+        },
+        {
           "id": "merge",
           "options": {}
         },
@@ -1358,7 +1421,8 @@
               "host": "Host",
               "method": "Method",
               "status_code": "Status",
-              "requests": "Requests"
+              "requests": "Requests",
+              "Value": "Requests"
             }
           }
         },
