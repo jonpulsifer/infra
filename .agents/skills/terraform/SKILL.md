@@ -33,9 +33,11 @@ beyond them.
   (`ATLANTIS_AUTOPLAN_FILE_LIST` in
   `clusters/offsite/apps/atlantis/helm-release.yaml`).
 - A PR that changes only a file a root reads with `file()`, such as a topology
-  JSON file, `clients.yaml`, `clusters/folly/inventory/nodes.yaml` or
-  `flux-values.yaml`, gets no plan. Comment
-  `atlantis plan -d <root>` on the PR.
+  JSON file, `clients.yaml` or `flux-values.yaml`, gets no plan. Comment
+  `atlantis plan -d <root>` on the PR. The Talos roots are the exception:
+  `atlantis.yaml` at the repo root lists their `file()` inputs, such as
+  `clusters/base/config/kube-login.json` and `clusters/folly/inventory/nodes.yaml`,
+  and a change to one plans the root. A new `file()` input goes in that list.
 - `plan-hook.sh` lets only the identities in `atlantis_users` in
   `only-me.rego` plan. A comment of `atlantis apply` applies the plans and
   merges the PR. Comment `atlantis apply` only when the owner asks.

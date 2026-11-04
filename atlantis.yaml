@@ -1,0 +1,27 @@
+# The Talos roots read files outside their directory with file(), and a PR
+# that changes only one of those files matches nothing in
+# ATLANTIS_AUTOPLAN_FILE_LIST, so Atlantis planned nothing and the merge
+# changed no node. Each project lists the files its root reads, relative to
+# the root (docs/platform/opentofu.md). Listing projects here turns the
+# directory autodiscovery off, and `enabled` turns it back on for every other
+# root, which plans as before.
+version: 3
+autodiscover:
+  mode: enabled
+projects:
+  - dir: clusters/folly/talos
+    autoplan:
+      when_modified:
+        - "**/*.tf*"
+        - "**/.terraform.lock.hcl"
+        - "../fleet/classes.json"
+        - "../inventory/nodes.yaml"
+        - "../../base/config/kube-login.json"
+        - "../../../terraform/network/tailscale/fleet.tf.json"
+  - dir: clusters/offsite/talos
+    autoplan:
+      when_modified:
+        - "**/*.tf*"
+        - "**/.terraform.lock.hcl"
+        - "../../base/config/kube-login.json"
+        - "../../../terraform/network/tailscale/fleet.tf.json"
