@@ -28,7 +28,7 @@ Query VictoriaLogs in Grafana with the `kubernetes` job and the `sensor` namespa
 
 ## How it works
 
-The switch port that `sensor_port` names in `bootstrap.tf` is in mirror mode with the uplink as its source. Each pod shares shale's network namespace and has the capabilities to bring the NIC up in promiscuous mode and open packet sockets. `clusters/folly/apps/sensor/scripts/sensor-interface.sh` finds the link whose device path runs through a USB bus. `clusters/folly/apps/sensor/scripts/sensor.zeek` turns every Zeek stream into JSON on stdout with the stream's name in `_path`. Suricata runs the image's default configuration with EVE on stdout, and `suricata-update` fetches the rules before it starts.
+The switch port that `sensor_port` names in `bootstrap.tf` is in mirror mode with the uplink as its source. Each pod shares shale's network namespace and has the capabilities to bring the NIC up in promiscuous mode and open packet sockets. `clusters/folly/apps/sensor/scripts/sensor-interface.sh` finds the link whose device path runs through a USB bus. `clusters/folly/apps/sensor/scripts/sensor.zeek` turns every Zeek stream into JSON on stdout with the stream's name in `_path`. Suricata runs the image's default configuration with EVE on stdout, and `suricata-update` fetches the rules before it starts, less the signatures in `clusters/folly/apps/sensor/scripts/suricata-disable.conf`, which name what is normal on this network.
 
 ## Where it lives
 

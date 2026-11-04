@@ -5,7 +5,8 @@ set -eu
 interface=$(/scripts/sensor-interface.sh)
 ip link set dev "$interface" up promisc on
 # A failed fetch keeps the rules on disk: the last run's, or none on a fresh pod.
-suricata-update --no-test --no-reload \
+# suricata-disable.conf drops the signatures that match this network's normal.
+suricata-update --no-test --no-reload --disable-conf /scripts/suricata-disable.conf \
   || echo "sensor: suricata-update failed, starting with the rules on disk" >&2
 echo "sensor: suricata captures on $interface" >&2
 exec suricata -c /etc/suricata/suricata.yaml --af-packet="$interface" \

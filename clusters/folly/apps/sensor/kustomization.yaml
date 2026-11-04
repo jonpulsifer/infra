@@ -15,6 +15,7 @@ configMapGenerator:
       - scripts/sensor.zeek
       - scripts/suricata-run.sh
       - scripts/suricata-update-loop.sh
+      - scripts/suricata-disable.conf
 generatorOptions:
   disableNameSuffixHash: true
   annotations:
