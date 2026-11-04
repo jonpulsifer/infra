@@ -38,8 +38,9 @@ for m in $modules; do
     echo "$m: $(cat "$depends")" >&2
     exit 1
   fi
-  # A builtin prints "builtin <name>" and needs no file; an insmod line ends in a space.
-  sed -n 's/^insmod \(.*[^ ]\) *$/\1/p' "$depends" >>"$keep"
+  # A builtin prints "builtin <name>" and needs no file; an insmod line is the
+  # path, then the options modprobe.d sets, or a trailing space.
+  sed -n 's/^insmod \([^ ]*\).*$/\1/p' "$depends" >>"$keep"
 done
 sort -u "$keep" -o "$keep"
 while read -r file; do
