@@ -39,6 +39,12 @@ is, such as Flux or Atlantis. kthx is the lab's hosting product. Its engine,
   the wiki are public. If `sops -d` produced it, it stays out.
 - Never commit to `main`. Open a branch and a PR, and let CI, Atlantis and Flux
   apply it.
+- Before merging a PR that changes `.terraform.lock.hcl`, read an Atlantis plan
+  for every affected OpenTofu root. Passing CI alone does not establish this:
+  `ATLANTIS_AUTOPLAN_FILE_LIST` in `clusters/offsite/apps/atlantis/helm-release.yaml`
+  does not match lockfiles. Use `.github/scripts/validation-impact.sh targets`
+  to find affected roots; request missing plans as described in
+  `docs/runbooks/apply-an-opentofu-change.md`.
 - A NixOS host configuration deployed from a branch reverts at the host's next
   auto-upgrade, which rebuilds from `main` every day. Merge the change promptly.
   The Pi 4 hosts have no auto-upgrade and change only when deployed. No Pi Zero
