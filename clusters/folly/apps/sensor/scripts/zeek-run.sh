@@ -5,4 +5,4 @@ interface=$(/scripts/sensor-interface.sh)
 ifconfig "$interface" up promisc
 echo "sensor: zeek captures on $interface" >&2
 # -C ignores checksums: a mirror port carries frames the sender offloaded.
-exec zeek -C -i "$interface" local /scripts/sensor.zeek
+exec zeek -C -i "$interface" local /scripts/sensor.zeek /scripts/funnel-tripwires.zeek

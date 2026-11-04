@@ -9,9 +9,12 @@ ip link set dev "$interface" up promisc on
 suricata-update --no-test --no-reload --disable-conf /scripts/suricata-disable.conf \
   || echo "sensor: suricata-update failed, starting with the rules on disk" >&2
 echo "sensor: suricata captures on $interface" >&2
+# The local rules name the Funnel fetchers as an address group, filled from the env.
 exec suricata -c /etc/suricata/suricata.yaml --af-packet="$interface" \
   --set outputs.0.fast.enabled=no \
   --set outputs.1.eve-log.filename=/dev/stdout \
   --set outputs.1.eve-log.community-id=yes \
   --set stats.interval=60 \
-  --set unix-command.enabled=yes
+  --set unix-command.enabled=yes \
+  --set "vars.address-groups.FUNNEL_FETCHERS=[${FUNNEL_FETCHERS}]" \
+  -s /scripts/funnel-tripwires.rules

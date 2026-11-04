@@ -45,6 +45,7 @@ in
     ../services/talos-boot.nix
     ../services/tinkerbell.nix
     ../services/tsidp.nix
+    ../services/tsidp-tripwires.nix
     ../system/sops.nix
   ];
 

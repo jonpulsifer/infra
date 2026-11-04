@@ -54,6 +54,14 @@ spec:
           image: docker.io/jasonish/suricata:8.0.8@sha256:d5a3a1785299ab40918d465e54fedf8e3afeeedba76bb64b0cc74dbc20bda2c3
           # The image's entrypoint fills /etc/suricata, then runs these.
           args: ["/bin/bash", "/scripts/suricata-run.sh"]
+          # The hosts that fetch tsidp's keys through Funnel, and tsidp's host:
+          # the tripwires in scripts/funnel-tripwires.zeek and
+          # scripts/funnel-tripwires.rules leave them out.
+          env:
+            - name: FUNNEL_FETCHERS
+              value: "${API_SERVER_IP},${SPORE_IP}"
+            - name: SPORE_IP
+              value: "${SPORE_IP}"
           securityContext:
             capabilities:
               drop: [ALL]

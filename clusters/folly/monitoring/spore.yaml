@@ -248,3 +248,20 @@ spec:
           annotations:
             message: No SPIRE agent is attested
             description: "The SPIRE server on spore has no agent with an unexpired, unbanned SVID, so no workload holds a SPIFFE identity. Check the agents' TPM attestation and their reach to spore on TCP 8081."
+        # tsidp's refusals, counted from its journal (nix/services/tsidp-tripwires.nix). Either
+        # firing outside a known cause is the signal to take the Funnel off
+        # (docs/platform/identity.md#when-to-switch-to-the-passthrough).
+        - alert: TsidpFunnelUnexpectedRequest
+          expr: increase(tsidp_refused_requests_total{instance="spore", via="funnel"}[10m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp refused a request over Funnel to {{ $labels.path }}
+            description: "Someone off the tailnet asked tsidp for /authorize, the admin UI, /clients or /register through Funnel, which only the discovery document and keys are for. `journalctl -u tsidp` on spore has the request."
+        - alert: TsidpRequestRefused
+          expr: increase(tsidp_refused_requests_total{instance="spore", via="unknown", path=~"token|introspect|userinfo"}[10m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp refused a request to {{ $labels.path }}
+            description: "tsidp answered 401 or 403 on {{ $labels.path }}, reachable through Funnel as well as the tailnet. A kubeconfig with a replaced client secret does this; anything else is a guess at a code, token or secret. `journalctl -u tsidp` on spore has the request."

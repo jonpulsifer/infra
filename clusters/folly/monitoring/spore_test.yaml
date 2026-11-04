@@ -1,0 +1,51 @@
+---
+# promtool tests for the tsidp alerts in spore.yaml, run by `mise run k8s:check-rules`.
+rule_files:
+  - spore.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A refused /authorize over Funnel at minute 5, and a refused /token at minute 20.
+  - interval: 1m
+    input_series:
+      - series: 'tsidp_refused_requests_total{instance="spore",via="funnel",path="authorize"}'
+        values: 0x4 1x30
+      - series: 'tsidp_refused_requests_total{instance="spore",via="funnel",path="discovery"}'
+        values: 0x35
+      - series: 'tsidp_refused_requests_total{instance="spore",via="unknown",path="token"}'
+        values: 0x19 1x15
+      - series: 'tsidp_refused_requests_total{instance="spore",via="unknown",path="other"}'
+        values: 0x4 3x30
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              via: funnel
+              path: authorize
+            exp_annotations:
+              message: "tsidp refused a request over Funnel to authorize"
+              description: "Someone off the tailnet asked tsidp for /authorize, the admin UI, /clients or /register through Funnel, which only the discovery document and keys are for. `journalctl -u tsidp` on spore has the request."
+      - eval_time: 18m
+        alertname: TsidpFunnelUnexpectedRequest
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: TsidpRequestRefused
+        exp_alerts: []
+      - eval_time: 21m
+        alertname: TsidpRequestRefused
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+              via: unknown
+              path: token
+            exp_annotations:
+              message: "tsidp refused a request to token"
+              description: "tsidp answered 401 or 403 on token, reachable through Funnel as well as the tailnet. A kubeconfig with a replaced client secret does this; anything else is a guess at a code, token or secret. `journalctl -u tsidp` on spore has the request."

@@ -1,0 +1,4 @@
+# A folly host other than the Funnel fetchers opening TLS to a *.ts.net name,
+# which only Funnel serves over the internet (docs/platform/identity.md).
+# suricata-run.sh fills FUNNEL_FETCHERS and loads this file beside ET Open.
+alert tls [$HOME_NET,!$FUNNEL_FETCHERS] any -> $EXTERNAL_NET any (msg:"LOCAL TLS to a Tailscale Funnel name from a host that does not fetch tsidp keys"; flow:established,to_server; tls.sni; content:".ts.net"; endswith; nocase; classtype:policy-violation; sid:1000001; rev:1;)
