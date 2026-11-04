@@ -43,8 +43,10 @@ spec:
             capabilities:
               drop: [ALL]
               # NET_ADMIN brings the link up in promiscuous mode, NET_RAW
-              # opens the AF_PACKET sockets, SYS_NICE sets thread priorities.
-              add: [NET_ADMIN, NET_RAW, SYS_NICE]
+              # opens the AF_PACKET sockets, SYS_NICE sets thread priorities,
+              # and DAC_OVERRIDE reads the image's 0600 config, which the
+              # suricata user owns.
+              add: [NET_ADMIN, NET_RAW, SYS_NICE, DAC_OVERRIDE]
           resources:
             requests:
               cpu: 250m
@@ -67,6 +69,8 @@ spec:
           securityContext:
             capabilities:
               drop: [ALL]
+              # suricata-update reads the same 0600 config.
+              add: [DAC_OVERRIDE]
           resources:
             requests:
               cpu: 10m
