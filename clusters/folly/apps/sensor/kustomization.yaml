@@ -10,6 +10,7 @@ configMapGenerator:
   - name: sensor-scripts
     files:
       - scripts/sensor-interface.sh
+      - scripts/quiet-nic.sh
       - scripts/zeek-run.sh
       - scripts/sensor.zeek
       - scripts/suricata-run.sh
