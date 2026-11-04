@@ -85,7 +85,7 @@ A lost workstation also holds the admin certificates and the talosconfig, which 
 
 ## When to switch to the passthrough
 
-tsidp's Funnel stays on while every tripwire in [Identity](../platform/identity.md#when-to-switch-to-the-passthrough) is quiet, or fires only for the API servers' fetches, spore's issuer check or a replaced kubeconfig secret. Any other firing means the Funnel comes off, and tsidp is reached through a TLS passthrough on spore that forwards TCP 443 on its Anchor address to tsidp.
+tsidp's Funnel stays on while every tripwire in [Identity](../platform/identity.md#when-to-switch-to-the-passthrough) is quiet, or fires only for the API servers' fetches, spore's issuer check or a replaced kubeconfig secret. Any other firing means the Funnel comes off, and tsidp is reached through a TLS passthrough on spore that forwards TCP 443 on its Anchor address to tsidp. An `invalid_grant` on `/token` after tsidp restarts is expected: the restart drops the refresh tokens, and the next kubectl call opens the browser once.
 
 ## If something goes wrong
 

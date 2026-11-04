@@ -275,11 +275,12 @@ tsidp serves the API servers its discovery document and keys through Funnel. Fun
 
 | Signal | Declared in | Shows in |
 | --- | --- | --- |
-| `FunnelTripwire::Funnel_TLS`: a folly host other than the API server and spore opens TLS to a `*.ts.net` name | `clusters/folly/apps/sensor/scripts/funnel-tripwires.zeek` | Zeek's `notice` stream |
+| `FunnelTripwire::Funnel_TLS`: a folly host other than the API server and spore opens TLS to `idp.<tailnet>` | `clusters/folly/apps/sensor/scripts/funnel-tripwires.zeek` | Zeek's `notice` stream |
 | Suricata sid 1000001, the same match | `clusters/folly/apps/sensor/scripts/funnel-tripwires.rules` | Suricata's EVE alerts |
-| `FunnelTripwire::Spore_Internet_UDP`: 30 or more UDP flows between spore and the internet in 10 minutes | `funnel-tripwires.zeek` | Zeek's `notice` stream |
+| `FunnelTripwire::Spore_Internet_UDP`: 30 or more UDP flows between spore and the internet in 10 minutes, not counting DNS, NTP or STUN | `funnel-tripwires.zeek` | Zeek's `notice` stream |
 | `TsidpFunnelUnexpectedRequest`: tsidp refuses a Funnel request to `/authorize`, the admin UI, `/clients` or `/register` | `nix/services/tsidp-tripwires.nix`, `clusters/folly/monitoring/spore.yaml` | Alertmanager |
-| `TsidpRequestRefused`: tsidp refuses `/token`, `/introspect` or `/userinfo` | the same | Alertmanager |
+| `TsidpRequestRefused`: tsidp refuses `/token`, `/introspect` or `/userinfo` with an error other than `invalid_grant` | the same | Alertmanager |
+| `TsidpTripwiresStale`: the journal count has not run for 10 minutes | the same | Alertmanager |
 
 Nothing alerts on a VictoriaLogs query, so the sensor's signals wait for these queries in Grafana's VictoriaLogs data source:
 
@@ -292,8 +293,9 @@ Any signal that the API servers' fetches, spore's own issuer check or a replaced
 
 - tsidp logs no request it answers, only refusals, so nothing counts the discovery and key fetches. The flow count stands in, and misses Funnel traffic that a DERP relay carries over TCP.
 - Tailscale publishes no list of Funnel ingress addresses, so the flow count takes any internet address.
-- The flow threshold comes from the sensor's first two hours, before spore ran tsidp. `flow_threshold` in `funnel-tripwires.zeek` changes it.
-- tsidp writes a refused client secret into its journal; the tripwire exports only the route and the path.
+- `flow_threshold` in `funnel-tripwires.zeek` holds the threshold and the hour it was measured from: 1 to 11 flows per window with tsidp running, and 14 while tailscaled and tsidp started. The name match is `idp`, `providers.tailscale.hostname` in `clusters/base/config/kube-login.json`, under any tailnet, because neither that file nor the tailnet reaches the sensor's manifests.
+- tsidp writes a refused client secret into its journal; the tripwire exports only the route, the path and the error code.
+- A tsidp restart drops every refresh token, so each signed-in user's next kubectl call gets `invalid_grant` on `/token` and signs in again. That is expected: tsidp logs that 400 only at debug, and `TsidpRequestRefused` leaves out `invalid_grant`.
 - The journal tripwire runs only while `services.tsidp` is enabled on spore.
 
 ## Live state

@@ -258,10 +258,20 @@ spec:
           annotations:
             message: tsidp refused a request over Funnel to {{ $labels.path }}
             description: "Someone off the tailnet asked tsidp for /authorize, the admin UI, /clients or /register through Funnel, which only the discovery document and keys are for. `journalctl -u tsidp` on spore has the request."
+        # invalid_grant is what a stale refresh token gets after tsidp restarts, which spore's daily
+        # upgrade can do; tsidp logs that 400 only at debug, and the error label keeps it out here too.
         - alert: TsidpRequestRefused
-          expr: increase(tsidp_refused_requests_total{instance="spore", via="unknown", path=~"token|introspect|userinfo"}[10m]) > 0
+          expr: increase(tsidp_refused_requests_total{instance="spore", via="unknown", path=~"token|introspect|userinfo", error!="invalid_grant"}[10m]) > 0
           labels:
             severity: warning
           annotations:
-            message: tsidp refused a request to {{ $labels.path }}
+            message: tsidp refused a request to {{ $labels.path }} ({{ $labels.error }})
             description: "tsidp answered 401 or 403 on {{ $labels.path }}, reachable through Funnel as well as the tailnet. A kubeconfig with a replaced client secret does this; anything else is a guess at a code, token or secret. `journalctl -u tsidp` on spore has the request."
+        - alert: TsidpTripwiresStale
+          expr: (time() - tsidp_tripwires_last_success_timestamp_seconds{instance="spore"} > 600) or absent(tsidp_tripwires_last_success_timestamp_seconds{instance="spore"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp's refusal counts on spore are stale
+            description: "tsidp-tripwires.service has not read tsidp's journal for over 10 minutes, so TsidpFunnelUnexpectedRequest and TsidpRequestRefused see nothing. `journalctl -u tsidp-tripwires` on spore says why (nix/services/tsidp-tripwires.nix)."
