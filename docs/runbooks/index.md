@@ -69,6 +69,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 - [Operate the office phone](operate-the-office-phone.md): check, change and debug the office phone and the folly PBX
 - [Screen callers on the office phone](screen-callers-on-the-office-phone.md): add a contact who skips the press-5 screen, use the star codes, and render the prompts
 - [Operate the offsite PBX](operate-the-offsite-pbx.md): check the offsite PBX that hands calls to the troll agent, and find why a call failed
+- [Run a Slurm demo](run-a-slurm-demo.md): reach the Slinky login pod on folly, run the demo scripts, drain a worker, and call the REST API
 
 ## Every change
 

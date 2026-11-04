@@ -1,0 +1,23 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespaces.yaml
+  - oci-repositories.yaml
+  - helm-release-crds.yaml
+  - helm-release-operator.yaml
+  - helm-release-slurm.yaml
+configMapGenerator:
+  - name: slinky-demos
+    namespace: slurm
+    files:
+      - demos/00-tour.sh
+      - demos/01-hello.sh
+      - demos/02-array.sh
+      - demos/03-queue.sh
+      - demos/04-rest.sh
+generatorOptions:
+  disableNameSuffixHash: true
+  annotations:
+    # The demos are shell: their ${} is the shell's to fill, not Flux's.
+    kustomize.toolkit.fluxcd.io/substitute: disabled
