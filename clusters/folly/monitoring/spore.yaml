@@ -144,6 +144,38 @@ spec:
           annotations:
             message: PXE TFTP (dnsmasq) on spore is down
             description: "dnsmasq.service is not active on spore. A node on the bootstrap VLAN cannot load the signed iPXE (terraform/network/unifi/folly/bootstrap.tf)."
+        - alert: SporeHookosSyslogDown
+          expr: (node_systemd_unit_state{instance="spore", name="syslog.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="syslog.service", state="active"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: HookOS syslog receiver on spore is down
+            description: "syslog.service is not active on spore. A HookOS action's output leaves no record in the journal (nix/services/hookos-syslog.nix)."
+        - alert: SporeKeaDown
+          expr: (node_systemd_unit_state{instance="spore", name="kea-dhcp4-server.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="kea-dhcp4-server.service", state="active"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: DHCP (Kea) on spore is down
+            description: "kea-dhcp4-server.service is not active on spore. A machine on a node port gets no lease and no boot file once the gateway relays the Kubernetes network's DHCP to it (nix/services/kea.nix)."
+        - alert: SporeTsidpDown
+          expr: (node_systemd_unit_state{instance="spore", name="tsidp.service", state="active"} == 0) or absent(node_systemd_unit_state{instance="spore", name="tsidp.service", state="active"})
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp on spore is down
+            description: "tsidp.service is not active on spore. A Tailscale sign-in for kubectl fails, and an API server that restarts cannot fetch tsidp's keys (nix/services/tsidp.nix)."
+        - alert: SporeTsidpIssuerUnreachable
+          expr: (tsidp_issuer_serving{instance="spore"} == 0) or absent(tsidp_issuer_serving{instance="spore"})
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp's issuer does not answer through Funnel
+            description: "tsidp-check on spore cannot fetch tsidp's discovery document through Funnel, or it names another issuer. The API servers cannot fetch tsidp's keys. Check journalctl -u tsidp for the URL it started at; a node named idp-1 means a stale idp device (docs/platform/identity.md)."
         - alert: SporePxeHttpDown
           expr: (nginx_up{instance="spore"} == 0) or absent(nginx_up{instance="spore"})
           for: 5m
@@ -200,6 +232,14 @@ spec:
           annotations:
             message: SPIRE registration entry sync failed on spore
             description: "spire-server-entries.service failed. The server's registration entries may not match nix/hosts/spore.nix; read the unit's journal."
+        - alert: SporeSpireFleetEntriesFailed
+          expr: node_systemd_unit_state{instance="spore", name="spire-server-fleet-entries.service", state="failed"} == 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: SPIRE fleet entry applier failed on spore
+            description: "spire-server-fleet-entries.service failed, so the fleet-* entries stand as they were and no node is registered or withdrawn. A journal line `refusing to withdraw` means fleetd's file drops more nodes than the cap allows in one run; otherwise the file is malformed or the server does not answer. docs/platform/identity.md#fleetd-entries has the override."
         - alert: SpireNoAttestedAgents
           expr: (spire_server_attested_agents{instance="spore"} < 1) or absent(spire_server_attested_agents{instance="spore"})
           for: 15m
@@ -208,3 +248,32 @@ spec:
           annotations:
             message: No SPIRE agent is attested
             description: "The SPIRE server on spore has no agent with an unexpired, unbanned SVID, so no workload holds a SPIFFE identity. Check the agents' TPM attestation and their reach to spore on TCP 8081."
+        # tsidp's refusals, counted from its journal (nix/services/tsidp-tripwires.nix). Either
+        # firing outside a known cause is the signal to take the Funnel off
+        # (docs/platform/identity.md#when-to-switch-to-the-passthrough). Funnel's certificate puts
+        # the name in the Certificate Transparency logs, so scanners fetch /, /robots.txt and /.env
+        # all day; those count as path="other" and are noise, not a signal.
+        - alert: TsidpFunnelUnexpectedRequest
+          expr: increase(tsidp_refused_requests_total{instance="spore", via="funnel", path=~"authorize|clients|register"}[10m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp refused a request over Funnel to {{ $labels.path }}
+            description: "Someone off the tailnet asked tsidp for /authorize, /clients or /register through Funnel, which only the discovery document and keys are for. That is a deliberate probe of the OIDC provider, not the certificate-log scanning that hits /. `journalctl -u tsidp` on spore has the request."
+        # invalid_grant is what a stale refresh token gets after tsidp restarts, which spore's daily
+        # upgrade can do; tsidp logs that 400 only at debug, and the error label keeps it out here too.
+        - alert: TsidpRequestRefused
+          expr: increase(tsidp_refused_requests_total{instance="spore", via="unknown", path=~"token|introspect|userinfo", error!="invalid_grant"}[10m]) > 0
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp refused a request to {{ $labels.path }} ({{ $labels.error }})
+            description: "tsidp answered 401 or 403 on {{ $labels.path }}, reachable through Funnel as well as the tailnet. A kubeconfig with a replaced client secret does this; anything else is a guess at a code, token or secret. `journalctl -u tsidp` on spore has the request."
+        - alert: TsidpTripwiresStale
+          expr: (time() - tsidp_tripwires_last_success_timestamp_seconds{instance="spore"} > 600) or absent(tsidp_tripwires_last_success_timestamp_seconds{instance="spore"})
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            message: tsidp's refusal counts on spore are stale
+            description: "tsidp-tripwires.service has not read tsidp's journal for over 10 minutes, so TsidpFunnelUnexpectedRequest and TsidpRequestRefused see nothing. `journalctl -u tsidp-tripwires` on spore says why (nix/services/tsidp-tripwires.nix)."

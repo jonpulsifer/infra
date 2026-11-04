@@ -2,7 +2,8 @@
 # and a singleton kind may appear once per file.
 
 locals {
-  dns_zone = jsondecode(file("${path.module}/../../../terraform/network/tailscale/fleet.tf.json")).locals.fleet.dns_zone
+  fleet    = jsondecode(file("${path.module}/../../../terraform/network/tailscale/fleet.tf.json")).locals.fleet
+  dns_zone = local.fleet.dns_zone
 
   # With the imported signing key, the published JWKS under this issuer stays
   # valid, so GCP workload identity, the kthx engine's token to kthx and
@@ -10,6 +11,49 @@ locals {
   issuer = "https://oidc.${local.dns_zone}/${module.topology.data.CLUSTER_NAME}"
   # offsite admits these folly service-account tokens.
   peer_issuer = "https://oidc.${local.dns_zone}/folly"
+
+  # People sign in at Google or Tailscale with kubelogin
+  # (scripts/kube-login.sh); the API server maps a verified account of the
+  # hosted domain to google:<email> and a tailnet login to tailscale:<login>,
+  # and clusters/base/cluster-access-rbac.yaml says what that user may do. An
+  # empty client_id leaves its provider out of the authenticators.
+  kube_login = jsondecode(file("${path.module}/../../base/config/kube-login.json"))
+  google     = local.kube_login.providers.google
+  google_jwt = local.google.client_id == "" ? [] : [{
+    issuer = { url = local.google.issuer, audiences = [local.google.client_id] }
+    claimValidationRules = [
+      {
+        expression = "claims.?email_verified.orValue(false) == true"
+        message    = "the Google account's email address must be verified"
+      },
+      {
+        expression = "claims.?hd.orValue(\"\") == \"${local.google.hosted_domain}\""
+        message    = "only ${local.google.hosted_domain} accounts may sign in"
+      },
+    ]
+    claimMappings = {
+      username = { expression = "\"google:\" + claims.email" }
+      uid      = { expression = "claims.sub" }
+    }
+  }]
+
+  # tsidp on spore (nix/services/tsidp.nix) signs a tailnet user in and
+  # names them by their Tailscale login. The API servers have no tailnet and
+  # fetch its discovery document and keys through Funnel. tsidp sends no
+  # email_verified; the rule reads it because an email user name must, and
+  # the identity provider a person signs in to Tailscale with sets the login.
+  tailscale = local.kube_login.providers.tailscale
+  tailscale_jwt = local.tailscale.client_id == "" ? [] : [{
+    issuer = { url = "https://${local.tailscale.hostname}.${local.fleet.tailnet}", audiences = [local.tailscale.client_id] }
+    claimValidationRules = [{
+      expression = "claims.?email_verified.orValue(true) == true"
+      message    = "the Tailscale login's email address must not be marked unverified"
+    }]
+    claimMappings = {
+      username = { expression = "\"tailscale:\" + claims.email" }
+      uid      = { expression = "claims.sub" }
+    }
+  }]
 
   cluster_patches = [
     # gVisor and hostUsers: false pods need user namespaces, which Talos
@@ -68,7 +112,8 @@ locals {
       accepted   = { audiences = ["api", "https://kubernetes.default.svc"] }
     }),
     # A configuration file replaces Talos's anonymous flag, so the probe paths
-    # are restated. The jwt entry admits the peer cluster's listed accounts.
+    # are restated. The first jwt entry admits the peer cluster's listed
+    # accounts; the rest are the identity providers people sign in at.
     yamlencode({
       apiVersion = "v1alpha1"
       kind       = "KubeAuthenticationConfig"
@@ -77,7 +122,7 @@ locals {
           enabled    = true
           conditions = [{ path = "/livez" }, { path = "/readyz" }, { path = "/healthz" }]
         }
-        jwt = [{
+        jwt = concat([{
           issuer = { url = local.peer_issuer, audiences = ["api"] }
           claimValidationRules = [{
             expression = <<-CEL
@@ -91,7 +136,7 @@ locals {
             message    = "only the Atlantis, Rowbutt sandbox (admin and reader) and kthx engine service accounts may authenticate across clusters"
           }]
           claimMappings = { username = { expression = "\"federated:\" + claims.sub" } }
-        }]
+        }], local.google_jwt, local.tailscale_jwt)
       }
     }),
     # Fixed at first provisioning: a full EPHEMERAL cannot take etcd with it,

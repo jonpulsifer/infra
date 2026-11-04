@@ -6,7 +6,6 @@
 import type { ExecutionEnv } from '@earendil-works/pi-durable/env';
 import type { Clock } from './clock.ts';
 import type { SandboxConfig } from './config.ts';
-import type { KthxSites } from './kthx-sites.ts';
 import type { Kube } from './kube.ts';
 import type { Log } from './log.ts';
 import type { Lane, Profile } from './profiles.ts';
@@ -136,7 +135,7 @@ export interface Hands {
     hooks: ThreadHandsHooks,
     profile: Profile,
   ): ThreadHands;
-  /** Keeps its kthx sites, deletes its sandbox and forgets its hands. Never throws. */
+  /** Deletes its sandbox and forgets its hands. Never throws. */
   release(ref: ThreadRef, reason: TeardownReason): Promise<void>;
   /** Pool upkeep, on a timer. */
   ensureSpares(): Promise<void>;
@@ -168,7 +167,6 @@ export interface KubeHandsDeps {
   clock?: Clock;
   metrics?: HandsInstruments;
   githubApp?: TokenSource | null;
-  kthxSites?: KthxSites | null;
   clusterCa?: string | null;
   sshKey?: string | null;
   talosconfig?: string | null;
@@ -213,7 +211,6 @@ export interface HandsInstruments {
   handsDropped(reason: HandsDropReason): void;
   githubTokenMinted(result: string): void;
   githubTokenStamped(result: string): void;
-  kthxSitesSynced(result: string): void;
   teardown(reason: TeardownReason): void;
   turnSandbox(source: TurnSandboxSource): void;
 }

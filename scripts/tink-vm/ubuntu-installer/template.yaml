@@ -1,13 +1,13 @@
 # Spike, not applied anywhere: the provision Template for a class whose OS is Ubuntu. It is
-# clusters/folly/tinkerbell/template.yaml with three changes. install runs INSTALLER_IMAGE, an
+# clusters/folly/tinkerbell/template.yaml with two changes. install runs INSTALLER_IMAGE, an
 # image that holds a verified Ubuntu cloud image (./Dockerfile): its entrypoint writes the image to
 # the disk, writes the NoCloud seed (the Hardware's hostname and the node's payload, its
-# user-data) over the root and adds an Ubuntu boot entry for shim. next-boot prefers that entry.
+# user-data) over the root and adds an Ubuntu boot entry for shim, which next-boot keeps.
 # Where the Talos install gives the installer the install code, this one needs the code to exist,
 # since wipe-disk's gate is the code, and reads the payload tarball that the attest step would
 # fetch with the node's LDevID (decision 1); in the spike both are put in /worker/fleet by hand.
-# wipe-disk and reboot are the provision Template's, unchanged; next-boot differs in the entry it
-# prefers.
+# wipe-disk and reboot are the provision Template's, unchanged; next-boot is the provision
+# Template's, which serves every fleet OS.
 ---
 apiVersion: tinkerbell.org/v1alpha1
 kind: Template
@@ -33,6 +33,10 @@ spec:
           # install keys reads them as no install.
           INSTALL: '{{ or (index . "install") "false" }}'
           INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          # The boot entries the fleet's OSes create, by name, as an extended regular expression: the
+          # Talos installer's and the Ubuntu installer's. next-boot keeps the one on this install's EFI
+          # system partition and deletes the others; entries of no fleet OS stay.
+          FLEET_OS_ENTRIES: "Talos Linux UKI|Ubuntu"
           INSTALL_CODE_FILE: /tmp/fleet/install_code
           ATTESTED_FILE: /tmp/fleet/attested
           PAYLOAD_FILE: /tmp/fleet/payload.tar.gz
@@ -40,8 +44,9 @@ spec:
         actions:
           - name: wipe-disk
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
-            timeout: 600
+            timeout: 900
             volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
               - /worker/fleet:/tmp/fleet
             command:
               - /bin/sh
@@ -64,7 +69,39 @@ spec:
                   log "no install code; nothing wiped"
                   exit 1
                 fi
+                # An installer that outlived its action, after a timeout the action could not clean up,
+                # would keep writing the disk this action wipes. Remove it, and wipe nothing if it stays.
+                docker rm -f provision-install >/dev/null 2>&1 || true
+                if [ -n "$(docker ps -aq --filter name=^provision-install$ 2>/dev/null)" ]; then
+                  log "an installer from an earlier run is still there; nothing wiped"
+                  exit 1
+                fi
                 [ -b "$DISK" ] || { log "$DISK is not a block device"; exit 1; }
+                # HookOS's image cache is RAM and empty on every boot, so the installer is fetched on
+                # every provision. Fetch it before the wipe: a registry fault then refuses the run with
+                # the disk intact, and install pulls nothing. The docker client runs in the background
+                # so a timeout's SIGTERM is handled while the pull stalls.
+                if [ "$INSTALL" = true ]; then
+                  if [ -z "$INSTALLER_IMAGE" ]; then
+                    log "no installer image is declared; nothing wiped"
+                    exit 1
+                  fi
+                  if ! docker image inspect "$INSTALLER_IMAGE" >/dev/null 2>&1; then
+                    log "pulling $INSTALLER_IMAGE"
+                    pull_out=$(mktemp)
+                    docker pull -q "$INSTALLER_IMAGE" >"$pull_out" 2>&1 &
+                    pull_pid=$!
+                    trap 'kill "$pull_pid" 2>/dev/null; log "stopped while pulling the installer; nothing wiped"; exit 143' TERM INT
+                    pull_rc=0
+                    wait "$pull_pid" || pull_rc=$?
+                    trap - TERM INT
+                    if [ "$pull_rc" != 0 ]; then
+                      log "the installer image $INSTALLER_IMAGE cannot be pulled ($(tail -n 1 "$pull_out")); nothing wiped"
+                      exit 1
+                    fi
+                  fi
+                  log "$INSTALLER_IMAGE is here"
+                fi
                 log "wiping every partition of $DISK"
                 for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
                   wipefs --all --force "$p"
@@ -81,7 +118,7 @@ spec:
           # output goes to the console too, since Tinkerbell keeps no action log.
           - name: install
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
-            timeout: 900
+            timeout: 600
             volumes:
               - /var/run/docker.sock:/var/run/docker.sock
               - /worker/fleet:/tmp/fleet
@@ -104,21 +141,33 @@ spec:
                   exit 1
                 fi
                 log "installing $INSTALLER_IMAGE to $DISK"
-                if docker run --rm --privileged --network none \
+                # The installer is a sibling container on HookOS's Docker, so stopping this action
+                # stops only the docker client. The shell waits in the background and removes the
+                # installer when tink-agent's SIGTERM ends the action at its timeout.
+                trap 'docker rm -f provision-install >/dev/null 2>&1; log "stopped; any installer is removed"; exit 143' TERM INT
+                docker run --rm --pull never --name provision-install --privileged --network none \
                   --volume /dev:/dev \
                   --volume /worker/fleet:/tmp/fleet:ro \
                   --mount type=volume,dst=/sys/firmware/efi/efivars,volume-driver=local,volume-opt=type=efivarfs,volume-opt=device=efivarfs,volume-nocopy=true \
                   --env DISK="$DISK" --env PAYLOAD="$PAYLOAD_FILE" --env NODE_HOSTNAME="$NODE_HOSTNAME" \
-                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1; then
+                  "$INSTALLER_IMAGE" >/tmp/fleet/install.log 2>&1 &
+                rc=0
+                wait $! || rc=$?
+                if [ "$rc" = 0 ]; then
                   tail -n 5 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
                 else
                   tail -n 25 /tmp/fleet/install.log | while IFS= read -r line; do log "$line"; done
                   log "the installer failed; the lines above are its last output"
                   exit 1
                 fi
-          # After an install the disk boots, preferring the installer's Ubuntu entry; after a wipe
-          # with no install the network does, since a wiped disk has nothing to boot. BootNext makes
-          # each certain. A run that only attests leaves the firmware's boot order alone.
+          # After an install the disk boots, through the installer's entry on this install's EFI system
+          # partition; after a wipe with no install the network does, since a wiped disk has nothing to
+          # boot. BootNext makes each certain. The installer leaves efivarfs read-only, so the action
+          # remounts it, puts the entry first in BootOrder, and fails the run when any step or read-back
+          # fails. Every other entry of a fleet OS (FLEET_OS_ENTRIES) names a partition this run erased
+          # or another disk's, and goes, so an OS change or a retirement leaves none behind. A retired
+          # node powers off, so its next-boot only deletes them, and a failure there is logged and does
+          # not stop the power-off. A run that only attests leaves the firmware's boot order alone.
           - name: next-boot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
             timeout: 120
@@ -128,40 +177,69 @@ spec:
               - |
                 set -eu
                 log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$INSTALL" != true ] && [ "$WIPE" != true ]; then
+                  log "nothing installed or wiped; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ "$RETIRE" = true ]; then
+                  fail() { log "$*; the retired node powers off with its boot entries as they are"; exit 0; }
+                else
+                  fail() { log "$*; the run fails, and the node stays in HookOS"; exit 1; }
+                fi
+                # HookOS mounts efivarfs read-write, but the Talos installer remounts it read-only when it is
+                # done, and efivarfs has one superblock, so every mount of it in HookOS is read-only after an
+                # install. Remount it read-write.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  fail "efivarfs did not mount ($err)"
+                fi
+                err=$(mount -o remount,rw /sys/firmware/efi/efivars 2>&1) || fail "efivarfs stays read-only ($err)"
+                entries=$(efibootmgr -v 2>&1) || fail "efibootmgr failed ($entries)"
+                num() { sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*/\1/p'; }
+                guid=""
+                if [ "$INSTALL" = true ]; then
+                  # The installer's entry is the one on this install's EFI system partition, found by its
+                  # type, since Ubuntu's has no name.
+                  esp=""
+                  for p in $(sgdisk -p "$DISK" | awk '$1 ~ /^[0-9]+$/ { print $1 }'); do
+                    if sgdisk -i "$p" "$DISK" | grep -qi '^Partition GUID code: C12A7328-F81F-11D2-BA4B-00A0C93EC93B'; then
+                      esp=$p
+                      break
+                    fi
+                  done
+                  [ -n "$esp" ] || fail "$DISK has no EFI system partition"
+                  guid=$(sgdisk -i "$esp" "$DISK" | sed -n 's/^Partition unique GUID: //p' | tr 'A-F' 'a-f')
+                  [ -n "$guid" ] || fail "$DISK's EFI system partition has no GUID"
+                  n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
+                  [ -n "$n" ] || fail "no boot entry names $DISK's EFI system partition ($guid)"
+                fi
+                for s in $(printf '%s\n' "$entries" | grep -E "^Boot[0-9A-Fa-f]{4}\*? ($FLEET_OS_ENTRIES)([[:space:]]|$)" | num); do
+                  if [ -n "$guid" ] && printf '%s\n' "$entries" | grep -i "^Boot$s" | grep -qi "$guid"; then continue; fi
+                  err=$(efibootmgr -q -b "$s" -B 2>&1) || fail "the stale entry Boot$s cannot be deleted ($err)"
+                  log "deleted the stale entry Boot$s"
+                done
                 if [ "$RETIRE" = true ]; then
                   log "a retired node powers off; no next boot"
                   exit 0
                 fi
-                # BootNext is a convenience: with netboot off for the node, a refused PXE falls
-                # through to the installed disk anyway, so an EFI failure here is logged, not fatal.
-                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
-                  log "efivarfs did not mount ($err); the firmware's boot order decides the next boot"
-                  exit 0
-                fi
-                if ! entries=$(efibootmgr -v 2>&1); then
-                  log "efibootmgr failed ($entries); the firmware's boot order decides the next boot"
-                  exit 0
-                fi
                 if [ "$INSTALL" = true ]; then
-                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*Ubuntu.*/\1/p' | head -n 1)
-                  [ -n "$n" ] || n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*HD(.*/\1/p' | head -n 1)
                   what="the installed disk"
-                elif [ "$WIPE" = true ]; then
+                else
                   n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  [ -n "$n" ] || fail "no IPv4 network boot entry"
                   what="IPv4 network"
-                else
-                  log "nothing installed or wiped; the firmware's boot order decides the next boot"
-                  exit 0
                 fi
-                if [ -z "$n" ]; then
-                  log "no entry for $what; the firmware's boot order decides the next boot"
-                  exit 0
-                fi
-                if err=$(efibootmgr -q -n "$n" 2>&1); then
-                  log "Boot$n ($what) is the next boot"
-                else
-                  log "BootNext refused ($err); the firmware's boot order decides the next boot"
-                fi
+                # The entry goes first in BootOrder, so every later boot without an override takes it too, and
+                # BootNext makes the next one certain.
+                order=$(efibootmgr | sed -n 's/^BootOrder: //p' | tr ',' '\n' | grep -iv "^$n\$" | while read -r o; do
+                  efibootmgr | grep -qi "^Boot$o" && printf ',%s' "$o"; done)
+                err=$(efibootmgr -q -o "$n$order" 2>&1) || fail "BootOrder refused ($err)"
+                err=$(efibootmgr -q -n "$n" 2>&1) || fail "BootNext refused ($err)"
+                now=$(efibootmgr)
+                got_next=$(printf '%s\n' "$now" | sed -n 's/^BootNext: //p')
+                got_order=$(printf '%s\n' "$now" | sed -n 's/^BootOrder: //p')
+                [ "$got_next" = "$n" ] || fail "BootNext reads back as '${got_next}', not $n"
+                case "$got_order" in "$n"|"$n",*) ;; *) fail "BootOrder reads back as '${got_order}', not $n first" ;; esac
+                log "Boot$n ($what) is the next boot and first in BootOrder ($got_order)"
           # A retired node powers off instead, and stays off until somebody turns it on.
           - name: reboot
             image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f
@@ -176,7 +254,8 @@ spec:
                 key=b; what="rebooting"
                 if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
                 # A detached container reboots or powers off the node after this action reports success.
-                docker run -d --privileged --name provision-reboot \
+                docker rm -f provision-reboot >/dev/null 2>&1 || true
+                docker run -d --rm --privileged --name provision-reboot \
                   ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:dd679b3712476b2ff86c3aec8edbc3b64f57e08c1d94472e2c0993a8a4d3007f \
                   sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
                 for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done

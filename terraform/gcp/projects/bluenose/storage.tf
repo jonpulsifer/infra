@@ -172,3 +172,59 @@ resource "google_storage_bucket_iam_member" "kthx" {
   role   = "roles/storage.objectAdmin"
   member = google_service_account.kthx.member
 }
+
+# kthx quick sites: each site is the folder `<name>/` holding its live files and
+# the `<name>/.kthx` marker that names its owner. nginx serves it through a
+# read-only gcsfuse mount; `kthx deploy` writes it straight from the caller's
+# credentials. Versioning is the only undo.
+resource "google_storage_bucket" "kthx_sites" {
+  name                        = "bluenose-kthx-sites"
+  location                    = local.region
+  force_destroy               = false
+  uniform_bucket_level_access = true
+  public_access_prevention    = "enforced"
+
+  versioning {
+    enabled = true
+  }
+
+  lifecycle_rule {
+    condition {
+      num_newer_versions = 3
+      with_state         = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  lifecycle_rule {
+    condition {
+      days_since_noncurrent_time = 30
+      with_state                 = "ARCHIVED"
+    }
+    action {
+      type = "Delete"
+    }
+  }
+
+  depends_on = [module.vessel]
+}
+
+resource "google_storage_bucket_iam_member" "kthx_sites_writers" {
+  for_each = {
+    owner    = "user:jonathan@pulsifer.ca"
+    server   = google_service_account.kthx.member
+    deployer = google_service_account.kthx_deployer.member
+  }
+
+  bucket = google_storage_bucket.kthx_sites.name
+  role   = "roles/storage.objectAdmin"
+  member = each.value
+}
+
+resource "google_storage_bucket_iam_member" "kthx_sites_reader" {
+  bucket = google_storage_bucket.kthx_sites.name
+  role   = "roles/storage.objectViewer"
+  member = google_service_account.kthx_sites.member
+}

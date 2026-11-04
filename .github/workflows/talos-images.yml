@@ -1,7 +1,8 @@
 name: talos-images
-# Builds folly's signed Talos boot assets with the siderolabs imager, and its
-# signed netboot iPXE and HookOS with Nix, using the Secure Boot keys in
-# 1Password, then publishes them. A pull request only checks the inputs: the
+# Builds folly's signed Talos boot assets with the siderolabs imager (the
+# installer, the ISO and the metal disk image fleet-boot writes), and its
+# signed netboot iPXE, HookOS and fleet-boot with Nix, using the Secure Boot
+# keys in 1Password, then publishes them. A pull request only checks the inputs: the
 # build needs the keys.
 on:
   push:
@@ -11,6 +12,17 @@ on:
       - clusters/folly/config/anchor-topology.json
       - nix/images/ipxe-folly.nix
       - nix/images/hookos-folly.nix
+      - nix/images/fleet-boot.nix
+      # The fleet-boot binary the fleet-boot UKI carries, and what it imports.
+      - apps/fleetd/package.nix
+      - apps/fleetd/go.mod
+      - apps/fleetd/go.sum
+      - apps/fleetd/cmd/fleet-boot/**
+      - apps/fleetd/client/**
+      - apps/fleetd/protocol/**
+      - apps/fleetd/lldp/**
+      - apps/fleetd/fleetboot/**
+      - apps/fleetd/classes/**
       # HookOS's fleet_attest_url reads this.
       - terraform/network/tailscale/fleet.tf.json
       - .github/scripts/talos-image-inputs.sh
@@ -18,6 +30,10 @@ on:
       - .github/scripts/talos-images-build.sh
       - .github/scripts/talos-installer-verify.sh
       - .github/scripts/talos-installer-verify_test.sh
+      - .github/scripts/talos-uki-config-verify.sh
+      - .github/scripts/talos-uki-testlib.sh
+      - .github/scripts/talos-metal-verify.sh
+      - .github/scripts/talos-metal-verify_test.sh
       - .github/scripts/talos-netboot-build.sh
       - .github/scripts/talos-netboot-verify.sh
       - .github/scripts/talos-uki-verify.sh
@@ -98,7 +114,9 @@ jobs:
             bash .github/scripts/talos-image-inputs.sh "$tf" || return 1
             git show "$rev:clusters/folly/config/anchor-topology.json" | jq -r '.data.SPORE_BOOTSTRAP_IP' || return 1
             git ls-tree -r "$rev" -- "$ROOT/secureboot" "$ROOT/netboot.json" \
-              nix/images/ipxe-folly.nix nix/images/hookos-folly.nix \
+              nix/images/ipxe-folly.nix nix/images/hookos-folly.nix nix/images/fleet-boot.nix \
+              apps/fleetd/package.nix apps/fleetd/go.mod apps/fleetd/go.sum apps/fleetd/cmd/fleet-boot \
+              apps/fleetd/client apps/fleetd/protocol apps/fleetd/lldp apps/fleetd/fleetboot apps/fleetd/classes \
               terraform/network/tailscale/fleet.tf.json \
               .github/scripts/talos-images-build.sh .github/scripts/talos-netboot-build.sh \
               .github/workflows/talos-images.yml
@@ -132,6 +150,9 @@ jobs:
     permissions:
       contents: write
       packages: write
+    outputs:
+      installer_digest: ${{ steps.push.outputs.digest }}
+      metal_digest: ${{ steps.metal.outputs.digest }}
     env:
       VERSION: ${{ needs.inputs.outputs.version }}
     steps:
@@ -140,9 +161,11 @@ jobs:
         with:
           version: v0.21.6
       - name: Install the signature tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq sbsigntool mtools zstd
       - name: Test the installer check
         run: bash .github/scripts/talos-installer-verify_test.sh
+      - name: Test the metal image check
+        run: bash .github/scripts/talos-metal-verify_test.sh
       - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
         with:
           extra-conf: |
@@ -193,13 +216,13 @@ jobs:
           echo "KEYS=$keys" >>"$GITHUB_ENV"
           echo "HOOKOS_KEYS=$hookos" >>"$GITHUB_ENV"
 
-      - name: Build the installer and ISO
+      - name: Build the installer, ISO and metal image
         run: |
           set -euo pipefail
           bash .github/scripts/talos-image-inputs.sh "$ROOT/talos.tf" >"$RUNNER_TEMP/inputs.json"
           bash .github/scripts/talos-images-build.sh "$RUNNER_TEMP/inputs.json" "$KEYS" "$RUNNER_TEMP/out" "$CONFIG_URL"
 
-      - name: Build and sign iPXE and HookOS
+      - name: Build and sign iPXE, HookOS and fleet-boot
         run: |
           set -euo pipefail
           bash .github/scripts/talos-netboot-build.sh \
@@ -229,16 +252,32 @@ jobs:
             echo '```'
           } >>"$GITHUB_STEP_SUMMARY"
 
-      - name: iPXE and HookOS must verify against the committed certificates
+      - name: iPXE, HookOS and fleet-boot must verify against the committed certificates
         run: |
           set -euo pipefail
           bash .github/scripts/talos-netboot-verify.sh "$ROOT/secureboot" "$ROOT/netboot.json" "$RUNNER_TEMP/out" \
             | tee "$RUNNER_TEMP/netboot.txt"
           {
-            echo "### HookOS command line"
+            echo "### HookOS and fleet-boot command lines"
             echo '```'
-            sed -n 's/^.*: command line: //p' "$RUNNER_TEMP/netboot.txt"
+            sed -n 's/^.*\/\([^/]*\)\.efi: command line: /\1: /p' "$RUNNER_TEMP/netboot.txt"
             echo '```'
+            sed -n 's/^.*\/\(fleet-boot[^/]*\.efi\): \([0-9]*\) bytes$/fleet-boot UKI: \2 bytes/p' "$RUNNER_TEMP/netboot.txt"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+      # fleet-boot writes this image for a Talos class and puts the install
+      # code in its META, so the image must carry none.
+      - name: The metal image's UKI must verify and fetch its config by code
+        id: metal
+        run: |
+          set -euo pipefail
+          img="$RUNNER_TEMP/out/metal-amd64-secureboot.raw.zst"
+          bash .github/scripts/talos-metal-verify.sh "$ROOT/secureboot/uki-signing-cert.pem" "$img" "$CONFIG_URL" \
+            | tee "$RUNNER_TEMP/metal.txt"
+          echo "digest=sha256:$(sha256sum "$img" | cut -d ' ' -f 1)" >>"$GITHUB_OUTPUT"
+          {
+            echo "### Metal image"
+            sed -n 's/^.*: \([0-9]* bytes compressed.*\)$/\1/p' "$RUNNER_TEMP/metal.txt"
           } >>"$GITHUB_STEP_SUMMARY"
 
       - name: Keep the installer for a look when a check fails
@@ -251,17 +290,20 @@ jobs:
           retention-days: 3
 
       - name: Push the installer
+        id: push
         run: |
           set -euo pipefail
           image="$INSTALLER_REPO:$VERSION"
           crane push "$RUNNER_TEMP/out/installer-amd64-secureboot.tar" "$image"
-          echo "Installer: \`$image@$(crane digest "$image")\`" >>"$GITHUB_STEP_SUMMARY"
+          digest=$(crane digest "$image")
+          echo "digest=$digest" >>"$GITHUB_OUTPUT"
+          echo "Installer: \`$image@$digest\`" >>"$GITHUB_STEP_SUMMARY"
 
       # Releases in this repository are immutable, and a tag name that an
       # immutable release used is spent for good. Each build is its own release,
       # tagged with the run id; gh uploads the assets to a draft and publishes
       # once. The mirror on each anchor takes the newest release of the version.
-      - name: Publish the ISO, iPXE and HookOS
+      - name: Publish the ISO, metal image, iPXE, HookOS and fleet-boot
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -271,6 +313,81 @@ jobs:
           gh release create "$tag" --target "$GITHUB_SHA" --latest=false \
             --title "Talos $VERSION for $SITE, build $GITHUB_RUN_ID" --notes "$notes" \
             "$RUNNER_TEMP/out/metal-amd64-secureboot.iso" \
+            "$RUNNER_TEMP/out/metal-amd64-secureboot.raw.zst" \
             "$RUNNER_TEMP/out/ipxe-amd64-secureboot.efi" \
-            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi"
+            "$RUNNER_TEMP/out/hookos-amd64-secureboot-uki.efi" \
+            "$RUNNER_TEMP/out/fleet-boot-amd64-secureboot-uki.efi"
           echo "Release: \`$tag\`" >>"$GITHUB_STEP_SUMMARY"
+
+  # fleetd installs only an image pinned by digest, so each build pins the
+  # installer it pushed, and the metal image it published for fleet-boot, in
+  # clusters/folly/fleet/classes.json, through a pull request the
+  # continuous-delivery App opens and merges, as containers.yml does for the
+  # other images. The tag in class-inputs.json is the Talos root's
+  # own and stays; fleetd prefers the class table's pin.
+  pin:
+    needs: [inputs, build]
+    if: >-
+      needs.build.result == 'success'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: main
+          # The pull request's checks run only when the identity that opens it
+          # also pushes the branch, so git must not send GITHUB_TOKEN.
+          persist-credentials: false
+      - name: Mint a continuous-delivery App token
+        id: cd-app-token
+        if: vars.CD_APP_ID != ''
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ vars.CD_APP_ID }}
+          private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
+      - name: Pin the installer digest and the metal image in the class table
+        env:
+          GH_TOKEN: ${{ steps.cd-app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          DIGEST: ${{ needs.build.outputs.installer_digest }}
+          METAL_DIGEST: ${{ needs.build.outputs.metal_digest }}
+          VERSION: ${{ needs.inputs.outputs.version }}
+          CLASSES: clusters/folly/fleet/classes.json
+          BRANCH_NAME: cd/talos-installer-digest
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the build pushed no digest"; exit 1; }
+          [[ "$METAL_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::the build published no metal image digest"; exit 1; }
+          image="$INSTALLER_REPO@$DIGEST"
+          # The release the build job published, its tag's slash encoded.
+          metal="https://github.com/$GITHUB_REPOSITORY/releases/download/talos-$SITE%2F$VERSION-$GITHUB_RUN_ID/metal-amd64-secureboot.raw.zst"
+          # Each build's metal image hashes differently and lives in its own
+          # release, so it moves only with the installer: a build whose
+          # installer every Talos class already pins, beside an image, pins
+          # nothing.
+          if jq -e --arg image "$image" '[.[] | select(.os == "talos") | .installer_image == $image and (.image // "") != ""] | all' "$CLASSES" >/dev/null; then
+            echo "$CLASSES already pins $image and a metal image beside it"
+            exit 0
+          fi
+          jq --arg image "$image" --arg metal "$metal" --arg digest "$METAL_DIGEST" \
+            'with_entries(if .value.os == "talos" then .value.installer_image = $image | .value.image = $metal | .value.image_digest = $digest | .value.image_format = "raw.zst" else . end)' \
+            "$CLASSES" >"$RUNNER_TEMP/classes.json"
+          cp "$RUNNER_TEMP/classes.json" "$CLASSES"
+          git config user.name "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]"
+          git config user.email "${{ steps.cd-app-token.outputs.app-slug || 'github-actions' }}[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git checkout -B "$BRANCH_NAME"
+          git commit -am "fix(cd): pin the Talos $VERSION installer and metal image" -m "$image" -m "$metal $METAL_DIGEST"
+          git push origin "$BRANCH_NAME" --force
+          title="fix(cd): pin the Talos $VERSION installer and metal image"
+          body="Automated pin of the installer this build pushed, and of the metal disk image it published for fleet-boot, by URL and sha256, for fleetd's class table."
+          if [ -z "$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH_NAME" --state open --json number --jq '.[0].number')" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body" --head "$BRANCH_NAME" --base main
+          else
+            gh pr edit "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
+          # On the merge commit only: the branch commit keeps its checks.
+          gh pr merge "$BRANCH_NAME" --repo "$GITHUB_REPOSITORY" --auto --squash --body "[skip ci]"

@@ -8,6 +8,7 @@ configMapGenerator:
       - coredns.json
       - flameboss.json
       - pbx.json
+      - sensor.json
       - spore.json
       - windows.json
 generatorOptions:

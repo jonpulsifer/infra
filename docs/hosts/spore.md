@@ -1,6 +1,6 @@
 ---
 title: spore
-description: A Raspberry Pi 5 on NVMe that serves x86 netboot, forge's HTTP boot image, the Talos boot image and Tinkerbell, lab DNS and time, and the SPIRE server.
+description: A Raspberry Pi 5 on NVMe that serves x86 netboot, forge's HTTP boot image, the Talos boot image and Tinkerbell, lab DNS and time, the SPIRE server and tsidp.
 specs:
   vendor: Raspberry Pi
   model: Raspberry Pi 5 Model B Rev 1.1 (8 GB)
@@ -21,11 +21,13 @@ spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab D
 
 - The `/nfs/data` filesystem, which holds Garage, the rackpi5 boot images and an export to the Lab future network (`nfs-server.nix`). No Kubernetes volume lives on it.
 - [Netboot](../platform/nixos/netboot.md) for x86 PXE and [rackpi5](rackpi5.md) (`pxe-netboot.nix`, `spore-native-boot.nix`)
-- [Tinkerbell](../platform/nixos/tinkerbell.md), which answers PXE for folly's Talos nodes and reprovisions them (`tinkerbell.nix`)
+- [Tinkerbell](../platform/nixos/tinkerbell.md), which reprovisions folly's Talos nodes (`tinkerbell.nix`), with HookOS's syslog in the journal (`hookos-syslog.nix`)
+- [Kea](../platform/nixos/kea.md), the Kubernetes network's DHCP once the gateway relays it here (`kea.nix`)
 - [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) through `nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix` and `ntp-server.nix`
 - [Talos boot](../platform/nixos/talos-boot.md) and [fleetd](../apps/fleetd.md) on the bootstrap VLAN (`talos-boot.nix`, `fleetd.nix`), with the DevID CA on its YubiKey (`devid-ca-yubikey.nix`)
 - folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage-ha` (`garage.nix`), as a node of the [Garage cluster](../platform/backups.md#garage-cluster). The old standalone store in `/nfs/data/garage` is the rollback.
 - The [SPIRE server](../platform/identity.md) that attests Talos nodes by TPM (`spire-server.nix`)
+- [tsidp](../platform/identity.md#people-on-the-tailnet), the tailnet's OIDC provider for kubectl, as the tailnet node `idp` with state in `/var/lib/tsidp` (`tsidp.nix`)
 
 ## Reach
 

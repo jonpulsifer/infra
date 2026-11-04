@@ -3,10 +3,8 @@
  * identity proxy vouched for. The no-operator 404 is in `sites.test.ts`.
  */
 import { describe, expect, test } from 'bun:test';
-import { join } from 'node:path';
-import { tarGz } from '../../cli/tar.ts';
 import { readConfig } from '../../server/env.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer } from '../harness/server.ts';
 
 const IDENTITY = 'ops.kthx-tailnet.test';
 /** The proxy pod, the only peer allowed to speak for a person. */
@@ -40,41 +38,8 @@ interface Site {
   readonly token: string;
 }
 
-async function claim(name: string, from = address()) {
-  return kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: from,
-    }),
-  );
-}
-
 async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await claim(name);
-  expect(response.status).toBe(201);
-  return {
-    name,
-    host: `${name}.${ZONE}`,
-    token: (await response.json()).token,
-  };
-}
-
-/** So the nuke has bytes on the volume to take as well as rows. */
-async function publish(site: Site): Promise<void> {
-  const uploaded = await kthx().fetch(
-    ask(`/api/sites/${site.name}/releases`, {
-      method: 'POST',
-      token: site.token,
-      body: tarGz([
-        { path: 'index.html', bytes: new TextEncoder().encode('hi') },
-      ]),
-      address: address(),
-    }),
-  );
-  expect(uploaded.status).toBe(201);
+  return kthx().site(label);
 }
 
 /**
@@ -103,66 +68,57 @@ async function inPostgres(name: string): Promise<boolean> {
   return row?.there ?? false;
 }
 
+const inBucket = (name: string) =>
+  kthx().gcs.names(kthx().bucket, `${name}/`).length > 0;
+
+async function free(name: string): Promise<boolean> {
+  const answer = await kthx().fetch(
+    ask(`/api/names/${name}`, { address: address() }),
+  );
+  return ((await answer.json()) as { available: boolean }).available;
+}
+
+/** So the site database is written to, not merely provisioned. */
+async function write(site: Site): Promise<void> {
+  const wrote = await kthx().fetch(
+    ask('/api/db/notes', {
+      host: site.host,
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        origin: `https://${site.host}`,
+      },
+      body: JSON.stringify({ title: 'hi' }),
+      address: address(),
+    }),
+  );
+  expect(wrote.status).toBe(201);
+}
+
 describe('the nuke', () => {
-  test('takes every site, its database, its bytes, and frees its name', async () => {
+  test('takes every site, its folder, its database, and frees its name', async () => {
     const first = await claimed('one');
     const second = await claimed('two');
-    await publish(first);
-    // So the site database is written to, not merely provisioned.
-    const wrote = await kthx().fetch(
-      ask('/api/db/notes', {
-        host: first.host,
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          origin: `https://${first.host}`,
-        },
-        body: JSON.stringify({ title: 'hi' }),
-        address: address(),
-      }),
-    );
-    expect(wrote.status).toBe(201);
+    await write(first);
     expect(await inPostgres(first.name)).toBe(true);
 
     const answer = await nuke();
     expect(answer.status).toBe(200);
     expect(await answer.json()).toEqual({ deleted: 2, failed: 0 });
 
-    const listed = await kthx().fetch(
-      ask('/api/sites', { address: address() }),
-    );
-    const items = ((await listed.json()).items as { name: string }[]).map(
-      (item) => item.name,
-    );
-    expect(items).not.toContain(first.name);
-    expect(items).not.toContain(second.name);
-    expect(await inPostgres(first.name)).toBe(false);
-    expect(await inPostgres(second.name)).toBe(false);
-    expect(
-      await Bun.file(
-        join(kthx().sitesDir, first.name, '1/index.html'),
-      ).exists(),
-    ).toBe(false);
-
-    // A hard delete frees the name instead of answering 410.
-    const again = await claim(first.name);
-    expect(again.status).toBe(201);
-    expect((await kthx().fetch(ask('/', { host: first.host }))).status).toBe(
-      404,
-    );
+    for (const site of [first, second]) {
+      expect(inBucket(site.name)).toBe(false);
+      expect(await inPostgres(site.name)).toBe(false);
+      expect(await free(site.name)).toBe(true);
+    }
   });
 
-  test('takes a name that was already deleted, so it comes free too', async () => {
-    const site = await claimed('gone');
-    const removed = await kthx().fetch(
-      ask(`/api/sites/${site.name}`, { method: 'DELETE', token: site.token }),
-    );
-    expect(removed.status).toBe(204);
-    // A soft delete keeps the row, so the name answers 410 and cannot be claimed.
-    expect((await claim(site.name)).status).toBe(409);
-
+  test('takes a database whose marker is already gone', async () => {
+    const site = await claimed('orphan');
+    await write(site);
+    kthx().gcs.buckets.get(kthx().bucket)?.delete(`${site.name}/.kthx`);
     expect(await (await nuke()).json()).toEqual({ deleted: 1, failed: 0 });
-    expect((await claim(site.name)).status).toBe(201);
+    expect(await inPostgres(site.name)).toBe(false);
   });
 
   test('is not opened by another person, or by nobody at all', async () => {
@@ -178,12 +134,12 @@ describe('the nuke', () => {
     expect(anonymous.status).toBe(401);
     expect((await anonymous.json()).code).toBe('UNAUTHENTICATED');
 
-    expect(await inPostgres(site.name)).toBe(true);
+    expect(inBucket(site.name)).toBe(true);
   });
 
-  test('is not opened by a site bearer, on any door', async () => {
-    const site = await claimed('bearer');
-    // A bearer opens one site; none opens the zone.
+  test("is not opened by a site owner's ID token, on any door", async () => {
+    const site = await claimed('owner');
+    // A token opens its owner's sites; none opens the zone.
     const refused = await kthx().fetch(
       ask('/api/sites', {
         method: 'DELETE',
@@ -192,7 +148,7 @@ describe('the nuke', () => {
       }),
     );
     expect(refused.status).toBe(401);
-    expect(await inPostgres(site.name)).toBe(true);
+    expect(inBucket(site.name)).toBe(true);
   });
 
   test('is not opened by a peer this deployment does not believe', async () => {
@@ -201,7 +157,7 @@ describe('the nuke', () => {
     // is nobody.
     const refused = await nuke(OPERATOR, '198.51.100.9');
     expect(refused.status).toBe(401);
-    expect(await inPostgres(site.name)).toBe(true);
+    expect(inBucket(site.name)).toBe(true);
   });
 
   test('refuses a browser that is not on this host', async () => {
@@ -218,7 +174,21 @@ describe('the nuke', () => {
       peer(PROXY),
     );
     expect(refused.status).toBe(403);
-    expect(await inPostgres(site.name)).toBe(true);
+    expect(inBucket(site.name)).toBe(true);
+  });
+
+  test('an admin login deletes any one site, as its owner can', async () => {
+    const site = await claimed('one-site');
+    const removed = await kthx().fetch(
+      ask(`/api/sites/${site.name}`, {
+        method: 'DELETE',
+        host: IDENTITY,
+        headers: { 'tailscale-user-login': OPERATOR },
+      }),
+      peer(PROXY),
+    );
+    expect(removed.status).toBe(204);
+    expect(inBucket(site.name)).toBe(false);
   });
 });
 
@@ -227,6 +197,7 @@ describe('who the environment names', () => {
     DATABASE_URL: 'postgres://x/y',
     KTHX_ME_KEY: 'm'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_SITES_BUCKET: 'sites',
     KTHX_ADMIN_LOGINS: admins,
   });
 

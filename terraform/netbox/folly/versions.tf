@@ -19,6 +19,11 @@ terraform {
       source  = "Mastercard/restapi"
       version = "~> 3.0"
     }
+    # Fills the password the provider requires of an API-only user.
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.7"
+    }
     onepassword = {
       source  = "1Password/onepassword"
       version = "~> 3.0"
@@ -36,8 +41,9 @@ locals {
 }
 
 # An API Credential item whose credential is a NetBox v2 token (nbt_<key>.<token>)
-# that may change devices, IP addresses, cables, device types, custom fields,
-# webhooks and event rules.
+# of the `terraform` NetBox user, which may change devices, IP addresses,
+# cables, device types, custom fields, webhooks, event rules, users and
+# permissions (users.tf).
 ephemeral "onepassword_item" "netbox" {
   vault = local.vault_id
   title = "netbox-folly-terraform"

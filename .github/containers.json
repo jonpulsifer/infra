@@ -16,6 +16,9 @@
     "spire-agent-tpm",
     "kthx-engine",
     "kthx-engine-verifier",
+    "gcsfuse",
+    "keylime-agent",
+    "keylime-server",
     "switchboard",
     "tally",
     "tally-ocr",
@@ -33,6 +36,9 @@
     ],
     "flameboss": [
       "clusters/folly/monitoring/flameboss.yaml"
+    ],
+    "gcsfuse": [
+      "clusters/offsite/apps/kthx-sites/deployment.yaml"
     ],
     "hub": [
       "clusters/offsite/apps/hub/helm-release.yaml"
@@ -82,7 +88,8 @@
       "clusters/folly/apps/spire/tpm-reattest.yaml"
     ],
     "tink-reprovision-tools": [
-      "clusters/folly/tinkerbell/template.yaml"
+      "clusters/folly/tinkerbell/template.yaml",
+      "clusters/folly/tinkerbell/template-image.yaml"
     ],
     "weather": [
       "clusters/offsite/apps/weather/deployment.yaml"

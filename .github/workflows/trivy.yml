@@ -47,19 +47,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: Run Trivy config scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_IGNOREFILE: ${{ github.workspace }}/.github/trivyignore.yaml
+      # mise installs trivy from its GitHub release. trivy-action's installer
+      # fetches from get.trivy.dev, which the runners could not resolve.
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
-          scan-type: config
-          scan-ref: ${{ matrix.dir }}
-          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
-          hide-progress: false
-          ignore-unfixed: true
-          output: trivy-config.txt
-          exit-code: 0
-          severity: CRITICAL,HIGH
+          install_args: trivy
+      - name: Run Trivy config scan
+        run: >-
+          trivy config
+          --config .github/trivy.yaml
+          --ignorefile .github/trivyignore.yaml
+          --severity CRITICAL,HIGH
+          --exit-code 0
+          --output trivy-config.txt
+          "${{ matrix.dir }}"
       - name: Output Trivy config results
         if: always()
         run: |
@@ -86,33 +87,30 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          install_args: trivy
       - name: Run Trivy config scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        env:
-          TRIVY_IGNOREFILE: ${{ github.workspace }}/.github/trivyignore.yaml
-        with:
-          scan-type: config
-          scan-ref: .
-          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
-          ignore-unfixed: true
-          format: sarif
-          limit-severities-for-sarif: true
-          output: trivy-config.sarif
-          exit-code: 0
-          severity: CRITICAL,HIGH
+        run: >-
+          trivy config
+          --config .github/trivy.yaml
+          --ignorefile .github/trivyignore.yaml
+          --severity CRITICAL,HIGH
+          --exit-code 0
+          --format sarif
+          --output trivy-config.sarif
+          .
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: filesystem
-          scan-ref: .
-          trivy-config: ${{ github.workspace }}/.github/trivy.yaml
-          skip-setup-trivy: true
-          ignore-unfixed: true
-          format: sarif
-          limit-severities-for-sarif: true
-          output: trivy-fs.sarif
-          exit-code: 0
-          severity: CRITICAL,HIGH
+        run: >-
+          trivy fs
+          --config .github/trivy.yaml
+          --ignorefile .github/trivyignore.yaml
+          --ignore-unfixed
+          --severity CRITICAL,HIGH
+          --exit-code 0
+          --format sarif
+          --output trivy-fs.sarif
+          .
       - name: Upload config results
         uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
         with:

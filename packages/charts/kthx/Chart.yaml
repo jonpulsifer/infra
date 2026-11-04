@@ -1,6 +1,6 @@
 apiVersion: v2
 name: kthx
-description: The kthx server, its sites volume, its own CloudNativePG cluster, the nightly dump, and the route every kthx.dev name arrives on
+description: The kthx server, its sites bucket, its own CloudNativePG cluster, the nightly dump, and the apex and control routes
 type: application
 version: 0.3.0
 appVersion: "latest"

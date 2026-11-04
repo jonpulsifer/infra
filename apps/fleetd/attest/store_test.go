@@ -1,8 +1,13 @@
 package attest
 
 import (
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/pem"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -42,8 +47,8 @@ func TestStoreRefusesPathsAsNames(t *testing.T) {
 	}
 }
 
-// The intake name of a device created on first sight is a safe slug of
-// the claimed serial, never a path.
+// The intake name a claim for a serial NetBox lacks waits under is a safe
+// slug of the claimed serial, never a path.
 func TestIntakeNameNeverIsAPath(t *testing.T) {
 	for serial, want := range map[string]string{
 		"MXL0172Q6L":           "intake-mxl0172q6l",
@@ -147,5 +152,69 @@ func TestStoreKeepsOneRecordPerSerial(t *testing.T) {
 	}
 	if rec, _, _ := s.RecordBySerial("MXL9"); rec.Machine != "shoal" {
 		t.Fatalf("by serial with an older twin: %+v", rec)
+	}
+}
+
+// A machine's identity is the SHA-1 of its LDevID, the agent ID SPIRE's
+// tpm_devid gives it, and its EK hashes; one with no LDevID has only hashes.
+func TestStoreIdentities(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf := newTestCA(t, "surge", nil, 0).cert
+	ca := newTestCA(t, "FML DevID test CA", nil, 0).cert
+	var chain []byte
+	for _, c := range []*x509.Certificate{leaf, ca} {
+		chain = append(chain, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})...)
+	}
+	if err := s.Save(Record{Machine: "surge", Serial: "S1", EKHashes: map[string]string{"rsa": "bb", "ecc": "aa"}}, map[string][]byte{fileLDevIDCert: chain}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Record{Machine: "swell", Serial: "S2", EKHashes: map[string]string{"rsa": "cc"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.Identities()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha1.Sum(leaf.Raw)
+	want := []Identity{
+		{Machine: "surge", Fingerprint: hex.EncodeToString(sum[:]), NotAfter: leaf.NotAfter, EKHashes: []string{"aa", "bb"}},
+		{Machine: "swell", EKHashes: []string{"cc"}},
+	}
+	if !reflect.DeepEqual(ids, want) {
+		t.Errorf("identities:\n got %+v\nwant %+v", ids, want)
+	}
+}
+
+func TestStoreRetireKeepsTheRecordAndFiles(t *testing.T) {
+	s, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	files := map[string][]byte{fileLDevIDCert: []byte("cert")}
+	if err := s.Save(Record{Machine: "riptide", Serial: "MXL1", Status: StatusAttested, LDevIDSerial: "ab"}, files); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Save(Record{Machine: "swell", Serial: "MXL2", Status: StatusAttested}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := s.Retire("mxl1", first); err != nil || n != 1 {
+		t.Fatalf("Retire: %d %v", n, err)
+	}
+	if n, err := s.Retire("MXL1", first.Add(time.Hour)); err != nil || n != 0 {
+		t.Fatalf("a second Retire: %d %v", n, err)
+	}
+	rec, _, _ := s.Record("riptide")
+	if rec.Status != StatusRetired || !rec.RetiredAt.Equal(first) || rec.LDevIDSerial != "ab" || rec.Issued() {
+		t.Fatalf("retired record: %+v", rec)
+	}
+	if b, err := s.File("riptide", fileLDevIDCert); err != nil || string(b) != "cert" {
+		t.Fatalf("file after Retire: %q %v", b, err)
+	}
+	if other, _, _ := s.Record("swell"); other.Status != StatusAttested {
+		t.Fatalf("another serial's record changed: %+v", other)
 	}
 }

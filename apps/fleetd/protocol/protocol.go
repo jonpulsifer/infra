@@ -36,8 +36,7 @@ const (
 	VerdictFailedNoQuarantine = "failed-no-quarantine"
 )
 
-// Machine is what the host says about itself, from SMBIOS and its NIC. The
-// hardware facts fill the NetBox device the service creates on first sight.
+// Machine is what the host says about itself, from SMBIOS and its NIC.
 type Machine struct {
 	Serial       string `json:"serial"`
 	UUID         string `json:"uuid"`
@@ -187,7 +186,7 @@ type Verdict struct {
 
 // RenewRequest opens a renewal for the machine with this SMBIOS serial. The
 // service answers 404 when it holds no LAK for the serial, and 403 when the
-// machine's status forbids a renewal. Check asks for the daily check
+// machine's status forbids a renewal. Check asks for the hourly check
 // instead: the same evidence on the same routes, judged by the renewal
 // policy, recorded as a pass or a quarantine, and no new certificate.
 type RenewRequest struct {
@@ -196,7 +195,7 @@ type RenewRequest struct {
 }
 
 // RenewStart carries the renewal's session and its quote nonce. Check is
-// true only when the service opened the daily check the request asked for:
+// true only when the service opened the hourly check the request asked for:
 // a service that predates the check leaves it false, and the client then
 // sends no evidence, which that service would answer with new certificates.
 type RenewStart struct {
@@ -232,8 +231,8 @@ type Renewed struct {
 
 // ConfirmRequest reports that the host stored its certificates.
 // Signature is the session's AK signing ConfirmDigest, a TPMT_SIGNATURE: the
-// device flow is plain HTTP, so only a confirm the TPM that passed signed
-// gets an install code. A wrong signature is refused; an unsigned confirm,
+// transport proves nothing about the sender, so only a confirm the TPM that
+// passed signed gets an install code. A wrong signature is refused; an unsigned confirm,
 // from a client that predates it, confirms without a code.
 type ConfirmRequest struct {
 	NVIndexes []uint32 `json:"nv_indexes,omitempty"`
@@ -309,7 +308,7 @@ type Status struct {
 	Site       string    `json:"site,omitempty"`
 	ConsumedAt time.Time `json:"consumed_at,omitzero"`
 	// LDevIDSerial is the hex serial of the LDevID the verdict stands on. It
-	// binds a verdict to the certificate fleetd serves, since a daily
+	// binds a verdict to the certificate fleetd serves, since an hourly
 	// check moves attested_at without issuing one.
 	LDevIDSerial string `json:"ldevid_serial,omitempty"`
 }

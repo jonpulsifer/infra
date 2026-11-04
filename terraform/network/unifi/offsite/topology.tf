@@ -6,6 +6,7 @@ module "topology" {
 }
 
 locals {
-  topology = module.topology.data
-  lb_range = local.topology.LB_RANGE
+  network_catalog = jsondecode(file("${path.module}/network-catalog.json"))
+  topology        = module.topology.data
+  lb_range        = local.topology.LB_RANGE
 }

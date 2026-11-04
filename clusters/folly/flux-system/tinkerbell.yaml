@@ -1,6 +1,7 @@
 ---
-# The kubeconfig for spore's Tinkerbell API, from 1Password, and the account
-# fleetd on spore cordons a quarantined node as.
+# The kubeconfig for spore's Tinkerbell API, from 1Password, the account
+# fleetd on spore reaches folly as, and the binding that leaves a kubelet's
+# first client certificate to fleetd's approval.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -22,8 +23,9 @@ spec:
       name: spore-tinkerbell-kubeconfig
       namespace: flux-system
 ---
-# Applies the Hardware, Rufio Machine and AMT Secret objects to spore's Tinkerbell API, which runs
-# outside both clusters. Its identity may manage only those kinds in the tinkerbell namespace.
+# Applies the provision Template and the BMC Secrets to spore's Tinkerbell API, which runs outside
+# both clusters. Its identity may write only those kinds in the tinkerbell namespace, and reads the
+# Hardware, Machine and Workflow objects fleetd owns (nix/services/tinkerbell.nix).
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:

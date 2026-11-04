@@ -33,21 +33,21 @@ func (h *harness) runWithNetwork(n *protocol.Network) error {
 	return err
 }
 
-func plannedWithNetworkFields(f *fakeNetBox, preset map[string]any) {
-	fields := map[string]any{"talos_class": "worker-g5"}
+func plannedWithNetworkFields(h *harness, f *fakeNetBox, preset map[string]any) {
+	fields := map[string]any{"class": "worker-g5"}
 	for k, v := range simNetworkFields {
 		fields[k] = v
 	}
 	for k, v := range preset {
 		fields[k] = v
 	}
-	f.add("testbox", simSerial, "planned", simMAC, fields)
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(fields))
 }
 
 func TestPassRecordsTheSignedNetwork(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	plannedWithNetworkFields(f, nil)
+	plannedWithNetworkFields(h, f, nil)
 	if err := h.runWithNetwork(&simNetwork); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPassRecordsTheSignedNetwork(t *testing.T) {
 func TestAttestedAddressMustBeTheSource(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	plannedWithNetworkFields(f, nil)
+	plannedWithNetworkFields(h, f, nil)
 	n := simNetwork
 	n.Address = "192.0.2.5"
 	if err := h.runWithNetwork(&n); err != nil {
@@ -77,9 +77,9 @@ func TestAttestedAddressMustBeTheSource(t *testing.T) {
 		t.Fatalf("NetBox after the pass: %+v", cf)
 	}
 	waitFor(t, "the journal entry", func() bool {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		for _, j := range f.journal {
+		f.Mu.Lock()
+		defer f.Mu.Unlock()
+		for _, j := range f.journalLines() {
 			if strings.Contains(j, "the attested address 192.0.2.5 is not the address the evidence came from (127.0.0.1)") {
 				return true
 			}
@@ -106,7 +106,7 @@ func TestForgedNetworkIsNotRecorded(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			f := newFakeNetBox(t)
 			h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-			plannedWithNetworkFields(f, map[string]any{"attested_address": "192.0.2.9", "attested_network_at": "2026-10-01T00:00:00Z"})
+			plannedWithNetworkFields(h, f, map[string]any{"attested_address": "192.0.2.9", "attested_network_at": "2026-10-01T00:00:00Z"})
 			h.tamper = tamper
 			n := simNetwork
 			l := *simNetwork.LLDP
@@ -129,7 +129,7 @@ func TestForgedNetworkIsNotRecorded(t *testing.T) {
 func TestNetworkWaitsForTheFields(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
-	f.add("testbox", simSerial, "planned", simMAC, map[string]any{"talos_class": "worker-g5"})
+	f.add("testbox", simSerial, "planned", simMAC, h.bound(map[string]any{"class": "worker-g5"}))
 	if err := h.runWithNetwork(&simNetwork); err != nil {
 		t.Fatal(err)
 	}

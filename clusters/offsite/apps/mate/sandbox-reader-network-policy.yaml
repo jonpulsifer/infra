@@ -1,7 +1,7 @@
 ---
 # Read-only sandboxes: DNS and the two API servers on 6443, nothing else.
-# Prometheus and Alertmanager answer through the API server's service proxy,
-# where RBAC admits GET only. No world, no SSH, no pod but kube-dns.
+# Monitoring queries use the API server's service proxy: GET for Prometheus
+# and Alertmanager, GET/POST for Grafana's query-only sidecar. No world, no SSH, no pod but kube-dns.
 # sandboxes.ts stamps this name; test/policy.test.ts checks the two agree,
 # since a selector that matches nothing fails open. mate-sandbox-baseline
 # (sandbox-network-policy.yaml) holds the pod to DNS if this file is missing.

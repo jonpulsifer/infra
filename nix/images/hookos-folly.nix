@@ -1,10 +1,11 @@
-# folly's generic HookOS, packed as one unsigned UKI for every node. Its command line carries no
-# worker_id: the agent image derives the ID from the netbooted NIC's MAC, and the command line pins
-# that image by digest, so the signature covers the agent that attests and wipes disks. The agent
+# folly's generic HookOS, packed as one UKI for every node, which .github/workflows/talos-images.yml
+# signs. Its command line carries no worker_id: the agent image derives the ID from the netbooted
+# NIC's MAC, and the command line pins that image by digest, so the signature covers the agent
+# binary; what the agent runs comes from the Tink server over TLS. The agent
 # sets the clock from fleet_ntp_server and attests against fleet_attest_url before it waits for work
 # (images/tink-agent-autoid). Under Secure Boot the stub ignores any command line iPXE passes, so
-# ../services/fleetd.nix and ./ipxe-folly.nix pass this one. .github/workflows/talos-images.yml signs the UKI with the HookOS key, a db certificate apart
-# from the Talos one, so a HookOS boot never measures Talos's PCR 7.
+# ../services/fleetd.nix and ./ipxe-folly.nix pass this one. The HookOS key is a db certificate
+# apart from the Talos one, so a HookOS boot never measures Talos's PCR 7.
 {
   lib,
   fetchurl,
@@ -15,14 +16,16 @@ let
   lab = import ../lib/anchor.nix;
   fleet = import ../lib/fleet.nix;
   pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
-  # Tink server and syslog are Tinkerbell's on spore's bootstrap address, at its default ports;
-  # chrony and fleetd's enrollment name answer there too.
+  # The Tink server, the syslog receiver (../services/hookos-syslog.nix, or Smee's), chrony and
+  # fleetd's enrollment name all answer at spore's bootstrap address, at the default ports.
   tink = lab.bootstrap.hosts.spore;
   cmdline = lib.concatStringsSep " " [
     "facility="
     "syslog_host=${tink}"
-    "grpc_authority=${tink}:42113"
-    "tinkerbell_tls=false"
+    # The Tink server presents the enrollment name's public certificate (../services/tinkerbell.nix),
+    # which the agent verifies against its bundled roots, as tink-attest does for the attest URL.
+    "grpc_authority=enroll.${fleet.dnsZone}:42113"
+    "tinkerbell_tls=true"
     "tinkerbell_insecure_tls=false"
     "modules=loop,squashfs,sd-mod,usb-storage"
     "intel_iommu=on"

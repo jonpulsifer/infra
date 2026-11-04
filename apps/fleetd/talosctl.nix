@@ -6,7 +6,7 @@
   fetchurl,
 }:
 let
-  version = "1.14.4";
+  version = "1.14.5";
   arch =
     {
       x86_64-linux = "amd64";
@@ -15,8 +15,8 @@ let
     .${stdenvNoCC.hostPlatform.system};
   sha256 =
     {
-      amd64 = "0a69e3f9b682c5cd844b78dae305f6056ceb86c5fcc6913dcea78c527ed97cee";
-      arm64 = "a4430fad81b8dc54d99e0dc7b7ea5d0741b93645bc612cbeadf12855c4ec60bb";
+      amd64 = "ff432b68986709e6b69c563a08a2ced4232d5196b0dccd6d2e783e9d714d7d7d";
+      arm64 = "dfd3aa33c3159810e216fc39afb685d4d120c8f2728e017d8c7f7635d3139382";
     }
     .${arch};
 in

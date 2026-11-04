@@ -46,12 +46,6 @@ afterAll(() => {
 
 const kthx = withServer({ aiUrl: `http://127.0.0.1:${upstream.port}/v1` });
 
-let nextAddress = 0;
-function address(): string {
-  nextAddress += 1;
-  return `198.51.0.${nextAddress % 250}`;
-}
-
 interface Doc {
   id: string;
   etag: string;
@@ -143,19 +137,7 @@ async function evaluated(
 
 /** The SDK as a `<script>` tag loads it, pointed at one site. */
 async function loaded(label: string): Promise<Sdk> {
-  const name = kthx().name(label);
-  const claim = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(claim.status).toBe(201);
-  await claim.json();
-
-  const host = `${name}.${ZONE}`;
+  const { name, host } = await kthx().site(label);
   const cookies: string[] = [];
   const location = {
     origin: `https://${host}`,

@@ -19,11 +19,40 @@ folly holds the Anchor network and Kubernetes in a custom `Lab` zone. offsite ha
 
 ## Node ports
 
-Every folly node port is a Kubernetes port: the network untagged, no tagged VLANs, and no 802.1X. `node_ports` in `terraform/network/unifi/folly/bootstrap.tf` names them: each [inventory](../../reference/inventory.md) node's `switch_port`, and `free_node_ports`, where a new box may be cabled. A node carries its address statically in its Talos config, so the switch needs no MAC and the gateway holds no reservation for it. A quarantine is the node's identity revoked and the node cordoned, with no VLAN move. [Identity](../identity.md) has the rules.
+Every folly node port carries the Kubernetes network untagged. It carries no tagged VLANs and uses no 802.1X.
 
-The Kubernetes network's DHCP pool is `K8S_DHCP_CIDR` in `clusters/folly/config/cluster-topology.json`, which holds no node's address. It serves machines that netboot: firmware PXE, HookOS, and an install's first boot before Talos applies its config. Its offer names the anchors' DNS addresses, whose CoreDNS answers `enroll.lolwtf.ca` with `SPORE_BOOTSTRAP_IP`, and `SPORE_BOOTSTRAP_IP` as its TFTP server with the signed iPXE as the boot file, `boot_option` in `bootstrap.tf`. [Talos boot](../nixos/talos-boot.md) serves the iPXE.
+`node_ports` in `terraform/network/unifi/folly/bootstrap.tf` combines:
 
-The `bootstrap` network holds spore's boot address, with no DHCP. Its keys are `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN` and `SPORE_BOOTSTRAP_IP` in `clusters/folly/config/anchor-topology.json`. spore's switch port carries the VLAN tagged, and no port carries it untagged. The network is alone in the `Bootstrap` zone, whose policies block the gateway and every other address in `LB_RANGE`. The policies `kubernetes_to_boot` in `firewall.tf` admit the Kubernetes network to `SPORE_BOOTSTRAP_IP` on the boot, enrollment and Tinkerbell ports, which the policy's comment lists. A reply rule matches only the policy's ports, so dnsmasq on spore sends TFTP data from port 69 as well. [Talos boot](../nixos/talos-boot.md#rules) says how spore answers.
+- Each [inventory](../../reference/inventory.md) node's `switch_port`.
+- `free_node_ports`, where a new machine can connect.
+
+Talos holds the node's static address. The switch needs no MAC declaration, and the gateway needs no DHCP reservation.
+
+Quarantine cordons the node and restricts its identity. It does not move the node to another VLAN. [Identity](../identity.md) explains credential withdrawal and expiry.
+
+### DHCP for installation
+
+`K8S_DHCP_CIDR` in `clusters/folly/config/cluster-topology.json` excludes static node addresses. Its pool serves firmware PXE, HookOS and Talos before the first configuration applies.
+
+The gateway relays the Kubernetes network's DHCP to [Kea](../nixos/kea.md) on spore's bootstrap address (`dhcp_relay` in `k8s.tf`); the gateway's own DHCP for the network stays declared and disabled there, the rollback. Kea's offer supplies:
+
+- The anchors' DNS addresses. CoreDNS resolves `enroll.lolwtf.ca` to `SPORE_BOOTSTRAP_IP`.
+- `SPORE_BOOTSTRAP_IP` as the TFTP server.
+- The signed iPXE boot file.
+
+[Talos boot](../nixos/talos-boot.md) serves iPXE. The relay is gateway-originated traffic onto the bootstrap VLAN, so no policy admits it. Kea's reply comes back on that VLAN to the network's router address, which is Bootstrap-to-Gateway traffic; the `bootstrap_dhcp_reply` policy in `firewall.tf` admits it on UDP 67 ahead of the bootstrap block, which Terraform recreates behind it, since the controller appends a new policy at the end of its zone pair. A client renews its lease by unicast to Kea, which the Lab-to-Boot UDP policy admits on 67.
+
+### Bootstrap network
+
+The `bootstrap` network holds spore's boot address and has no DHCP. Its keys are `BOOTSTRAP_CIDR`, `BOOTSTRAP_VLAN` and `SPORE_BOOTSTRAP_IP` in `clusters/folly/config/anchor-topology.json`.
+
+Only spore's switch port carries this VLAN, tagged. No port carries it untagged.
+
+The network has its own `Bootstrap` zone. Its policies block the gateway and every other address in `LB_RANGE`.
+
+The `kubernetes_to_boot` policies in `firewall.tf` admit Kubernetes-network traffic to spore's boot, enrollment and Tinkerbell ports. The policy comments list the ports.
+
+Reply rules match only those ports. dnsmasq therefore sends TFTP data from port 69. [Talos boot](../nixos/talos-boot.md#rules) explains spore's routing and firewall.
 
 ## Rules
 

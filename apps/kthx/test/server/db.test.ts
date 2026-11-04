@@ -1,20 +1,16 @@
 /**
- * A database per site: that a claim makes one, that one site's role cannot
+ * A database per site: that first use makes one, that one site's role cannot
  * reach another's, and what `/api/db` does on top. Real Postgres throughout.
  */
 import { describe, expect, test } from 'bun:test';
 import { SQL } from 'bun';
+import { diskDepot } from '../../server/depot.ts';
 import { MAX_BULK } from '../../server/documents.ts';
 import { sitePassword } from '../../server/pg.ts';
+import { sweepSites } from '../../server/sites.ts';
 import { ask, withServer, ZONE } from '../harness/server.ts';
 
 const kthx = withServer();
-
-let nextAddress = 0;
-function address(): string {
-  nextAddress += 1;
-  return `192.0.2.${nextAddress % 250}`;
-}
 
 interface Site {
   readonly name: string;
@@ -23,18 +19,7 @@ interface Site {
 }
 
 async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(response.status).toBe(201);
-  const body = (await response.json()) as { token: string };
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return kthx().site(label);
 }
 
 function at(site: Site, path: string, init: Parameters<typeof ask>[1] = {}) {
@@ -88,16 +73,21 @@ async function seed(
 }
 
 describe('provisioning', () => {
-  test('a claim leaves a database and a role, and only that role opens it', async () => {
+  test('a site gets its database on first use, and only its role opens it', async () => {
     const a = await claimed('a');
     const b = await claimed('b');
 
+    const before = (await kthx().sql`
+      select 1 from sites where name = ${a.name}
+    `) as unknown[];
+    expect(before).toHaveLength(0);
+
+    expect((await at(a, '/api/db')).status).toBe(200);
+    expect((await at(b, '/api/db')).status).toBe(200);
     const [row] = (await kthx().sql`
       select provisioned_at from sites where name = ${a.name}
     `) as { provisioned_at: Date | null }[];
     expect(row?.provisioned_at).not.toBeNull();
-
-    expect((await at(a, '/api/db')).status).toBe(200);
 
     // The boundary is `REVOKE CONNECT, TEMP … FROM PUBLIC` plus one `GRANT
     // CONNECT`; a database ACL is not copied from the template.
@@ -115,25 +105,23 @@ describe('provisioning', () => {
     await crossed.close({ timeout: 1 }).catch(() => {});
   });
 
-  test('a site whose row has no database yet is 503, and is repaired', async () => {
-    const site = await claimed('unprovisioned');
-    // As a claim that died between its row and its database leaves it.
-    await kthx().sql`
-      update sites set provisioned_at = null where name = ${site.name}
-    `;
-    const busy = await at(site, '/api/db');
-    expect(busy.status).toBe(503);
-    expect(((await busy.json()) as { code: string }).code).toBe('BUSY');
+  test('a visit that needs no database makes none', async () => {
+    const site = await claimed('visited');
+    expect((await at(site, '/api/me')).status).toBe(200);
+    const [row] = (await kthx().sql`
+      select provisioned_at from sites where name = ${site.name}
+    `) as { provisioned_at: Date | null }[];
+    expect(row?.provisioned_at).toBeNull();
+  });
 
-    // The refusal started the repair; a later call finds it done.
-    for (let i = 0; i < 50; i += 1) {
-      if ((await at(site, '/api/db')).status === 200) break;
-      await Bun.sleep(20);
-    }
+  test('a row whose database never finished is provisioned on the way in', async () => {
+    const site = await claimed('unprovisioned');
+    // As a provisioning that died between the row and the database leaves it.
+    await kthx().sql`insert into sites (name) values (${site.name})`;
     expect((await at(site, '/api/db')).status).toBe(200);
   });
 
-  test('deleting a site drops its database and its role', async () => {
+  test('deleting a site drops its folder, its database and its role', async () => {
     const site = await claimed('doomed');
     await write(site, 'POST', '/api/db/notes', { a: 1 });
 
@@ -147,7 +135,8 @@ describe('provisioning', () => {
           or exists (select 1 from pg_roles where rolname = ${site.name}) as any
     `) as { any: boolean }[];
     expect(left?.any).toBe(false);
-    expect((await at(site, '/api/db')).status).toBe(410);
+    expect(kthx().gcs.names(kthx().bucket, `${site.name}/`)).toEqual([]);
+    expect((await at(site, '/api/db')).status).toBe(404);
   });
 
   test('a handler that arrives after a delete does not rebuild the site', async () => {
@@ -174,6 +163,7 @@ describe('provisioning', () => {
 
   test('the sweep drops the residue and nothing the cluster needs', async () => {
     const site = await claimed('orphan');
+    expect((await at(site, '/api/db')).status).toBe(200);
     await kthx().sql`delete from sites where name = ${site.name}`;
 
     // Confined to this file's names: an unfiltered sweep takes the cluster.
@@ -199,25 +189,60 @@ describe('provisioning', () => {
     `) as { any: boolean }[];
     expect(alive?.any).toBe(true);
   });
-
-  test('a name that is already a database is taken even with no row', async () => {
-    const site = await claimed('residue');
-    // As a claim that failed after `CREATE DATABASE` leaves it: no row, but a
-    // database whose documents the name would hand over.
-    await kthx().sql`delete from sites where name = ${site.name}`;
-    const again = await kthx().fetch(
-      ask('/api/sites', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: site.name }),
-        address: address(),
-      }),
-    );
-    expect(again.status).toBe(409);
-    expect(((await again.json()) as { code: string }).code).toBe('TAKEN');
-  });
 });
 
+describe('the marker sweep', () => {
+  const sweep = () =>
+    sweepSites({
+      sql: kthx().sql,
+      pg: kthx().pg,
+      depot: diskDepot(kthx().schema),
+      sites: kthx().sites,
+      id: 'test',
+    });
+  const database = async (name: string) =>
+    (
+      (await kthx().sql`
+        select exists (select 1 from pg_database where datname = ${name}) as any
+      `) as { any: boolean }[]
+    )[0]?.any;
+
+  test('a site whose marker is gone loses its row and database', async () => {
+    const site = await claimed('removed');
+    await seed(site, 'notes', [{ a: 1 }]);
+    expect(await sweep()).toEqual([]);
+
+    // As `kthx rm` by someone the server could not ask leaves it.
+    kthx().gcs.buckets.get(kthx().bucket)?.delete(`${site.name}/.kthx`);
+    expect(await sweep()).toEqual([site.name]);
+    expect(await database(site.name)).toBe(false);
+    const rows = (await kthx().sql`
+      select 1 from sites where name = ${site.name}
+    `) as unknown[];
+    expect(rows).toHaveLength(0);
+  });
+
+  test('a row no sweep has seen a marker for is kept', async () => {
+    const site = await claimed('older');
+    await seed(site, 'notes', [{ a: 1 }]);
+    // A row from before the bucket: its site is not moved into it yet.
+    kthx().gcs.buckets.get(kthx().bucket)?.delete(`${site.name}/.kthx`);
+    expect(await sweep()).toEqual([]);
+    expect(await database(site.name)).toBe(true);
+  });
+
+  test('a failed listing erases nothing', async () => {
+    const site = await claimed('listing');
+    await seed(site, 'notes', [{ a: 1 }]);
+    await sweep();
+    kthx().gcs.failures.push({
+      match: (call) => call.kind === 'list',
+      status: 503,
+    });
+    await expect(sweep()).rejects.toThrow();
+    expect(await database(site.name)).toBe(true);
+  });
+});
 describe('documents', () => {
   test('a create gets a server id, an etag, and the wire shape', async () => {
     const site = await claimed('create');

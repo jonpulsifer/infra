@@ -262,15 +262,13 @@ export class Pg {
 
   /**
    * Reads the row first: `leaving` covers only {@link drop} itself, and a
-   * handler that read a live row before a delete must not re-create it.
+   * handler that read a row before a delete must not re-create it.
    */
   async repair(name: string): Promise<void> {
     const [row] = (await this.control`
-      select deleted_at from sites where name = ${name}
-    `) as { deleted_at: Date | null }[];
-    if (row === undefined || row.deleted_at !== null) {
-      throw new SiteGone(`${name} is gone`);
-    }
+      select 1 as here from sites where name = ${name}
+    `) as { here: number }[];
+    if (row === undefined) throw new SiteGone(`${name} is gone`);
     const running = this.repairs.get(name);
     if (running !== undefined) return running;
     const attempt = this.provision(name).finally(() => {
@@ -280,10 +278,13 @@ export class Pg {
     return attempt;
   }
 
-  /** Re-provisions every live site and returns the names that failed. */
+  /**
+   * Re-provisions every site that has a database and returns the names that
+   * failed. A site whose API never touched `/api/db` gets one on first use.
+   */
   async repairAll(): Promise<string[]> {
     const rows = (await this.control`
-      select name from sites where deleted_at is null order by name
+      select name from sites where provisioned_at is not null order by name
     `) as { name: string }[];
     const failed: string[] = [];
     for (const { name } of rows) {
@@ -348,8 +349,8 @@ export class Pg {
   }
 
   /**
-   * Drops databases and roles no live site names, left by failed claims and
-   * interrupted deletes.
+   * Drops databases and roles no site row names, left by interrupted
+   * provisioning and deletes.
    *
    * ponytail: `consider` confines a test's sweep to its own names; production
    * sweeps the whole cluster, which one kthx owns.
@@ -380,9 +381,7 @@ export class Pg {
     const databases = (await this.control`
       select datname as name from pg_database d
       where not datistemplate
-        and not exists (
-          select 1 from sites s where s.name = d.datname and s.deleted_at is null
-        )
+        and not exists (select 1 from sites s where s.name = d.datname)
     `) as { name: string }[];
     for (const { name } of databases) {
       if (!mine(name)) continue;
@@ -398,9 +397,7 @@ export class Pg {
       join pg_auth_members m on m.member = r.oid
       join pg_roles g on g.oid = m.roleid and g.rolname = ${this.group}
       where not r.rolsuper
-        and not exists (
-          select 1 from sites s where s.name = r.rolname and s.deleted_at is null
-        )
+        and not exists (select 1 from sites s where s.name = r.rolname)
     `) as { name: string }[];
     for (const { name } of roles) {
       if (!mine(name)) continue;

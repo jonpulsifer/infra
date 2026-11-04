@@ -55,6 +55,8 @@ folly's signed Talos images use the lab's own Secure Boot keys, outside the FML 
 | PCR signing key | The expected PCR 11 value of each UKI. A TPM opens a sealed disk only under a policy this key signed. | None |
 | `PK`, `KEK` and `db` | The firmware's key lists. A machine in Setup Mode enrolls them. `db` holds both lab certificates and the Microsoft UEFI certificates. The UKI signing key signs all three. | `PK.auth`, `KEK.auth`, `db.auth` |
 
+### Key constraints
+
 The UKI and HookOS signing keys are RSA-2048. HP's EliteDesk 800 G2 and G5 firmware refused images signed with RSA-4096 keys whose certificates were in `db`. The item's `PK_auth`, `KEK_auth` and `db_auth` files match the committed `.auth` files. The PCR signing key is fleet-wide. Every disk that a TPM seals to the signed policy is bound to it, so a new key leaves each sealed disk unable to open after the next upgrade. Rotate it only with a plan that reinstalls each such node.
 
 ## DevID CAs
@@ -68,6 +70,8 @@ The DevID CAs sign each attested machine's LDevID and LAK certificates. Each one
 | `folly-devid-ca-capsule` | RSA-2048, generated in PIV slot 9c of a YubiKey 4c | capsule |
 
 A key never leaves its card. Its PIN policy is once and its touch policy is never, so a service signs unattended after one login. The keys are RSA because YubiKey 5 firmware before 5.7 leaks ECDSA keys (Yubico's EUCLEAK advisory), and the 4c's firmware is past the ROCA fix in 4.3.5.
+
+### Issuance and deployment
 
 - `scripts/devid-ca-yubikey.sh` sets each card's PIN, PUK and management key, stores them in the host's SOPS file and the 1Password item `devid-ca-<host>`, and commits the key's CSR.
 - `terraform/pki/devid.tf` issues the software CA. `scripts/pki/devid-ca.sh` writes it to `folly-devid-ca-software.pem` and its chain to `folly-devid-ca-software-chain.pem` in `terraform/pki/certs/`.
@@ -93,7 +97,17 @@ Until `scripts/pki/devid-ca.sh` or the YubiKey runbook commits one, `terraform/p
 - After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
 - After Atlantis applies or replaces the DevID CA, run `scripts/pki/devid-ca.sh` and commit what it writes. A new CA leaves every LDevID untrusted until its node attests again.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
-- On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one.
+- On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one, and `--kubernetes=false` limits the rotation to the Talos API CA, which is all a talosconfig needs.
+- On folly, rotate the Kubernetes CA only with a plan for the workers [fleetd](../apps/fleetd.md) installed, `fleet_workers` in `clusters/folly/talos/talos.tf`. Talos deletes a kubelet certificate that no accepted CA signed, and their kubelets then bootstrap with the token the Talos root gives them, which no Secret holds, so they stay off the cluster until [they install again](#rejoin-fleetds-workers-after-a-ca-rotation).
+
+## Rejoin fleetd's workers after a CA rotation
+
+A rotation of folly's Kubernetes CA leaves each worker in `fleet_workers` without a kubelet certificate and without a token that joins. Each one installs again through fleetd, which gives it a token of its own.
+
+1. Commit the new CA to `clusters/folly/config/kubernetes-ca.pem`, and deploy spore from `main`, as [Deploy a NixOS host](../runbooks/deploy-a-nixos-host.md) describes. fleetd reaches folly's API with that CA.
+2. For one worker at a time, follow [Reprovision a node](../runbooks/reprovision-a-node.md). The reinstall erases the node's local-path volumes, so restore them as that runbook says.
+
+   Result: the node is `Ready` with a new kubelet certificate.
 
 ## Where it lives
 

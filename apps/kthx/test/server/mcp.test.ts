@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { writes } from '../../server/limits.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, OWNER, withServer } from '../harness/server.ts';
 
 /** Written out here, so the server cannot define what is expected. */
 const TOOLS = [
@@ -19,12 +19,6 @@ const TOOLS = [
 
 const kthx = withServer();
 
-let nextAddress = 0;
-function address(): string {
-  nextAddress += 1;
-  return `198.18.1.${nextAddress % 250}`;
-}
-
 interface Site {
   readonly name: string;
   readonly host: string;
@@ -32,18 +26,7 @@ interface Site {
 }
 
 async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(response.status).toBe(201);
-  const body = (await response.json()) as { token: string };
-  return { name, host: `${name}.${ZONE}`, token: body.token };
+  return kthx().site(label);
 }
 
 function post(
@@ -186,10 +169,10 @@ describe('the protocol', () => {
   });
 });
 
-describe('the bearer', () => {
-  test('is required, and must be the one that opens this site', async () => {
+describe("the owner's ID token", () => {
+  test("is required, and must name the site's owner", async () => {
     const site = await claimed('mcp-auth');
-    const other = await claimed('mcp-other');
+    const other = await kthx().site('mcp-other', 'stranger@example.com');
 
     const anonymous = await kthx().fetch(
       ask('/api/mcp', {
@@ -214,11 +197,8 @@ describe('the tools', () => {
   test('site_info is the control API answer', async () => {
     const site = await claimed('mcp-info');
     const info = await json(site, 'site_info');
-    expect(info).toMatchObject({
-      name: site.name,
-      serving: null,
-      releases: [],
-    });
+    expect(info).toMatchObject({ name: site.name, owner: OWNER });
+    expect(typeof info.deployed).toBe('string');
     expect((info.usage as { db_bytes: number }).db_bytes).toBeGreaterThan(0);
   });
 

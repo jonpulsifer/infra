@@ -185,13 +185,13 @@ describe('the read-only sandbox account', () => {
     checkRules(role.rules);
   });
 
-  test('the monitoring Role proxies GETs to Prometheus and Alertmanager only', async () => {
+  test('the monitoring Role reserves POST for the query-only Grafana sidecar', async () => {
     const role = await one(
       'clusters/base/monitoring/mate-sandbox-reader.yaml',
       'Role',
       'mate-sandbox-reader',
     );
-    checkRules(role.rules);
+    checkRules(role.rules.slice(0, 1));
     // A new name goes here on purpose, once no GET on it changes state.
     expect(role.rules).toEqual([
       {
@@ -202,6 +202,12 @@ describe('the read-only sandbox account', () => {
           'prom-stack-kube-prometheus-alertmanager:9093',
         ],
         verbs: ['get'],
+      },
+      {
+        apiGroups: [''],
+        resources: ['services/proxy'],
+        resourceNames: ['grafana-mate:8081'],
+        verbs: ['get', 'create'],
       },
     ]);
   });

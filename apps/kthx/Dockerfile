@@ -1,8 +1,7 @@
 # syntax=docker/dockerfile:1
 # The kthx server and the CLI tarball it serves. The server runs from source.
-# The chart runs it as uid 65532 on a read-only root; `/tmp` and the sites
-# volume are writable.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:06ec4316c47dee00fbd9c0270cae73fddff2ac84f010467c89ce252c3883379c AS base
+# The chart runs it as uid 65532 on a read-only root; `/tmp` is writable.
+FROM cgr.dev/chainguard/node:latest-dev@sha256:15c7b9f31bfbc87b78dca7adf6e8b518d7270ac425f8a346ed0e0be09fc60c53 AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
@@ -26,22 +25,23 @@ COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
 # The CLI is packed in the same image, so it matches the server that serves it.
-# It imports `@repo/kthx` and never `@repo/archive`.
+# It bundles `@repo/kthx` and the bucket client in `@repo/archive`.
 FROM deps AS cli
 WORKDIR /app
 COPY --from=pruner /app/out/full/apps/kthx ./apps/kthx
 COPY --from=pruner /app/out/full/packages/kthx ./packages/kthx
+COPY --from=pruner /app/out/full/packages/archive ./packages/archive
 RUN cd /app/apps/kthx && bun run pack
 
-FROM cgr.dev/chainguard/node:latest@sha256:ffcc470ef9b6d2715eed2fe84cb342e11b9e438e37aa800ca5e2c5013d8d8b0b AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:6cb70d6b2a324e491263949ea9f58938ed19031ef478e0bdb0b1810f96f8b400 AS runner
 ENV NODE_ENV=production \
-  PORT=8080 \
-  KTHX_SITES_DIR=/sites
+  PORT=8080
 WORKDIR /app
 # World-readable: the runtime uid owns nothing in the image.
 COPY --from=deps --chmod=755 /app ./
 COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/server ./apps/kthx/server
 COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/cli ./apps/kthx/cli
+COPY --from=pruner --chmod=755 /app/out/full/apps/kthx/scripts ./apps/kthx/scripts
 # `deps` has only the workspace manifests and symlinks. `pruner` supplies the
 # sources without a `node_modules`.
 COPY --from=pruner --chmod=755 /app/out/full/packages/archive ./packages/archive

@@ -58,11 +58,15 @@ func (v *Verifier) installCode(ctx context.Context, rec Record, s *session) (pro
 	uuid, ok := smbiosUUID(rec.UUID)
 	switch {
 	case err != nil:
+	case len(s.machine.Approved) == 0:
+		err = errors.New("the pass matched no approved EK binding")
 	case !ok:
 		err = errors.New("the session's SMBIOS UUID is not 8-4-4-4-12 hex")
 	default:
 		ctx, cancel := context.WithTimeout(ctx, installTimeout)
-		err = v.Installer.Install(ctx, InstallRequest{Serial: rec.Serial, UUID: uuid, Node: rec.Machine, Class: rec.Class, Code: base64.RawURLEncoding.EncodeToString(raw)})
+		if _, err = v.confirmBinding(ctx, s); err == nil {
+			err = v.Installer.Install(ctx, InstallRequest{Serial: rec.Serial, UUID: uuid, Node: rec.Machine, Class: rec.Class, Code: base64.RawURLEncoding.EncodeToString(raw)})
+		}
 		cancel()
 	}
 	if err != nil {

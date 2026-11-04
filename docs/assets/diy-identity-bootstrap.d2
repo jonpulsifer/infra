@@ -1,0 +1,24 @@
+vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
+direction: down
+provision: "Provisioning session" {
+  target: "Our signed RAM image\nTPM attester + fixed installer"
+  tool: "Trusted provisioning tool\nInventory + verification + install authorization"
+  target -> tool: fresh evidence
+  tool -> target: certificates + authorized payload
+}
+runtime: "Runtime services" {
+  node: "Installed node\nPersistent TPM-bound identity package\nSPIRE agent + boot-check / renewal client"
+  identity: "Small identity service\nBoot policy + certificate renewal\nNetBox eligibility -> registration applier"
+  spire: "SPIRE server on spore\nAgent admission + registrations\nWorkload SVID issuance"
+  identity -> node: renewed device certificates
+  node -> identity: LAK-signed boot evidence
+  identity -> spire: eligibility and withdrawal via applier
+  node -> spire: LDevID node proof
+  spire -> node: credentials for registered workloads
+}
+issuer: "Trusted DevID issuer\nProtected signing key"
+provision.tool -> issuer: enrollment
+runtime.identity -> issuer: renewal
+provision.tool -> runtime.identity: authenticated enrollment record
+provision.target -> runtime.node: install and persist key package
+**.style.font-size: 20

@@ -1,6 +1,6 @@
 resource "netbox_custom_field_choice_set" "fleet" {
   for_each = {
-    talos-class    = local.classes
+    class          = local.classes
     bmc-type       = ["none", "amt", "redfish"]
     desired-action = ["none", "provision", "attest", "wipe"]
   }
@@ -10,17 +10,22 @@ resource "netbox_custom_field_choice_set" "fleet" {
 }
 
 locals {
-  # Every custom field on dcim.device. Git declares talos_class, bmc_type,
-  # install_disk, tpm_version, amt and secure_boot_expected (devices.tf); the
-  # owner sets desired_action; talos-attest and fleet-controller write the rest.
+  # Every custom field on dcim.device. Git declares class, bmc_type,
+  # install_disk, install_disk_serial, tpm_version, amt, secure_boot_expected,
+  # expected_port and the approved EK binding (devices.tf); the owner sets
+  # desired_action; talos-attest and
+  # fleet-controller write the rest.
   custom_fields = {
     bios_version         = { type = "text", label = "BIOS version", group = "Hardware", weight = 100, description = "SMBIOS BIOS version the node reports" }
     sku                  = { type = "text", label = "SKU", group = "Hardware", weight = 110, description = "SMBIOS SKU number" }
     install_disk         = { type = "text", label = "Install disk", group = "Hardware", weight = 120, regex = "^/dev/", description = "The disk Talos installs to" }
+    install_disk_serial  = { type = "text", label = "Install disk serial", group = "Hardware", weight = 125, regex = "^[A-Za-z0-9._-]{1,64}$", description = "The serial the install disk reports. The provision Template wipes and installs only the disk at install_disk that reports it; without one, fleetd starts no run that wipes" }
     amt                  = { type = "boolean", label = "Intel AMT", group = "Hardware", weight = 130, description = "The node has Intel AMT" }
     secure_boot_expected = { type = "boolean", label = "Secure Boot expected", group = "Hardware", weight = 140, description = "The firmware state the node is expected to boot in" }
     smbios_uuid          = { type = "text", label = "SMBIOS UUID", group = "Hardware", weight = 150, description = "SMBIOS UUID of the node, written by talos-attest on an intake pass; the Talos config URL names it" }
     tpm_version          = { type = "text", label = "TPM version", group = "Identity", weight = 200, regex = "^(1\\.2|2\\.0)$", description = "TPM spec version; only 2.0 seals disks and attests" }
+    approved_ek_hash     = { type = "text", label = "Approved EK hash", group = "Identity", weight = 205, regex = "^[0-9a-f]{64}$", description = "The RSA EK the nodes file approves for the node, as fleetd's EK hash: SHA-256 of its DER SubjectPublicKeyInfo. Git declares it; fleetd admits an intake only against it" }
+    approved_ek_hash_ecc = { type = "text", label = "Approved EK hash (ECC)", group = "Identity", weight = 206, regex = "^[0-9a-f]{64}$", description = "The ECC EK the nodes file approves for the node, as fleetd's EK hash: SHA-256 of its DER SubjectPublicKeyInfo. Git declares it; fleetd admits an intake only against it" }
     ek_hash              = { type = "text", label = "EK hash", group = "Identity", weight = 210, regex = "^[0-9a-f]{64}$", description = "SHA-256 of the TPM endorsement key public area" }
     ek_hash_ecc          = { type = "text", label = "EK hash (ECC)", group = "Identity", weight = 215, regex = "^[0-9a-f]{64}$", description = "SHA-256 of the ECC TPM endorsement key public area" }
     ek_issuer            = { type = "text", label = "EK issuer", group = "Identity", weight = 220, description = "Issuer of the TPM endorsement key certificate" }
@@ -31,11 +36,13 @@ locals {
     attest_verdict       = { type = "text", label = "Attest verdict", group = "Identity", weight = 270, description = "attested, quarantined: <reason>, or pending-approval" }
     attest_consumed_at   = { type = "datetime", label = "Attest consumed at", group = "Identity", weight = 280, description = "When the node fetched the install config fleet-controller rendered for its last attestation" }
     pcr0_by_bios         = { type = "json", label = "PCR 0 by BIOS version", group = "Identity", weight = 290, description = "The SHA-256 PCR 0 the running node quoted under each BIOS version it reported, recorded by talos-attest; edit an entry to explain a change" }
+    dbx_hash             = { type = "text", label = "dbx hash", group = "Identity", weight = 295, regex = "^[0-9a-f]{64}$", description = "The SHA-256 of the dbx variable the firmware measured at the last attestation, written by fleetd; a change raises a warning and never quarantines" }
+    sbat_level           = { type = "text", label = "SBAT level", group = "Identity", weight = 296, regex = "^[0-9a-f]{64}$", description = "The SHA-256 of the SbatLevel variable shim measured at the last attestation, written by fleetd; a change raises a warning and never quarantines" }
     attested_address     = { type = "text", label = "Attested address", group = "Identity", weight = 291, description = "The boot NIC IPv4 address the node reported at its last intake pass, signed by its AK; fleet-controller dials its AMT there while it is on the bootstrap network" }
     attested_switch      = { type = "text", label = "Attested switch", group = "Identity", weight = 292, description = "The LLDP chassis ID of the switch the node reported at its last intake pass, signed by its AK" }
     attested_switch_port = { type = "text", label = "Attested switch port", group = "Identity", weight = 293, description = "The LLDP port ID the node reported at its last intake pass, signed by its AK; fleet-controller cables the node to it" }
     attested_network_at  = { type = "datetime", label = "Attested network at", group = "Identity", weight = 294, description = "When talos-attest recorded the attested address and switch port" }
-    talos_class          = { type = "select", label = "Talos class", group = "Fleet", weight = 300, choice_set = "talos-class", description = "The class git declares for the node: its role and patches" }
+    class                = { type = "select", label = "Class", group = "Fleet", weight = 300, choice_set = "class", description = "The class git declares for the node, a key of clusters/folly/fleet/classes.json: its OS, its workload, and the attestation profile and install that follow" }
     bmc_type             = { type = "select", label = "BMC type", group = "Fleet", weight = 310, choice_set = "bmc-type", description = "The out-of-band management the node has" }
     desired_action       = { type = "select", label = "Desired action", group = "Fleet", weight = 320, choice_set = "desired-action", default = "none", description = "What the fleet controller does next: provision (attest, wipe, install), attest, or wipe" }
     last_workflow        = { type = "text", label = "Last workflow", group = "Fleet", weight = 330, description = "The newest Workflow the fleet controller made" }

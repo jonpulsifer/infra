@@ -34,7 +34,9 @@ spec:
             dns:
               - matchPattern: "*"
     # The internet on the web ports: GitHub, package registries and
-    # documentation.
+    # documentation, and the Google endpoints the kthx deployer credential
+    # uses (sts, iamcredentials, oauth2 and storage .googleapis.com). This
+    # policy names no host, so they need no rule of their own.
     - toEntities:
         - world
       toPorts:

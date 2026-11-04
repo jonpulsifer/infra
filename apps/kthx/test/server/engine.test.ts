@@ -5,7 +5,6 @@
  */
 import { afterAll, describe, expect, spyOn, test } from 'bun:test';
 import { base64urlEncode } from '@repo/archive/bytes';
-import { tarGz } from '../../cli/tar.ts';
 import {
   ENGINE_PAGE,
   EngineKeys,
@@ -20,7 +19,7 @@ import {
   type EngineConfig,
   readConfig,
 } from '../../server/env.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, OWNER, withServer, ZONE } from '../harness/server.ts';
 
 const CONTROL = 'ops.kthx-engine.test';
 const IDENTITY = 'ops.kthx-tailnet.test';
@@ -179,41 +178,6 @@ async function reserved(): Promise<{ name: string; holder: string }[]> {
   return (await kthx().sql`
     select name, holder from reservations order by name
   `) as { name: string; holder: string }[];
-}
-
-async function claim(name: string) {
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      host: CONTROL,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-    }),
-  );
-  return { status: response.status, body: await response.json() };
-}
-
-async function claimed(
-  label: string,
-): Promise<{ name: string; token: string }> {
-  const name = kthx().name(label);
-  const answer = await claim(name);
-  expect(answer.status).toBe(201);
-  return { name, token: answer.body.token as string };
-}
-
-async function upload(name: string, token: string): Promise<void> {
-  const response = await kthx().fetch(
-    ask(`/api/sites/${name}/releases`, {
-      method: 'POST',
-      host: CONTROL,
-      token,
-      body: tarGz([
-        { path: 'index.html', bytes: new TextEncoder().encode('<p>hi</p>') },
-      ]),
-    }),
-  );
-  expect(response.status).toBe(201);
 }
 
 async function remove(name: string, token: string): Promise<void> {
@@ -516,28 +480,25 @@ describe('the admin list', () => {
     readonly deployed: string | null;
   }
 
-  /** Pins the claim time, so the order under test does not depend on timing. */
-  async function claimedAt(name: string, iso: string) {
-    await kthx().sql`
-      update sites set created_at = ${iso}::timestamptz where name = ${name}
-    `;
-  }
-
-  test('lists every live site with its owner and serving release', async () => {
-    const first = await claimed('first');
-    const second = await claimed('second');
-    const gone = await claimed('gone');
-    await upload(second.name, second.token);
+  test('lists every site with its owner and last deploy, newest first', async () => {
+    const first = await kthx().site('first', OWNER, '2026-08-01T00:00:00.000Z');
+    const second = await kthx().site(
+      'second',
+      'someone@example.test',
+      '2026-08-02T00:00:00.000Z',
+    );
+    const gone = await kthx().site('gone');
     await remove(gone.name, gone.token);
-    await kthx().sql`
-      update sites set owner_login = 'someone@example.test'
-      where name = ${second.name}
-    `;
-    await claimedAt(first.name, '2026-08-01T00:00:00Z');
-    await claimedAt(second.name, '2026-08-02T00:00:00Z');
-    const [release] = (await kthx().sql`
-      select at from releases where site = ${second.name} and n = 1
-    `) as { at: Date }[];
+    // A site whose API wrote a document has its database.
+    const wrote = await kthx().fetch(
+      ask('/api/db/notes', {
+        host: second.host,
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ a: 1 }),
+      }),
+    );
+    expect(wrote.status).toBe(201);
 
     const listed = await engine('/sites');
     expect(listed.status).toBe(200);
@@ -551,18 +512,18 @@ describe('the admin list', () => {
           serving: 1,
           held: false,
           created: '2026-08-02T00:00:00.000Z',
-          deployed: release?.at.toISOString(),
+          deployed: '2026-08-02T00:00:00.000Z',
           provisioned: true,
         },
         {
           name: first.name,
           url: `https://${first.name}.${ZONE}`,
-          owner: null,
-          serving: null,
+          owner: OWNER,
+          serving: 1,
           held: false,
           created: '2026-08-01T00:00:00.000Z',
-          deployed: null,
-          provisioned: true,
+          deployed: '2026-08-01T00:00:00.000Z',
+          provisioned: false,
         },
       ],
       next: null,
@@ -574,12 +535,9 @@ describe('the admin list', () => {
     expect(items.find((item) => item.name === second.name)?.owner).toBeNull();
     for (const item of items) {
       expect(Object.keys(item).sort()).toEqual([
-        'at',
-        'changed',
+        'deployed',
         'name',
         'owner',
-        'releases',
-        'serving',
         'url',
       ]);
     }
@@ -587,13 +545,10 @@ describe('the admin list', () => {
 
   test('walks every site with the cursor and counts them all', async () => {
     const owned = [
-      await claimed('walk-a'),
-      await claimed('walk-b'),
-      await claimed('walk-c'),
+      await kthx().site('walk-a', OWNER, '2026-07-01T00:00:00.000Z'),
+      await kthx().site('walk-b', OWNER, '2026-07-02T00:00:00.000Z'),
+      await kthx().site('walk-c', OWNER, '2026-07-03T00:00:00.000Z'),
     ].map((site) => site.name);
-    for (const [index, name] of owned.entries()) {
-      await claimedAt(name, `2026-07-0${index + 1}T00:00:00Z`);
-    }
     const seen: string[] = [];
     let after: string | null = null;
     for (let page = 0; page < 5; page += 1) {
@@ -611,10 +566,11 @@ describe('the admin list', () => {
 
   test('clamps the page size and refuses a cursor that is not a name', async () => {
     const total = MAX_ENGINE_PAGE + 1;
-    await kthx().sql`
-      insert into sites (name, token_hash)
-      select 'clamp-' || n, 'unused' from generate_series(1, ${total}::int) n
-    `;
+    for (let n = 1; n <= total; n += 1) {
+      kthx().gcs.put(kthx().bucket, `clamp-${n}/.kthx`, '{}', {
+        metadata: { 'kthx-owner': OWNER },
+      });
+    }
     const sized = async (limit: string) => {
       const { body } = await engine(`/sites?limit=${limit}`);
       expect(body.total).toBe(total);
@@ -633,9 +589,8 @@ describe('the admin list', () => {
 });
 
 describe('the site detail', () => {
-  test('is what the owner reads, with the claim and serving times', async () => {
-    const site = await claimed('detail');
-    await upload(site.name, site.token);
+  test("is what the owner reads, with the engine's own fields", async () => {
+    const site = await kthx().site('detail');
     const owned = await kthx().fetch(
       ask(`/api/sites/${site.name}`, { host: CONTROL, token: site.token }),
     );
@@ -646,22 +601,24 @@ describe('the site detail', () => {
     expect(read.status).toBe(200);
     expect(read.body).toEqual({
       ...own,
-      created: expect.any(String),
-      deployed: own.releases[0].at,
-      provisioned: true,
+      serving: 1,
+      held: false,
+      created: own.deployed,
+      provisioned: false,
+      releases: [],
     });
   });
 
-  test('answers 404 NO_SITE for a name nobody holds and 410 for a deleted one', async () => {
+  test('answers 404 NO_SITE for a name nobody holds, a deleted one included', async () => {
     expect(await engine(`/sites/${kthx().name('nobody')}`)).toMatchObject({
       status: 404,
       body: { code: 'NO_SITE' },
     });
-    const gone = await claimed('gone');
+    const gone = await kthx().site('gone');
     await remove(gone.name, gone.token);
     expect(await engine(`/sites/${gone.name}`)).toMatchObject({
-      status: 410,
-      body: { code: 'GONE' },
+      status: 404,
+      body: { code: 'NO_SITE' },
     });
   });
 });
@@ -693,9 +650,9 @@ describe('reservations', () => {
     expect(await reserved()).toHaveLength(labels.length);
   });
 
-  test('a live or deleted site, or another holder, is 409 and nothing is written', async () => {
-    const live = await claimed('live');
-    const gone = await claimed('gone');
+  test('a site, or another holder, is 409, and a deleted site frees its name', async () => {
+    const live = await kthx().site('live');
+    const gone = await kthx().site('gone');
     await remove(gone.name, gone.token);
     expect((await reserve(OTHER_APP, ['held'])).status).toBe(200);
 
@@ -705,12 +662,12 @@ describe('reservations', () => {
       code: 'TAKEN',
       message: 'that name is taken',
       taken: [
-        { name: gone.name, by: 'site' },
         { name: 'held', by: 'app' },
         { name: live.name, by: 'site' },
       ].sort((a, b) => (a.name < b.name ? -1 : 1)),
     });
     expect(await reserved()).toEqual([{ name: 'held', holder: OTHER_APP }]);
+    expect((await reserve(APP, [gone.name])).status).toBe(200);
   });
 
   test('refuse any other body as malformed', async () => {
@@ -779,13 +736,9 @@ describe('reservations', () => {
     expect(await reserved()).toEqual([{ name: 'kept', holder: APP }]);
   });
 
-  test('a reserved name cannot be claimed', async () => {
+  test('a reserved name is not free to claim', async () => {
     const name = kthx().name('held');
     expect((await reserve(APP, [name])).status).toBe(200);
-    expect(await claim(name)).toMatchObject({
-      status: 409,
-      body: { code: 'TAKEN' },
-    });
     const standing = await kthx().fetch(
       ask(`/api/names/${name}`, { host: CONTROL }),
     );
@@ -797,28 +750,15 @@ describe('reservations', () => {
     });
   });
 
-  test('a reservation racing a claim for one name has one winner', async () => {
-    for (let round = 0; round < 5; round += 1) {
-      const name = kthx().name(`race-${round}`);
-      const [claiming, holding] = await Promise.all([
-        claim(name),
-        reserve(APP, [name]),
-      ]);
-      const winners = [claiming.status === 201, holding.status === 200];
-      expect(winners.filter(Boolean)).toHaveLength(1);
-      expect([claiming.status, holding.status]).toContain(409);
-      const [row] = (await kthx().sql`
-        select
-          (select count(*)::int from sites where name = ${name}) as sites,
-          (select count(*)::int from reservations where name = ${name})
-            as reservations
-      `) as { sites: number; reservations: number }[];
-      expect((row?.sites ?? 0) + (row?.reservations ?? 0)).toBe(1);
-    }
+  test('a marker written seconds ago blocks a reservation', async () => {
+    const site = await kthx().site('fresh');
+    expect(await kthx().sites.marker(site.name)).not.toBeNull();
+    kthx().gcs.put(kthx().bucket, `${kthx().name('fresh2')}/.kthx`, '{}');
+    expect((await reserve(APP, [kthx().name('fresh2')])).status).toBe(409);
   });
 
   test('outlive the nuke', async () => {
-    await claimed('nuked');
+    await kthx().site('nuked');
     expect((await reserve(APP, ['acme'])).status).toBe(200);
     const nuked = await kthx().fetch(
       ask('/api/sites', {
@@ -841,6 +781,7 @@ describe('the config', () => {
     DATABASE_URL: 'postgres://x',
     KTHX_ME_KEY: 'k'.repeat(32),
     KTHX_PG_KEY: 'p'.repeat(32),
+    KTHX_SITES_BUCKET: 'sites',
     KTHX_CONTROL_HOST: 'kthx.lab.test',
     KTHX_ENGINE_ISSUER: 'https://oidc.example.test/offsite',
     KTHX_ENGINE_AUDIENCE: AUDIENCE,

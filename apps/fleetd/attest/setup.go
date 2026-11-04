@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 func env(key, def string) string {
@@ -39,9 +41,9 @@ func loadCA(chainPath string, validity time.Duration) (*CA, error) {
 // the handlers.
 func FromEnv(log *slog.Logger) (*Server, error) {
 	site := env("ATTEST_SITE", "folly")
-	// 90 days: the running node renews from 30 days out, and a machine
+	// A year: the running node renews from 30 days out, and a machine
 	// that stops renewing loses its identity, which is the revocation.
-	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "2160h"))
+	validity, err := time.ParseDuration(env("ATTEST_CERT_VALIDITY", "8760h"))
 	if err != nil {
 		return nil, fmt.Errorf("ATTEST_CERT_VALIDITY: %w", err)
 	}
@@ -66,8 +68,15 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	policy, err := LoadPolicy(env("ATTEST_POLICY", "/etc/fleetd/policy.yaml"))
+	policies, err := LoadPolicies(env("ATTEST_POLICY", "/etc/fleetd/policy"))
 	if err != nil {
+		return nil, err
+	}
+	table, err := classes.Load(env("FLEET_CLASSES", "/etc/fleetd/classes.json"))
+	if err != nil {
+		return nil, err
+	}
+	if err := CheckClasses(table, policies); err != nil {
 		return nil, err
 	}
 	store, err := OpenStore(env("ATTEST_STATE_DIR", "/var/lib/fleetd/attest"))
@@ -86,7 +95,8 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 
 	v := &Verifier{
 		Roots:      roots,
-		Policy:     policy,
+		Policies:   policies,
+		Classes:    table,
 		CA:         ca,
 		Store:      store,
 		Audit:      &Audit{W: os.Stdout, Site: site},
@@ -102,14 +112,15 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the NetBox token is unreadable: %w", err)
 	}
-	nb := &NetBox{URL: u, Token: strings.TrimSpace(string(tok)), Client: &http.Client{Timeout: 10 * time.Second}, Site: site, Role: env("ATTEST_NETBOX_ROLE", "kubernetes-node"), Log: log}
+	nb := NewNetBox(u, strings.TrimSpace(string(tok)), &http.Client{Timeout: 10 * time.Second}, log)
 	if store.PendingMax, err = strconv.Atoi(env("ATTEST_PENDING_MAX", "50")); err != nil {
 		return nil, fmt.Errorf("ATTEST_PENDING_MAX: %w", err)
 	}
-	if v.IntakePerHour, err = strconv.Atoi(env("ATTEST_INTAKE_PER_HOUR", "10")); err != nil {
-		return nil, fmt.Errorf("ATTEST_INTAKE_PER_HOUR: %w", err)
-	}
 	v.NetBox = nb
+	v.BindingAuthor = strings.TrimSpace(os.Getenv("ATTEST_BINDING_AUTHOR"))
+	if v.BindingAuthor == "" {
+		log.Warn("ATTEST_BINDING_AUTHOR is unset, so no approved EK binding counts and every planned machine waits")
+	}
 	v.Recorders = append(v.Recorders, nb)
 	log.Info("NetBox is the system of record", "url", u, "site", site)
 	if metricsFile := os.Getenv("ATTEST_METRICS_FILE"); metricsFile != "" {

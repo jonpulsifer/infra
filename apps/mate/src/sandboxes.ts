@@ -8,6 +8,7 @@ import { PROTOCOL_VERSION } from '@repo/mate-hands/protocol';
 import { type Clock, systemClock } from './clock.ts';
 import type {
   KthxConfig,
+  KthxGcpConfig,
   SandboxConfig,
   SwitchboardConfig,
   VaultConfig,
@@ -305,7 +306,49 @@ function connectEnv(vault: VaultConfig): Record<string, unknown>[] {
 // The CLI's claiming host. The engine's MCP server is mate's to call, and its
 // agent token stays in mate's pod.
 function kthxEnv(kthx: KthxConfig): Record<string, unknown>[] {
-  return kthx.origin ? [{ name: 'KTHX_ORIGIN', value: kthx.origin }] : [];
+  return [
+    ...(kthx.origin ? [{ name: 'KTHX_ORIGIN', value: kthx.origin }] : []),
+    ...(kthx.gcp
+      ? [
+          {
+            name: 'GOOGLE_APPLICATION_CREDENTIALS',
+            value: `${KTHX_GCP_DIR}/${KTHX_GCP_CREDENTIALS}`,
+          },
+        ]
+      : []),
+  ];
+}
+
+// The `external_account` document in the ConfigMap names this token file.
+const KTHX_GCP_DIR = '/var/run/kthx';
+const KTHX_GCP_CREDENTIALS = 'gcp-credentials.json';
+const KTHX_GCP_TOKEN = 'gcp-token';
+const KTHX_GCP_VOLUME = 'kthx-gcp';
+const KTHX_GCP_TOKEN_SECONDS = 3600;
+
+// The pod's own API token stays off. The projected token is for Google's STS
+// and is useless to the Kubernetes API, whose audience it does not carry.
+function kthxGcpVolume(gcp: KthxGcpConfig): Record<string, unknown> {
+  return {
+    name: KTHX_GCP_VOLUME,
+    projected: {
+      sources: [
+        {
+          serviceAccountToken: {
+            audience: gcp.audience,
+            expirationSeconds: KTHX_GCP_TOKEN_SECONDS,
+            path: KTHX_GCP_TOKEN,
+          },
+        },
+        {
+          configMap: {
+            name: gcp.credentialsConfigMap,
+            items: [{ key: KTHX_GCP_CREDENTIALS, path: KTHX_GCP_CREDENTIALS }],
+          },
+        },
+      ],
+    },
+  };
 }
 
 // A missing Secret would hold every sandbox in CreateContainerConfigError, so
@@ -450,6 +493,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
   const { name, namespace, labels, config, image, shutdownTime, profile } =
     declaration;
   const { grants } = profile;
+  const gcp = grants.kthxSites ? config.kthx.gcp : null;
   return {
     apiVersion: SANDBOX_API,
     kind: 'Sandbox',
@@ -504,6 +548,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
                 ],
               }),
           restartPolicy: 'Always',
+          ...(gcp ? { serviceAccountName: gcp.serviceAccount } : {}),
           automountServiceAccountToken: false,
           // The agent runs arbitrary commands and gets no Service addresses.
           enableServiceLinks: false,
@@ -561,6 +606,15 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
               volumeMounts: [
                 { name: 'home', mountPath: AGENT_HOME },
                 { name: 'workspace', mountPath: WORKSPACE },
+                ...(gcp
+                  ? [
+                      {
+                        name: KTHX_GCP_VOLUME,
+                        mountPath: KTHX_GCP_DIR,
+                        readOnly: true,
+                      },
+                    ]
+                  : []),
               ],
               securityContext: CONTAINER_SECURITY,
               resources: {
@@ -572,6 +626,7 @@ export function sandboxManifest(declaration: SandboxDeclaration): Sandbox {
           volumes: [
             { name: 'home', emptyDir: {} },
             { name: 'workspace', emptyDir: {} },
+            ...(gcp ? [kthxGcpVolume(gcp)] : []),
           ],
         },
       },
@@ -724,7 +779,6 @@ export class KubeHands implements Hands {
       clock: this.clock,
       metrics: deps.metrics,
       githubApp: deps.githubApp,
-      kthxSites: deps.kthxSites,
       clusterCa: deps.clusterCa,
       sshKey: deps.sshKey,
       talosconfig: deps.talosconfig,
@@ -791,9 +845,7 @@ export class KubeHands implements Hands {
       const found = await this.sandboxesOf(ref);
       for (const sandbox of found) {
         const name = sandbox.metadata.name;
-        await this.keepSites(sandbox);
         await this.destroy(name);
-        this.credentials.forget(name);
       }
       const held = found.length > 0 || Boolean(thread?.holding);
       this.slots.release(key);
@@ -974,7 +1026,7 @@ export class KubeHands implements Hands {
 
   /**
    * Sandboxes an earlier mate minted, which speak no protocol this one does:
-   * a thread's keeps its kthx sites first. Retried each sweep until all go.
+   * retried each sweep until all go.
    */
   private async condemnInherited(sandboxes: Sandbox[]): Promise<void> {
     const { log, metrics } = this.deps;
@@ -983,9 +1035,7 @@ export class KubeHands implements Hands {
       const name = sandbox.metadata.name;
       const claimed = threadOf(sandbox.metadata.labels ?? {}) !== null;
       try {
-        if (claimed) await this.keepSites(sandbox);
         await this.condemn(name);
-        this.credentials.forget(name);
         if (claimed) metrics?.teardown('inherited');
         log.info('condemned a sandbox an earlier mate left', {
           sandbox: name,
@@ -1048,7 +1098,6 @@ export class KubeHands implements Hands {
             error: plain(failure),
           }),
         );
-        this.credentials.forget(name);
         const thread = this.threads.get(threadKey(ref));
         if (thread?.holding === name) {
           thread.gone(name);
@@ -1203,10 +1252,6 @@ export class KubeHands implements Hands {
   /** A sandbox that died or runs no daemon mate speaks to. Never throws. */
   private async lose(name: string): Promise<void> {
     try {
-      const sandbox = await this.deps.kube
-        .json<Sandbox>(this.path(name))
-        .catch(() => null);
-      if (sandbox) await this.keepSites(sandbox);
       await this.condemn(name);
     } catch (error) {
       if (error instanceof KubeError && error.status === 404) return;
@@ -1214,8 +1259,6 @@ export class KubeHands implements Hands {
         sandbox: name,
         error: plain(error),
       });
-    } finally {
-      this.credentials.forget(name);
     }
   }
 
@@ -1243,13 +1286,11 @@ export class KubeHands implements Hands {
     if (!ref) return true;
     if (inUse() || !wanted()) return false;
     const found = await this.sandboxesOf(ref);
-    for (const sandbox of found) await this.keepSites(sandbox);
     if (inUse() || !wanted()) return false;
     const thread = this.threads.get(key);
     for (const sandbox of found) {
       const name = sandbox.metadata.name;
       await this.condemn(name);
-      this.credentials.forget(name);
       thread?.gone(name);
     }
     this.standing.delete(key);
@@ -1262,32 +1303,6 @@ export class KubeHands implements Hands {
     thread?.tell((hooks) => hooks.onSandboxGone('preempted'));
     metrics?.teardown('preempted');
     return true;
-  }
-
-  /**
-   * Best effort, before the delete takes the file with it. Only from a pod
-   * whose profile label and network both say it held the sites file: any
-   * other could have written one to overwrite the ledger.
-   */
-  private async keepSites(sandbox: Sandbox): Promise<void> {
-    const profile = profileOfSandbox(sandbox);
-    if (
-      !this.credentials.kthx ||
-      !profile?.grants.kthxSites ||
-      sandbox.metadata.labels?.['app.kubernetes.io/name'] !==
-        profile.sandbox.network
-    ) {
-      return;
-    }
-    const pod = await runningPod(this.deps.kube, this.namespace, sandbox).catch(
-      () => null,
-    );
-    if (pod) {
-      await this.credentials.keepSites(
-        sandbox.metadata.name,
-        pod.metadata.name,
-      );
-    }
   }
 
   private async list(): Promise<Sandbox[]> {
@@ -1343,8 +1358,7 @@ export class KubeHands implements Hands {
   /**
    * By label, since an adopted spare's name derives from no thread. A
    * terminating object is skipped, because `reuse` fails on it. A sandbox
-   * minted for another profile is never handed over: it keeps its sites, if
-   * its own labels grant them, and is condemned.
+   * minted for another profile is never handed over: it is condemned.
    */
   private async find(
     thread: ThreadRef,
@@ -1366,9 +1380,7 @@ export class KubeHands implements Hands {
           'a sandbox of this thread is labelled for another profile',
           { sandbox: name, profile: profile.id, labelled },
         );
-        await this.keepSites(found);
         await this.condemn(name);
-        this.credentials.forget(name);
         continue;
       }
       // A pod the controller made again after the window closed can never
@@ -1383,7 +1395,6 @@ export class KubeHands implements Hands {
           { sandbox: name },
         );
         await this.condemn(name);
-        this.credentials.forget(name);
         continue;
       }
       return found;

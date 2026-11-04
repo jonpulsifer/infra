@@ -26,9 +26,75 @@ tests:
               instance: spore
             exp_annotations:
               message: A rendered Talos config has waited 30 minutes for its node
-              description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the provision Workflow and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+              description: "fleetd rendered a node's first config 30 minutes ago and has not served it. The install failed, or the node's GET of /talos/config fails before it reaches spore: read the device's journal in NetBox, then `journalctl -u tinkerbell | grep <node address>` on spore for the installer's output, and the machine's console for a TLS or clock error. fleetd drops the config unread two hours after the render. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
       - eval_time: 55m
         alertname: FleetInstallPending
+        exp_alerts: []
+
+  # A node asks for a config fleetd does not hold at minutes 10 and 20, then is provisioned again.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_install_config_missing_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1x9 2x40
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetInstallConfigMissing
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FleetInstallConfigMissing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: An installed node asks for a Talos config fleetd does not hold
+              description: "A planned device's node asked for its first config after its provision, and fleetd holds none for it: a reboot of spore since the render drops every config that waits, as does the TTL. The node asks in vain and the device stays planned. Read the device's journal in NetBox, then set desired_action to provision. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 55m
+        alertname: FleetInstallConfigMissing
+        exp_alerts: []
+
+  # A node asks again for its served config from minute 10 to minute 20, then is provisioned again.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_install_config_refetched_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1+1x10 11x40
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts: []
+      - eval_time: 25m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: An installed node asks again for a Talos config fleetd served it
+              description: "A node asked for its config with a code whose config fleetd already served. Its kernel acknowledged every byte, and it did not keep the config: a power loss or a reset before Talos wrote it to STATE. The code is spent, so the node asks in vain whatever its device's status says. Read the device's journal in NetBox, then set desired_action to provision; the disk holds no STATE to lose. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 55m
+        alertname: FleetInstallConfigRefetched
+        exp_alerts: []
+
+  # A node booted HookOS after its install at minute 10.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_hookos_after_success_total{job="node-exporter",instance="spore"}'
+        values: 0x9 1x100
+    alert_rule_test:
+      - eval_time: 9m
+        alertname: FleetNodeBootedHookOSAfterInstall
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: FleetNodeBootedHookOSAfterInstall
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: A node booted HookOS after its install succeeded
+              description: "A planned device attested from HookOS after its provision Workflow succeeded, so its firmware did not boot the installed disk, as when PXE is first in its boot order. Read the device's journal in NetBox, fix its boot order, or set desired_action to provision. https://wiki.lolwtf.ca/runbooks/provision-a-node/"
+      - eval_time: 80m
+        alertname: FleetNodeBootedHookOSAfterInstall
         exp_alerts: []
 
   # spore's boot files and enrollment name serve until minute 10, then both checks fail.
@@ -97,7 +163,7 @@ tests:
               job: node-exporter
             exp_annotations:
               message: fleetd does not answer on its DevID listener
-              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its daily check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
+              description: "fleetd is down or its DevID listener on port 8444 does not answer, so no node renews its LDevID or passes its hourly check, and new SPIRE agents fall back to the EK attestor. Read journalctl -u fleetd on spore (nix/services/fleetd.nix)."
 
   # A worker falls back to PXE at minute 10 and its unattended boot is refused.
   - interval: 1m
@@ -187,14 +253,14 @@ tests:
               message: "optiplex's LDevID expires within 23 days"
               description: "tpm-reattest has not renewed optiplex's LDevID. Read its log in the spire namespace, or attest the machine again, before the LDevID expires and its SPIRE agent falls back to the EK attestor."
 
-  # riptide's newest check, on capsule, is an hour old, so spore's 28-hour-old one does not count.
-  # optiplex last passed 28 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
+  # riptide's newest check, on capsule, is an hour old, so spore's 4-hour-old one does not count.
+  # optiplex last passed 4 hours ago and is a node, so it fires. oldbox was retired: no node, no alert.
   - interval: 1m
     input_series:
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="spore",machine="riptide"}'
         values: 0x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="capsule",machine="riptide"}'
-        values: 97200x1700
+        values: 10800x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="optiplex"}'
         values: 0x1700
       - series: 'talos_attest_last_checked_timestamp_seconds{instance="forge",machine="oldbox"}'
@@ -204,18 +270,18 @@ tests:
       - series: 'kube_node_info{node="optiplex"}'
         values: 1x1700
     alert_rule_test:
-      - eval_time: 25h
+      - eval_time: 2h
         alertname: TalosAttestNotChecked
         exp_alerts: []
-      - eval_time: 28h
+      - eval_time: 4h
         alertname: TalosAttestNotChecked
         exp_alerts:
           - exp_labels:
               severity: warning
               machine: optiplex
             exp_annotations:
-              message: "optiplex has not passed a TPM quote check in 26 hours"
-              description: "fleetd has recorded no passing daily check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
+              message: "optiplex has not passed a TPM quote check in 3 hours"
+              description: "fleetd has recorded no passing hourly check of optiplex. Read tpm-reattest's log on the node in the spire namespace: NO TPM is a TPM that is off or gone, RENEWAL FAILED a transport error, a timeout or a refusal. The node is not quarantined for any of these."
 
   # spore refused a check of riptide at minute 10: the alert fires for an hour, then clears. A pass
   # never fires.
@@ -234,7 +300,7 @@ tests:
               machine: riptide
               verdict: refused
             exp_annotations:
-              message: "riptide's daily check ended in refused"
+              message: "riptide's hourly check ended in refused"
               description: "quarantine: the TPM quoted a boot that misses fleetd's renewal policy: NetBox's attest_verdict reads quarantined, and fleetd serves no LDevID for it and cordons it. refused: evidence for its serial did not carry the proof of the LAK and LDevID on file, and nothing was recorded. Read verdicts.jsonl and journalctl -u fleetd on spore."
       - eval_time: 80m
         alertname: TalosAttestCheckFailed
@@ -266,7 +332,7 @@ tests:
               machine: optiplex
             exp_annotations:
               message: "optiplex's PCR 0 changed at the same BIOS version"
-              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next daily check clears this."
+              description: "optiplex's firmware measured itself differently while it reports the BIOS version it had when NetBox recorded its PCR 0. Read the device's NetBox journal for both values. Once a firmware setting or update explains it, set that version's entry in pcr0_by_bios to the new value, and the next hourly check clears this."
 
   # optiplex, the control plane, failed in place on spore, and no anchor has a newer record: critical.
   # riptide failed in place on forge, then passed on capsule later: the newer record clears it. A
@@ -303,3 +369,55 @@ tests:
             exp_annotations:
               message: "Control-plane node optiplex failed attestation and is not quarantined"
               description: "optiplex's TPM quoted a boot that misses fleetd's renewal policy. It keeps its status and LDevID because it runs the control plane, and NetBox's attest_verdict reads failed-no-quarantine. Read the device's NetBox journal and journalctl -u fleetd on spore, then reinstall or fix the node; the next passing check clears this."
+
+  # A kubelet asks at minute 0 and nobody approves; a renewal asked at the same time is approved.
+  - interval: 1m
+    input_series:
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="approved"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-join",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="denied"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-renew",signer_name="kubernetes.io/kube-apiserver-client-kubelet"}'
+        values: 0x80
+      - series: 'kube_certificatesigningrequest_condition{certificatesigningrequest="csr-renew",signer_name="kubernetes.io/kube-apiserver-client-kubelet",condition="approved"}'
+        values: 1x80
+      - series: 'kube_certificatesigningrequest_created{certificatesigningrequest="csr-serving",signer_name="kubernetes.io/kubelet-serving"}'
+        values: 0x80
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: KubeletCSRPending
+        exp_alerts: []
+      - eval_time: 67m
+        alertname: KubeletCSRPending
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              certificatesigningrequest: csr-join
+            exp_annotations:
+              message: "Kubelet certificate request csr-join has waited an hour"
+              description: "A node's kubelet asked for its client certificate an hour ago and nobody approved it, so the node does not register. fleetd approves a worker it installs within a pass; read the device's NetBox journal for why it did not, and journalctl -u fleetd on spore. A join with the cluster's bootstrap token, such as shale's or a control plane's, is the owner's to approve. https://wiki.lolwtf.ca/runbooks/install-talos-on-a-node/"
+
+  # A Kubernetes upgrade puts the subject back at minute 10, and Flux puts the placeholder back at minute 40.
+  - interval: 1m
+    input_series:
+      - series: 'fleet_node_client_approval_subjects{job="node-exporter",instance="spore"}'
+        values: 0x9 1x30 0x20
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              instance: spore
+            exp_annotations:
+              message: The controller manager's approval of a kubelet's first certificate binds subjects again
+              description: "system-bootstrap-approve-node-client-csr binds 1 subjects besides its placeholder, or fleetd cannot read it (-1). A Talos Kubernetes upgrade syncs that binding with forced ownership; Flux's tinkerbell-access puts the placeholder back. Run flux --context folly reconcile kustomization tinkerbell-access --with-source, and make sure the policy node-client-bootstrap-approval exists. -1: read journalctl -u fleetd on spore for the error."
+      - eval_time: 45m
+        alertname: NodeClientApprovalBindingRestored
+        exp_alerts: []
+

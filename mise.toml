@@ -20,6 +20,8 @@ helm = "latest"
 jq = "latest"
 k9s = "latest"
 kubectl = "latest"
+# kubectl oidc-login, the exec plugin scripts/kube-login.sh puts in a kubeconfig.
+kubelogin = "latest"
 kustomize = "latest"
 powershell = "latest"
 promtool = "latest"
@@ -37,6 +39,7 @@ uv = "latest"
 opentofu = "1.13.2"
 terraform = "latest"
 terraform-docs = "latest"
+trivy = "latest"
 velero = "latest"
 vim = "latest"
 d2 = "0.9.0"
@@ -159,12 +162,16 @@ description = "Print a folly node's observed inventory entry (args: [--insecure]
 run = "bash scripts/inventory.sh observe"
 
 [tasks."attest:approve"]
-description = "Show the first intake that waits for a serial on fleetd, and approve its EK hashes once you confirm them, over the tailnet (args: <serial>)"
+description = "Print the nodes-file lines that would approve the EK hashes a waiting claim on fleetd names, for review against independent evidence; approves nothing (args: <serial>)"
 run = "bash scripts/attest.sh approve"
 
 [tasks."attest:pending"]
-description = "List the first intakes that wait for approval on fleetd"
+description = "List the intakes that wait on fleetd for an approved EK binding"
 run = "bash scripts/attest.sh pending"
+
+[tasks."kube:login"]
+description = "Add the cluster and a user that signs in at Google or Tailscale to ~/.kube/config and select its context, as gcloud get-credentials does (args: <folly|offsite> [--provider google|tailscale])"
+run = "bash scripts/kube-login.sh"
 
 [tasks."k8s:render-apps"]
 description = "Render shared cluster app overlays and each cluster's monitoring overlay, then template referenced in-repo charts"
@@ -173,6 +180,18 @@ run = "bash .github/scripts/render-cluster-apps.sh"
 [tasks."backup:coverage"]
 description = "List how each PVC on a cluster is backed up and fail on an uncovered one (arg: [context], default folly)"
 run = "bash scripts/backup-coverage.sh"
+
+[tasks."keylime:render-policies"]
+description = "Render each fleetd policy profile as the Keylime measured-boot reference state in clusters/folly/apps/keylime/policies/"
+run = "go -C apps/fleetd run ./cmd/keylime-policy-render -out ../../clusters/folly/apps/keylime/policies"
+
+[tasks."keylime:test"]
+description = "Run the fleetd-profile Keylime policy's tests, which share their cases with apps/fleetd's"
+run = "python3 -m unittest discover -s apps/keylime-policy"
+
+[tasks."keylime:eventlog-json"]
+description = "Rewrite apps/keylime-policy/testdata/riptide-eventlog.json from the binary log, parsed the way Keylime parses it"
+run = "nix shell nixpkgs#tpm2-tools -c tpm2_eventlog --eventlog-version=2 apps/fleetd/attest/testdata/riptide-eventlog.bin | yq -o=json > apps/keylime-policy/testdata/riptide-eventlog.json"
 
 [tasks."k8s:check-rules"]
 description = "Lint every rendered PrometheusRule and run the alert unit tests"
@@ -204,6 +223,10 @@ run = [
 [tasks."elevenlabs:test"]
 description = "Run the ElevenLabs reconciler against a stubbed API and check what it logs and sends"
 run = "bash .github/scripts/elevenlabs-reconcile_test.sh"
+
+[tasks."spire:test"]
+description = "Run spore's SPIRE fleet entry applier against a stub server CLI and check what it registers, withdraws and bans"
+run = "bash nix/services/spire/fleet-entries_test.sh"
 
 [tasks."tf:init"]
 description = "Initialize Terraform modules without backends"
@@ -244,6 +267,10 @@ run = [
 [tasks."docs:build"]
 description = "Build the wiki from docs/ with the first-party Bun renderer"
 run = "bun run --cwd apps/wiki build"
+
+[tasks."docs:brief"]
+description = "Build the purchase-to-identity brief for kthx from its canonical wiki page"
+run = "bun apps/wiki/brief/build.ts"
 
 [tasks."docs:diagrams"]
 description = "Render every *.d2 to the *.svg committed beside it"
@@ -304,7 +331,7 @@ hide = true
 # A script outside these paths or without an sh/bash shebang is never checked,
 # and nothing reports it.
 run = """
-grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' scripts/* .github/scripts/* images/*/gh clusters/offsite/apps/elevenlabs/*.sh 2>/dev/null
+grep -rlE '^#!(/usr/bin/env (ba)?sh|/bin/(ba)?sh)' scripts/* .github/scripts/* images/*/gh clusters/offsite/apps/elevenlabs/*.sh nix/services/spire/*.sh 2>/dev/null
 """
 
 [tasks.format]

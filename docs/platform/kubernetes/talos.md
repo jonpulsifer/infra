@@ -11,7 +11,7 @@ Every Kubernetes node runs Talos Linux. `clusters/<site>/talos/` is an OpenTofu 
 | --- | --- | --- |
 | Image Factory installer | Installs a node from the cluster's schematic | Every offsite node |
 | Signed installer | `ghcr.io/jonpulsifer/talos-installer-folly`, a UKI signed with the lab's Secure Boot keys | [optiplex](../../hosts/optiplex.md), [riptide](../../hosts/riptide.md) and [shale](../../hosts/shale.md) |
-| TPM disk encryption | A fresh install makes `STATE` and `EPHEMERAL` LUKS2 volumes whose key the TPM seals to PCR 7 and to a PCR 11 policy signed by the PCR signing key. Adds the `lolwtf.ca/tpm=true` label. | The install render of optiplex and riptide. No running node yet. |
+| TPM disk encryption | A fresh install makes `STATE` and `EPHEMERAL` LUKS2 volumes whose key the TPM seals to PCR 7 and to a PCR 11 policy signed by the PCR signing key. Adds the `lolwtf.ca/tpm=true` label. | The install render of riptide. optiplex's TPM is off, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps it out. No running node yet. |
 | Render parity check | Renders folly's nodes with the provider and with `talosctl gen config`, and fails on any byte difference | `.github/workflows/talos-render-parity.yml` |
 | Static addresses | `static_addresses` in the module: a `LinkAliasConfig` names the node's one physical NIC `net0`, and its `LinkConfig` carries the node's address in `K8S_NODE_CIDR`, the default route through `ROUTER_IP`, and the anchors' DNS addresses as resolvers. Talos runs no DHCP on the NIC. fleetd renders the same from `node_network` in the class inputs. | Every folly node. offsite takes its addresses by DHCP. |
 
@@ -26,7 +26,24 @@ optiplex, riptide and shale boot Image Factory systemd-boot UKI installs, with S
 - Tag the signed installer with the Talos version alone, with no digest. Any other form makes Create reinstall the node.
 - Change a node's `installer` together with its `generation`. A new generation replaces its `talos_machine`, whose Create applies the config and upgrades only for a new version tag. An `image` change alone upgrades the node at once.
 - Add a node to `encrypted_nodes` only after a reinstall has formatted its volumes encrypted. A running node whose config calls a plain volume encrypted fails its next boot: `EPHEMERAL` reports `block dev type mismatch: xfs != luks` and the kubelet never starts.
-- `tpm_nodes` changes only the label and the install render that `install_inputs` and fleetd use. It is safe on a running node.
+- `tpm_nodes` changes the label, the `kernel.kexec_load_disabled` sysctl and the install render that `install_inputs` and fleetd use. It is safe on a running node and needs no reboot. `tpm_off` in `clusters/folly/talos/nodes.tf` takes out a node whose TPM the node does not expose, so the TPM DaemonSets skip it; NetBox keeps its `tpm_version`.
+### Bootstrap credentials
+
+On folly, a node's `bootstrap_token` replaces the bundle's token in its configuration.
+
+The `fleet_workers` installed by [fleetd](../../apps/fleetd.md) receive `nojoin.0000000000000000` from the root. No Kubernetes Secret holds that token, so it cannot authorize a join.
+
+For each installation, fleetd creates a separate token and approves it for that node alone. The root's configuration leaves no lasting bootstrap credential on disk.
+
+The controller manager approves no bootstrap-token certificate request. A node that uses the bundle's token needs the owner's approval. This includes shale and control planes. See [Install Talos on a node](../../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate).
+
+A running kubelet uses its own client certificate to authenticate and renew. Changing the bootstrap token does not stop it.
+
+A Kubernetes CA rotation deletes that certificate. Fleet workers then need another installation, as [PKI](../pki.md#rejoin-fleetds-workers-after-a-ca-rotation) describes.
+
+### Configuration checks
+
+
 - Run `talosctl apply-config --dry-run` with the render before a `VolumeConfig` change reaches a running node.
 - A network document change applies to a running node without a reboot: `talos_machine` applies its config in Talos's `AUTO` mode, which Talos 1.14 runs as `NO_REBOOT`, and reboots a node only for a new installer image.
 - Before a static address reaches a node, run `talosctl --nodes <addr> get links` and make sure it lists one physical link: type `ether` with an empty kind, since a bond, VLAN or bridge has one. After it reaches the node, `talosctl --nodes <addr> get linkaliasspecs` names `net0` on its NIC and `talosctl --nodes <addr> get addresses` shows the address from the `configuration` layer. A box with two physical NICs gets no alias and keeps DHCP; give it a narrower selector before its DHCP reservation goes.

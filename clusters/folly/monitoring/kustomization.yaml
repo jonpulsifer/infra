@@ -21,6 +21,8 @@ resources:
   - ../../base/monitoring
   - secret.sops.yaml
  # - unpoller
+components:
+  - ../../base/monitoring/grafana-mate
 patches:
   - target:
       group: helm.toolkit.fluxcd.io

@@ -73,7 +73,7 @@ const TOOLS: readonly Tool[] = [
   {
     name: 'site_info',
     description:
-      'This site: its url, which release serves, every release, usage and quotas.',
+      'This site: its url, its owner, its last deploy, usage and quotas.',
     inputSchema: NO_ARGS,
     plan: (_args, site) => ({
       method: 'GET',

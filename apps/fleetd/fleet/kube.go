@@ -30,6 +30,9 @@ type Kube struct {
 	Server    string
 	Namespace string
 	Client    *http.Client
+	// Workflows, when set, takes every Workflow call in place of the API:
+	// the boot executor's attempt records (Attempts).
+	Workflows WorkflowStore
 }
 
 // Resource names a namespaced custom resource.
@@ -41,12 +44,17 @@ var (
 	HardwareResource = Resource{"tinkerbell.org", "v1alpha1", "hardware", "Hardware"}
 	WorkflowResource = Resource{"tinkerbell.org", "v1alpha1", "workflows", "Workflow"}
 	MachineResource  = Resource{"bmc.tinkerbell.org", "v1alpha1", "machines", "Machine"}
+	JobResource      = Resource{"bmc.tinkerbell.org", "v1alpha1", "jobs", "Job"}
+	TaskResource     = Resource{"bmc.tinkerbell.org", "v1alpha1", "tasks", "Task"}
 )
 
 func (r Resource) apiVersion() string { return r.Group + "/" + r.Version }
 
 // ErrNotFound is a 404 from the API.
 var ErrNotFound = errors.New("not found")
+
+// ErrConflict is a 409 from the API, such as a failed delete precondition.
+var ErrConflict = errors.New("409 Conflict")
 
 // NewKube reads the CA and client certificate files.
 func NewKube(server, caFile, certFile, keyFile, namespace string) (*Kube, error) {
@@ -76,6 +84,15 @@ func NewKube(server, caFile, certFile, keyFile, namespace string) (*Kube, error)
 	}, nil
 }
 
+// workflows is the store a Workflow call goes to under the boot executor,
+// or nil when the call goes to the API.
+func (k *Kube) workflows(r Resource) WorkflowStore {
+	if k.Workflows != nil && r == WorkflowResource {
+		return k.Workflows
+	}
+	return nil
+}
+
 func (k *Kube) path(r Resource, name string) string {
 	p := fmt.Sprintf("/apis/%s/%s/namespaces/%s/%s", r.Group, r.Version, k.Namespace, r.Plural)
 	if name != "" {
@@ -103,7 +120,11 @@ func (k *Kube) do(ctx context.Context, method, path, contentType string, body []
 	}
 	if resp.StatusCode/100 != 2 {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s %s: %s: %s", method, path, resp.Status, strings.TrimSpace(string(msg)))
+		status := errors.New(resp.Status)
+		if resp.StatusCode == http.StatusConflict {
+			status = ErrConflict
+		}
+		return fmt.Errorf("%s %s: %w: %s", method, path, status, strings.TrimSpace(string(msg)))
 	}
 	if out != nil {
 		return json.NewDecoder(resp.Body).Decode(out)
@@ -132,11 +153,29 @@ func (o Object) Created() time.Time {
 	return t
 }
 
+// ResourceVersion is metadata.resourceVersion.
+func (o Object) ResourceVersion() string {
+	s, _ := o.metadata()["resourceVersion"].(string)
+	return s
+}
+
 // Labels is metadata.labels.
 func (o Object) Labels() map[string]string {
 	out := map[string]string{}
 	l, _ := o.metadata()["labels"].(map[string]any)
 	for k, v := range l {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// Annotations is metadata.annotations.
+func (o Object) Annotations() map[string]string {
+	out := map[string]string{}
+	a, _ := o.metadata()["annotations"].(map[string]any)
+	for k, v := range a {
 		if s, ok := v.(string); ok {
 			out[k] = s
 		}
@@ -151,6 +190,90 @@ func (o Object) State() string {
 	return s
 }
 
+// GlobalExecutionStop is status.globalExecutionStop, the deadline Tinkerbell
+// sets for a Workflow. It is false when the field is missing or unparseable.
+func (o Object) GlobalExecutionStop() (time.Time, bool) {
+	st, _ := o["status"].(map[string]any)
+	s, _ := st["globalExecutionStop"].(string)
+	t, err := time.Parse(time.RFC3339, s)
+	return t, err == nil && !t.IsZero()
+}
+
+// GlobalTimeout is status.globalTimeout, the global timeout Tinkerbell's
+// controller copies from the rendered Template. It is false when the field is
+// missing or not positive, as before the controller's first reconcile.
+func (o Object) GlobalTimeout() (time.Duration, bool) {
+	st, _ := o["status"].(map[string]any)
+	s, _ := st["globalTimeout"].(float64)
+	return time.Duration(s) * time.Second, s > 0
+}
+
+// CurrentAction is status.currentState.actionName, the action a Workflow's
+// agent last reported on.
+func (o Object) CurrentAction() string {
+	st, _ := o["status"].(map[string]any)
+	cs, _ := st["currentState"].(map[string]any)
+	s, _ := cs["actionName"].(string)
+	return s
+}
+
+// FailedAction is the first action in status.tasks that ended FAILED or
+// TIMEOUT, with its state and message. The name is empty when no action did.
+func (o Object) FailedAction() (name, state, message string) {
+	st, _ := o["status"].(map[string]any)
+	tasks, _ := st["tasks"].([]any)
+	for _, t := range tasks {
+		task, _ := t.(map[string]any)
+		actions, _ := task["actions"].([]any)
+		for _, a := range actions {
+			act, _ := a.(map[string]any)
+			s, _ := act["state"].(string)
+			s = strings.TrimPrefix(s, "STATE_")
+			if s == "FAILED" || s == "TIMEOUT" {
+				name, _ := act["name"].(string)
+				message, _ := act["message"].(string)
+				return name, s, message
+			}
+		}
+	}
+	return "", "", ""
+}
+
+// Condition is the status.conditions entry of the type: its status, message
+// and time, the last zero when the entry carries none. It is false when the
+// object has no such entry.
+func (o Object) Condition(kind string) (status, message string, at time.Time, ok bool) {
+	st, _ := o["status"].(map[string]any)
+	conds, _ := st["conditions"].([]any)
+	for _, c := range conds {
+		cond, _ := c.(map[string]any)
+		if t, _ := cond["type"].(string); t != kind {
+			continue
+		}
+		status, _ = cond["status"].(string)
+		message, _ = cond["message"].(string)
+		s, _ := cond["time"].(string)
+		at, _ = time.Parse(time.RFC3339, s)
+		return status, message, at, true
+	}
+	return "", "", time.Time{}, false
+}
+
+// Annotate sets annotations on an existing object with a merge patch that
+// carries metadata.annotations alone, so no other field and no other
+// writer's annotation is touched. A missing object is ErrNotFound.
+func (k *Kube) Annotate(ctx context.Context, r Resource, name string, annotations map[string]string) error {
+	if w := k.workflows(r); w != nil {
+		return w.Annotate(ctx, name, annotations)
+	}
+	body, err := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": annotations}})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"fieldManager": {FieldManager}}
+	return k.do(ctx, http.MethodPatch, k.path(r, name)+"?"+q.Encode(), "application/merge-patch+json", body, nil)
+}
+
 // Apply is a server-side apply that takes ownership of conflicting fields.
 func (k *Kube) Apply(ctx context.Context, r Resource, obj Object) error {
 	body, err := json.Marshal(obj)
@@ -163,6 +286,9 @@ func (k *Kube) Apply(ctx context.Context, r Resource, obj Object) error {
 
 // Create posts a new object.
 func (k *Kube) Create(ctx context.Context, r Resource, obj Object) error {
+	if w := k.workflows(r); w != nil {
+		return w.Create(ctx, obj)
+	}
 	body, err := json.Marshal(obj)
 	if err != nil {
 		return err
@@ -173,6 +299,9 @@ func (k *Kube) Create(ctx context.Context, r Resource, obj Object) error {
 
 // Get reads one object, or ErrNotFound.
 func (k *Kube) Get(ctx context.Context, r Resource, name string) (Object, error) {
+	if w := k.workflows(r); w != nil {
+		return w.Get(ctx, name)
+	}
 	var obj Object
 	if err := k.do(ctx, http.MethodGet, k.path(r, name), "", nil, &obj); err != nil {
 		return nil, err
@@ -182,6 +311,9 @@ func (k *Kube) Get(ctx context.Context, r Resource, name string) (Object, error)
 
 // List reads the objects that match a label selector.
 func (k *Kube) List(ctx context.Context, r Resource, selector string) ([]Object, error) {
+	if w := k.workflows(r); w != nil {
+		return w.List(ctx, selector)
+	}
 	var list struct {
 		Items []Object `json:"items"`
 	}
@@ -195,8 +327,33 @@ func (k *Kube) List(ctx context.Context, r Resource, selector string) ([]Object,
 	return list.Items, nil
 }
 
+// DeleteUnchanged removes an object only while its resourceVersion is the one
+// given, so a write since that read keeps it and answers ErrConflict. A
+// missing object is no error.
+func (k *Kube) DeleteUnchanged(ctx context.Context, r Resource, name, resourceVersion string) error {
+	if w := k.workflows(r); w != nil {
+		return w.DeleteUnchanged(ctx, name, resourceVersion)
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion":    "v1",
+		"kind":          "DeleteOptions",
+		"preconditions": map[string]any{"resourceVersion": resourceVersion},
+	})
+	if err != nil {
+		return err
+	}
+	err = k.do(ctx, http.MethodDelete, k.path(r, name), "application/json", body, nil)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
 // Delete removes an object; a missing one is no error.
 func (k *Kube) Delete(ctx context.Context, r Resource, name string) error {
+	if w := k.workflows(r); w != nil {
+		return w.Delete(ctx, name)
+	}
 	err := k.do(ctx, http.MethodDelete, k.path(r, name), "", nil, nil)
 	if errors.Is(err, ErrNotFound) {
 		return nil

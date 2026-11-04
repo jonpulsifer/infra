@@ -15,11 +15,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/go-attestation/attest"
 
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -201,6 +201,9 @@ const (
 	reasonEKUnpinned     = "ek-unpinned"
 	reasonEKHash         = "ek-hash-mismatch"
 	reasonEKPending      = "ek-pending-approval"
+	reasonBinding        = "ek-binding-changed"
+	reasonBindingAuthor  = "ek-binding-unauthored"
+	reasonBindingRemoved = "ek-binding-removed"
 	reasonAK             = "ak-invalid"
 	reasonSession        = "session"
 	reasonConfirm        = "confirm-signature"
@@ -214,11 +217,8 @@ const (
 	reasonUnattended     = "unattended-boot"
 	reasonNetBox         = "netbox-unavailable"
 	reasonSerial         = "invalid-serial"
-	reasonIntakeRate     = "intake-rate"
-	reasonApproval       = "approval"
+	reasonField          = "invalid-field"
 	reasonInternal       = "internal"
 )
 
-func normalMAC(m string) string {
-	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(m), "-", ":"))
-}
+func normalMAC(m string) string { return netbox.NormalMAC(m) }

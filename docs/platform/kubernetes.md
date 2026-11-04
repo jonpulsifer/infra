@@ -36,7 +36,9 @@ A pod that names no RuntimeClass runs on `runc`. Every node also has these:
 
 [Rowbutt](../apps/mate.md) sandboxes run on `kata-clh`. The `packages/charts/app/` chart runs pods on `gvisor` unless its `sandbox` value is false.
 
-On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/talos/talos.tf` gives it the `lolwtf.ca/sandbox` label and a `NoSchedule` taint of the same key, so only a pod that selects the label and tolerates the taint lands there: the Rowbutt sandboxes, the GitHub Actions runners and the kthx engine's in-cluster build Jobs. A DaemonSet that should run on every node tolerates the taint in its chart values. folly has no sandbox node. Talos hands a node's taints to the kubelet, which applies them when it registers the Node, and NodeRestriction refuses the kubelet's later change, so a taint declared for a registered node is applied once by hand with `kubectl taint`.
+On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/talos/talos.tf` gives it the `lolwtf.ca/sandbox` label and a `NoSchedule` taint of the same key, so only a pod that selects the label and tolerates the taint lands there: the Rowbutt sandboxes, the GitHub Actions runners and the kthx engine's in-cluster build Jobs.
+
+A DaemonSet that should run on every node tolerates the taint in its chart values. On folly, a node's labels and taints come from its class's `workload` in `clusters/folly/fleet/classes.json`, through the `workloads` map in `clusters/folly/talos/talos.tf`, which both the Talos root and fleetd's render read. Every folly class is `general` today, which sets none, so folly has no sandbox node. Talos hands a node's taints to the kubelet, which applies them when it registers the Node, and NodeRestriction refuses the kubelet's later change, so a taint declared for a registered node is applied once by hand with `kubectl taint`.
 
 ## Signed Talos images
 
@@ -46,10 +48,18 @@ On offsite, [hotrod](../hosts/hotrod.md) is the sandbox node. `clusters/offsite/
 | --- | --- | --- |
 | Installer | `ghcr.io/jonpulsifer/talos-installer-folly:<version>` | Installs and upgrades a node. Its UKI's `talos.config` is `CONFIG_URL` in the workflow: a node's first boot from disk, which has no STATE, fetches its config by the install code in META `0x0b`, and every later boot loads the config from STATE. sd-boot's "Reset to maintenance mode" entry wipes STATE but not META, so that boot polls the URL with a burned code instead of entering maintenance mode. It carries no OAuth arguments. |
 | ISO | `metal-amd64-secureboot.iso` on the release `talos-folly/<version>` | Enrolls the Secure Boot keys at the machine, and rescues a node |
-| iPXE | `ipxe-amd64-secureboot.efi` on the same release | Chains Smee's script for the booting MAC, or boots HookOS from its own menu. [Talos boot](nixos/talos-boot.md#netboot-images) has the details. |
+| iPXE | `ipxe-amd64-secureboot.efi` on the same release | Boots HookOS from its menu. [Talos boot](nixos/talos-boot.md#netboot-images) has the details. |
 | HookOS UKI | `hookos-amd64-secureboot-uki.efi` on the same release | Runs the Tinkerbell agent, which wipes a disk before a reinstall |
 
 A push to `main` rebuilds them when the version, the extensions, the kernel arguments, the public keys, `clusters/folly/talos/netboot.json` or the pipeline change. Nothing builds while `netboot.json` pins the all-zero agent digest, which the containers workflow's delivery replaces. The nodes still run the Image Factory installer that `terraform/modules/talos-cluster/main.tf` names. [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md) is the procedure.
+
+## People
+
+A person reaches either API server by signing in at Google or at tsidp, Tailscale's OIDC provider on the tailnet. `clusters/base/config/kube-login.json` names each provider and its OAuth client ID. Each Talos root reads it into the API server's `AuthenticationConfiguration`, beside the peer cluster's issuer. It maps a verified account of the hosted domain to `google:<email>` and a tailnet login to `tailscale:<login>`. `clusters/base/cluster-access-rbac.yaml` binds those users to roles. `mise run kube:login <site>` writes the kubeconfig, as [Get kubectl access](../runbooks/get-cluster-admin-access.md) describes.
+
+The OAuth client is a Desktop client in the GCP project `homelab-ng`, made in the console: Google's Terraform resources make IAP clients, whose redirect URIs are fixed, or Workforce Identity Federation clients, which do not sign a Google account in. Its ID is in the file and its secret, which Google does not treat as confidential for a Desktop client, is `credential` in the 1Password item `kube-login-google`. Revoke access by removing the binding; disable every sign-in by deleting the client. The admin certificate from `talosctl` is the break-glass path.
+
+tsidp runs on spore, as [Identity](identity.md#people-on-the-tailnet) describes. Its client is made in tsidp's admin UI with the redirect URIs `http://localhost:8000` and `http://localhost:18000`, kubelogin's two listeners. tsidp has no public clients, so the client's secret is `credential` in the 1Password item `kube-login-tailscale` and goes into the 0600 kubeconfig, as Google's does.
 
 ## Rules
 
@@ -73,7 +83,7 @@ A push to `main` rebuilds them when the version, the extensions, the kernel argu
 - [Talos Linux](kubernetes/talos.md)
 - [How changes ship](how-changes-ship.md)
 - [Apply a Kubernetes change](../runbooks/apply-a-kubernetes-change.md)
-- [Get cluster admin access](../runbooks/get-cluster-admin-access.md)
+- [Get kubectl access](../runbooks/get-cluster-admin-access.md)
 - [Operate Postgres](../runbooks/operate-postgres.md)
 - [Install Talos on a node](../runbooks/install-talos-on-a-node.md)
 - [Build the signed Talos images](../runbooks/build-the-signed-talos-images.md)

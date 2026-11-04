@@ -227,7 +227,6 @@ export class RecordingInstruments implements Instruments {
   pool: { ready: number; wanted: number } | null = null;
   readonly tokenMints: string[] = [];
   readonly tokenStamps: string[] = [];
-  readonly siteSyncs: string[] = [];
   appReady: boolean | null = null;
   /** Every sign-in state reported, oldest first. */
   readonly chatgptStates: (ChatgptSignIn | null)[] = [];
@@ -278,9 +277,6 @@ export class RecordingInstruments implements Instruments {
   }
   githubTokenStamped(result: string): void {
     this.tokenStamps.push(result);
-  }
-  kthxSitesSynced(result: string): void {
-    this.siteSyncs.push(result);
   }
   spares(ready: number, wanted: number): void {
     this.pool = { ready, wanted };

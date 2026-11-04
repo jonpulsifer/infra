@@ -11,7 +11,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | `attest` | Attests, and boots the installed disk | The status stays, and the node has a new LDevID |
 | `wipe` | Wipes the system disk, with no attestation | The node stays in HookOS until a Workflow runs |
 
-`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. `attest` leaves the status alone. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
+`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. A `planned` device attests only against the approved EK binding in its nodes-file entry, so a `provision` of a node without one waits in HookOS; [Approve a machine's EKs](provision-a-node.md#approve-a-machines-eks) adds it. `attest` leaves the status alone, and an `active` node without a binding attests against its `ek_hash` pins. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -73,15 +73,21 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The `Workflow` stays `PREPARING` with `BootJobFailed` | Rufio cannot reach the BMC | Read the `Machine`'s conditions, fix the BMC, and set `desired_action` again |
-| A new `desired_action` starts nothing | A run of the device is unfinished | Wait for it. fleetd records the request against the running `Workflow` |
+| The `Workflow` ends `FAILED` within seconds with `BootJobFailed`, and the journal says `ended FAILED before any action ran: its BMC job netboot-<workflow> failed: <message>` | The BMC refused a power action or did not answer, so no action ran | Fix the BMC: the message is the BMC's answer, and `kubectl -n tinkerbell get machine <node> -o yaml` on spore shows whether Rufio reaches it. Then set `desired_action` again |
+| In fleetd's `native` [BMC mode](../apps/fleetd/lifecycle.md#bmc-mode), no `Workflow` appears, and the journal says `<run> (<action>) did not start: the BMC did not network-boot the machine: <message>` | The BMC refused a power action or did not answer, so fleetd created no `Workflow` and no action ran | Fix the BMC: the message is the BMC's answer. Then set `desired_action` again |
+| A new `desired_action` starts nothing, and the journal says `<action> waits: Workflow <run> (<its action>) is still running` | A run of another action is unfinished | Wait for it. `desired_action` stays set, and the first pass after the run ends starts it. A run that never reports its first action ends after its global timeout with a journal line that says `never reported its first action` |
+| The journal says `is already running; the request is that run` | You asked for the action of the run that is going | Nothing. The running `Workflow` is the request |
+| The journal says `its record was late` | NetBox refused fleetd's write that names the run, so the request stayed set | Nothing. fleetd adopts the run it started, finished or not, and starts no second one |
+| The power fails during a run | The run stops where the power cut it | Find the symptom in [Provision a node](provision-a-node.md#if-something-goes-wrong): `never reported its first action`, `resumed in a new boot after wipe-disk`, `passed its global timeout`, or a 404 for the config |
 | HP shows 3F0 Boot Device Not Found after HookOS | The firmware has no IPv4 network boot entry | Boot `IPV4 Network` from the F9 menu |
 | `install: no install code` | The boot's attestation got no code | Read the `attest.install` audit line in `journalctl -u fleetd` on spore, then set `desired_action` again |
-| The node polls its config URL and gets 404 | A STATE wipe on an installed node, because a served code is spent | Set `desired_action` to `provision`, which renders a new code |
+| The node polls its config URL and gets 404 | The node lost its config before Talos wrote it to STATE, as to a power loss in that second, or STATE was wiped on an installed node. Its code is spent either way. Within a day of the fetch, fleetd recognises the code, journals the ask and fires `FleetInstallConfigRefetched` | Set `desired_action` to `provision`, which renders a new code |
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
-| The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleetd cordons it | Read the reason, and clear the verdict once it is explained. The next daily check that passes restores the node's LDevID; then uncordon the node |
-| `attest: FAILED` with `ek-hash-mismatch` | A pin names another TPM, such as after a board swap | Compare `mise run attest:pending` with `ek_hash` in NetBox |
+| The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleetd cordons it | Read the reason, and clear the verdict once it is explained. The next hourly check that passes restores the node's LDevID; then uncordon the node |
+| `attest: FAILED` with `ek-hash-mismatch` | The approved binding or a pin names another TPM, such as after a board swap | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence and with `approved_ek_hash` and `ek_hash`. A replaced TPM needs a binding change in the nodes file |
+| `attest: FAILED` with `pending-approval` | A `planned` device whose entry approves no EK | [Approve its EKs](provision-a-node.md#approve-a-machines-eks) |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
+| The journal says the run waits for `install_disk_serial` | The node's entry has no `disk_serial`, so fleetd starts no run that wipes | Add the serial that `talosctl --nodes <addr> get disks` shows for the install disk, as [Hardware inventory](../reference/inventory.md#nodes-file) says, and apply `terraform/netbox/folly` |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |
 
 ## Related

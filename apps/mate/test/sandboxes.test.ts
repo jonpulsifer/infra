@@ -1,12 +1,11 @@
 /** KubeHands' sandboxes against a fake apiserver: the manifest, the mint and the pool. */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import type { SandboxConfig } from '../src/config.ts';
+import type { KthxConfig, SandboxConfig } from '../src/config.ts';
 import { HARNESS_CONTAINER } from '../src/hands.ts';
-import { KthxSites, parseSites, serialize } from '../src/kthx-sites.ts';
 import { Kube } from '../src/kube.ts';
 import {
   type KubeHandsDeps,
@@ -381,10 +380,7 @@ describe('the manifest', () => {
   test('hands the harness the kthx origin, and never the agent token', async () => {
     const r = rig({
       config: {
-        kthx: {
-          origin: 'https://kthx.example.test',
-          sitesSecret: 'mate-kthx-sites',
-        },
+        kthx: { origin: 'https://kthx.example.test', gcp: null },
       },
     });
     await mint(r);
@@ -392,6 +388,106 @@ describe('the manifest', () => {
     expect(env.KTHX_ORIGIN.value).toBe('https://kthx.example.test');
     // mate calls the engine's MCP server itself, with a token only it holds.
     expect(env.KTHX_AGENT_TOKEN).toBeUndefined();
+  });
+
+  describe('kthx deploys as a Google service account', () => {
+    const GCP = {
+      audience: '//iam.example.test/pools/fml-pool/providers/offsite',
+      serviceAccount: 'mate-sandbox-kthx',
+      credentialsConfigMap: 'mate-kthx-gcp',
+    };
+    const KTHX = { origin: 'https://kthx.example.test', gcp: GCP };
+
+    function manifestFor(profile: Profile, kthx: KthxConfig = KTHX): Json {
+      const spec = sandboxManifest({
+        name: NAME,
+        namespace: 'mate',
+        labels: sandboxLabels(THREAD, GUILD, profile),
+        config: { ...SANDBOX_CONFIG, ...FULL, kthx },
+        image: SANDBOX_IMAGE,
+        shutdownTime: new Date().toISOString(),
+        profile,
+      }) as Json;
+      return spec.spec.podTemplate.spec;
+    }
+
+    test('a sandbox with the grant runs as the account, with a projected token and the credential file', async () => {
+      const r = rig({ config: { ...FULL, kthx: KTHX } });
+      await mint(r);
+      const pod = podTemplate(r);
+      const harness = pod.containers[0];
+
+      expect(pod.serviceAccountName).toBe('mate-sandbox-kthx');
+      // The Kubernetes API token stays off; only the Google one is projected.
+      expect(pod.automountServiceAccountToken).toBe(false);
+      expect(pod.volumes).toContainEqual({
+        name: 'kthx-gcp',
+        projected: {
+          sources: [
+            {
+              serviceAccountToken: {
+                audience: GCP.audience,
+                expirationSeconds: 3600,
+                path: 'gcp-token',
+              },
+            },
+            {
+              configMap: {
+                name: 'mate-kthx-gcp',
+                items: [
+                  { key: 'gcp-credentials.json', path: 'gcp-credentials.json' },
+                ],
+              },
+            },
+          ],
+        },
+      });
+      expect(harness.volumeMounts).toContainEqual({
+        name: 'kthx-gcp',
+        mountPath: '/var/run/kthx',
+        readOnly: true,
+      });
+      const env = envOf(harness);
+      expect(env.GOOGLE_APPLICATION_CREDENTIALS.value).toBe(
+        '/var/run/kthx/gcp-credentials.json',
+      );
+      expect(env.KTHX_ORIGIN.value).toBe('https://kthx.example.test');
+    });
+
+    test('a sandbox without the grant gets no account, token, file or variable', () => {
+      const operatorWithout: Profile = {
+        ...OPERATOR,
+        grants: { ...OPERATOR.grants, kthxSites: false },
+      };
+      for (const profile of [INVESTIGATOR, operatorWithout]) {
+        expect(profile.grants.kthxSites).toBe(false);
+        const pod = manifestFor(profile);
+        expect(pod.serviceAccountName).toBeUndefined();
+        expect(pod.automountServiceAccountToken).toBe(false);
+        expect(pod.volumes.map((v: Json) => v.name)).toEqual([
+          'home',
+          'workspace',
+        ]);
+        expect(pod.containers[0].volumeMounts.map((m: Json) => m.name)).toEqual(
+          ['home', 'workspace'],
+        );
+        expect(envOf(pod.containers[0]).GOOGLE_APPLICATION_CREDENTIALS).toBe(
+          undefined,
+        );
+      }
+    });
+
+    test('with no audience configured, the grant adds none of it', () => {
+      const pod = manifestFor(OPERATOR, { origin: KTHX.origin, gcp: null });
+      expect(pod.serviceAccountName).toBeUndefined();
+      expect(pod.volumes.map((v: Json) => v.name)).toEqual([
+        'home',
+        'workspace',
+      ]);
+      expect(envOf(pod.containers[0]).GOOGLE_APPLICATION_CREDENTIALS).toBe(
+        undefined,
+      );
+    });
   });
 
   // The helper is a shell snippet, so only running git proves its shape.
@@ -884,14 +980,10 @@ describe('the warm pool', () => {
 });
 
 // A sandbox is minted for one profile: its labels, name and env follow the
-// profile's grants, and a read-only one never reaches the kthx ledger.
+// profile's grants.
 describe('profiles', () => {
   const READER = `${NAME}-r`;
   const ORIGIN = 'https://kthx.example.test';
-  const SECRET = 'mate-kthx-sites';
-  const SITES = '.config/kthx/sites.json';
-  const LEDGER = serialize({ [ORIGIN]: { blog: 'tok-blog' } });
-  const HOSTILE = serialize({ [ORIGIN]: { blog: 'tok-attacker' } });
 
   function reader(
     opts: {
@@ -903,42 +995,11 @@ describe('profiles', () => {
       config: {
         ...FULL,
         kubeReaderServiceAccount: 'mate-sandbox-reader',
-        kthx: { origin: ORIGIN, sitesSecret: SECRET },
+        kthx: { origin: ORIGIN, gcp: null },
         ...opts.config,
       },
       deps: opts.deps,
     });
-  }
-
-  function ledgered(r: Rig): KthxSites {
-    return new KthxSites({
-      kube: r.kube,
-      namespace: 'mate',
-      secret: SECRET,
-      log: r.log,
-    });
-  }
-
-  /** The ledger holds one site, and the hands fold sites into it. */
-  function withLedger(r: Rig): Rig {
-    r.fake.putSecret(SECRET, { 'sites.json': LEDGER });
-    r.hands = r.another({ kthxSites: ledgered(r) });
-    return r;
-  }
-
-  function leaveSites(r: Rig, contents: string): void {
-    mkdirSync(dirname(join(r.home, SITES)), { recursive: true });
-    writeFileSync(join(r.home, SITES), contents);
-  }
-
-  /** Nothing read the sandbox's sites file or wrote the ledger. */
-  function ledgerUntouched(r: Rig): void {
-    expect(r.fake.patches.filter((p) => p.name === SECRET)).toEqual([]);
-    expect(r.fake.secretValue(SECRET, 'sites.json')).toBe(LEDGER);
-    expect(r.metrics.siteSyncs).toEqual([]);
-    for (const exec of r.fake.execs) {
-      expect(exec.command.join(' ')).not.toContain('sites.json');
-    }
   }
 
   async function mintAs(
@@ -1073,15 +1134,11 @@ describe('profiles', () => {
     );
   });
 
-  test('an operator sandbox found for an investigator thread keeps its sites, then is condemned', async () => {
-    const r = withLedger(reader());
+  test('an operator sandbox found for an investigator thread is condemned', async () => {
+    const r = reader();
     await mint(r);
-    leaveSites(
-      r,
-      serialize({ [ORIGIN]: { blog: 'tok-blog', shop: 'tok-shop' } }),
-    );
     // A later mate, with this thread's row born investigator.
-    r.hands = r.another({ kthxSites: ledgered(r) });
+    r.hands = r.another();
     expect(await mintAs(r, INVESTIGATOR)).toMatchObject({
       sandbox: READER,
       source: 'fresh',
@@ -1089,25 +1146,20 @@ describe('profiles', () => {
     expect(
       r.log.of('a sandbox of this thread is labelled for another profile'),
     ).toHaveLength(1);
-    expect(parseSites(r.fake.secretValue(SECRET, 'sites.json') ?? '')).toEqual({
-      [ORIGIN]: { blog: 'tok-blog', shop: 'tok-shop' },
-    });
     await until(() => !r.fake.sandboxes.has(NAME));
   });
 
-  test('a reader sandbox labelled operator is condemned with no sites read', async () => {
-    const r = withLedger(reader());
+  test('a reader sandbox labelled operator is condemned', async () => {
+    const r = reader();
     await plant(r, 'mate-forged', {
       ...sandboxLabels(THREAD, GUILD, INVESTIGATOR),
       'lolwtf.ca/profile': 'operator',
     });
-    leaveSites(r, HOSTILE);
     expect((await mintAs(r, INVESTIGATOR)).sandbox).toBe(READER);
     expect(
       r.log.of('a sandbox of this thread is labelled for another profile'),
     ).toHaveLength(1);
     await until(() => !r.fake.sandboxes.has('mate-forged'));
-    ledgerUntouched(r);
   });
 
   test('a reader sandbox whose pod came back after the window closed is replaced at once', async () => {
@@ -1242,56 +1294,6 @@ describe('profiles', () => {
     );
     await turn.lease.finish();
     turn.end();
-  });
-
-  describe('a hostile sites file in a reader sandbox never reaches the ledger', () => {
-    test('on release', async () => {
-      const r = withLedger(reader());
-      await mintAs(r, INVESTIGATOR);
-      leaveSites(r, HOSTILE);
-      await r.hands.release(THREAD, 'quiet');
-      expect(r.fake.sandboxes.has(READER)).toBe(false);
-      ledgerUntouched(r);
-    });
-
-    test('on eviction', async () => {
-      const clock = new FakeClock();
-      const r = reader({ deps: { maxSandboxes: 1, clock } });
-      r.fake.putSecret(SECRET, { 'sites.json': LEDGER });
-      r.hands = r.another({ kthxSites: ledgered(r) });
-      const hooks = new Hooks();
-      const turn = begin(r.hands.thread(THREAD, hooks, INVESTIGATOR));
-      expect((await turn.env.exists('.', C)).ok).toBe(true);
-      await turn.lease.finish();
-      turn.end();
-      leaveSites(r, HOSTILE);
-      await clock.advance(PREEMPT_IDLE_MS);
-      expect((await mintAs(r, INVESTIGATOR, OTHER_THREAD)).error).toBeNull();
-      expect(hooks.gone).toEqual(['preempted']);
-      ledgerUntouched(r);
-    });
-
-    test('on a loss', async () => {
-      const r = withLedger(reader());
-      leaveSites(r, HOSTILE);
-      r.fake.oldHands = true;
-      expect((await mintAs(r, INVESTIGATOR)).error).not.toBeNull();
-      await until(() => !r.fake.sandboxes.has(READER));
-      ledgerUntouched(r);
-    });
-
-    test('at boot, from an earlier mate', async () => {
-      const r = withLedger(reader());
-      await plant(
-        r,
-        READER,
-        withoutHands(sandboxLabels(THREAD, GUILD, INVESTIGATOR)),
-      );
-      leaveSites(r, HOSTILE);
-      expect(await r.hands.start()).toEqual([]);
-      await until(() => !r.fake.sandboxes.has(READER));
-      ledgerUntouched(r);
-    });
   });
 
   test('a standing custodian sandbox counts in the automation lane', async () => {

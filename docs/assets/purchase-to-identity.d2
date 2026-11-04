@@ -1,0 +1,16 @@
+vars: {d2-config: {layout-engine: elk; theme-id: 0; pad: 24}}
+direction: down
+receive: "Receive the machine\nCheck chassis, intended disk and TPM keys"
+record: "Record the intended machine\nGit review -> Atlantis -> planned NetBox device\nClass and action describe the intended installation"
+boot: "Start the first PXE boot\nSigned iPXE -> signed HookOS\nNo MAC or runnable Workflow yet"
+admit: "HookOS proves identity and boot state to fleetd\nRecord the MAC and check admission policy"
+choose: "fleetd creates the first-install Workflow\nClass selects template and installer\nDevice fields select disk and configuration\nAdmission supplies the install code"
+install: "The machine executes the workflow\nCheck disk -> wipe -> install Talos -> reboot"
+finish: "Talos fetches configuration from fleetd\nNetBox becomes active after delivery\nCluster join, readiness and SPIRE follow separately"
+receive -> record
+record -> boot
+boot -> admit
+admit -> choose
+choose -> install
+install -> finish
+**.style.font-size: 20

@@ -37,7 +37,7 @@ const (
 	auditVerdict = "attest.verdict"
 	auditIssue   = "attest.issue"
 	auditRenew   = "attest.renew"
-	// auditCheck is a daily check's verdict; auditPCR0 a PCR 0 the BIOS
+	// auditCheck is a hourly check's verdict; auditPCR0 a PCR 0 the BIOS
 	// version on record does not explain.
 	auditCheck = "attest.check"
 	auditPCR0  = "attest.pcr0"

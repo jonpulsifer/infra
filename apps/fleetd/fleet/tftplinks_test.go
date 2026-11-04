@@ -106,7 +106,7 @@ func TestSyncRefusesNamesThatAreNotMACs(t *testing.T) {
 }
 
 func TestReconcileKeepsLinksForNetBoxMACs(t *testing.T) {
-	nb := &fakeNetBox{devices: []map[string]any{device("swell", "planned", "none", nil)}, ifaces: riptideIfaces()}
+	nb := &fakeNetBox{Devices: []map[string]any{device("swell", "planned", "none", nil)}, Ifaces: riptideIfaces()}
 	r, done := newTest(t, nb, &fakeKube{})
 	defer done()
 	dir := t.TempDir()

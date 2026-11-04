@@ -1,12 +1,12 @@
 ---
-# Attests each TPM node every day and renews its LDevID before it expires. A
+# Attests each TPM node every hour and renews its LDevID before it expires. A
 # CronJob cannot pin one pod to each node, so a DaemonSet runs `tink-attest
-# renew -every 24h`. Each run signs a quote over PCRs 0 to 7 and the event log
+# renew -every 1h`. Each run signs a quote over PCRs 0 to 7 and the event log
 # with the LAK. When the LDevID in NV 0x01c90000 expires within 30 days, the
 # attest service certifies the LDevID key again on its DevID listener, the run
 # stores the new certificate in NV and deletes the node's spire-agent pod,
 # whose devid-init then fetches the new certificate; the answer must chain to a
-# DevID CA in spire-devid-ca (devid-ca.yaml). Otherwise the run is the daily
+# DevID CA in spire-devid-ca (devid-ca.yaml). Otherwise the run is the hourly
 # check: the service judges the same evidence, records the verdict and PCR 0 in
 # NetBox, and issues nothing. TalosAttestNotChecked and TalosAttestLDevIDExpiring
 # are the backstops.
@@ -128,13 +128,13 @@ spec:
         - name: renew
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/tink-attest@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/tink-attest@sha256:61ac8e87d11dd74e6c2337e382275f8722c87a3240d16fab4b410801811594f7
+          image: ghcr.io/jonpulsifer/tink-attest@sha256:8eb18829dd8b447b631f65cb1e89869e532b046ceb1b88acc2b1925c67851ac6
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/tink-attest"]
           # Each run reads the CA bundle again, so a rotated CA needs no restart.
           args:
             - renew
-            - -every=24h
+            - -every=1h
             - -retry=1h
             - -renew-before=720h
             - -ca-bundle=/etc/devid-ca/devid-ca.pem

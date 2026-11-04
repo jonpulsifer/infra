@@ -1,0 +1,87 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zeek
+  labels:
+    app.kubernetes.io/name: zeek
+    app.kubernetes.io/part-of: sensor
+  annotations:
+    # The scripts are read at start, so a change to the ConfigMap rolls the pod.
+    configmap.reloader.stakater.com/reload: sensor-scripts
+spec:
+  replicas: 1
+  # One capture per interface: the old pod leaves before the new one starts.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: zeek
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: zeek
+        app.kubernetes.io/part-of: sensor
+    spec:
+      # The sensor's USB NIC is on shale, cabled to the switch's mirror port
+      # (terraform/network/unifi/folly/bootstrap.tf).
+      nodeSelector:
+        kubernetes.io/hostname: shale
+      # The capture interface is the node's, so the pod shares its network
+      # namespace. Nothing listens.
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      tolerations:
+        - effect: NoSchedule
+          key: unschedulable
+          operator: Equal
+          value: "true"
+      initContainers:
+        # Waits for the USB NIC, then leaves it up, promiscuous and with no
+        # address: privileged, to write the node's sysctls for the link.
+        - name: quiet-nic
+          image: docker.io/jasonish/suricata:8.0.8@sha256:d5a3a1785299ab40918d465e54fedf8e3afeeedba76bb64b0cc74dbc20bda2c3
+          command: ["/bin/bash", "/scripts/quiet-nic.sh"]
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      containers:
+        - name: zeek
+          image: docker.io/zeek/zeek:9.0.1@sha256:524cb0ce29f26a6a954fb9c357a8f92b95812476d8240f0ece26617ace249dd0
+          command: ["/bin/bash", "/scripts/zeek-run.sh"]
+          workingDir: /var/lib/zeek
+          # The hosts that fetch tsidp's keys through Funnel, and tsidp's host:
+          # the tripwires in scripts/funnel-tripwires.zeek and
+          # scripts/funnel-tripwires.rules leave them out.
+          env:
+            - name: FUNNEL_FETCHERS
+              value: "${API_SERVER_IP},${SPORE_IP}"
+            - name: SPORE_IP
+              value: "${SPORE_IP}"
+          securityContext:
+            capabilities:
+              drop: [ALL]
+              # NET_ADMIN brings the link up in promiscuous mode, NET_RAW
+              # opens the packet socket.
+              add: [NET_ADMIN, NET_RAW]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 2Gi
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+            - name: state
+              mountPath: /var/lib/zeek
+      volumes:
+        - name: scripts
+          configMap:
+            name: sensor-scripts
+            defaultMode: 0555
+        - name: state
+          emptyDir: {}

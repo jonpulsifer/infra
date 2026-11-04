@@ -15,7 +15,7 @@ import (
 )
 
 // Policy is what a replayed event log must show. Certificates are named by
-// the lowercase hex SHA-256 of their DER. policy.yaml is the instance.
+// the lowercase hex SHA-256 of their DER. A file under policy/ is the instance.
 type Policy struct {
 	// PCRs the quote must cover in the SHA-256 bank.
 	PCRs []int `yaml:"pcrs"`
@@ -150,7 +150,11 @@ func (p *Policy) evaluate(events []attest.Event, requiredAuthorities []string) [
 	need("The boot path", post, requiredAuthorities)
 
 	if len(p.BootApplications) > 0 {
-		for _, d := range bootApplications(events) {
+		apps := bootApplications(events)
+		if len(apps) == 0 {
+			v = append(v, "PCR 4 records no boot application after its separator")
+		}
+		for _, d := range apps {
 			if !slices.Contains(p.BootApplications, d) {
 				v = append(v, fmt.Sprintf("PCR 4 records boot application %s, which the policy does not list", d))
 			}
@@ -158,6 +162,24 @@ func (p *Policy) evaluate(events []attest.Event, requiredAuthorities []string) [
 	}
 	sort.Strings(v)
 	return slices.Compact(v)
+}
+
+// coverage errs unless the log accounts for every PCR the profile covers. The
+// replay passes a PCR that has no events whatever the quote says, so such a
+// PCR must still hold its initial value, all zeros: a log that omits a PCR's
+// events cannot hide a measurement. A PCR 0 that a TXT locality started at a
+// nonzero value has measurements in any real boot, so it fails here too.
+func (p *Policy) coverage(pcrs []attest.PCR, events []attest.Event) error {
+	for _, want := range p.PCRs {
+		if slices.ContainsFunc(events, func(e attest.Event) bool { return e.Index == want }) {
+			continue
+		}
+		i := slices.IndexFunc(pcrs, func(q attest.PCR) bool { return q.Index == want })
+		if i < 0 || !slices.Equal(pcrs[i].Digest, make([]byte, len(pcrs[i].Digest))) {
+			return fail(reasonEventLog, "the event log holds no event for PCR %d, whose quoted value is not the initial one", want)
+		}
+	}
+	return nil
 }
 
 // bootApplications returns the Authenticode digests PCR 4 records after its

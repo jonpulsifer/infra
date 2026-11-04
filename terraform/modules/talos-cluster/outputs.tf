@@ -25,7 +25,7 @@ output "nodes" {
 # server's class render, and fails on a byte of difference. tofu console
 # evaluates it with a local backend and no state.
 output "install_inputs" {
-  description = "Per node: machine_type, cluster_name, cluster_endpoint, talos_contract, kubernetes_version and the ordered config_patches of a fresh install."
+  description = "Per node: machine_type, cluster_name, cluster_endpoint, talos_contract, kubernetes_version, the ordered config_patches of a fresh install, and the bootstrap_token that replaces the bundle's, or null."
   value = { for name, n in var.nodes : name => {
     machine_type       = n.role
     cluster_name       = local.topology.CLUSTER_NAME
@@ -33,6 +33,7 @@ output "install_inputs" {
     talos_contract     = var.talos_contract
     kubernetes_version = var.kubernetes_version
     config_patches     = local.install_patches[name]
+    bootstrap_token    = n.bootstrap_token
   } }
 }
 

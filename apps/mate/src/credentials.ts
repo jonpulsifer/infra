@@ -2,23 +2,15 @@
  * A turn's credentials in its sandbox: minted on the turn's first tool call,
  * written over the hands link with `writeFiles`, and blanked when the turn
  * ends. The thread's profile grants each one: a credential it does not grant
- * is written empty, and its kthx sites file is never read or folded. Nothing
+ * is written empty. Nothing
  * outlives the turn: the GitHub token is revoked whatever happens, and the
  * cluster token expires on its own.
  */
-import { HandsError } from '@repo/mate-hands/protocol';
 import { type Clock, type Handle, systemClock } from './clock.ts';
 import type { SandboxConfig } from './config.ts';
 import { HARNESS_CONTAINER, type HandsClient } from './hands.ts';
 import type { HandsTarget } from './hands-env.ts';
-import {
-  type KthxSites,
-  parseSites,
-  SITES_LIMIT_BYTES,
-  type Sites,
-  serialize,
-} from './kthx-sites.ts';
-import { type ExecClose, type Kube, KubeError } from './kube.ts';
+import type { ExecClose, Kube } from './kube.ts';
 import {
   AGENT_HOME,
   type HandsInstruments,
@@ -41,8 +33,8 @@ export const TALOSCONFIG_PATH = '.talos/config';
 const SSH_DIR = '.ssh';
 const SSH_KEY_PATH = `${SSH_DIR}/id_ed25519`;
 const SSH_CONFIG_PATH = `${SSH_DIR}/config`;
-// Where the kthx CLI keeps its site tokens under the image's XDG_CONFIG_HOME.
-const SITES_PATH = '.config/kthx/sites.json';
+// A one-shot command's output is a few small lines.
+const OUTPUT_LIMIT_BYTES = 64 * 1024;
 
 // folly's Anchor network has no route from offsite, so its hosts are reached through
 // a jump host that offsite routes to and the folly firewall admits on 22:
@@ -189,7 +181,6 @@ export interface CredentialDeps {
   readonly clock?: Clock;
   readonly metrics?: HandsInstruments;
   readonly githubApp?: TokenSource | null;
-  readonly kthxSites?: KthxSites | null;
   readonly clusterCa?: string | null;
   readonly sshKey?: string | null;
   /** The `os:reader` talosconfig, with a context per cluster; `null` until the Secret exists. */
@@ -203,14 +194,8 @@ interface Minted {
   cluster: string | null;
 }
 
-/**
- * The credentials of every sandbox, and the kthx sites ledger's view of each:
- * what a sandbox's sites file holds that the ledger also holds, so a name
- * missing from the file is a removal only against this. Empty after a
- * restart, which folds every site as new.
- */
+/** The credentials of every sandbox. */
 export class Credentials {
-  private readonly stamped = new Map<string, Sites>();
   readonly clock: Clock;
 
   constructor(readonly deps: CredentialDeps) {
@@ -224,13 +209,8 @@ export class Credentials {
       (grants.github && githubApp) ||
         kubeAccount(config, grants.kube) ||
         (grants.ssh && sshKey) ||
-        (grants.talos && talosconfig) ||
-        (grants.kthxSites && this.kthx),
+        (grants.talos && talosconfig),
     );
-  }
-
-  get kthx(): KthxSites | null {
-    return this.deps.config.kthx.origin ? (this.deps.kthxSites ?? null) : null;
   }
 
   turn(profile: Profile): TurnCredentials {
@@ -241,87 +221,8 @@ export class Credentials {
     );
   }
 
-  /**
-   * Before a sandbox is deleted: folds its sites file into the ledger over a
-   * one-shot command, since no link is open. Never throws.
-   */
-  async keepSites(sandbox: string, pod: string): Promise<void> {
-    if (!this.kthx) return;
-    try {
-      await bounded(this.clock, 'keeping the kthx sites', () =>
-        this.syncSites(sandbox, () =>
-          this.command(pod, ['/bin/sh', '-c', readSitesScript(this.home)]),
-        ),
-      );
-    } catch (error) {
-      // 404: gone already, and its home with it.
-      if (error instanceof KubeError && error.status === 404) return;
-      this.deps.log.warn('could not keep the sandbox kthx sites', {
-        sandbox,
-        error: plain(error),
-      });
-    }
-  }
-
-  forget(sandbox: string): void {
-    this.stamped.delete(sandbox);
-  }
-
   get home(): string {
     return this.deps.home ?? AGENT_HOME;
-  }
-
-  /**
-   * Reads a sandbox's kthx site tokens back into the ledger. Answers what the
-   * file should hold now, or `null` to leave it alone: an unreadable file may
-   * hold tokens nobody else has, and after a failed save it is their only
-   * copy. `read-failed` is the file, `save-failed` the Secret.
-   */
-  async syncSites(
-    sandbox: string,
-    read: () => Promise<string>,
-  ): Promise<Sites | null> {
-    const { log, metrics } = this.deps;
-    const ledger = this.kthx;
-    if (!ledger) return null;
-    const before = this.stamped.get(sandbox) ?? {};
-    let harvested: Sites;
-    try {
-      // Only absence is tolerated: a file that is there but cannot be read
-      // is not a file with nothing in it.
-      harvested = parseSites(await read());
-    } catch (error) {
-      metrics?.kthxSitesSynced('read-failed');
-      log.error('could not read the sandbox kthx sites file', {
-        sandbox,
-        error: plain(error),
-      });
-      // Unknown: a fold against nothing stamped can only add, never remove.
-      this.stamped.set(sandbox, {});
-      return null;
-    }
-    try {
-      const sites = await ledger.merge(before, harvested);
-      metrics?.kthxSitesSynced('ok');
-      // The file holds this, and now so does the ledger.
-      this.stamped.set(sandbox, harvested);
-      return sites;
-    } catch (error) {
-      metrics?.kthxSitesSynced('save-failed');
-      log.error('could not save the sandbox kthx sites into the ledger', {
-        sandbox,
-        secret: ledger.secret,
-        error: plain(error),
-      });
-      // The file holds what the ledger does not; the next fold must add it.
-      this.stamped.set(sandbox, {});
-      return null;
-    }
-  }
-
-  /** The file now holds what `sites` does. */
-  wrote(sandbox: string, sites: Sites): void {
-    this.stamped.set(sandbox, sites);
   }
 
   /**
@@ -329,23 +230,19 @@ export class Credentials {
    * the stream cannot half-close stdin, so every one is empty: argv reaches
    * the apiserver audit log.
    */
-  async blank(pod: string, sites: boolean): Promise<void> {
+  async blank(pod: string): Promise<void> {
     const home = this.home;
-    const sitesFile = `${home}/${SITES_PATH}`;
     await this.command(pod, [
       '/bin/sh',
       '-c',
       [
         'umask 077',
-        `mkdir -p ${home}/${SSH_DIR} "$(dirname ${home}/${KUBECONFIG_PATH})" "$(dirname ${home}/${TALOSCONFIG_PATH})"${
-          sites ? ` "$(dirname ${sitesFile})"` : ''
-        }`,
+        `mkdir -p ${home}/${SSH_DIR} "$(dirname ${home}/${KUBECONFIG_PATH})" "$(dirname ${home}/${TALOSCONFIG_PATH})"`,
         `printf %s "$1" > ${home}/${TOKEN_PATH}`,
         `printf %s "$2" > ${home}/${KUBECONFIG_PATH}`,
         `printf %s "$3" > ${home}/${SSH_KEY_PATH}`,
         `printf %s "$4" > ${home}/${SSH_CONFIG_PATH}`,
         `printf %s "$5" > ${home}/${TALOSCONFIG_PATH}`,
-        ...(sites ? [`printf %s "$6" > ${sitesFile}`] : []),
       ].join('; '),
       'mate',
       '',
@@ -353,7 +250,6 @@ export class Credentials {
       '',
       '',
       '',
-      ...(sites ? [serialize({})] : []),
     ]);
   }
 
@@ -379,10 +275,10 @@ export class Credentials {
         const { done, value } = await reader.read();
         if (done) break;
         size += value.length;
-        if (size > SITES_LIMIT_BYTES) {
+        if (size > OUTPUT_LIMIT_BYTES) {
           stream.close();
           throw new Error(
-            `${command[0]} printed more than ${SITES_LIMIT_BYTES} bytes`,
+            `${command[0]} printed more than ${OUTPUT_LIMIT_BYTES} bytes`,
           );
         }
         chunks.push(value);
@@ -450,12 +346,6 @@ export class TurnCredentials {
               ...(await this.peers(target, client, cwd, signal)),
             ])
           : '';
-        // First, so a save the last turn's end could not make is retried now.
-        const sites = grants.kthxSites
-          ? await creds.syncSites(target.sandbox, () =>
-              readSites(client, home, signal),
-            )
-          : null;
         const ssh = grants.ssh ? (creds.deps.sshKey ?? '') : '';
         const talos = grants.talos ? (creds.deps.talosconfig ?? '') : '';
         if (this.sealed) return;
@@ -473,16 +363,11 @@ export class TurnCredentials {
                   : '',
                 talos,
               }),
-              ...(sites
-                ? [file(`${home}/${SITES_PATH}`, serialize(sites))]
-                : []),
             ],
             dirMode: DIR_MODE,
           },
           { signal },
         );
-        // Only now: a write that failed left the file as the fold read it.
-        if (sites) creds.wrote(target.sandbox, sites);
         if (githubApp) {
           metrics?.githubTokenStamped(github ? 'ok' : 'mint-failed');
         }
@@ -503,21 +388,15 @@ export class TurnCredentials {
 
   /**
    * Blanks what `stamp` wrote: over the link while it is open, else with a
-   * one-shot command carrying no secret. The sites file becomes `{}` only
-   * once the ledger holds what it said. Never throws.
+   * one-shot command carrying no secret. Never throws.
    */
   async retire(target: HandsTarget, client: HandsClient | null): Promise<void> {
-    const { creds, grants } = this;
+    const { creds } = this;
     if (!this.stamped) return;
     try {
       await bounded(creds.clock, 'blanking credentials', async (signal) => {
         if (client && !client.isClosed) {
           const { home } = client.hello;
-          const synced = grants.kthxSites
-            ? await creds.syncSites(target.sandbox, () =>
-                readSites(client, home, signal),
-              )
-            : null;
           await client.call(
             'writeFiles',
             {
@@ -529,31 +408,14 @@ export class TurnCredentials {
                   sshConfig: '',
                   talos: '',
                 }),
-                // `{}` and not nothing: the CLI reads an empty file as corrupt.
-                ...(synced
-                  ? [file(`${home}/${SITES_PATH}`, serialize({}))]
-                  : []),
               ],
               dirMode: DIR_MODE,
             },
             { signal },
           );
-          // What the next turn reads first, and it folds in as nothing
-          // claimed, not as every site removed.
-          if (synced) creds.wrote(target.sandbox, {});
           return;
         }
-        const synced = grants.kthxSites
-          ? await creds.syncSites(target.sandbox, () =>
-              creds.command(target.pod, [
-                '/bin/sh',
-                '-c',
-                readSitesScript(creds.home),
-              ]),
-            )
-          : null;
-        await creds.blank(target.pod, synced !== null);
-        if (synced) creds.wrote(target.sandbox, {});
+        await creds.blank(target.pod);
       });
     } catch (error) {
       creds.deps.log.warn("could not clear the turn's credentials", {
@@ -701,38 +563,6 @@ function credentialFiles(home: string, values: CredentialValues) {
     file(`${home}/${SSH_CONFIG_PATH}`, values.sshConfig),
     file(`${home}/${TALOSCONFIG_PATH}`, values.talos),
   ];
-}
-
-/** Absent is empty; anything else unreadable, or over the limit, throws. */
-async function readSites(
-  client: HandsClient,
-  home: string,
-  signal: AbortSignal,
-): Promise<string> {
-  let text: string;
-  try {
-    text = await client.call(
-      'readTextFile',
-      { path: `${home}/${SITES_PATH}` },
-      { signal },
-    );
-  } catch (error) {
-    const missing =
-      error instanceof HandsError &&
-      error.detail.kind === 'file' &&
-      error.detail.code === 'not_found';
-    if (missing) return '';
-    throw error;
-  }
-  if (Buffer.byteLength(text) > SITES_LIMIT_BYTES) {
-    throw new Error(`sites.json holds more than ${SITES_LIMIT_BYTES} bytes`);
-  }
-  return text;
-}
-
-function readSitesScript(home: string): string {
-  const path = `${home}/${SITES_PATH}`;
-  return `[ ! -e ${path} ] || head -c ${SITES_LIMIT_BYTES + 1} ${path}`;
 }
 
 /** `work`, given up on after `STAMP_TIMEOUT_MS`, its calls cancelled. */

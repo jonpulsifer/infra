@@ -21,19 +21,21 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 ## Kubernetes
 
 - [Apply a Kubernetes change](apply-a-kubernetes-change.md): change `clusters/`, share a resource between the clusters, and make sure Flux applies it
-- [Get cluster admin access](get-cluster-admin-access.md): get `kubectl` access and withdraw access
+- [Get kubectl access](get-cluster-admin-access.md): sign in at Google for `kubectl` access, keep the admin certificate for break-glass, and withdraw access
 - [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.md): replace a cluster's NixOS nodes with Talos, bootstrap etcd, Cilium and Flux, and restore its backups
 - [Make a Talos secrets bundle](make-a-talos-secrets-bundle.md): generate a cluster's Talos secrets with its imported signing key, and pin its new CA
 - [Install Cilium and Flux on Talos](install-cilium-and-flux-on-talos.md): write a new cluster's kubeconfig context, install Cilium with its BGP peering, and bootstrap Flux
 - [Move a cluster's data through a Talos rebuild](move-a-clusters-data-through-a-talos-rebuild.md): freeze the writers, take the last backups, and restore the databases, volumes and kthx Apps
 - [Verify a Talos cluster](verify-a-talos-cluster.md): check the nodes, network, identity and workloads of a cluster that runs Talos
 - [Issue a talosconfig](issue-a-talosconfig.md): mint the owner's and Rowbutt's Talos API credentials and store them in 1Password
+- [Rotate the cluster bootstrap token](rotate-the-cluster-bootstrap-token.md): replace folly's cluster-wide bootstrap token in the Talos bundle, apply it, and delete the old one
 - [Add a TPM node to SPIRE](add-a-tpm-node-to-spire.md): read a node's TPM endorsement key hash, admit it on spore, and make sure its agent serves SVIDs
 - [Operate Postgres](operate-postgres.md): connect to, inspect and restart the CloudNativePG databases
 - [Restore a database](restore-a-database.md): restore a Postgres database from its barman backups, and run the restore drill
 - [Recover a re-created database](recover-a-re-created-database.md): bring a database back when its `Cluster` is created again under the same name
 - [Restore a volume](restore-a-volume.md): restore the files of a volume from a Velero backup
 - [Restore from the GCS copy](restore-from-the-gcs-copy.md): copy a Garage bucket back from the encrypted GCS copy
+- [Restore a site](restore-a-site.md): copy a kthx quick site's files back from the noncurrent versions the sites bucket keeps
 - [Migrate Garage to three nodes](migrate-garage-to-three-nodes.md): move folly's backup store from spore alone to a replication factor 3 cluster on the anchors
 - [Migrate a local-path volume](migrate-a-local-path-volume.md): move a hostPath volume to a `local` volume so that Velero can back it up
 
@@ -47,6 +49,7 @@ Runbooks are the step-by-step procedures that the owner and agents follow to cha
 ## Secrets
 
 - [Manage SOPS secrets](manage-sops-secrets.md): restore the operator age key, edit a SOPS file, add a host, and rotate the key
+- [Switch a NetBox token to its own user](switch-a-netbox-token.md): mint a token for the terraform and fleetd users, move each onto it, and revoke the admin tokens
 - [Initialize OpenBao](initialize-openbao.md): initialize a new OpenBao instance and store its recovery key
 - [Make a YubiKey a DevID CA](set-up-a-devid-ca-yubikey.md): generate a DevID CA key on an anchor's YubiKey, certify it with Atlantis, and write the certificate into the card
 

@@ -60,7 +60,7 @@ The DevID CA and the SPIRE CA have different jobs. The DevID CA certifies device
 
 ### Declaration and boot
 
-Automatic installation requires a complete machine declaration. A declared planned device can bind its first certified EK without a separate approval. An unknown serial needs the owner's EK approval; that approval does not supply the declaration fields required for installation.
+Automatic installation requires a complete machine declaration, including an approved EK binding in the node's entry. The binding comes from a receiving scan or a supplier record, not from the claim. fleetd honours it only when NetBox's changelog shows Terraform's user wrote it. A planned device without a binding, and an unknown serial, wait as claims that authorize nothing.
 
 UniFi DHCP directs PXE to spore. Firmware loads signed iPXE, which loads signed HookOS. The HookOS command line pins the agent image by digest.
 
@@ -86,7 +86,7 @@ For an eligible provision, fleetd renders the config and returns a random instal
 
 The Talos installer writes the code to META. At first boot, Talos sends the UUID and code over HTTPS. This request uses a bearer credential. It does not produce a new TPM proof.
 
-Only one fetch can claim the config at a time. A complete response burns the code. A partial response permits a retry. Config expiry bounds the waiting period. A new render invalidates the earlier code.
+Only one fetch can claim the config at a time. TCP acknowledgement of the complete response burns the code; it does not prove durable storage by Talos. A partial response permits a retry. Config expiry bounds the waiting period. A new render invalidates the earlier code.
 
 After config release, fleetd attempts to set the device active. A failed NetBox update waits for a retry. Active records config release; it does not mean that Kubernetes reports the node Ready.
 
@@ -98,15 +98,17 @@ SPIRE supports two node proofs here. The EK plugin checks possession against an 
 
 Registration entries connect the node identity to workload selectors. A pod receives only identities that match its registration. GCP access also requires an IAM grant for the subject. [Identity](../platform/identity.md) describes the token exchange.
 
-The running node sends daily LAK-signed boot evidence to fleetd. Renewal also replaces expiring device certificates. An authenticated policy failure quarantines a worker and requests a cordon. A control-plane failure records a failed verdict and raises an alert without an automatic cordon. The failed verdict can also remove eligibility for fleet-owned SPIRE registrations.
+The running node sends hourly LAK-signed boot evidence to fleetd. Renewal also replaces expiring device certificates. An authenticated policy failure quarantines a worker and requests a cordon. A control-plane failure records a failed verdict and raises an alert without an automatic cordon. The failed verdict can also remove eligibility for fleet-owned SPIRE registrations.
 
 A cordon prevents new scheduling. It does not stop existing pods or isolate the network. Transport failure is not evidence of an unacceptable boot, so it does not trigger the same quarantine decision.
 
-fleetd exports eligible devices for the SPIRE registration service. That service removes its registrations when a node leaves the export. Static `git-*` entries and EK paths need separate review. Removing an entry does not invalidate every credential that a consumer already holds.
+fleetd exports eligible devices, and the retired ones it holds records of, for the SPIRE registration service. That service removes fleet-owned registrations when a node leaves the export. It bans the agent unless another registration still carries its selector. Explicitly retired nodes' agents are banned on sight, subject to the withdrawal safeguard below. spore declares no static entry. Its EK allow list admits an agent and issues it nothing. A ban stops a new attestation and a renewal, but it does not invalidate an SVID that a consumer already holds before that SVID expires.
 
-An empty NetBox device list preserves the export. A malformed export preserves SPIRE entries. These safeguards avoid accidental mass withdrawal, but they can retain stale access during a fault.
+An empty NetBox device list preserves the export. A malformed export preserves SPIRE entries. An export that would withdraw or ban more than one node at once changes nothing until the owner allows it. These safeguards avoid accidental mass withdrawal, but they can retain stale access during a fault.
 
 ## 5. Design choices and tradeoffs
+
+[From purchase to workload identity](purchase-to-identity.md#what-removing-tinkerbell-would-look-like) follows NetBox through workflow selection and compares Tinkerbell with a DIY identity bootstrapper and a narrow runtime attestation service. [The DIY design](diy-identity-bootstrap.md) keeps TPM-backed LDevID enrollment and SPIRE workload identity as its requirements.
 
 “Better suited” means a better fit for a stated requirement. It does not mean that one component replaces every function of another.
 
@@ -135,7 +137,7 @@ Evidence has four distinct levels: source analysis, simulator tests, integration
 | Question | Evidence in the tree | Conclusion and boundary |
 | --- | --- | --- |
 | Can a TPM session bind installation authorization to its key? | `apps/fleetd/attest/sim_install_test.go` | Simulator cases exercise install-code delivery and session takeover refusal. They do not test physical TPM latency. |
-| Can an unknown or unavailable inventory authorize installation? | `apps/fleetd/attest/sim_fleet_test.go` | Tests cover NetBox failure and initial enrollment. Automatic first binding of an unpinned planned device remains a trust gap. |
+| Can an unknown or unavailable inventory authorize installation? | `apps/fleetd/attest/sim_fleet_test.go` | Tests cover NetBox failure, unbound and mismatched enrollment, a binding changed or written by another user during a session, and pins after a bound pass (`sim_intake_test.go`, `binding_test.go`). The binding is only as sound as its receiving evidence. |
 | Does admission require a complete declaration? | `apps/fleetd/fleet/admit_test.go` | Tests cover missing fields, port mismatch and automatic control-plane refusal. A matching report is not proof of cable location. |
 | Can a config be fetched twice? | `apps/fleetd/fleet/install_test.go` | Cases cover concurrent fetches, response completion, expiry and service restart. They do not prevent theft of an unspent code. |
 | Does the wipe require the current boot's authorization? | `apps/fleetd/fleet/template_test.go` | Tests exercise the provision script's pass and code gates. They do not constrain a hostile privileged runtime. |
@@ -147,7 +149,7 @@ Alternative operating systems require more than a successful disk boot. Acceptan
 
 ## 7. Threat model
 
-Assets include cluster configuration, private keys, disk contents, lifecycle authority and workload credentials. Attackers include an untrusted network client, a substitute machine, a compromised node and a compromised management host.
+Assets include cluster configuration, private keys, disk contents, lifecycle authority and workload credentials. Attackers include an untrusted network client, a substitute machine, a compromised node, a compromised management host and a compromised bootstrapped cluster.
 
 The model trusts the configured manufacturer roots, firmware measurements, cryptographic implementations, declaration authorities and signing infrastructure. A physical attacker or management-host compromise can invalidate those assumptions.
 
@@ -156,19 +158,23 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | Threat | Status | Control and evidence | Remaining boundary |
 | --- | --- | --- | --- |
 | Replay an earlier attestation response | Solved | Session nonce, credential activation and quote checks in `apps/fleetd/attest/attest.go`. | Assumes trusted verifier state and sound TPM cryptography. |
-| Substitute a different TPM for an existing EK pin | Solved | EK matching and activation in `apps/fleetd/attest/attest.go`. | Does not establish who controls the correct TPM. |
-| Win first enrollment with a copied serial and MAC | Not solved | Manufacturer EK validation and admission checks constrain the attempt. | An unpinned planned device has no independent chassis-to-EK binding. |
+| Substitute a different TPM for an existing EK pin | Solved | EK matching and activation in `apps/fleetd/attest/attest.go`. A device past `planned` is held to the EK hashes fleetd's own store proves; NetBox's `ek_hash` fields authorize nothing. | Does not establish who controls the correct TPM. |
+| Win first enrollment with a copied serial and MAC | Solved | A planned device admits only the EKs its Terraform-written binding names, in `apps/fleetd/attest/attest.go`. | Rests on the receiving evidence behind the binding and on the Terraform user's token and NetBox admin. |
 | Forge a physical switch location | Not solved | `apps/fleetd/attest/network.go` checks signed reports; admission checks `expected_port`. | LLDP observations do not authenticate a cable or switch. |
-| Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. | Does not establish that firmware measures all relevant code correctly. |
-| Run an old but accepted signed image | Not solved | Signing-authority checks apply in `apps/fleetd/attest/policy.yaml`. | Empty `boot_applications` provides no exact-image restriction or version floor. |
-| Compromise a host after an acceptable boot | Not solved | Daily quotes provide later boot evidence. | They do not prove runtime memory integrity or remove an attacker. |
+| Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. A quoted PCR with no log events must read its initial value. | Does not establish that firmware measures all relevant code correctly. |
+| Run an old but accepted signed image | Not solved | Signing-authority checks apply in the class's profile under `apps/fleetd/attest/policy/`. | Empty `boot_applications` provides no exact-image restriction or version floor. A filled pin also requires a boot application in PCR 4's log, so a log stripped of PCR 4 fails. |
+| Compromise a host after an acceptable boot | Not solved | Hourly quotes provide later boot evidence. | They do not prove runtime memory integrity or remove an attacker. |
 | Replay a fully consumed config code | Solved | Burn state and single-fetch exclusion in `apps/fleetd/fleet/configs.go`. | Theft before consumption remains possible. |
 | Steal an unspent install code from the node | Not solved | TPM delivery, HTTPS, file permissions and expiry reduce exposure. | The code is a bearer secret after unwrapping, including in META. |
-| Trigger quarantine with unauthenticated bad evidence | Solved | TPM-proof gates in `apps/fleetd/attest/attest.go`. | Resource exhaustion and network denial remain possible. |
+| Trigger quarantine with unauthenticated bad evidence | Solved | TPM-proof gates in `apps/fleetd/attest/attest.go`. Claimed fields are capped before they are logged, invalid requests are counted and not journaled, `verdicts.jsonl` rotates, and an unproven request displaces no open session. | Resource exhaustion and network denial remain possible. |
+| Stand in for the Tink server, or for an agent, on the Kubernetes network | Not solved | The Tink server serves gRPC over TLS with the enrollment name's public certificate (`nix/services/tinkerbell.nix`), and HookOS's signed command line names that name with `tinkerbell_tls=true` (`nix/images/hookos-folly.nix`), so no host can hand the agent actions. fleetd acts on a retirement's reported success only once the BMC reports the machine off (`apps/fleetd/fleet/bmcjob.go`). | The agent holds no credential: a host that reaches port 42113 speaks as any MAC and can report an action's result. A device without a BMC rests on the agent's report. |
+| Take over the root of trust from the bootstrapped cluster | Not solved | Flux's identity in Tinkerbell writes only the Template and the BMC Secrets (`nix/services/tinkerbell.nix`). The Workflow, Hardware and Machine objects are fleetd's. | folly's Flux decrypts with the operator age key, which also opens the hosts' sops files, and the 1Password store both clusters read spans the `homelab` vault, which holds the Secure Boot signing keys, the Tinkerbell CA and the Terraform NetBox token that authors every EK binding. A folly or offsite cluster-admin therefore reaches the signing keys and the binding authority. The lab accepts this: one owner holds both; a Flux-only age key and a split vault are the roadmap. |
 | Instantly end all access for a retired node | Not solved | Renewal refusal, registration removal and agent eviction restrict new access. | Static entries, EK paths, caches and issued credentials need separate accounting. |
+| Join under another node's name with a bootstrap token | Solved | An admission policy refuses the controller manager the approval of any bootstrap request, and its approval binding binds only a group no one is in (`clusters/folly/tinkerbell-access/node-client-approval.yaml`); fleetd approves a kubelet certificate only for the node whose own token asked, once, then deletes the token (`apps/fleetd/fleet/joincsr.go`). | The owner approves a join with the cluster-wide token by hand, and the name check is in fleetd's code: a stolen account token can approve any bootstrap request. |
+| Rejoin the cluster from a retired worker's disk | Not solved | A worker's config carries its own bootstrap token, which expires hours after the render (`apps/fleetd/fleet/jointoken.go`); the Talos root gives the workers fleetd installs a token no Secret holds; retirement deletes the node's Node, its kubelet's CSRs and its token (`apps/fleetd/fleet/drain.go`). | A disk image from before the wipe keeps the kubelet's client certificate, valid for up to a year, which Kubernetes cannot revoke, and the cluster-wide trustd token. A disk written before the per-node tokens holds the cluster-wide bootstrap token until the owner rotates it. |
 | Use the online issuer after management-host compromise | Not solved | YubiKey custody limits key extraction. | Authorized signing access and fleetd's other credentials remain valuable. |
 | Continue provisioning through loss of spore | Not solved | Boot services sit outside folly. | Spore remains a common dependency; this is not a redundant provisioning service. |
-| Prove that retirement erases all sensitive data | Not solved | The retirement workflow wipes the system disk. | A workflow result is not proof of physical media sanitization or erasure of backups. |
+| Prove that retirement erases all sensitive data | Not solved | The retirement workflow wipes the system disk and erases it whole by NVMe sanitize or format, discard or zeroing, and checks canary blocks afterwards. | A workflow result is not proof of physical media sanitization or erasure of backups. |
 
 ## 8. Failure behavior and acceptance
 
@@ -189,6 +195,6 @@ Identity withdrawal needs an exercise with both registration owners and both nod
 
 An operating-system class, new signing authority or broader renewal policy changes the trust boundary. Such a change needs its own negative tests and target-hardware evidence. A simulator result can establish feasibility without authorizing deployment.
 
-The most important open design decisions are independent EK binding, exact-image policy, complete credential withdrawal and management-host recovery. Their acceptance conditions are concrete: reject a substitute TPM at first admission, reject an unacceptable signed image, demonstrate bounded withdrawal, and restore without folly.
+Independent EK binding is an admission requirement; its assurance depends on receiving evidence. Open design decisions include exact-image policy, complete credential withdrawal and management-host recovery. Acceptance requires rejection of a substitute TPM and an unacceptable signed image, bounded withdrawal, and restoration without folly.
 
 The owner controls lifecycle policy, explicit actions and infrastructure deployment. Enabled auto-provision authorizes an eligible worker's first installation. Git remains the source of desired state. [How changes ship](../platform/how-changes-ship.md) defines which controller applies each layer.

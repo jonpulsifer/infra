@@ -1,6 +1,6 @@
 //go:build cgo
 
-// The daily check on the software TPM: a running node's LAK-signed quote,
+// The hourly check on the software TPM: a running node's LAK-signed quote,
 // judged by the renewal policy, recorded in NetBox as a verdict and a time,
 // with nothing issued. Each case below says whether it may quarantine.
 package attest
@@ -52,7 +52,7 @@ func activeNode(t *testing.T) (*harness, *fakeNetBox) {
 	t.Helper()
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{netbox: f})
-	f.add("testbox", simSerial, "active", simMAC, map[string]any{"talos_class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"]})
+	f.add("testbox", simSerial, "active", simMAC, map[string]any{"class": "worker-g5", "pcr0_by_bios": nil, "ek_hash": h.hashes["rsa"], "ek_hash_ecc": h.hashes["ecc"], "approved_ek_hash": h.hashes["rsa"], "approved_ek_hash_ecc": h.hashes["ecc"]})
 	if _, err := h.run(simSerial, simMAC); err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 	t.Run("policy", func(t *testing.T) {
 		h, f := activeNode(t)
 		// The HookOS key, which a disk boot of Talos never shows.
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
 		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("policy miss: %+v", r)
@@ -209,13 +209,13 @@ func TestDailyCheckQuarantinesAPolicyMiss(t *testing.T) {
 func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 	h, f := activeNode(t)
 	before := nvLDevID(t, h)
-	policy := h.v.Policy.RenewRequiredAuthorities
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	policy := h.v.Policies["talos"].RenewRequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("policy miss: %+v", r)
 	}
 	quarantined(t, h, f, reasonPolicy)
-	h.v.Policy.RenewRequiredAuthorities = policy
+	h.v.Policies["talos"].RenewRequiredAuthorities = policy
 
 	// A good boot changes nothing while the verdict stands.
 	if _, err := h.check(h.ts.URL, "1.0"); err == nil {
@@ -252,7 +252,7 @@ func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 	}
 
 	// The lift restores the identity, not a free pass: a miss quarantines again.
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("a miss after the lift: %+v", r)
 	}
@@ -265,12 +265,12 @@ func TestOwnerLiftsAQuarantineOnAnActiveNode(t *testing.T) {
 // the lifted serial is refused and leaves the anchor's quarantine in place.
 func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
 	h, f := activeNode(t)
-	policy := h.v.Policy.RenewRequiredAuthorities
-	h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+	policy := h.v.Policies["talos"].RenewRequiredAuthorities
+	h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 	if r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }()); r.Verdict.Verdict != protocol.VerdictQuarantine {
 		t.Fatalf("policy miss: %+v", r)
 	}
-	h.v.Policy.RenewRequiredAuthorities = policy
+	h.v.Policies["talos"].RenewRequiredAuthorities = policy
 	f.set(simSerial, func(d *fakeDevice) { d.CustomFields["attest_verdict"] = "" })
 	h.tamperRenew = func(_ string, e *protocol.RenewEvidence) {
 		e.Quote.Signature = append([]byte{}, e.Quote.Signature[:len(e.Quote.Signature)-1]...)
@@ -290,10 +290,10 @@ func TestALiftedQuarantineStillNeedsTheProof(t *testing.T) {
 // folly's only control plane would move the cluster's API to the bootstrap
 // VLAN. Its failure is recorded, journaled and alerts; status and LDevID stay.
 func TestControlPlaneFailsInPlace(t *testing.T) {
-	t.Run("daily check", func(t *testing.T) {
+	t.Run("hourly check", func(t *testing.T) {
 		h, f := activeNode(t)
-		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["class"] = "controlplane" })
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.check(h.ts.URL, "1.0"); return err }())
 		if r.Status != http.StatusForbidden || r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("control-plane policy miss: %+v", r)
@@ -307,7 +307,7 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 		}
 
 		// The next passing check clears it.
-		h.v.Policy.RenewRequiredAuthorities = nil
+		h.v.Policies["talos"].RenewRequiredAuthorities = nil
 		if _, err := h.check(h.ts.URL, "1.0"); err != nil {
 			t.Fatalf("check after the boot is fixed: %v", err)
 		}
@@ -320,9 +320,9 @@ func TestControlPlaneFailsInPlace(t *testing.T) {
 	})
 	t.Run("renewal", func(t *testing.T) {
 		h, f := activeNode(t)
-		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["talos_class"] = "controlplane" })
+		f.set(simSerial, func(d *fakeDevice) { d.CustomFields["class"] = "controlplane" })
 		first := nvLDevID(t, h)
-		h.v.Policy.RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
+		h.v.Policies["talos"].RenewRequiredAuthorities = loadPolicy(t).RequiredAuthorities
 		r := refusal(t, func() error { _, err := h.renew(simSerial); return err }())
 		if r.Verdict.Verdict != protocol.VerdictFailedNoQuarantine || r.Verdict.Reason != reasonPolicy {
 			t.Fatalf("control-plane renewal policy miss: %+v", r)
@@ -574,7 +574,7 @@ func TestDailyCheckAgainstAnOlderService(t *testing.T) {
 			r.Body = io.NopCloser(bytes.NewReader(b))
 			r.ContentLength = int64(len(b))
 		}
-		h.srv.Public().ServeHTTP(w, r)
+		bothListeners(h.srv).ServeHTTP(w, r)
 	}))
 	defer old.Close()
 	first := nvLDevID(t, h)
@@ -764,9 +764,9 @@ func foreignPublic(t *testing.T, h *harness) []byte {
 
 // journaled is whether a journal entry contains s.
 func (f *fakeNetBox) journaled(s string) bool {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, j := range f.journal {
+	f.Mu.Lock()
+	defer f.Mu.Unlock()
+	for _, j := range f.journalLines() {
 		if strings.Contains(j, s) {
 			return true
 		}

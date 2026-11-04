@@ -82,7 +82,11 @@ for (const [path, text] of Object.entries({
 }
 const server = dev(
   dir,
-  { name: 'notes', token: 'tok-notes', site: upstream.url.origin },
+  {
+    name: 'notes',
+    authorization: async () => 'tok-notes',
+    site: upstream.url.origin,
+  },
   0,
 );
 const url = (path: string) => `${server.url.origin}${path}`;
@@ -104,13 +108,12 @@ describe('files', () => {
     expect(css.headers.get('cache-control')).toBe('no-store');
     expect(css.headers.get('etag')).toBeNull();
 
-    const icon = await fetch(url('/favicon.ico'));
-    expect(icon.status).toBe(200);
-    expect(icon.headers.get('content-type')).toBe('image/x-icon');
-
-    const lost = await fetch(url('/nope'));
-    expect(lost.status).toBe(404);
-    expect(await lost.text()).toBe('<h1>lost</h1>');
+    // The site's own 404 page answers every miss, as nginx answers one.
+    for (const path of ['/nope', '/favicon.ico']) {
+      const lost = await fetch(url(path));
+      expect(lost.status).toBe(404);
+      expect(await lost.text()).toBe('<h1>lost</h1>');
+    }
 
     for (const path of ['/.env', '/kthx.json', '/../etc/passwd']) {
       expect((await fetch(url(path))).status).toBe(404);
@@ -120,14 +123,18 @@ describe('files', () => {
     );
   });
 
-  test('treats a lone top-level directory as the site, like a release', async () => {
+  test('treats a lone top-level directory as the site, as a deploy does', async () => {
     const wrapped = mkdtempSync(join(tmpdir(), 'kthx-dev-'));
     mkdirSync(join(wrapped, 'dist'));
     writeFileSync(join(wrapped, 'dist', 'index.html'), '<h1>dist</h1>');
     writeFileSync(join(wrapped, 'kthx.json'), '{}');
     const inner = dev(
       wrapped,
-      { name: 'notes', token: 't', site: upstream.url.origin },
+      {
+        name: 'notes',
+        authorization: async () => 't',
+        site: upstream.url.origin,
+      },
       0,
     );
     try {
@@ -215,7 +222,7 @@ describe('the proxy', () => {
     expect(seen[0]!.cookie).toBeNull();
   });
 
-  test('runs without a token, and then signs nothing', async () => {
+  test('runs without an ID token, and then signs nothing', async () => {
     seen.length = 0;
     const loose = dev(dir, { name: 'notes', site: upstream.url.origin }, 0);
     try {

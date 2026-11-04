@@ -70,11 +70,22 @@ variable "nodes" {
     installer_image = optional(string)
     # A change replaces the node's talos_machine (see nodes.tf).
     install_generation = optional(string)
+    # Replaces the bundle's bootstrap token in a worker's config. A worker
+    # that joins with a token another system creates for its install alone
+    # gets one no Secret holds, so the config this root applies leaves no
+    # lasting join credential on its disk.
+    bootstrap_token = optional(string)
   }))
 
   validation {
     condition     = alltrue([for n in var.nodes : contains(["controlplane", "worker"], n.role)])
     error_message = "role must be controlplane or worker."
+  }
+  validation {
+    condition = alltrue([for n in var.nodes : n.bootstrap_token == null || (
+      n.role == "worker" && can(regex("^[a-z0-9]{6}\\.[a-z0-9]{16}$", n.bootstrap_token))
+    )])
+    error_message = "bootstrap_token is for a worker, as <6 of [a-z0-9]>.<16 of [a-z0-9]>: a control plane's config creates the cluster's token."
   }
   validation {
     condition     = length([for n in var.nodes : n if n.role == "controlplane"]) >= 1

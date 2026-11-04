@@ -17,10 +17,17 @@ package fleet
 
 import (
 	"fmt"
+	"log"
 	"net/netip"
+	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/bmc"
+	"github.com/jonpulsifer/infra/apps/fleetd/classes"
 )
 
 func env(key, fallback string) string {
@@ -49,9 +56,11 @@ func ReadSecret(path string) (string, error) {
 
 // Config is the fleet's environment.
 type Config struct {
-	Site          string
-	Namespace     string
-	Template      string
+	Site      string
+	Namespace string
+	// Classes is the class table: the Template and installer image of each
+	// class a Workflow can run.
+	Classes       classes.Table
 	HookOSURL     string
 	HookOSCmdline string
 	Interval      time.Duration
@@ -61,6 +70,14 @@ type Config struct {
 	// Installs maps each class the fleet renders to its Talos installer
 	// image, from the class inputs.
 	Installs map[string]string
+	// ImageInstalls names each image class whose provision installs: the
+	// class table carries its whole image, FLEET_INSTALLS is on and SeedURL
+	// is set.
+	ImageInstalls map[string]bool
+	// SeedURL is where an image class's install, or the installed node's
+	// first boot, fetches its seed: the boot listener's /seed, from
+	// FLEET_SEED_URL. Without it no image class installs.
+	SeedURL string
 	// Bootstrap is the address of the control plane the Talos root
 	// bootstraps etcd on, from FLEET_BOOTSTRAP_ADDRESS.
 	Bootstrap string
@@ -70,18 +87,39 @@ type Config struct {
 	// AutoProvision lets an admitted device with a class and an address,
 	// which never ran a Workflow, start its provision without the owner.
 	AutoProvision bool
+	// BMCJobWait is how long a pass waits for the BMC to power a machine
+	// off: the Rufio Job that stops a run, or in native mode the stop and
+	// the power-off a netboot starts with.
+	BMCJobWait time.Duration
+	// BMCMode is who drives a device's BMC: BMCRufio, through Rufio's
+	// Machine and Job objects and Tinkerbell's boot jobs, or BMCNative,
+	// fleetd itself, from FLEET_BMC.
+	BMCMode string
 }
+
+// The BMC modes FLEET_BMC names.
+const (
+	BMCRufio  = "rufio"
+	BMCNative = "native"
+)
+
+// NativeBMC says whether fleetd drives the BMCs itself.
+func (c Config) NativeBMC() bool { return c.BMCMode == BMCNative }
 
 // LoadConfig reads the FLEET_* environment that README.md lists.
 func LoadConfig() (Config, error) {
 	c := Config{
 		Site:          env("FLEET_SITE", "folly"),
 		Namespace:     env("FLEET_NAMESPACE", "tinkerbell"),
-		Template:      env("FLEET_TEMPLATE", "provision"),
 		HookOSURL:     os.Getenv("FLEET_HOOKOS_URL"),
 		HookOSCmdline: os.Getenv("FLEET_HOOKOS_CMDLINE"),
 		BMCSecrets:    map[string]string{"amt": "bmc-amt"},
 		AMTPort:       16992,
+		BMCJobWait:    30 * time.Second,
+		BMCMode:       env("FLEET_BMC", BMCRufio),
+	}
+	if c.BMCMode != BMCRufio && c.BMCMode != BMCNative {
+		return c, fmt.Errorf("FLEET_BMC %q is neither %s nor %s", c.BMCMode, BMCRufio, BMCNative)
 	}
 	for _, k := range []string{"FLEET_HOOKOS_URL", "FLEET_HOOKOS_CMDLINE"} {
 		if _, err := required(k); err != nil {
@@ -89,6 +127,13 @@ func LoadConfig() (Config, error) {
 		}
 	}
 	var err error
+	classFile, err := required("FLEET_CLASSES")
+	if err != nil {
+		return c, err
+	}
+	if c.Classes, err = classes.Load(classFile); err != nil {
+		return c, err
+	}
 	if c.Interval, err = time.ParseDuration(env("FLEET_INTERVAL", "2m")); err != nil || c.Interval <= 0 {
 		return c, fmt.Errorf("FLEET_INTERVAL must be a positive duration")
 	}
@@ -113,8 +158,46 @@ func LoadConfig() (Config, error) {
 		}
 		c.Bootstrap = a.String()
 	}
+	if v := os.Getenv("FLEET_SEED_URL"); v != "" {
+		u, err := url.Parse(v)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" {
+			return c, fmt.Errorf("FLEET_SEED_URL %q is not an http(s) URL without a query", v)
+		}
+		c.SeedURL = v
+	}
 	return c, nil
 }
+
+// LoadBMC reads native mode's environment: FLEET_BMC_AMT_CREDENTIAL_FILE,
+// the AMT credential, and FLEET_BMC_STATE_FILE, where fleetd keeps each
+// run's BMC record. In rufio mode it returns nils and reads nothing.
+func LoadBMC(cfg Config) (func(Device) (bmc.BMC, error), *Runs, error) {
+	if !cfg.NativeBMC() {
+		return nil, nil, nil
+	}
+	credFile, err := required("FLEET_BMC_AMT_CREDENTIAL_FILE")
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC=native: %w", err)
+	}
+	state, err := required("FLEET_BMC_STATE_FILE")
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC=native: %w", err)
+	}
+	cred, err := bmc.LoadCredential(credFile)
+	if err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC_AMT_CREDENTIAL_FILE: %w", err)
+	}
+	runs := &Runs{File: state}
+	if _, _, err := runs.Get(""); err != nil {
+		return nil, nil, fmt.Errorf("FLEET_BMC_STATE_FILE: %w", err)
+	}
+	dialer := &bmc.Dialer{Credentials: map[string]bmc.Credential{"amt": cred}, AMTPort: cfg.AMTPort, Timeout: BMCCallTimeout(cfg.BMCJobWait)}
+	return func(d Device) (bmc.BMC, error) { return dialer.Dial(d.BMCType, d.BMCAddress) }, runs, nil
+}
+
+// BMCCallTimeout bounds one call to a BMC: a third of the power-off wait, so
+// one slow read leaves the wait room for more, and at least 5 seconds.
+func BMCCallTimeout(wait time.Duration) time.Duration { return max(wait/3, 5*time.Second) }
 
 // LoadCluster reads the site cluster's API: FLEET_CLUSTER_SERVER, its CA in
 // FLEET_CLUSTER_CA_FILE and a ServiceAccount token in FLEET_CLUSTER_TOKEN_FILE,
@@ -132,13 +215,19 @@ func LoadCluster() (*Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cluster API client: %w", err)
 	}
+	if dir := os.Getenv("FLEET_CONFIG_DIR"); dir != "" {
+		c.Ledger.File = filepath.Join(dir, joinLedgerFile)
+	}
 	return c, nil
 }
 
-// LoadInstaller reads the render's environment. The renderer runs only with
-// all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL;
-// without them nothing renders, and no install code is answered. A Workflow
-// installs only with the renderer and FLEET_INSTALLS=true.
+// LoadInstaller reads the render's environment. The Talos renderer runs only
+// with all three of FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and
+// FLEET_TALOSCTL; without them no Talos class renders, and no install code
+// is answered for one. A Talos Workflow installs only with the renderer and
+// FLEET_INSTALLS=true; an image class's installs with FLEET_INSTALLS=true, a
+// whole image in the class table and FLEET_SEED_URL, and needs no Talos
+// renderer.
 //
 // FLEET_CONTROLPLANE_BUNDLE, the full secrets bundle, lets a control-plane
 // class render and install too. It needs the renderer and
@@ -149,6 +238,7 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		Site:    cfg.Site,
 		NetBox:  netbox,
 		Kube:    kube,
+		Classes: cfg.Classes,
 		Configs: &Configs{Dir: os.Getenv("FLEET_CONFIG_DIR")},
 		Metrics: metrics,
 		Now:     time.Now,
@@ -160,14 +250,32 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 	if in.TTL, err = time.ParseDuration(env("FLEET_CONFIG_TTL", "2h")); err != nil || in.TTL <= 0 {
 		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be a positive duration")
 	}
-	classes, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
-	if classes == "" && workers == "" && bin == "" {
+	// FLEET_SEED_INPUTS lets a seed class render; a Talos class needs the
+	// three below.
+	if seeds := os.Getenv("FLEET_SEED_INPUTS"); seeds != "" {
+		inputs, err := LoadSeedInputs(seeds)
+		if err != nil {
+			return nil, err
+		}
+		in.Seeds = &SeedRenderer{Inputs: inputs, Classes: cfg.Classes}
+	}
+	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
+	// installs, and nothing renders, since no run asks for a config.
+	installs := env("FLEET_INSTALLS", "false") == "true"
+	if installs {
+		cfg.ImageInstalls = imageInstalls(cfg.Classes, cfg.SeedURL)
+	}
+	inputsFile, workers, bin := os.Getenv("FLEET_CLASS_INPUTS"), os.Getenv("FLEET_WORKER_SECRETS"), os.Getenv("FLEET_TALOSCTL")
+	if inputsFile == "" && workers == "" && bin == "" {
 		return in, nil
 	}
-	if classes == "" || workers == "" || bin == "" {
+	if inputsFile == "" || workers == "" || bin == "" {
 		return nil, fmt.Errorf("FLEET_CLASS_INPUTS, FLEET_WORKER_SECRETS and FLEET_TALOSCTL go together")
 	}
-	inputs, err := LoadClassInputs(classes)
+	if in.TTL+JoinTokenGrace > JoinTokenMaxLifetime {
+		return nil, fmt.Errorf("FLEET_CONFIG_TTL must be at most %s: a worker's bootstrap token lives for it plus %s, and the cluster admits none for more than %s", JoinTokenMaxLifetime-JoinTokenGrace, JoinTokenGrace, JoinTokenMaxLifetime)
+	}
+	inputs, err := LoadClassInputs(inputsFile)
 	if err != nil {
 		return nil, err
 	}
@@ -198,9 +306,7 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 		t.BundlePath, in.ControlPlanes, in.Bootstrap = bundle, true, boot.String()
 		cfg.Bootstrap = in.Bootstrap
 	}
-	// FLEET_INSTALLS is the switch for the install itself: off, no Workflow
-	// installs, and nothing renders, since no run asks for a config.
-	if env("FLEET_INSTALLS", "false") != "true" {
+	if !installs {
 		return in, nil
 	}
 	cfg.Installs = map[string]string{}
@@ -209,5 +315,46 @@ func LoadInstaller(cfg *Config, netbox *NetBox, kube *Kube, metrics *Metrics) (*
 			cfg.Installs[class] = ci.InstallerImage
 		}
 	}
+	// The class table pins its images by digest, so its image wins over the
+	// class inputs', which carry the Talos root's mutable tag. A class the
+	// inputs render but leave out, such as a control plane without the
+	// bundle, stays out.
+	for class, c := range cfg.Classes {
+		_, rendered := inputs[class]
+		_, installs := cfg.Installs[class]
+		if c.InstallerImage != "" && (installs || !rendered) {
+			cfg.Installs[class] = c.InstallerImage
+		}
+	}
+	for class, image := range cfg.Installs {
+		if !classes.PinnedByDigest(image) {
+			return nil, fmt.Errorf("class %s installs %q, which is not pinned by digest: pin installer_image in classes.json", class, image)
+		}
+	}
 	return in, nil
+}
+
+// imageInstalls names the image classes whose provision installs: each with
+// a whole image in the table, when the seed URL is set. Without the seed URL
+// no image class installs, and the log says so once.
+func imageInstalls(table classes.Table, seedURL string) map[string]bool {
+	installs := map[string]bool{}
+	var whole []string
+	for name, c := range table {
+		if c.Installs() {
+			whole = append(whole, name)
+		}
+	}
+	if len(whole) == 0 {
+		return installs
+	}
+	if seedURL == "" {
+		sort.Strings(whole)
+		log.Printf("FLEET_SEED_URL is not set, so the image classes %s install nothing: their install writes the seed URL to the disk", strings.Join(whole, ", "))
+		return installs
+	}
+	for _, name := range whole {
+		installs[name] = true
+	}
+	return installs
 }

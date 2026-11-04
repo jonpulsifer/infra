@@ -85,3 +85,8 @@ resource "google_compute_instance" "oldboy" {
   tags = ["maximum-uptime"]
 }
 
+
+resource "google_compute_project_metadata_item" "patch_and_config_feature_set" {
+  key   = "patch-and-config-feature-set"
+  value = "OSCONFIG_C"
+}

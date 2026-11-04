@@ -1,0 +1,626 @@
+# The Template a fleetd Workflow runs for a class whose payload is a disk image (nixos-image,
+# alpine-image, cloud-init-nocloud) instead of Talos; template.yaml, Template provision, is the one
+# for Talos. The shape is the same: wipe-disk, then install-image, next-boot and reboot, with the
+# hardwareMap keys of provision plus image_url, image_digest, image_format, payload_kind, os and
+# seed_url, which fleetd writes from the class and from FLEET_SEED_URL. Everything template.yaml
+# says about attestation, the install code, the disk checks, retirement and tink-agent's rendering
+# holds here; wipe-disk is provision's word for word, except that it pulls no installer, since an
+# image install fetches nothing before the wipe.
+#
+# install-image downloads the class's image into RAM (/worker/fleet), checks its sha256 against
+# image_digest, and refuses when it differs, with the disk wiped but nothing written. It then
+# streams the image onto the disk by image_format (raw, raw.zst, raw.gz, or tar.xz, whose first
+# member is the raw disk), moves the backup GPT to the disk's end, and rereads the partition table.
+# The seed follows payload_kind. A nixos-image or alpine-image gets fleet-seed.json at the root of
+# its EFI system partition, with the seed URL, the node's UUID and the install code; the node's
+# first boot fetches the seed itself. A cloud-init-nocloud image gets the seed now: install-image
+# fetches the tar from fleetd with the UUID and the code, refuses anything but a 200, and extracts
+# it to var/lib/cloud/seed/nocloud on the Linux root partition, which cloud-init reads on first
+# boot. So for a cloud-init class the install code is spent in HookOS, and the device turns active
+# when the install wrote the seed.
+#
+# The download is the long step: the run gets 300 s to wipe, 900 s to download and write, and 120 s
+# each to set the boot entry and reboot, 1,440 s in all under the global_timeout of 1,800 s. The
+# write destroys the wiped disk's blank state, and the mark that guards it is wipe-disk's, so a run
+# that resumes at install-image in a new boot fails with that reason, as in provision, and the
+# recovery is a new provision.
+#
+# next-boot is provision's, with one addition: an image's loader sits at the removable path, so
+# no firmware entry names it, and next-boot creates the entry "fleet <os>" for the image's EFI
+# system partition when none does. The actions run images/tink-reprovision-tools, which the
+# containers workflow's delivery pins by digest in this file as it does in template.yaml.
+---
+apiVersion: tinkerbell.org/v1alpha1
+kind: Template
+metadata:
+  name: provision-image
+spec:
+  data: |
+    version: "0.1"
+    name: provision-image
+    global_timeout: 1800
+    tasks:
+      - name: provision
+        worker: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+        volumes:
+          - /dev:/dev
+        environment:
+          DISK: "{{ index .Hardware.Disks 0 }}"
+          MAC: "{{ (index .Hardware.Interfaces 0).DHCP.MAC }}"
+          ATTEST: '{{ or (index . "attest") "true" }}'
+          WIPE: "{{ .wipe }}"
+          RETIRE: "{{ .retire }}"
+          # Tinkerbell renders with missingkey=error, so a Workflow from a controller that sets no
+          # install keys reads them as no install.
+          INSTALL: '{{ or (index . "install") "false" }}'
+          INSTALLER_IMAGE: '{{ or (index . "installer_image") "" }}'
+          IMAGE_URL: '{{ or (index . "image_url") "" }}'
+          IMAGE_DIGEST: '{{ or (index . "image_digest") "" }}'
+          IMAGE_FORMAT: '{{ or (index . "image_format") "" }}'
+          PAYLOAD_KIND: '{{ or (index . "payload_kind") "" }}'
+          OS: '{{ or (index . "os") "" }}'
+          SEED_URL: '{{ or (index . "seed_url") "" }}'
+          # The boot entries the fleet's OSes create, by name, as an extended regular expression: the
+          # Talos installer's, the Ubuntu and Debian installers', and next-boot's own "fleet <os>"
+          # entry for an image. next-boot keeps the one on this install's EFI system partition and
+          # deletes the others; entries of no fleet OS stay.
+          FLEET_OS_ENTRIES: "Talos Linux UKI|Ubuntu|debian|fleet .*"
+          DISK_SERIAL: '{{ or (index . "install_disk_serial") "" }}'
+          INSTALL_CODE_FILE: /tmp/fleet/install_code
+          ATTESTED_FILE: /tmp/fleet/attested
+          WIPED_FILE: /tmp/fleet/wiped
+        actions:
+          - name: wipe-disk
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
+            timeout: 300
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+              - /worker/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "wipe: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "wipe: $*" >"$t" 2>/dev/null || true; done; }
+                # The serial a whole disk reports: an NVMe or MMC controller's, a virtio disk's, or a
+                # SCSI or SATA disk's unit serial number page past its 4-byte header.
+                serial_of() {
+                  if [ -r "$1/device/serial" ]; then cat "$1/device/serial"
+                  elif [ -r "$1/serial" ]; then cat "$1/serial"
+                  elif [ -r "$1/device/vpd_pg80" ]; then tail -c +5 "$1/device/vpd_pg80"
+                  fi 2>/dev/null | tr -d ' \t\n\000'
+                }
+                check_disk() {
+                  case "$DISK_SERIAL" in
+                    "") log "no install disk serial is declared for $DISK; $1"; exit 1 ;;
+                    *[!A-Za-z0-9._-]*) log "the install disk serial $DISK_SERIAL is malformed; $1"; exit 1 ;;
+                  esac
+                  [ -b "$DISK" ] || { log "$DISK is not a block device; $1"; exit 1; }
+                  name=$(basename "$(readlink -f "$DISK")")
+                  [ -d "/sys/block/$name" ] || { log "$DISK is not a whole disk; $1"; exit 1; }
+                  found=""
+                  for b in /sys/block/*; do
+                    if [ "$(serial_of "$b")" = "$DISK_SERIAL" ]; then found="$found ${b##*/}"; fi
+                  done
+                  found=${found# }
+                  case "$found" in
+                    "") log "no disk reports the serial $DISK_SERIAL; $1"; exit 1 ;;
+                    *" "*) log "more than one disk reports the serial $DISK_SERIAL ($found); $1"; exit 1 ;;
+                    "$name") ;;
+                    *) log "$DISK is $name, but the disk that reports $DISK_SERIAL is $found; $1"; exit 1 ;;
+                  esac
+                  if [ "$(cat "/sys/block/$name/removable" 2>/dev/null)" != 0 ]; then log "$DISK is removable; $1"; exit 1; fi
+                  case "$(readlink -f "/sys/block/$name")" in
+                    */usb[0-9]*) log "$DISK is on USB; $1"; exit 1 ;;
+                  esac
+                  log "$DISK reports the serial $DISK_SERIAL"
+                }
+                # A retirement erases the whole disk after the signature wipe. That wipe leaves everything past
+                # the first 16 MiB of each partition, and the data volume is not encrypted, so the disk would
+                # otherwise keep it. The methods run from the strongest to the weakest: an NVMe sanitize (crypto
+                # or block erase), an NVMe format with the namespace's own LBA format, a secure discard, a discard,
+                # and a zeroing of the whole disk. A method passes only on evidence: before each, random blocks are
+                # written at sample offsets past the first 16 MiB of the disk and of each partition, and after it
+                # every one of them must read differently, so a discard the device ignores fails and the next
+                # method runs. Zeroing runs in bounded chunks that stop at the deadline or on TERM, since the
+                # kernel cannot interrupt a chunk once it starts. A disk whose zeroing does not finish inside the
+                # action's time fails the action, because which regions of the data volume are free is unknown
+                # and a partial zeroing proves nothing. A discard is not a sanitize: TRIM only advises the device.
+                BEFORE=/tmp/erase-before
+                SAMPLES=""
+                TERMED=0
+                ZERO=$(head -c 4096 /dev/zero | sha256sum | cut -d' ' -f1)
+                budget_end=$(( $(date +%s) + 780 ))
+                remaining() { echo $(( budget_end - $(date +%s) )); }
+                hash_at() { dd if="$DISK" bs=4096 skip="$1" count=1 2>/dev/null | sha256sum | cut -d' ' -f1; }
+                plan_samples() {
+                  size=$(blockdev --getsize64 "$DISK")
+                  SAMPLES=""
+                  i=1
+                  while [ "$i" -le 16 ]; do
+                    SAMPLES="$SAMPLES $(( size * i / 17 / 4096 + 4096 ))"
+                    i=$((i + 1))
+                  done
+                  for part in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                    pname=${part##*/}
+                    pstart=$(cat "/sys/class/block/$pname/start")
+                    plen=$(cat "/sys/class/block/$pname/size")
+                    if [ "$plen" -ge 131072 ]; then
+                      SAMPLES="$SAMPLES $(( pstart / 8 + 8192 )) $(( (pstart + plen / 2) / 8 )) $(( (pstart + plen) / 8 - 256 ))"
+                    fi
+                  done
+                }
+                write_canaries() {
+                  for s in $SAMPLES; do
+                    head -c 4096 /dev/urandom | dd of="$DISK" bs=4096 seek="$s" conv=notrunc,fsync 2>/dev/null || return 1
+                  done
+                  blockdev --flushbufs "$DISK" || true
+                  for s in $SAMPLES; do echo "$s $(hash_at "$s")"; done >"$BEFORE"
+                }
+                verify_erase() {
+                  blockdev --flushbufs "$DISK" || true
+                  total=0
+                  missing=0
+                  kept=0
+                  while read -r s h; do
+                    total=$((total + 1))
+                    if [ "$h" = "$ZERO" ]; then missing=$((missing + 1)); continue; fi
+                    if [ "$(hash_at "$s")" = "$h" ]; then kept=$((kept + 1)); fi
+                  done <"$BEFORE"
+                  log "$total canary blocks written; $kept still read as written"
+                  [ "$total" -gt 0 ] && [ "$missing" -eq 0 ] && [ "$kept" -eq 0 ]
+                }
+                nvme_ready() {
+                  case "$name" in nvme*) ;; *) return 1 ;; esac
+                  command -v nvme >/dev/null
+                }
+                erase_nvme_sanitize() {
+                  nvme_ready || return 1
+                  sanicap=$(nvme id-ctrl "$DISK" 2>/dev/null | awk '$1 == "sanicap" { print $3 }')
+                  if [ $(( ${sanicap:-0} & 1 )) -ne 0 ]; then act=4
+                  elif [ $(( ${sanicap:-0} & 2 )) -ne 0 ]; then act=2
+                  else return 1
+                  fi
+                  log "nvme sanitize --sanact=$act $DISK"
+                  nvme sanitize "$DISK" --sanact="$act" || return 1
+                  while [ "$(remaining)" -gt 0 ] && [ "$TERMED" = 0 ]; do
+                    sstat=$(nvme sanitize-log "$DISK" 2>/dev/null | awk '/\(SSTAT\)/ { print $NF }')
+                    case $(( ${sstat:-0} & 7 )) in
+                      1|4) return 0 ;;
+                      3) log "the sanitize failed"; nvme sanitize "$DISK" --sanact=1 >/dev/null 2>&1 || true; return 1 ;;
+                    esac
+                    sleep 2
+                  done
+                  log "the sanitize did not finish before the deadline; the controller goes on with it"
+                  return 1
+                }
+                erase_nvme_format() {
+                  nvme_ready || return 1
+                  info=$(nvme id-ctrl "$DISK" 2>/dev/null) || return 1
+                  oacs=$(echo "$info" | awk '$1 == "oacs" { print $3 }')
+                  fna=$(echo "$info" | awk '$1 == "fna" { print $3 }')
+                  [ $(( ${oacs:-0} & 2 )) -ne 0 ] || return 1
+                  if [ $(( ${fna:-0} & 4 )) -ne 0 ]; then ses=2; else ses=1; fi
+                  flbas=$(nvme id-ns "$DISK" 2>/dev/null | awk '$1 == "flbas" { print $3 }')
+                  lbaf=$(( (${flbas:-0} & 15) | (((${flbas:-0} >> 5) & 3) << 4) ))
+                  log "nvme format --ses=$ses --lbaf=$lbaf $DISK"
+                  timeout "$(remaining)" nvme format "$DISK" --ses="$ses" --lbaf="$lbaf" --force --timeout=$(( $(remaining) * 1000 ))
+                }
+                erase_discard_secure() { timeout "$(remaining)" blkdiscard --secure --force "$DISK"; }
+                erase_discard() { timeout "$(remaining)" blkdiscard --force "$DISK"; }
+                erase_overwrite() {
+                  size=$(blockdev --getsize64 "$DISK")
+                  chunk=$(( 64 * 1048576 ))
+                  off=0
+                  took=0
+                  while [ "$off" -lt "$size" ]; do
+                    if [ "$TERMED" = 1 ] || [ "$(remaining)" -le $(( took * 2 + 5 )) ]; then
+                      log "zeroed $(( off / 1048576 )) of $(( size / 1048576 )) MiB before the deadline; the rest of $DISK is not erased"
+                      return 1
+                    fi
+                    len=$chunk
+                    if [ $(( size - off )) -lt "$len" ]; then len=$(( size - off )); fi
+                    t0=$(date +%s)
+                    blkdiscard --zeroout --force --offset "$off" --length "$len" "$DISK" || return 1
+                    took=$(( $(date +%s) - t0 ))
+                    off=$(( off + len ))
+                  done
+                }
+                erase_disk() {
+                  trap 'TERMED=1' TERM INT
+                  for method in nvme_sanitize nvme_format discard_secure discard overwrite; do
+                    if [ "$TERMED" = 1 ] || [ "$(remaining)" -le 0 ]; then log "no time is left to erase $DISK"; return 1; fi
+                    write_canaries || { log "canary blocks cannot be written to $DISK"; return 1; }
+                    if "erase_$method"; then
+                      if verify_erase; then log "erased $DISK by $method"; return 0; fi
+                      log "$method ran, but the canary blocks were not erased"
+                    else
+                      log "$method is unsupported or failed on $DISK"
+                    fi
+                  done
+                  return 1
+                }
+                # A run that attests fails when this boot's attestation did, before it wipes
+                # anything, and the install code gates the wipe of a run that installs, so a
+                # refused machine keeps its disk.
+                if [ "$ATTEST" = true ] && [ ! -e "$ATTESTED_FILE" ]; then
+                  log "this boot did not pass attestation; nothing wiped"
+                  exit 1
+                fi
+                if [ "$WIPE" != true ]; then
+                  log "nothing wiped this run"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ] && [ ! -s "$INSTALL_CODE_FILE" ]; then
+                  log "no install code; nothing wiped"
+                  exit 1
+                fi
+                # An installer that outlived its action, after a timeout the action could not clean up,
+                # would keep writing the disk this action wipes. Remove it, and wipe nothing if it stays.
+                docker rm -f provision-install >/dev/null 2>&1 || true
+                if [ -n "$(docker ps -aq --filter name=^provision-install$ 2>/dev/null)" ]; then
+                  log "an installer from an earlier run is still there; nothing wiped"
+                  exit 1
+                fi
+                check_disk "nothing wiped"
+                # next-boot writes EFI variables after the disk is written, so a variable store that
+                # refuses writes would fail the run with the disk wiped. Write and remove a 1 KiB variable first:
+                # efivarfs takes a variable in one write, its 4-byte attributes and then the data.
+                if [ "$INSTALL" = true ]; then
+                  efi=/sys/firmware/efi/efivars
+                  probe=$efi/FleetWriteProbe-7e1ab0f1-0000-4000-8000-0000000000aa
+                  { mountpoint -q "$efi" || mount -t efivarfs efivarfs "$efi"; } 2>/dev/null || true
+                  mount -o remount,rw "$efi" 2>/dev/null || true
+                  { printf '\007\000\000\000'; head -c 1024 /dev/zero; } >/tmp/probe
+                  if ! err=$(dd if=/tmp/probe of="$probe" bs=2048 2>&1); then
+                    rm -f "$probe" 2>/dev/null || true
+                    log "the firmware refuses to store EFI variables ($(printf '%s' "$err" | head -n 1)); nothing wiped"
+                    exit 1
+                  fi
+                  chattr -i "$probe" 2>/dev/null || true
+                  rm -f "$probe" || { log "the probe variable $probe cannot be removed; nothing wiped"; exit 1; }
+                fi
+                if [ "$RETIRE" = true ]; then plan_samples; fi
+                log "wiping every partition of $DISK"
+                for p in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                  wipefs --all --force "$p"
+                  dd if=/dev/zero of="$p" bs=1M count=16 conv=fsync 2>/dev/null || true
+                done
+                wipefs --all --force "$DISK"
+                sgdisk --zap-all "$DISK"
+                dd if=/dev/zero of="$DISK" bs=1M count=1 conv=fsync
+                dd if=/dev/zero of="$DISK" bs=512 count=2048 conv=fsync seek=$(( $(blockdev --getsz "$DISK") - 2048 ))
+                if [ "$RETIRE" = true ]; then
+                  erase_disk || { log "$DISK could not be erased; the retirement stops with the disk partly erased"; exit 1; }
+                fi
+                blockdev --rereadpt "$DISK" || true
+                if blkid -p "$DISK"; then log "$DISK still has a signature"; exit 1; fi
+                touch "$WIPED_FILE"
+                log "wiped $DISK"
+          # install-image writes the class's disk image and its seed to the disk wipe-disk wiped. The
+          # image lives in RAM, so a 1 GB download and a 3 GB write share the action's 900 s.
+          - name: install-image
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
+            timeout: 900
+            volumes:
+              - /worker/fleet:/tmp/fleet
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "install-image: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "install-image: $*" >"$t" 2>/dev/null || true; done; }
+                # serial_of and check_disk are wipe-disk's, word for word.
+                serial_of() {
+                  if [ -r "$1/device/serial" ]; then cat "$1/device/serial"
+                  elif [ -r "$1/serial" ]; then cat "$1/serial"
+                  elif [ -r "$1/device/vpd_pg80" ]; then tail -c +5 "$1/device/vpd_pg80"
+                  fi 2>/dev/null | tr -d ' \t\n\000'
+                }
+                check_disk() {
+                  case "$DISK_SERIAL" in
+                    "") log "no install disk serial is declared for $DISK; $1"; exit 1 ;;
+                    *[!A-Za-z0-9._-]*) log "the install disk serial $DISK_SERIAL is malformed; $1"; exit 1 ;;
+                  esac
+                  [ -b "$DISK" ] || { log "$DISK is not a block device; $1"; exit 1; }
+                  name=$(basename "$(readlink -f "$DISK")")
+                  [ -d "/sys/block/$name" ] || { log "$DISK is not a whole disk; $1"; exit 1; }
+                  found=""
+                  for b in /sys/block/*; do
+                    if [ "$(serial_of "$b")" = "$DISK_SERIAL" ]; then found="$found ${b##*/}"; fi
+                  done
+                  found=${found# }
+                  case "$found" in
+                    "") log "no disk reports the serial $DISK_SERIAL; $1"; exit 1 ;;
+                    *" "*) log "more than one disk reports the serial $DISK_SERIAL ($found); $1"; exit 1 ;;
+                    "$name") ;;
+                    *) log "$DISK is $name, but the disk that reports $DISK_SERIAL is $found; $1"; exit 1 ;;
+                  esac
+                  if [ "$(cat "/sys/block/$name/removable" 2>/dev/null)" != 0 ]; then log "$DISK is removable; $1"; exit 1; fi
+                  case "$(readlink -f "/sys/block/$name")" in
+                    */usb[0-9]*) log "$DISK is on USB; $1"; exit 1 ;;
+                  esac
+                  log "$DISK reports the serial $DISK_SERIAL"
+                }
+                if [ "$INSTALL" != true ]; then
+                  log "nothing installed this run"
+                  exit 0
+                fi
+                # wipe-disk marks its wipe in /worker/fleet, which is RAM and empty on every boot, so a run
+                # without the mark resumed in a new boot.
+                if [ ! -e "$WIPED_FILE" ]; then
+                  log "this run resumed in a new boot after wipe-disk; nothing installed; set desired_action to provision"
+                  exit 1
+                fi
+                if [ ! -s "$INSTALL_CODE_FILE" ]; then
+                  log "no install code: the boot's attestation got none (no intake pass, or fleetd refused the render)"
+                  exit 1
+                fi
+                code=$(cat "$INSTALL_CODE_FILE")
+                case "$code" in
+                  *[!A-Za-z0-9_-]*) log "the install code is malformed"; exit 1 ;;
+                esac
+                if [ "${#code}" -ne 43 ]; then
+                  log "the install code is malformed"
+                  exit 1
+                fi
+                check_disk "nothing installed"
+                case "$IMAGE_DIGEST" in
+                  sha256:*) want=${IMAGE_DIGEST#sha256:} ;;
+                  *) log "the image digest '$IMAGE_DIGEST' is not sha256:<hex>; nothing installed"; exit 1 ;;
+                esac
+                case "$want" in
+                  *[!0-9a-f]*) log "the image digest is not lower-case hex; nothing installed"; exit 1 ;;
+                esac
+                if [ "${#want}" -ne 64 ]; then log "the image digest is not 64 hex digits; nothing installed"; exit 1; fi
+                case "$IMAGE_URL" in
+                  https://*) ;;
+                  *) log "the image URL '$IMAGE_URL' is not https; nothing installed"; exit 1 ;;
+                esac
+                case "$IMAGE_FORMAT" in
+                  raw|raw.zst|raw.gz|tar.xz) ;;
+                  *) log "the image format '$IMAGE_FORMAT' is unknown; nothing installed"; exit 1 ;;
+                esac
+                case "$PAYLOAD_KIND" in
+                  nixos-image|alpine-image|cloud-init-nocloud) ;;
+                  *) log "the payload kind '$PAYLOAD_KIND' is not an image's; nothing installed"; exit 1 ;;
+                esac
+                case "$SEED_URL" in
+                  https://*[!A-Za-z0-9:/._%~-]*|https://) log "the seed URL is malformed; nothing installed"; exit 1 ;;
+                  https://*) ;;
+                  *) log "the seed URL '$SEED_URL' is not https; nothing installed"; exit 1 ;;
+                esac
+                UUID=$(tr 'A-F' 'a-f' </sys/class/dmi/id/product_uuid)
+                case "$UUID" in
+                  ""|*[!0-9a-f-]*) log "the product UUID '$UUID' is malformed; nothing installed"; exit 1 ;;
+                esac
+                IMG=/tmp/fleet/image
+                ESP_MNT=/tmp/fleet/esp
+                ROOT_MNT=/tmp/fleet/root
+                rm -f "$IMG" /tmp/fleet/stream-failed /tmp/fleet/seed.tar
+                bg_pid=""
+                trap 'kill "$bg_pid" 2>/dev/null; umount "$ESP_MNT" "$ROOT_MNT" 2>/dev/null; log "stopped"; exit 143' TERM INT
+                # A step that runs in the background lets the shell take a timeout's SIGTERM while it works.
+                bg() { "$@" & bg_pid=$!; rc=0; wait "$bg_pid" || rc=$?; bg_pid=""; return "$rc"; }
+                log "downloading $IMAGE_URL"
+                if ! bg curl -fsSL --retry 3 --connect-timeout 30 -o "$IMG" "$IMAGE_URL"; then
+                  rm -f "$IMG"
+                  log "the image cannot be downloaded; nothing written"
+                  exit 1
+                fi
+                got=$(sha256sum "$IMG" | cut -d' ' -f1)
+                if [ "$got" != "$want" ]; then
+                  rm -f "$IMG"
+                  log "the image's sha256 is $got, not $want; nothing written"
+                  exit 1
+                fi
+                log "the image matches $IMAGE_DIGEST"
+                stream() {
+                  case "$IMAGE_FORMAT" in
+                    raw) cat "$IMG" ;;
+                    raw.zst) zstd -dc "$IMG" ;;
+                    raw.gz) gzip -dc "$IMG" ;;
+                    tar.xz) xz -dc "$IMG" | tar -xOf - ;;
+                  esac
+                }
+                write_disk() {
+                  { stream || touch /tmp/fleet/stream-failed; } | dd of="$DISK" bs=4M conv=fsync
+                }
+                if [ "$IMAGE_FORMAT" = tar.xz ]; then
+                  members=$(xz -dc "$IMG" | tar -tf - | wc -l)
+                  if [ "$members" -ne 1 ]; then log "the tarball has $members members, not one disk image; nothing written"; exit 1; fi
+                fi
+                log "writing $IMAGE_FORMAT to $DISK"
+                bg write_disk || { log "writing $DISK failed; the disk is partly written"; exit 1; }
+                if [ -e /tmp/fleet/stream-failed ]; then log "the image did not unpack; the disk is partly written"; exit 1; fi
+                rm -f "$IMG"
+                sync
+                sgdisk -e "$DISK" >/dev/null 2>&1 || log "the backup GPT could not be moved to the end of $DISK"
+                blockdev --rereadpt "$DISK" || true
+                if command -v partprobe >/dev/null; then partprobe "$DISK" || true; fi
+                # The partition numbers of the disk, in table order.
+                part_numbers() { sgdisk -p "$DISK" | awk '$1 ~ /^[0-9]+$/ { print $1 }'; }
+                # The device node of partition number $1: the kernel names it with or without a p.
+                part_dev() {
+                  for q in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                    if [ "$(cat "/sys/class/block/${q##*/}/partition" 2>/dev/null)" = "$1" ]; then echo "$q"; return 0; fi
+                  done
+                  return 1
+                }
+                # The partition number whose type GUID is $1, if any.
+                part_of_type() {
+                  for q in $(part_numbers); do
+                    if sgdisk -i "$q" "$DISK" | grep -qi "^Partition GUID code: $1"; then echo "$q"; return 0; fi
+                  done
+                  return 1
+                }
+                esp=""
+                i=0
+                while [ "$i" -lt 30 ]; do
+                  esp=$(part_of_type C12A7328-F81F-11D2-BA4B-00A0C93EC93B || true)
+                  if [ -n "$esp" ] && esp_dev=$(part_dev "$esp") && [ -b "$esp_dev" ]; then break; fi
+                  esp=""
+                  i=$((i + 1))
+                  sleep 1
+                done
+                if [ -z "$esp" ]; then log "$DISK has no EFI system partition after the write"; exit 1; fi
+                log "the EFI system partition is $esp_dev"
+                case "$PAYLOAD_KIND" in
+                  nixos-image|alpine-image)
+                    mkdir -p "$ESP_MNT"
+                    mount -t vfat "$esp_dev" "$ESP_MNT" || { log "$esp_dev cannot be mounted"; exit 1; }
+                    printf '{"url":"%s","uuid":"%s","code":"%s"}\n' "$SEED_URL" "$UUID" "$code" >"$ESP_MNT/fleet-seed.json" \
+                      || { umount "$ESP_MNT" || true; log "fleet-seed.json cannot be written"; exit 1; }
+                    sync
+                    umount "$ESP_MNT" || { log "$esp_dev cannot be unmounted"; exit 1; }
+                    log "wrote fleet-seed.json to the EFI system partition"
+                    ;;
+                  cloud-init-nocloud)
+                    status=$(curl -sS --retry 3 --connect-timeout 30 -o /tmp/fleet/seed.tar -w '%{http_code}' "$SEED_URL?uuid=$UUID&code=$code") || status=000
+                    if [ "$status" != 200 ]; then
+                      rm -f /tmp/fleet/seed.tar
+                      log "fleetd answered $status for the seed, not 200; the image is written without a seed"
+                      exit 1
+                    fi
+                    if tar -tf /tmp/fleet/seed.tar | grep -qE '^/|(^|/)\.\.(/|$)'; then
+                      rm -f /tmp/fleet/seed.tar
+                      log "the seed tar names a path outside its directory; the image is written without a seed"
+                      exit 1
+                    fi
+                    root=$(part_of_type 4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709 || true)
+                    root_dev=""
+                    if [ -n "$root" ]; then root_dev=$(part_dev "$root" || true); fi
+                    if [ -z "$root_dev" ]; then
+                      big=0
+                      for q in $(lsblk -lnpo NAME,TYPE "$DISK" | awk '$2 == "part" { print $1 }'); do
+                        [ "$(blkid -o value -s TYPE "$q" 2>/dev/null)" = ext4 ] || continue
+                        sz=$(cat "/sys/class/block/${q##*/}/size")
+                        if [ "$sz" -gt "$big" ]; then big=$sz; root_dev=$q; fi
+                      done
+                    fi
+                    if [ -z "$root_dev" ]; then log "$DISK has no Linux root partition; the image is written without a seed"; exit 1; fi
+                    mkdir -p "$ROOT_MNT"
+                    mount -t ext4 "$root_dev" "$ROOT_MNT" || { log "$root_dev cannot be mounted"; exit 1; }
+                    dest="$ROOT_MNT/var/lib/cloud/seed/nocloud"
+                    if ! { mkdir -p "$dest" && tar -xf /tmp/fleet/seed.tar -C "$dest" && [ -s "$dest/user-data" ] && [ -s "$dest/meta-data" ]; }; then
+                      umount "$ROOT_MNT" || true
+                      log "the seed cannot be extracted to $root_dev"
+                      exit 1
+                    fi
+                    sync
+                    umount "$ROOT_MNT" || { log "$root_dev cannot be unmounted"; exit 1; }
+                    rm -f /tmp/fleet/seed.tar
+                    log "wrote the cloud-init seed to $root_dev"
+                    ;;
+                esac
+                trap - TERM INT
+                log "installed $IMAGE_FORMAT image to $DISK"
+          # After an install the disk boots, through its entry on this install's EFI system
+          # partition; after a wipe with no install the network does, since a wiped disk has nothing to
+          # boot. BootNext makes each certain. The installer leaves efivarfs read-only, so the action
+          # remounts it, puts the entry first in BootOrder, and fails the run when any step or read-back
+          # fails. Every other entry of a fleet OS (FLEET_OS_ENTRIES) names a partition this run erased
+          # or another disk's, and goes, so an OS change or a retirement leaves none behind. A retired
+          # node powers off, so its next-boot only deletes them, and a failure there is logged and does
+          # not stop the power-off. A run that only attests leaves the firmware's boot order alone.
+          - name: next-boot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
+            timeout: 120
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                log() { echo "next-boot: $*"; for t in /dev/tty0 /dev/ttyS0; do echo "next-boot: $*" >"$t" 2>/dev/null || true; done; }
+                if [ "$INSTALL" != true ] && [ "$WIPE" != true ]; then
+                  log "nothing installed or wiped; the firmware's boot order decides the next boot"
+                  exit 0
+                fi
+                if [ "$RETIRE" = true ]; then
+                  fail() { log "$*; the retired node powers off with its boot entries as they are"; exit 0; }
+                else
+                  fail() { log "$*; the run fails, and the node stays in HookOS"; exit 1; }
+                fi
+                # HookOS mounts efivarfs read-write, but the Talos installer remounts it read-only when it is
+                # done, and efivarfs has one superblock, so every mount of it in HookOS is read-only after an
+                # install. Remount it read-write.
+                if ! mountpoint -q /sys/firmware/efi/efivars && ! err=$(mount -t efivarfs efivarfs /sys/firmware/efi/efivars 2>&1); then
+                  fail "efivarfs did not mount ($err)"
+                fi
+                err=$(mount -o remount,rw /sys/firmware/efi/efivars 2>&1) || fail "efivarfs stays read-only ($err)"
+                entries=$(efibootmgr -v 2>&1) || fail "efibootmgr failed ($entries)"
+                num() { sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*/\1/p'; }
+                guid=""
+                if [ "$INSTALL" = true ]; then
+                  # The installer's entry is the one on this install's EFI system partition, found by its
+                  # type, since Ubuntu's has no name; next-boot creates an image's, which has none.
+                  esp=""
+                  for p in $(sgdisk -p "$DISK" | awk '$1 ~ /^[0-9]+$/ { print $1 }'); do
+                    if sgdisk -i "$p" "$DISK" | grep -qi '^Partition GUID code: C12A7328-F81F-11D2-BA4B-00A0C93EC93B'; then
+                      esp=$p
+                      break
+                    fi
+                  done
+                  [ -n "$esp" ] || fail "$DISK has no EFI system partition"
+                  guid=$(sgdisk -i "$esp" "$DISK" | sed -n 's/^Partition unique GUID: //p' | tr 'A-F' 'a-f')
+                  [ -n "$guid" ] || fail "$DISK's EFI system partition has no GUID"
+                  n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
+                  if [ -z "$n" ]; then
+                    # An image's loader is at the removable path, so no entry names it yet.
+                    err=$(efibootmgr -q -c -d "$DISK" -p "$esp" -L "fleet ${OS:-image}" -l '\EFI\BOOT\BOOTX64.EFI' 2>&1) || fail "the boot entry for $DISK's EFI system partition cannot be created ($err)"
+                    entries=$(efibootmgr -v 2>&1) || fail "efibootmgr failed ($entries)"
+                    n=$(printf '%s\n' "$entries" | grep -i "HD($esp,GPT,$guid," | num | head -n 1)
+                    [ -n "$n" ] || fail "no boot entry names $DISK's EFI system partition ($guid) after creating one"
+                    log "created Boot$n for $DISK's EFI system partition"
+                  fi
+                fi
+                for s in $(printf '%s\n' "$entries" | grep -E "^Boot[0-9A-Fa-f]{4}\*? ($FLEET_OS_ENTRIES)([[:space:]]|$)" | num); do
+                  if [ -n "$guid" ] && printf '%s\n' "$entries" | grep -i "^Boot$s" | grep -qi "$guid"; then continue; fi
+                  err=$(efibootmgr -q -b "$s" -B 2>&1) || fail "the stale entry Boot$s cannot be deleted ($err)"
+                  log "deleted the stale entry Boot$s"
+                done
+                if [ "$RETIRE" = true ]; then
+                  log "a retired node powers off; no next boot"
+                  exit 0
+                fi
+                if [ "$INSTALL" = true ]; then
+                  what="the installed disk"
+                else
+                  n=$(printf '%s\n' "$entries" | sed -n 's/^Boot\([0-9A-Fa-f]\{4\}\)\*\{0,1\} .*IPV4.*/\1/Ip' | head -n 1)
+                  [ -n "$n" ] || fail "no IPv4 network boot entry"
+                  what="IPv4 network"
+                fi
+                # The entry goes first in BootOrder, so every later boot without an override takes it too, and
+                # BootNext makes the next one certain.
+                order=$(efibootmgr | sed -n 's/^BootOrder: //p' | tr ',' '\n' | grep -iv "^$n\$" | while read -r o; do
+                  efibootmgr | grep -qi "^Boot$o" && printf ',%s' "$o"; done)
+                err=$(efibootmgr -q -o "$n$order" 2>&1) || fail "BootOrder refused ($err)"
+                err=$(efibootmgr -q -n "$n" 2>&1) || fail "BootNext refused ($err)"
+                now=$(efibootmgr)
+                got_next=$(printf '%s\n' "$now" | sed -n 's/^BootNext: //p')
+                got_order=$(printf '%s\n' "$now" | sed -n 's/^BootOrder: //p')
+                [ "$got_next" = "$n" ] || fail "BootNext reads back as '${got_next}', not $n"
+                case "$got_order" in "$n"|"$n",*) ;; *) fail "BootOrder reads back as '${got_order}', not $n first" ;; esac
+                log "Boot$n ($what) is the next boot and first in BootOrder ($got_order)"
+          # A retired node powers off instead, and stays off until somebody turns it on.
+          - name: reboot
+            image: ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19
+            timeout: 120
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock
+            command:
+              - /bin/sh
+              - -c
+              - |
+                set -eu
+                key=b; what="rebooting"
+                if [ "$RETIRE" = true ]; then key=o; what="powering off"; fi
+                # A detached container reboots or powers off the node after this action reports success.
+                # This action's success means the container started, not that the node rebooted: the
+                # Workflow is SUCCESS before the node goes down. A node that stays in HookOS has a
+                # Hardware state that never leaves its provision, and no attestation from the next boot.
+                docker rm -f provision-reboot >/dev/null 2>&1 || true
+                docker run -d --rm --privileged --name provision-reboot \
+                  ghcr.io/jonpulsifer/tink-reprovision-tools@sha256:cae2316472a22d123cd3e1f48cb72c4c6357fc27e781d649aa66a83bf8c92f19 \
+                  sh -c "sleep 10; echo s >/proc/sysrq-trigger; sleep 2; echo $key >/proc/sysrq-trigger"
+                for t in /dev/tty0 /dev/ttyS0; do echo "provision: $what in 10 seconds" >"$t" 2>/dev/null || true; done

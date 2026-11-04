@@ -1,11 +1,11 @@
 locals {
-  lan_cidr = "192.168.1.1/24"
+  lan_cidr = local.network_catalog.default.subnet
   # UniFi expects gateway-host (.1) CIDRs for network subnets.
   node_cidr = "${cidrhost(local.topology.K8S_NODE_CIDR, 1)}/${split("/", local.topology.K8S_NODE_CIDR)[1]}"
 }
 
 resource "unifi_network" "default" {
-  name               = "Default"
+  name               = local.network_catalog.default.name
   subnet             = local.lan_cidr
   domain_name        = "localdomain"
   setting_preference = "auto"
@@ -25,9 +25,9 @@ resource "unifi_network" "default" {
 }
 
 resource "unifi_network" "k8s" {
-  name               = "Kubernetes"
+  name               = local.network_catalog.kubernetes.name
   subnet             = local.node_cidr
-  vlan               = 2
+  vlan               = local.network_catalog.kubernetes.vlan
   setting_preference = "auto"
   auto_scale         = false
   lte_lan            = true

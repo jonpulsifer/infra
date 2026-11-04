@@ -3,9 +3,21 @@ title: Evaluate the Rowbutt models
 description: Read what Rowbutt's recorded turns say about each model, and replay its recorded tool decisions against a candidate model before changing MATE_MODEL or the fallback.
 ---
 
-[Rowbutt](../apps/mate.md) keeps every thread's session in `mate-db`, and each recorded step names the model that answered it. `bun run evals` in `apps/mate` reads that store and prints two things: a ledger of what the recorded steps show about each model, and, with `--model`, a decision replay that puts the recorded context in front of a candidate model at each recorded tool call and scores whether it picked the same tool and the same action. Use it before changing `MATE_MODEL` or `MATE_FALLBACK_MODEL` in `clusters/offsite/apps/mate/deployment.yaml`, or when a model looks slow or wasteful in chat.
+[Rowbutt](../apps/mate.md) stores each thread's session in `mate-db`. Each recorded step names the model that answered it.
+Use this runbook before changing `MATE_MODEL` or `MATE_FALLBACK_MODEL` in `clusters/offsite/apps/mate/deployment.yaml`.
+It also helps investigate slow or costly responses.
 
-The replay measures agreement with the recorded model one step at a time, not correctness: once a candidate picks another path the recorded tool results fit it no more, so each decision asks for one call and runs nothing after it. Read the thread of a disagreement before you trust either side.
+`bun run evals` in `apps/mate` provides two reports:
+
+- A ledger of the recorded steps for each model.
+- With `--model`, a replay of recorded tool decisions against a candidate model.
+
+For each replay, the candidate receives the recorded context at one tool call.
+The score measures agreement on the tool and action. It does not measure correctness.
+
+Each decision requests one call and executes nothing after it.
+If the candidate chooses another path, the recorded tool results cannot describe that path.
+Read the thread behind each disagreement before accepting either model's decision.
 
 ## Before you start
 
@@ -51,7 +63,23 @@ The replay measures agreement with the recorded model one step at a time, not co
    bun run evals -- --since 7d --model opencode-go/qwen3.8-max --decisions 40
    ```
 
-   Result: a second table with, for each candidate, the decisions replayed, how many it answered, the share that chose the same tool, the share that chose the same action, how many answered with text and no tool, how many errored, and the cost. Under it, one line per disagreement with the thread's key and the step, so the thread can be read. `--model` repeats for several candidates, `--thinking` sets the candidate's reasoning level, and `--decisions` bounds the sample, which takes the newest decision of each thread in turn. A step that called several tools at once is scored by its first call, and the context the candidate sees is the one pi sent for the step: after a compaction, the summary and what it kept, not the whole history.
+   Result: a table for each candidate with these measures:
+
+   - Decisions replayed and decisions answered.
+   - Share of answers with the same tool and the same action.
+   - Answers with text but no tool, errors, and cost.
+
+   Each disagreement includes the thread key and step for review.
+
+   | Option | Purpose |
+   | --- | --- |
+   | Repeated `--model` | Compare several candidates |
+   | `--thinking` | Select the candidate's reasoning level |
+   | `--decisions` | Limit the sample; select each thread's newest decision in turn |
+
+   A step with several tool calls is scored by its first call.
+   The candidate sees the context pi sent for that step.
+   After compaction, this means the summary and retained context, not the full history.
 
 2. Decide. A candidate that agrees on most actions, answers with no tool rarely and costs less is a fair default; one that errors or answers with text where the recorded model called a tool is not ready. Change `MATE_MODEL`, `MATE_THINKING`, `MATE_FALLBACK_MODEL` or `MATE_FALLBACK_THINKING` in `clusters/offsite/apps/mate/deployment.yaml` through a pull request, and read [Operate the Rowbutt model fallback](operate-the-rowbutt-model-fallback.md) for what each pair means.
 

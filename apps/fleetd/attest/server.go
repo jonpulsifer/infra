@@ -27,13 +27,16 @@ type Server struct {
 
 const maxBody = 1 << 20
 
+// Public is the boot listener's handler. It serves the device flow and nothing
+// else, since HookOS and Talos reach it before they have an identity: the
+// lookups and the renewals are on the DevID listener, and the metrics on the
+// admin one.
 func (s *Server) Public() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("POST "+protocol.PathStart, s.start)
 	mux.HandleFunc("POST "+protocol.PathEvidence, s.evidence)
 	mux.HandleFunc("POST "+protocol.PathConfirm, s.confirm)
-	s.devIDRoutes(mux)
-	mux.HandleFunc("GET /metrics", s.metrics)
 	return mux
 }
 
@@ -58,7 +61,6 @@ func (s *Server) devIDRoutes(mux *http.ServeMux) {
 func (s *Server) Admin() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /machines", s.machines)
-	mux.HandleFunc("POST /approve", s.approve)
 	mux.HandleFunc("GET /metrics", s.metrics)
 	return s.requireApprover(mux)
 }
@@ -113,12 +115,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		code, verdict = http.StatusNotFound, ""
 	case f.Reason == reasonNetBox:
 		code, verdict = http.StatusServiceUnavailable, protocol.VerdictRefused
-	case f.Reason == reasonSerial:
+	case f.Reason == reasonSerial || f.Reason == reasonField || f.Reason == reasonMACInvalid:
 		code, verdict = http.StatusBadRequest, protocol.VerdictRefused
-	case f.Reason == reasonIntakeRate:
-		code, verdict = http.StatusTooManyRequests, protocol.VerdictRefused
-	case f.Reason == reasonApproval:
-		code, verdict = http.StatusBadRequest, ""
 	case f.Unauthenticated:
 		verdict = protocol.VerdictRefused
 	case f.Unquarantined:
@@ -134,7 +132,7 @@ func (s *Server) start(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	resp, err := s.V.Start(r.Context(), req)
+	resp, err := s.V.Start(r.Context(), req, clientAddress(r))
 	if err != nil {
 		s.writeError(w, err)
 		return
@@ -180,7 +178,7 @@ func (s *Server) localDevID(serial string) (protocol.DevID, bool, error) {
 // liftedDevID is the DevID the service keeps for a machine it quarantined,
 // once NetBox answers that the owner cleared the quarantine: the device is
 // known, blocked by no status, and its attest_verdict is no quarantine. It
-// gives the node its key blobs and opens a renewal or a daily check, whose
+// gives the node its key blobs and opens a renewal or a hourly check, whose
 // LAK signature, LDevID certification and boot policy decide before anything
 // is written; the record stays quarantined until such a check
 // passes. Without NetBox no owner lifts a quarantine, so there is none.
@@ -296,7 +294,7 @@ func (s *Server) status(ctx context.Context, serial string) (protocol.Status, bo
 }
 
 // sameAttestation is whether the service's record and NetBox's verdict stand
-// on the same LDevID: by its serial when both name one, since a daily check
+// on the same LDevID: by its serial when both name one, since a hourly check
 // moves attested_at without issuing, else by attested_at to the second, as
 // NetBox keeps it.
 func sameAttestation(mine, nb protocol.Status) bool {
@@ -417,22 +415,6 @@ func (s *Server) machines(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"machines": recs, "pending": pending})
 }
 
-func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Serial   string   `json:"serial"`
-		EKHashes []string `json:"ek_hashes"`
-	}
-	if !decode(w, r, &req) {
-		return
-	}
-	hashes, err := s.V.Approve(r.Context(), req.Serial, req.EKHashes, strings.ToLower(r.Header.Get("Tailscale-User-Login")))
-	if err != nil {
-		s.writeError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"approved": hashes, "next": "the next attest writes these to the device's ek_hash and ek_hash_ecc in NetBox"})
-}
-
 // renewStart opens a renewal for a running node. The LAK and the AK blobs
 // come from the newest pass.
 func (s *Server) renewStart(w http.ResponseWriter, r *http.Request) {
@@ -459,7 +441,7 @@ func (s *Server) renewStart(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, protocol.Verdict{Reason: reasonUnknownMachine, Detail: []string{"no LDevID on file for serial " + req.Serial + "; attest from HookOS first"}})
 		return
 	}
-	resp, err := s.V.RenewStart(r.Context(), req.Serial, d, req.Check)
+	resp, err := s.V.RenewStart(r.Context(), req.Serial, d, req.Check, clientAddress(r))
 	if err != nil {
 		s.writeError(w, err)
 		return

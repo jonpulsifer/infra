@@ -1,9 +1,25 @@
 ---
 title: Identity
-description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file.
+description: SPIRE on spore gives each folly node with a TPM 2.0 an identity rooted in its TPM, by LDevID or EK hash, gives its pods SPIFFE IDs, and lets a pod reach GCP with no key file; tsidp on spore signs people on the tailnet in to kubectl.
 ---
 
-SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs on [spore](../hosts/spore.md). An agent on a folly node proves that it holds a TPM: by the LDevID, a TPM-resident key with a certificate from the DevID CA, that the attest service issued it, or by its endorsement key (EK) on the server's allow list. It then serves SVIDs, SPIFFE's X.509 and JWT credentials, to the pods on that node.
+SPIRE gives folly nodes and their pods identities in the trust domain `lolwtf.ca`. Its server runs on [spore](../hosts/spore.md).
+
+A node's agent proves that it holds a trusted TPM. SPIRE accepts either a device certificate or an approved TPM endorsement key. The agent then gives credentials to authorized pods.
+
+## Terms
+
+| Term | Meaning |
+| --- | --- |
+| SPIFFE ID | The name of a node or workload, such as `spiffe://lolwtf.ca/node/<name>` |
+| SVID | An X.509 or JWT credential that proves a SPIFFE identity |
+| TPM | The hardware security module that holds a node's keys |
+| EK | The TPM's endorsement key |
+| LDevID | A device identity certificate for a key held in the TPM |
+| LAK | The certified attestation key used to prove the node's boot state |
+| DevID CA | The certificate authority that signs device identities |
+
+Read [Node lifecycle](node-lifecycle.md) first for the installation sequence. The [technical design](../reference/folly-design.md) explains the trust limits.
 
 ## Server
 
@@ -14,7 +30,7 @@ SPIRE issues SPIFFE identities in the trust domain `lolwtf.ca`. The server runs 
 | `tpm_devid` node attestor | Checks the LDevID's chain against the DevID CA, the EK certificate's chain against the manufacturer CAs in `nix/services/spire/roots/`, and that the LDevID key and the EK are in one TPM. It runs when `homelab.spire.devid.enable` is true. | spore, built into SPIRE |
 | `k8sbundle` notifier | Writes the server's bundle into folly's `spire/spire-bundle` at startup and on every CA rotation, as the ServiceAccount `spire-bundle-writer` | spore, in the server, when `homelab.spire.bundleNotifier.enable` is true |
 | `spire-server-entries` | Creates, updates and prunes the registration entries to match git | spore, a oneshot after the server is healthy |
-| `spire-server-fleet-entries` | Registers the nodes fleetd lists, and withdraws the ones it drops | spore, a oneshot that a path unit starts when fleetd rewrites `/var/lib/fleetd/spire-nodes.json`, and a timer every 10 minutes |
+| `spire-server-fleet-entries` | Registers the nodes fleetd lists, withdraws the ones it drops, and bans the agents of the ones it revokes | spore, a oneshot that a path unit starts when fleetd rewrites `/var/lib/fleetd/spire-nodes.json`, and a timer every 10 minutes |
 | `spire-server-agent-count` | Writes `spire_server_attested_agents` for the node exporter every minute | spore, a timer |
 
 The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
@@ -26,13 +42,13 @@ The server has no `k8s_psat` node attestor, so only a TPM can attest a node.
 | `spiffe://lolwtf.ca/node/<name>` | A node alias, one entry for each attestor | `tpm:pub_hash:<hash>`, or `tpm_devid:subject:cn:<name>` |
 | `spiffe://lolwtf.ca/ns/<ns>/sa/<sa>` | A pod, parented to its node's alias | `k8s:ns:<ns>`, `k8s:sa:<sa>` |
 
-The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<talos_class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `talos_class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
+The hash is the SHA-256 of the EK public key in DER form, in lowercase hex. The fingerprint is the SHA-1 of the LDevID certificate. The attest service sets the LDevID's subject to `CN=<name>, serialNumber=<serial>, OU=<class>, O=<site>`: the node's name, its SMBIOS serial, NetBox's `class` and the site. Every JWT-SVID carries the issuer `https://spire.lolwtf.ca`, set by `homelab.spire.jwtIssuer`.
 
 SPIRE 1.15.5's `tpm_devid` gives the selectors in the table and no others: no selector names the subject's OU or O. So an alias cannot select a class or a site, and each machine gets its own alias by subject CN.
 
-- The `git-*` LDevID aliases follow `clusters/folly/inventory/nodes.yaml`. Each node with `tpm` `2.0`, its own or its model's, gets one. `nix/lib/inventory.nix` reads the nodes file at evaluation, so a `git-*` alias needs a spore deploy. A node fleetd lists in `spire-nodes.json` gets its `fleet-*` alias with no deploy. It fails the evaluation on any line outside the file's shape.
-- Change EK hashes in `ekHashes` and workload entries in `workloads` of `nix/hosts/spore.nix`. The sync deletes any entry whose ID starts with `git-` and is not declared, and it leaves entries made by hand.
-- An agent matches a node entry only when it has every selector, so each node has one alias by EK hash and one by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
+- Each node alias, by LDevID CN or EK hash, is a `fleet-*` entry for a node fleetd lists in `spire-nodes.json`, so a node gets it with no deploy and loses it when fleetd withdraws it. spore declares none.
+- Change the EK allow list in `ekHashes` and the workload entries in `workloads` of `nix/hosts/spore.nix`. The allow list admits an agent; its alias by EK hash comes from fleetd's file, as the LDevID alias does. spore declares no entry, and the sync deletes any entry whose ID starts with `git-` and leaves entries made by hand.
+- An agent matches a node entry only when it has every selector, so a node has one alias for each attestor: by EK hash, and by LDevID CN. A node with no entry in `ekHashes` attests only by LDevID.
 - Add a node's EK hash before its agent starts. The plugin refuses an EK that is not on the list.
 - `homelab.spire.devid.caChains` takes one file for each issuing DevID CA, `folly-devid-ca-<name>.pem` in `terraform/pki/certs/`. The server reads the first certificate of each file, so list the CA files and not the bundle `folly-devid-ca.pem`. The fml intermediate or root in that pool would admit any certificate it signs.
 - Run the CLI as root with `-socketPath /run/spire/server/private/api.sock`. Its default socket path is wrong for this server.
@@ -44,12 +60,75 @@ Two owners write registration entries, and the entry ID says which.
 
 | Owner | IDs | Holds |
 | --- | --- | --- |
-| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`: the alias for each node in `ekHashes` and each node of `nodes.yaml` with a TPM 2.0, and the `workloads` under them |
-| fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the eviction of a withdrawn node's agent |
+| Nix, `spire-server-entries` | `git-*` | The entries in `homelab.spire.entries` of `nix/hosts/spore.nix`, which declares none, so the sync prunes every `git-*` entry |
+| fleetd and `spire-server-fleet-entries` | `fleet-*` | The same aliases and `workloads` for each node in `spire-nodes.json`, and the bans of withdrawn and revoked nodes' agents |
 
-fleetd writes `spire-nodes.json` from NetBox and holds no SPIRE credential. The applier runs as root on the server's socket, takes only a node name that matches `[a-z0-9-]` and EK hashes of 64 lowercase hex characters, and leaves every entry as it is when the file is malformed. A node is in the file while its device is `active` with the verdict `attested`. When it leaves, the applier deletes the node's `fleet-*` entries and evicts each agent whose node selector no entry carries any longer. An evicted agent attests again while its LDevID is valid, and gets no workload entries without an alias.
+#### Registration and withdrawal
 
-SPIRE rejects an entry that repeats another's parent, SPIFFE ID and selectors. The applier skips an entry that a `git-*` entry, or one made by hand, already issues, and the Nix sync deletes a `fleet-*` entry that an entry it declares repeats. The declared entry wins in both orders, and no alias is missing while a node moves from one owner to the other.
+fleetd writes `spire-nodes.json` from NetBox. It has no SPIRE credential. The applier runs as root through the server's socket.
+
+The applier accepts these values:
+
+- Node names that match `[a-z0-9-]`.
+- EK hashes with 64 lowercase hexadecimal characters.
+- LDevID fingerprints with 40 lowercase hexadecimal characters.
+
+A malformed file changes nothing. The same applies if a node or EK hash appears as both registered and revoked.
+
+| Export list | Admission condition | Applier action |
+| --- | --- | --- |
+| `nodes` | The device is `active` and its verdict is `attested`. | Register its aliases and workloads. |
+| Absent from `nodes` | The node does not meet that condition. | Delete its `fleet-*` entries. Ban agents whose node selector has no remaining entry. |
+| `revoked` | fleetd holds a record, but the device is `decommissioning`, `offline` or absent from NetBox. | Ban matching agents, even if a `git-*` entry carries their selector. |
+
+A revoked record includes the node name and EK hashes. It also includes the stored LDevID's SHA-1 fingerprint until the certificate's `notAfter` time.
+
+The applier matches revoked agents by agent ID, EK hash or `tpm_devid:subject:cn:<name>`. The CN match covers renewed LDevIDs too. An EK hash held by a registered node is never revoked. A TPM can therefore move to a new node name.
+
+#### Bans and readmission
+
+A banned agent cannot attest with the same agent ID. An unexpired LDevID or an allowed EK does not override the ban.
+
+SPIRE has no unban operation. When the node registers again, the applier removes its banned agent record if nothing still revokes it. The agent can then attest again.
+
+A new LDevID produces a new agent ID. An EK agent retains its hash-based ID, so it needs the removal step.
+
+The applier also removes manual bans on registered nodes. To keep a node out, set its NetBox device to `failed`.
+
+#### Credential expiry
+
+SPIRE checks no LDevID revocation beyond the ban. Setting `decommissioning` does not immediately end access:
+
+1. fleetd updates its export on the next pass.
+2. The path unit starts the applier. A 10-minute timer retries if the path unit misses the update.
+3. The applier bans the agent. Existing workload SVIDs remain valid until their TTL expires, normally one hour.
+
+`BanAgent` needs an attested-node record. If an agent first attests after an applier run, the next run bans it.
+
+#### Protection against bulk withdrawal
+
+One run can withdraw or ban agents for at most `homelab.spire.fleetEntries.maxWithdrawals` nodes. The default is one.
+
+A node counts toward the limit if:
+
+- It has a `fleet-*` alias but is absent from `nodes`.
+- The run bans one of its agents. This includes revoked nodes and listed nodes that lose an EK alias.
+
+A bulk edit that clears `ek_hash` pins can exceed the limit. The applier then changes nothing and exits with an error. `SporeSpireFleetEntriesFailed` fires after 15 minutes.
+
+The applier refuses further runs until the export is below the limit or the owner authorizes the withdrawal. The owner records authorized node names in `/var/lib/spire-fleet-entries/withdraw` on spore, as root, one name per line. The next run acts on those names and removes the file.
+
+The applier bans agents before deleting entries. If it fails between these operations, the next run plans the bans again.
+
+Source: `nix/services/spire/fleet-entries.sh`. `mise run spire:test` tests it against a stub server.
+
+#### Duplicate registrations
+
+SPIRE rejects entries with identical parents, SPIFFE IDs and selectors.
+
+The fleet applier skips an entry already supplied by a `git-*` or manual entry. The Nix sync deletes a duplicate `fleet-*` entry when its declaration supplies the same identity.
+
+The declared entry wins in either order. The node keeps its alias while registration ownership changes.
 
 ## The chain
 
@@ -61,7 +140,7 @@ A node's identity starts before Talos runs. Each step relies on the one before i
 | --- | --- | --- |
 | EK certificate | The TPM is a genuine Infineon or Nuvoton part | The TPM maker's CA, pinned in `apps/fleetd/attest/roots/` |
 | Credential activation | The attestation key (AK) is in that TPM | [fleetd](../apps/fleetd.md), from HookOS |
-| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | fleetd, against `apps/fleetd/attest/policy.yaml` |
+| Quote and event log | The machine booted with Secure Boot on, under the lab's PK, through the signed iPXE and HookOS | fleetd, against the profiles in `apps/fleetd/attest/policy/` |
 | TPM2_Certify | The LDevID key is in that TPM and cannot leave it | fleetd |
 | LDevID and LAK certificates | The DevID CA vouches for the key and the AK | `FML DevID folly CA`, in [PKI](pki.md#chain) |
 | `tpm_devid` | The agent holds the LDevID key in a TPM with a genuine EK | spore's SPIRE server |
@@ -74,21 +153,49 @@ A folly node's identity follows its device's `status` in [NetBox](netbox.md). fl
 
 | Status | Meaning | Written by |
 | --- | --- | --- |
-| `planned` | Ordered, with its serial known, or in attestation or install. It may carry `ek_hash` pins. | The owner; fleetd, on an approved pass for a serial NetBox did not know, and on a `provision` or `wipe` of an installed node |
+| `planned` | Ordered, with its serial known, or in attestation or install. It may carry an approved EK binding and `ek_hash` pins. | The owner, through the nodes file; fleetd, on a `provision` or `wipe` of an installed node |
 | `active` | Its config is released, and it is expected Ready | fleetd, when the node fetches its config |
 | `failed` | Held out by the owner | The owner |
 | `decommissioning` | Retiring: the disk is wiped, and the exports drop it | The owner |
 | `offline` | Retired, and kept for history | fleetd, after the retirement run succeeds |
 
-Only the owner moves a device out of `failed` or into `decommissioning`, and fleetd refuses a `failed` device. A quarantine is a verdict, and the status stays: a quote that misses the policy sets `attest_verdict` to `quarantined: <reason>`, fleetd answers the node's `/devid` with 403 and cordons the node. fleetd refuses it a new identity until the owner clears the verdict. After that the node's next daily check or renewal, which proves its LAK and LDevID key and passes the policy, restores its record and its LDevID files, and the owner uncordons the node. A control plane's failed quote reads `failed-no-quarantine: <reason>` and alerts without a cordon. That verdict can also remove fleet-owned SPIRE registration eligibility. A `decommissioning` or `offline` device gets no LDevID renewal, so its identity ends when its LDevID expires. [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) and [Retire a node](../runbooks/retire-a-node.md) are the procedures.
+Only the owner moves a device out of `failed` or into `decommissioning`. fleetd refuses a `failed` device.
+
+### Quarantine
+
+Quarantine changes the attestation verdict, not the device status.
+
+| Evidence | Result |
+| --- | --- |
+| An authenticated worker quote fails policy | Set `attest_verdict` to `quarantined: <reason>`, refuse `/devid` with HTTP 403 and cordon the node. |
+| A control-plane quote fails policy | Record `failed-no-quarantine: <reason>` and alert without a cordon. Fleet-owned SPIRE registration eligibility can also change. |
+| A device is `decommissioning` or `offline` | Refuse LDevID renewal. Its LDevID remains valid until expiry. |
+
+A quarantined worker gets no new identity until the owner clears the verdict. Its next hourly check or renewal must prove both keys and pass policy. fleetd then restores its record and LDevID files. The owner uncordons the node.
+
+Use [Provision a node](../runbooks/provision-a-node.md), [Reprovision a node](../runbooks/reprovision-a-node.md) or [Retire a node](../runbooks/retire-a-node.md) for the procedures.
 
 ## Agents
 
 The DaemonSet `spire-agent` in the `spire` namespace runs on each folly node labelled `lolwtf.ca/tpm=true`. Its image, `ghcr.io/jonpulsifer/spire-agent-tpm`, adds the agent half of the EK plugin and `spire-devid-init` to SPIRE's agent.
 
-The init container `devid-init` reads the node's SMBIOS serial and fetches `<ATTEST_URL>/devid/<serial>` from fleetd's DevID listener on spore, with `ATTEST_URL` from the `spire-attest` ConfigMap. When the LDevID names this node and serial, is current and matches its key blob, it writes the files and renders the agent's config with `tpm_devid`. Otherwise, or with `ATTEST_URL` empty, it renders the EK attestor. The `tpm_devid` agent keeps its state in `/var/lib/spire-agent/tpm_devid`. The blobs are wrapped by the TPM's storage root key, which the agent derives from the TCG H-1 or H-2 template, so they load on no other TPM.
+### Agent initialization
+
+The init container `devid-init` reads the SMBIOS serial. It fetches `<ATTEST_URL>/devid/<serial>` from fleetd on spore. The `spire-attest` ConfigMap supplies `ATTEST_URL`.
+
+It selects `tpm_devid` only if the LDevID:
+
+- Names this node and serial.
+- Is current.
+- Matches its key blob.
+
+Otherwise, or if `ATTEST_URL` is empty, it selects the EK attestor.
+
+The `tpm_devid` agent stores state in `/var/lib/spire-agent/tpm_devid`. The TPM's storage root key wraps the blobs. The agent derives that key from the TCG H-1 or H-2 template. The blobs cannot load on another TPM.
 
 The container is privileged, since the device cgroup refuses `/dev/tpmrm0` to any other container. It shares the host's PID namespace and network, so the `k8s` workload attestor can ask the kubelet for a caller's pod. Its key and SVID stay in `/var/lib/spire-agent` on the node, so a new pod resumes with no second attestation.
+
+### Pod access
 
 A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a hostPath volume, which needs a privileged namespace. A node with no label runs no agent, so its pods get no SVID. The Job `spire-smoke` prints the SPIFFE ID that the agent serves it.
 
@@ -102,7 +209,7 @@ A pod reaches the Workload API at `/run/spire/sockets/agent.sock` through a host
 
 ## Renewal
 
-The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 24h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on fleetd's DevID listener, at the same `ATTEST_URL` as `devid-init`. fleetd issues the renewal from spore's YubiKey CA, whatever CA issued the LDevID on file. Otherwise it runs the daily check, which the next section describes.
+The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -every 1h` on each node labelled `lolwtf.ca/tpm=true`, as `clusters/folly/apps/spire/tpm-reattest.yaml` declares. It reads the LDevID and LAK certificates from NV `0x01c90000` and `0x01c90001`. When the LDevID expires within 30 days, or NV holds the LAK and no LDevID, it renews the LDevID on fleetd's DevID listener, at the same `ATTEST_URL` as `devid-init`. fleetd issues the renewal from spore's YubiKey CA, whatever CA issued the LDevID on file. Otherwise it runs the hourly check, which the next section describes.
 
 1. It fetches `/devid/<serial>` and checks that the key blobs are the keys the certificates in NV name.
 2. `POST /v1/renew` with the serial answers a session and a nonce.
@@ -113,11 +220,13 @@ The DaemonSet `tpm-reattest` in the `spire` namespace runs `tink-attest renew -e
 
 `scripts/render-spire-devid-ca.sh` writes `spire-devid-ca` from `terraform/pki/certs/folly-devid-ca.pem`, and the kustomize workflow fails when the two differ. A run that fails runs again an hour later. A node with no LDevID in NV has nothing to renew. The ServiceAccount `tpm-reattest` may list and delete pods in `spire`. The ValidatingAdmissionPolicy `tpm-reattest` allows it to delete only a `spire-agent` pod on the node that its token names. `TalosAttestLDevIDExpiring` fires when an LDevID expires within 23 days, which is a week of failed renewals.
 
-### Daily check
+### Hourly check
 
-On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are. A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
+On a day with no renewal due, the run takes steps 1 to 4 with `check` set in the request and the BIOS version from `/sys/class/dmi/id/bios_version` in the evidence. The service judges the boot by the renewal policy, records the verdict, `last_attested` and PCR 0 in NetBox, and answers no certificate, so NV and the `spire-agent` pod stay as they are.
 
-A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 26 hours.
+A boot that misses the policy after the LAK's proof quarantines a worker: its `attest_verdict` reads `quarantined: <reason>`, and fleetd serves it no LDevID and cordons it. A `controlplane` node stays in place and alerts at critical, so the cluster's API stays up. [fleetd](../apps/fleetd.md) has the rules.
+
+A run opens `/dev/tpmrm0` and reads the event log before it sends anything. Without the TPM it logs `NO TPM`, sends nothing, and tries again an hour later; a node whose TPM is off has no device to mount, so its pod does not start. A service that predates the check answers without `check`, and the run sends it no evidence. `TalosAttestNotChecked` fires when fleetd has recorded no passing quote from a node for 3 hours.
 
 ## GCP access
 
@@ -143,23 +252,71 @@ The test Job in `spire-test` runs as `uploader`, which can only create objects i
 - The discovery provider reads its keys through the Workload API as `spire-oidc/oidc-discovery-provider`. Without that entry, `spire.lolwtf.ca` serves no keys and every exchange fails.
 - `iam.workloadIdentityPoolProviders` in `terraform/gcp/projects/homelab-ng/policy.tf` lists the issuer. A new issuer needs an entry there first.
 
+## People on the tailnet
+
+tsidp, Tailscale's OIDC provider, signs a person on the tailnet in for kubectl. `nix/services/tsidp.nix` runs it on spore as a tailnet node of its own. `providers.tailscale.hostname` in `clusters/base/config/kube-login.json` names the node, and the issuer is `https://<hostname>.<tailnet>`.
+
+| Path | Reached through | Used by |
+| --- | --- | --- |
+| `/authorize`, the admin UI, client registration | The tailnet only | kubelogin's browser sign-in, the owner |
+| `/token` | The tailnet, and Funnel with the client's secret | kubelogin |
+| `/.well-known/openid-configuration`, `/.well-known/jwks.json` | The tailnet and Funnel | Both API servers, which have no tailnet |
+
+An ID token names the user by the login in `email` and by `userid:<n>` in `sub`, with no groups. It lasts 5 minutes. tsidp keeps refresh tokens in memory for 30 days, so a restart signs everyone out. A refresh needs no tailnet, so someone removed from the tailnet keeps refreshing over Funnel until that restart; the RBAC binding is the gate.
+
+- `/var/lib/tsidp` holds the node key, the signing key and the registered clients. tsidp never rotates the signing key, so the API servers keep the keys they fetched. Losing the directory needs a new client and a new node.
+- `tsidp/authkey` in `nix/secrets/spore.sops.yaml` is the secret of the OAuth client `tsidp_enrollment` in `terraform/network/tailscale/`, escrowed in 1Password as `tailscale OAuth (tsidp)`, with `?ephemeral=false&preauthorized=true` appended. The node is not ephemeral, so it keeps its identity across restarts, and it advertises `tag:tsidp`. tsidp reads the key only to register the node, so a new key needs no restart unless the node is unregistered. spore's build fails while the file lacks it.
+- The node must be named exactly `<hostname>`, since the issuer in every token is its name. tsnet registers as `idp-1` when a device named `idp` is still in the tailnet, after `/var/lib/tsidp` is lost or the node enrols again. If the admin console shows `idp-1`, delete the stale `idp` device and restart tsidp. `tsidp-check` reads the discovery document through Funnel every 5 minutes, and `SporeTsidpIssuerUnreachable` fires when its issuer is not the expected one.
+- `terraform/network/tailscale/policy.hujson` declares `tag:tsidp`, its `funnel` node attribute and the owner's `tailscale.com/cap/tsidp` grant `allow_admin_ui`.
+
+### When to switch to the passthrough
+
+tsidp serves the API servers its discovery document and keys through Funnel. Funnel's HTTP crosses folly's uplink only inside WireGuard, so the signals come from the network sensor and from tsidp's own journal.
+
+| Signal | Declared in | Shows in |
+| --- | --- | --- |
+| `FunnelTripwire::Funnel_TLS`: a folly host other than the API server and spore opens TLS to `idp.<tailnet>` | `clusters/folly/apps/sensor/scripts/funnel-tripwires.zeek` | Zeek's `notice` stream |
+| Suricata sid 1000001, the same match | `clusters/folly/apps/sensor/scripts/funnel-tripwires.rules` | Suricata's EVE alerts |
+| `FunnelTripwire::Spore_Internet_UDP`: 30 or more UDP flows between spore and the internet in 10 minutes, not counting DNS, NTP or STUN | `funnel-tripwires.zeek` | Zeek's `notice` stream |
+| `TsidpFunnelUnexpectedRequest`: tsidp refuses a Funnel request to `/authorize`, `/clients` or `/register` | `nix/services/tsidp-tripwires.nix`, `clusters/folly/monitoring/spore.yaml` | Alertmanager |
+| `TsidpRequestRefused`: tsidp refuses `/token`, `/introspect` or `/userinfo` with an error other than `invalid_grant` | the same | Alertmanager |
+| `TsidpTripwiresStale`: the journal count has not run for 10 minutes | the same | Alertmanager |
+
+Nothing alerts on a VictoriaLogs query, so the sensor's signals wait for these queries in Grafana's VictoriaLogs data source:
+
+```text
+{namespace="sensor",container="zeek"} | unpack_json fields (_path, note, msg, src) | filter _path:=notice note:~"FunnelTripwire"
+{namespace="sensor",container="suricata"} | unpack_json fields (event_type, src_ip, alert.signature_id, tls.sni) | filter event_type:=alert alert.signature_id:=1000001
+```
+
+Any signal that the API servers' fetches, spore's own issuer check or a replaced kubeconfig secret does not explain means the Funnel comes off. tsidp is then reached through a TLS passthrough on spore: spore's Anchor address forwards TCP 443 to tsidp's tailnet address, and the API servers resolve tsidp's name to spore.
+
+- tsidp logs no request it answers, only refusals, so nothing counts the discovery and key fetches. The flow count stands in, and misses Funnel traffic that a DERP relay carries over TCP.
+- Tailscale publishes no list of Funnel ingress addresses, so the flow count takes any internet address.
+- `flow_threshold` in `funnel-tripwires.zeek` holds the threshold and the hour it was measured from: 1 to 11 flows per window with tsidp running, and 14 while tailscaled and tsidp started. The name match is `idp`, `providers.tailscale.hostname` in `clusters/base/config/kube-login.json`, under any tailnet, because neither that file nor the tailnet reaches the sensor's manifests.
+- Funnel's certificate puts `idp.<tailnet>` in the Certificate Transparency logs, and scanners fetch `/`, `/robots.txt`, `/.env` and phishing-kit filenames from the first minutes on. tsidp refuses each one, the count carries them as `path="other"`, and no alert reads that series: a scanner that finds a hostname is not a probe of the OIDC provider.
+- tsidp writes a refused client secret into its journal; the tripwire exports only the route, the path and the error code.
+- A tsidp restart drops every refresh token, so each signed-in user's next kubectl call gets `invalid_grant` on `/token` and signs in again. That is expected: tsidp logs that 400 only at debug, and `TsidpRequestRefused` leaves out `invalid_grant`.
+- The journal tripwire runs only while `services.tsidp` is enabled on spore.
+
 ## Live state
 
-riptide and optiplex carry the `lolwtf.ca/tpm=true` label and run agents. riptide's agent attests by its LDevID, and optiplex's by EK hash. The allow list holds the EK hashes of both. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
+riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 
 - `nix/services/spire-server.nix`: the server, both node attestors, the bundle notifier, the entry sync, the agent count and the firewall
 - `nix/services/spire/roots/`: the Infineon and Nuvoton EK CAs that `tpm_devid` trusts, the same files as `apps/fleetd/attest/roots/`
 - `apps/fleetd/` and `nix/services/fleetd.nix`: fleetd and its deployment on spore
-- `nix/hosts/spore.nix`: `ekHashes`, `workloads` and the registration entries
-- `nix/lib/inventory.nix`: the nodes file as Nix, for the LDevID aliases and talos-attest's inventory
+- `nix/hosts/spore.nix`: the EK allow list `ekHashes` and the `workloads`
+- `nix/services/tsidp.nix`: tsidp, with its kubectl client in `clusters/base/config/kube-login.json`
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
 - `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
 - `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
-- `clusters/folly/monitoring/spore.yaml`: the scrape and the SPIRE alerts
+- `clusters/folly/monitoring/spore.yaml`: the scrape, the SPIRE alerts and the tsidp tripwires
+- `nix/services/tsidp-tripwires.nix`: tsidp's refusals as node-exporter metrics
 - `clusters/folly/config/cluster-topology.json`: `K8S_NODE_CIDR`, `CILIUM_POD_CIDR`, `API_SERVER_HOSTNAME`, `API_SERVER_PORT`
 
 ## Related

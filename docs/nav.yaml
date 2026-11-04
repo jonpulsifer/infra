@@ -21,7 +21,11 @@ sections:
       - apps/wiki.md
       - apps/lookout.md
       - group: Internal tools
-        items: [apps/netbench.md, apps/fleetd.md]
+        items:
+          - apps/netbench.md
+          - path: apps/fleetd.md
+            children: [apps/fleetd/lifecycle.md, apps/fleetd/attestation.md, apps/fleetd/operations.md]
+          - apps/keylime.md
       - group: Parked
         items: [apps/bosun.md]
   - title: Platform
@@ -29,7 +33,7 @@ sections:
     items:
       - platform/how-changes-ship.md
       - path: platform/nixos.md
-        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/tinkerbell.md, platform/nixos/build-host-and-cache.md]
+        children: [platform/nixos/netboot.md, platform/nixos/talos-boot.md, platform/nixos/fleet-boot.md, platform/nixos/kea.md, platform/nixos/tinkerbell.md, platform/nixos/node-image.md, platform/nixos/build-host-and-cache.md]
       - path: platform/kubernetes.md
         children: [platform/kubernetes/talos.md]
       - platform/workloads.md
@@ -48,7 +52,7 @@ sections:
       - platform/build-and-release.md
       - platform/cloud.md
       - path: platform/observability.md
-        children: [platform/observability/alerting.md]
+        children: [platform/observability/alerting.md, platform/observability/network-sensor.md]
   - title: Hosts
     index: hosts/index.md
     items:
@@ -94,6 +98,7 @@ sections:
           - runbooks/move-a-clusters-data-through-a-talos-rebuild.md
           - runbooks/verify-a-talos-cluster.md
           - runbooks/issue-a-talosconfig.md
+          - runbooks/rotate-the-cluster-bootstrap-token.md
           - runbooks/add-a-tpm-node-to-spire.md
           - runbooks/operate-postgres.md
           - runbooks/restore-a-database.md
@@ -101,6 +106,7 @@ sections:
           - runbooks/restore-a-volume.md
           - runbooks/restore-etcd-on-talos.md
           - runbooks/restore-from-the-gcs-copy.md
+          - runbooks/restore-a-site.md
           - runbooks/migrate-a-local-path-volume.md
           - runbooks/migrate-garage-to-three-nodes.md
       - group: Cloud and network
@@ -112,6 +118,7 @@ sections:
       - group: Secrets
         items:
           - runbooks/manage-sops-secrets.md
+          - runbooks/switch-a-netbox-token.md
           - runbooks/initialize-openbao.md
           - runbooks/set-up-a-devid-ca-yubikey.md
       - group: Apps
@@ -121,6 +128,7 @@ sections:
           - runbooks/repair-the-rowbutt-github-credential.md
           - runbooks/rotate-the-rowbutt-slack-token.md
           - runbooks/sign-rowbutt-in-to-chatgpt.md
+          - runbooks/query-grafana-as-mate.md
           - runbooks/operate-the-rowbutt-model-fallback.md
           - runbooks/evaluate-the-rowbutt-models.md
           - runbooks/operate-the-smiirl-counter.md
@@ -136,6 +144,8 @@ sections:
   - title: Reference
     index: reference/index.md
     items:
+      - reference/purchase-to-identity.md
+      - reference/diy-identity-bootstrap.md
       - reference/folly-design.md
       - reference/glossary.md
       - reference/topology.md

@@ -7,11 +7,6 @@ import { timingSafeEqual } from 'node:crypto';
 export type Code =
   | 'INVALID_NAME'
   | 'RESERVED'
-  | 'UNKNOWN_FORMAT'
-  | 'UNSUPPORTED_ZIP'
-  | 'MALFORMED_ZIP'
-  | 'PATH_ESCAPES_ARCHIVE'
-  | 'NO_INDEX'
   | 'INVALID_COLLECTION'
   | 'INVALID_ID'
   | 'INVALID_DOCUMENT'
@@ -23,7 +18,6 @@ export type Code =
   | 'UNAUTHENTICATED'
   | 'NOT_ENGINE'
   | 'FORBIDDEN'
-  | 'PRIVATE'
   | 'NOT_FOUND'
   | 'NO_SITE'
   | 'METHOD_NOT_ALLOWED'
@@ -48,14 +42,6 @@ const ERRORS: Record<Code, readonly [number, string]> = {
     'a name is 3 to 40 of a-z, 0-9 and -, and does not start or end with -',
   ],
   RESERVED: [400, 'that name is reserved'],
-  UNKNOWN_FORMAT: [400, 'the upload is neither a gzipped tar nor a ZIP'],
-  UNSUPPORTED_ZIP: [
-    400,
-    'this ZIP uses a feature the upload boundary does not read',
-  ],
-  MALFORMED_ZIP: [400, 'the archive could not be read'],
-  PATH_ESCAPES_ARCHIVE: [400, 'the archive names a path outside itself'],
-  NO_INDEX: [400, 'the archive has no index.html or 200.html at its root'],
   INVALID_COLLECTION: [400, 'a collection is 1 to 64 of a-z, 0-9, - and _'],
   INVALID_ID: [400, 'an id is 1 to 128 of A-Z, a-z, 0-9, - and _'],
   INVALID_DOCUMENT: [
@@ -78,14 +64,10 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   ],
   UNAUTHENTICATED: [
     401,
-    'this site is opened with its token: Authorization: Bearer <token>',
+    "this is opened by the owner's Google ID token: Authorization: Bearer <token>",
   ],
   NOT_ENGINE: [401, "this path answers the engine's service token only"],
   FORBIDDEN: [403, 'that does not open this site'],
-  PRIVATE: [
-    403,
-    'claiming and site control answer on the private host only; point KTHX_ORIGIN at it',
-  ],
   NOT_FOUND: [404, 'there is nothing here'],
   NO_SITE: [404, 'there is no site by that name'],
   METHOD_NOT_ALLOWED: [405, 'that is not something this path does'],
@@ -97,7 +79,7 @@ const ERRORS: Record<Code, readonly [number, string]> = {
   TOO_LARGE: [413, 'that is larger than this path accepts'],
   RATE_LIMITED: [429, 'too many requests; wait'],
   AI_BUDGET: [429, "this site has spent today's ai budget"],
-  STORAGE_FAILURE: [500, 'storing the release failed'],
+  STORAGE_FAILURE: [500, 'storing it failed'],
   AI_UPSTREAM: [502, 'the ai upstream did not answer'],
   NO_DOCUMENT: [502, 'the answer came back without a web page in it'],
   BUSY: [503, 'the server is full right now; try again in a moment'],

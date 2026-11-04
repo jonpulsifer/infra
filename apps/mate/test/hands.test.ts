@@ -208,7 +208,7 @@ describe('calls', () => {
     const { written } = await client.call('writeFiles', {
       files: [
         { path: 'creds/token', content: 'ghs-a-token', mode: 0o600 },
-        { path: 'creds/sites.json', content: '{}', mode: 0o600 },
+        { path: 'creds/other', content: '{}', mode: 0o600 },
       ],
     });
     expect(written).toBe(2);

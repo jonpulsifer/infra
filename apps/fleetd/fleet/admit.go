@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"strings"
 	"time"
+
+	"github.com/jonpulsifer/infra/apps/fleetd/netbox"
 )
 
 func portMismatch(port int, want int, name string) string {
@@ -29,7 +32,7 @@ func (r *Reconciler) where(ctx context.Context, d Device, since time.Time) (int,
 	}
 	port, ok := portNumber(a.Port)
 	if !ok {
-		return 0, fmt.Sprintf("the attested port %s of %s is no Port <n>", plain(a.Port), plain(a.Switch))
+		return 0, fmt.Sprintf("the attested port %s of %s is no Port <n>", netbox.Plain(a.Port), netbox.Plain(a.Switch))
 	}
 	switches, err := r.NetBox.Switches(ctx, r.Config.Site)
 	if err != nil {
@@ -40,7 +43,7 @@ func (r *Reconciler) where(ctx context.Context, d Device, since time.Time) (int,
 			return port, ""
 		}
 	}
-	return 0, fmt.Sprintf("the attested port %d is on %s, which no NetBox switch has", port, plain(a.Switch))
+	return 0, fmt.Sprintf("the attested port %d is on %s, which no NetBox switch has", port, netbox.Plain(a.Switch))
 }
 
 // Admit is an intake pass's install, called by the verifier after the pass's
@@ -74,12 +77,15 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 	if !r.provisionRunning(ctx, d) {
 		if why := r.provisionWhy(d); why != "" {
 			Audit("fleet.autoprovision", r.Config.Site, d, d.LastWorkflow, "skipped: "+why)
+			if err := r.hookosAfterSuccess(ctx, d, req.UUID); err != nil {
+				log.Printf("fleet.hookos-after-success: %s: %v", d.Name, err)
+			}
 			return conflict("no provision: %s", why)
 		}
 		if d.MAC == "" || d.Disk == "" {
 			return conflict("%s needs a primary MAC on an interface and install_disk", d.Name)
 		}
-		if r.Config.Installer(d, "provision") != "" {
+		if r.Config.WillInstall(d) {
 			if err := r.Installer.Ready(ctx, d); err != nil {
 				return err
 			}
@@ -92,12 +98,54 @@ func (r *Reconciler) Admit(ctx context.Context, req RenderRequest) error {
 		if err != nil {
 			return unavailable("%v", err)
 		}
+		if !strings.HasPrefix(name, "provision-"+d.Name+"-") {
+			return conflict("Workflow %s, which is no provision, is still running", name)
+		}
 		if d.DesiredAction != "provision" {
 			r.Metrics.AutoProvisioned.Add(1)
 			Audit("fleet.autoprovision", r.Config.Site, d, name, "provision")
 		}
 	}
 	return r.Installer.Render(ctx, req)
+}
+
+// hookosAfterSuccess journals once per run that a planned device attested
+// from HookOS after its provision Workflow succeeded and before its node read
+// its config: the firmware did not boot the installed disk. A device with a
+// desired_action set is on its way to a run that netboots on purpose, and is
+// no failure. The Workflow's annotation keeps the journal once across a
+// restart.
+func (r *Reconciler) hookosAfterSuccess(ctx context.Context, d Device, uuid string) error {
+	if d.DesiredAction != "none" || !strings.HasPrefix(d.LastWorkflow, "provision-"+d.Name+"-") {
+		return nil
+	}
+	if _, unread := r.Installer.Configs.Holds(uuid); !unread {
+		return nil
+	}
+	wf, err := r.Kube.Get(ctx, WorkflowResource, d.LastWorkflow)
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if strings.TrimPrefix(wf.State(), "STATE_") != "SUCCESS" {
+		return nil
+	}
+	if _, done := wf.Annotations()[HookOSAfterAnnotation]; done {
+		return nil
+	}
+	why := fmt.Sprintf("fleetd: the node booted %[2]s and attested after Workflow %[1]s succeeded, so its firmware did not boot the installed disk. Check its boot order (PXE first sends it back to %[2]s) and its console, then fix the order or set desired_action to provision to run it again", wf.Name(), bootImage(wf))
+	if err := r.journalOnce(ctx, "hookos-after/"+wf.Name(), d, "warning", why); err != nil {
+		return err
+	}
+	err = r.Kube.Annotate(ctx, WorkflowResource, wf.Name(), map[string]string{HookOSAfterAnnotation: r.Now().UTC().Format(time.RFC3339)})
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("annotate %s: %w", wf.Name(), err)
+	}
+	r.Metrics.HookOSAfter.Add(1)
+	Audit("fleet.workflow", r.Config.Site, d, wf.Name(), "node booted HookOS after SUCCESS")
+	return nil
 }
 
 // Expected says whether fleetd expects the machine with the serial in
@@ -154,7 +202,7 @@ func (r *Reconciler) provisionWhy(d Device) string {
 		return "FLEET_AUTO_PROVISION is off"
 	case r.Config.IsControlPlane(d.Class):
 		return "a control plane; the owner sets desired_action to provision by hand"
-	case r.Config.Installer(d, "provision") == "":
+	case !r.Config.WillInstall(d):
 		return "its class installs nothing here; the owner sets desired_action to provision"
 	}
 	return ""
@@ -163,14 +211,15 @@ func (r *Reconciler) provisionWhy(d Device) string {
 // missing names the declared fields a planned device lacks. Terraform
 // applies them from the nodes file, so an empty one is an apply that has not
 // run, and the owner fixes it there.
-func (d Device) missing() []string {
+func missing(d Device) []string {
 	var m []string
 	for _, f := range []struct {
 		name string
 		ok   bool
 	}{
-		{"talos_class", d.Class != ""},
+		{"class", d.Class != ""},
 		{"install_disk", d.Disk != ""},
+		{"install_disk_serial", d.DiskSerial != ""},
 		{"bmc_type", d.BMCType != ""},
 		{"tpm_version", d.TPM != ""},
 		{"amt", d.AMT != nil},
@@ -190,8 +239,10 @@ func (d Device) missing() []string {
 // its expected_port. It writes the journal and nothing else.
 func (r *Reconciler) checkDeclared(ctx context.Context, d Device) error {
 	why := ""
-	if m := d.missing(); len(m) > 0 {
+	if m := missing(d); len(m) > 0 {
 		why = fmt.Sprintf("%s lacks %s; apply terraform/netbox/folly", d.Name, strings.Join(m, ", "))
+	} else if _, ok := r.Config.Classes[d.Class]; !ok {
+		why = fmt.Sprintf("%s's class %q is not in the class table", d.Name, d.Class)
 	} else if port, _ := r.where(ctx, d, r.Now().Add(-AttestedPortTTL)); d.ExpectedPort != port {
 		why = portMismatch(port, d.ExpectedPort, d.Name)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/client"
+	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
 // fakeInstaller stands in for fleetd's installer: it records each request
@@ -43,13 +44,18 @@ func (f *fakeInstaller) requests() []InstallRequest {
 	return append([]InstallRequest(nil), f.reqs...)
 }
 
-func installVerifier(f Installer, audit io.Writer) *Verifier {
-	return &Verifier{Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}
+// installVerifier is a verifier whose NetBox holds testbox, planned and
+// bound to the ECC EK keySession makes.
+func installVerifier(t *testing.T, f Installer, audit io.Writer) (*Verifier, *fakeNetBox) {
+	nb := newFakeNetBox(t)
+	nb.add("testbox", "SIM-0001", "planned", "", map[string]any{"approved_ek_hash_ecc": "ek-under-test"})
+	return &Verifier{NetBox: nb.client(), BindingAuthor: fakeTerraform, Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}, nb
 }
 
 // keySession is a session with an ECC EK and an AK in AKTemplate's shape,
-// the keys a code is wrapped to, without a TPM behind them.
-func keySession(t *testing.T) *session {
+// the keys a code is wrapped to, without a TPM behind them, for testbox and
+// its approved binding as installVerifier's NetBox holds them.
+func keySession(t *testing.T, nb *fakeNetBox) *session {
 	t.Helper()
 	ek, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -67,7 +73,13 @@ func keySession(t *testing.T) *session {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &session{eks: []VerifiedEK{{Public: &ek.PublicKey, Alg: "ecc", Hash: "ek-under-test"}}, akPublic: akPublic}
+	d := nb.bySerial("SIM-0001")
+	return &session{
+		eks: []VerifiedEK{{Public: &ek.PublicKey, Alg: "ecc", Hash: "ek-under-test"}}, akPublic: akPublic,
+		claim:   protocol.Machine{Serial: "SIM-0001"},
+		bind:    true,
+		machine: Machine{Name: "testbox", Serial: "SIM-0001", NetBoxID: d.ID, Approved: map[string]string{"ecc": "ek-under-test"}},
+	}
 }
 
 var installRecord = Record{Machine: "testbox", Serial: "SIM-0001", UUID: "4C4C4544-0000-0000-0000-000000000000", Class: "worker-g5"}
@@ -75,7 +87,8 @@ var installRecord = Record{Machine: "testbox", Serial: "SIM-0001", UUID: "4C4C45
 func TestInstallCodeAfterTheInstallerRendered(t *testing.T) {
 	f := newFakeInstaller(nil)
 	var audit strings.Builder
-	wrapped, ok := installVerifier(f, &audit).installCode(context.Background(), installRecord, keySession(t))
+	v, nb := installVerifier(t, f, &audit)
+	wrapped, ok := v.installCode(context.Background(), installRecord, keySession(t, nb))
 	reqs := f.requests()
 	if !ok || len(reqs) != 1 {
 		t.Fatalf("issued %v after %d install requests", ok, len(reqs))
@@ -107,19 +120,32 @@ func TestInstallCodeWithheld(t *testing.T) {
 		uuid   string
 		calls  int
 		reason string
+		change func(*fakeNetBox, *session)
 	}{
-		{"no provision", errors.New("no provision asked"), installRecord.UUID, 1, "no provision asked"},
-		{"cannot render", errors.New("the renderer failed"), installRecord.UUID, 1, "the renderer failed"},
-		{"no UUID", nil, "", 0, "not 8-4-4-4-12 hex"},
-		{"not a UUID", nil, "../../etc/passwd", 0, "not 8-4-4-4-12 hex"},
-		{"braced UUID", nil, "{" + installRecord.UUID + "}", 0, "not 8-4-4-4-12 hex"},
+		{"no provision", errors.New("no provision asked"), installRecord.UUID, 1, "no provision asked", nil},
+		{"cannot render", errors.New("the renderer failed"), installRecord.UUID, 1, "the renderer failed", nil},
+		{"no UUID", nil, "", 0, "not 8-4-4-4-12 hex", nil},
+		{"not a UUID", nil, "../../etc/passwd", 0, "not 8-4-4-4-12 hex", nil},
+		{"braced UUID", nil, "{" + installRecord.UUID + "}", 0, "not 8-4-4-4-12 hex", nil},
+		{"no binding", nil, installRecord.UUID, 0, "no approved EK binding", func(_ *fakeNetBox, s *session) { s.machine.Approved = nil }},
+		{"binding removed", nil, installRecord.UUID, 0, reasonBinding, func(nb *fakeNetBox, _ *session) {
+			nb.set("SIM-0001", func(d *fakeDevice) { delete(d.CustomFields, "approved_ek_hash_ecc") })
+		}},
+		{"binding replaced", nil, installRecord.UUID, 0, reasonBinding, func(nb *fakeNetBox, _ *session) {
+			nb.set("SIM-0001", func(d *fakeDevice) { d.CustomFields["approved_ek_hash_ecc"] = strings.Repeat("ab", 32) })
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFakeInstaller(tc.err)
 			var audit strings.Builder
 			rec := installRecord
 			rec.UUID = tc.uuid
-			if _, ok := installVerifier(f, &audit).installCode(context.Background(), rec, keySession(t)); ok {
+			v, nb := installVerifier(t, f, &audit)
+			s := keySession(t, nb)
+			if tc.change != nil {
+				tc.change(nb, s)
+			}
+			if _, ok := v.installCode(context.Background(), rec, s); ok {
 				t.Fatal("a code the installer did not take")
 			}
 			if n := len(f.requests()); n != tc.calls {

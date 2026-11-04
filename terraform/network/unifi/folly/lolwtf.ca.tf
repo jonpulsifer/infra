@@ -100,9 +100,9 @@ resource "cloudflare_dns_record" "lab_service_dns" {
 }
 
 resource "unifi_network" "lab" {
-  name               = "Anchor"
+  name               = local.network_catalog.anchor.name
   subnet             = local.anchor_cidr
-  vlan               = 2
+  vlan               = local.network_catalog.anchor.vlan
   domain_name        = local.lab_domain
   setting_preference = "manual"
   auto_scale         = false

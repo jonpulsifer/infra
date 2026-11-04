@@ -1,12 +1,18 @@
 package attest
 
 import (
+	"cmp"
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -27,7 +33,7 @@ type Record struct {
 	Detail    []string          `json:"detail,omitempty"`
 	EKHashes  map[string]string `json:"ek_hashes,omitempty"`
 	EKIssuers []string          `json:"ek_issuers,omitempty"`
-	// Class is the machine's talos_class, the LDevID's OU.
+	// Class is the machine's class, the LDevID's OU.
 	Class string `json:"class,omitempty"`
 	// The SMBIOS facts the machine claimed, for NetBox.
 	Model string `json:"model,omitempty"`
@@ -39,10 +45,18 @@ type Record struct {
 	// in EKHashes: the only hashes that become pins. A renewal or a record
 	// written before EKProven existed carries hashes it may not have proved.
 	EKProven bool `json:"ek_proven,omitempty"`
+	// ProvenEKs are the EK hashes by algorithm that an intake pass proved by
+	// activating a credential. They stay on the record through renewals, checks
+	// and quarantines, and a device past planned that has no approved binding
+	// is held to them: NetBox's ek_hash is only a note of what a pass proved.
+	ProvenEKs map[string]string `json:"proven_eks,omitempty"`
 	// RSAEKCert is whether the TPM holds an RSA EK certificate, the only
 	// one SPIRE's tpm_devid agent reads.
-	RSAEKCert      bool      `json:"rsa_ek_cert"`
-	LDevIDSerial   string    `json:"ldevid_serial,omitempty"`
+	RSAEKCert    bool   `json:"rsa_ek_cert"`
+	LDevIDSerial string `json:"ldevid_serial,omitempty"`
+	// RetiredAt is when the node was retired; LDevIDSerial names the
+	// certificate it held.
+	RetiredAt      time.Time `json:"retired_at,omitzero"`
 	LDevIDNotAfter time.Time `json:"ldevid_not_after,omitzero"`
 	// LDevIDNotBefore is the certificate's CA-signed issue time: what orders
 	// one attestation of a serial against another, since a clock is
@@ -54,10 +68,12 @@ type Record struct {
 	NVIndexes       []uint32  `json:"nv_indexes,omitempty"`
 	// BootApplications are the Authenticode digests PCR 4 recorded after
 	// its separator, for pinning in the policy.
-	BootApplications []string  `json:"boot_applications,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	BootApplications []string `json:"boot_applications,omitempty"`
+	// Boot is the revocation state the log measured: dbx and the SBAT level.
+	Boot      bootFacts `json:"boot,omitzero"`
+	UpdatedAt time.Time `json:"updated_at"`
 	// CheckedAt is the running node's newest passing quote,
-	// from a daily check or a renewal.
+	// from a hourly check or a renewal.
 	CheckedAt time.Time `json:"checked_at,omitzero"`
 	// PCR0Changed is whether that quote's PCR 0 differs from the one NetBox
 	// holds for the BIOS version the node reported.
@@ -69,11 +85,14 @@ type Record struct {
 
 	// unquarantined marks the record of such a failure for NetBox.
 	unquarantined bool
-	// check marks a daily check's pass, which NetBox records as a verdict
+	// check marks a hourly check's pass, which NetBox records as a verdict
 	// and a time without touching the certificate fields; pcr0 is what the
 	// quote showed for PCR 0. Neither is kept on disk.
 	check bool
 	pcr0  *pcr0Seen
+	// approved is the binding an intake pass matched, whose hashes replace
+	// the pins on file.
+	approved map[string]string
 	// Network is where the machine was plugged in at an intake pass, as
 	// its AK signed it: its address and its switch port.
 	Network *protocol.Network `json:"network,omitempty"`
@@ -84,21 +103,54 @@ const (
 	StatusAttested    = "attested"
 	StatusQuarantined = "quarantined"
 	StatusPending     = "pending-approval"
+	// StatusRetired marks the record of a node that left the fleet: kept
+	// for audit, served by nothing.
+	StatusRetired = "retired"
 )
+
+// provenHashes are the EK hashes an intake pass proved, or none. A record
+// from before ProvenEKs was kept still holds them in EKHashes while it stands
+// on an intake pass.
+func (r Record) provenHashes() map[string]string {
+	if r.Status == StatusRetired {
+		return nil
+	}
+	if len(r.ProvenEKs) > 0 {
+		return r.ProvenEKs
+	}
+	if r.EKProven {
+		return r.EKHashes
+	}
+	return nil
+}
 
 // Issued reports whether the record's LDevID may be served.
 func (r Record) Issued() bool { return r.Status == StatusAttested }
 
-// Store keeps each machine's record and files under dir, the approvals of
-// first-intake EK hashes, and an append-only verdict journal. Writes go
+// Store keeps each machine's record and files under dir, the claims that
+// wait for an approved binding, and an append-only verdict journal. Writes go
 // through a temporary file and a rename.
 type Store struct {
 	dir string
 	mu  sync.Mutex
-	// PendingMax caps the claims that wait for approval; the oldest give way.
+	// PendingMax caps the claims that wait; the oldest give way.
 	// 50 when zero.
 	PendingMax int
+	// UnknownMax caps the claims for serials NetBox lacks, apart from
+	// PendingMax so junk serials cannot evict a known device's claim.
+	// 10 when zero.
+	UnknownMax int
+	// JournalMax is the size at which verdicts.jsonl moves to
+	// verdicts.jsonl.1, replacing the one before. 64 MiB when zero; negative
+	// never rotates.
+	JournalMax int64
 }
+
+const (
+	defaultPendingMax = 50
+	defaultUnknownMax = 10
+	defaultJournalMax = 64 << 20
+)
 
 // Files a machine directory holds after a pass.
 const (
@@ -247,6 +299,40 @@ func (s *Store) RetireOthers(serial, keep string) error {
 	return nil
 }
 
+// Retire marks every record that holds serial retired, with the time, and
+// reports how many it changed. The files stay for audit. A record already
+// retired keeps its first time. A later intake pass writes a fresh record
+// over it.
+func (s *Store) Retire(serial string, at time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs, err := s.records()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, r := range recs {
+		if serialKey(r.Serial) != serialKey(serial) || r.Status == StatusRetired {
+			continue
+		}
+		r.Status, r.RetiredAt, r.UpdatedAt = StatusRetired, at, at
+		r.Confirmed = false
+		dir, err := s.machineDir(r.Machine)
+		if err != nil {
+			return n, err
+		}
+		b, err := json.MarshalIndent(r, "", "  ")
+		if err != nil {
+			return n, err
+		}
+		if err := writeAtomic(filepath.Join(dir, "record.json"), append(b, '\n'), 0o640); err != nil {
+			return n, err
+		}
+		n++
+	}
+	return n, nil
+}
+
 // Pending is a first intake that waits for the owner: the EK hashes a
 // machine claimed for a serial, before anything proved them. It lives apart
 // from the machine records, keyed by serial, so a claim never touches an
@@ -259,7 +345,15 @@ type Pending struct {
 	EKHashes  map[string]string `json:"ek_hashes"`
 	EKIssuers []string          `json:"ek_issuers,omitempty"`
 	Detail    string            `json:"detail,omitempty"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	// Unknown marks a claim for a serial NetBox lacks.
+	Unknown   bool      `json:"unknown,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// sameClaim is whether two claims say the same, whenever they were made.
+func (p Pending) sameClaim(o Pending) bool {
+	p.UpdatedAt, o.UpdatedAt = time.Time{}, time.Time{}
+	return reflect.DeepEqual(p, o)
 }
 
 func (s *Store) pendingPath(serial string) string {
@@ -274,12 +368,13 @@ func (s *Store) SavePending(p Pending) error {
 		return err
 	}
 	p.Serial = serialKey(p.Serial)
-	// The store holds at most PendingMax claims: anyone can make one, so the
-	// oldest give way to the newest, and this serial's own file is the one
-	// it replaces.
-	limit := s.PendingMax
-	if limit <= 0 {
-		limit = 50
+	// The store holds at most PendingMax claims for known serials and
+	// UnknownMax for the rest: anyone can make one, so the oldest of a kind
+	// give way to the newest, and this serial's own file is the one it
+	// replaces.
+	limit := cmp.Or(s.PendingMax, defaultPendingMax)
+	if p.Unknown {
+		limit = cmp.Or(s.UnknownMax, defaultUnknownMax)
 	}
 	existing, err := s.pendings()
 	if err != nil {
@@ -287,7 +382,7 @@ func (s *Store) SavePending(p Pending) error {
 	}
 	others := existing[:0]
 	for _, e := range existing {
-		if serialKey(e.Serial) != p.Serial {
+		if serialKey(e.Serial) != p.Serial && e.Unknown == p.Unknown {
 			others = append(others, e)
 		}
 	}
@@ -436,7 +531,61 @@ func (s *Store) records() ([]Record, error) {
 	return out, nil
 }
 
-// Journal appends a verdict to verdicts.jsonl.
+// Identity is what SPIRE knows a machine's agent by: the SHA-1 fingerprint
+// of the LDevID on file, which tpm_devid names the agent after, and the EK
+// hashes, which the EK attestor names it after.
+type Identity struct {
+	Machine     string
+	Fingerprint string
+	NotAfter    time.Time
+	EKHashes    []string
+}
+
+// Identities lists each machine's identity, with no fingerprint for a
+// machine that holds no LDevID.
+func (s *Store) Identities() ([]Identity, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recs, err := s.records()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Identity, 0, len(recs))
+	for _, r := range recs {
+		id := Identity{Machine: r.Machine}
+		for _, h := range r.EKHashes {
+			id.EKHashes = append(id.EKHashes, h)
+		}
+		sort.Strings(id.EKHashes)
+		dir, err := s.machineDir(r.Machine)
+		if err != nil {
+			return nil, err
+		}
+		b, err := os.ReadFile(filepath.Join(dir, fileLDevIDCert))
+		if errors.Is(err, fs.ErrNotExist) {
+			out = append(out, id)
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		block, _ := pem.Decode(b)
+		if block == nil {
+			return nil, fmt.Errorf("%s's LDevID holds no PEM block", r.Machine)
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s's LDevID: %w", r.Machine, err)
+		}
+		sum := sha1.Sum(cert.Raw)
+		id.Fingerprint, id.NotAfter = hex.EncodeToString(sum[:]), cert.NotAfter
+		out = append(out, id)
+	}
+	return out, nil
+}
+
+// Journal appends a verdict to verdicts.jsonl. A line that would take the file
+// past JournalMax moves it to verdicts.jsonl.1 first.
 func (s *Store) Journal(entry any) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -444,58 +593,22 @@ func (s *Store) Journal(entry any) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, "verdicts.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	b = append(b, '\n')
+	path := filepath.Join(s.dir, "verdicts.jsonl")
+	if limit := cmp.Or(s.JournalMax, defaultJournalMax); limit > 0 {
+		if fi, err := os.Stat(path); err == nil && fi.Size() > 0 && fi.Size()+int64(len(b)) > limit {
+			if err := os.Rename(path, path+".1"); err != nil {
+				return err
+			}
+		}
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
 	if err != nil {
 		return err
 	}
-	if _, err := f.Write(append(b, '\n')); err != nil {
+	if _, err := f.Write(b); err != nil {
 		f.Close()
 		return err
 	}
 	return f.Close()
-}
-
-// Approvals maps a serial to the EK hashes the owner approved on first intake.
-type Approvals map[string][]string
-
-func (s *Store) approvalsPath() string { return filepath.Join(s.dir, "approvals.json") }
-
-// Approvals reads the approvals file.
-func (s *Store) Approvals() (Approvals, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.approvals()
-}
-
-func (s *Store) approvals() (Approvals, error) {
-	a := Approvals{}
-	b, err := os.ReadFile(s.approvalsPath())
-	if errors.Is(err, fs.ErrNotExist) {
-		return a, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return a, json.Unmarshal(b, &a)
-}
-
-// Approve records hashes as approved for a serial.
-func (s *Store) Approve(serial string, hashes []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	a, err := s.approvals()
-	if err != nil {
-		return err
-	}
-	key := serialKey(serial)
-	for _, h := range hashes {
-		if !slices.Contains(a[key], h) {
-			a[key] = append(a[key], h)
-		}
-	}
-	b, err := json.MarshalIndent(a, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeAtomic(s.approvalsPath(), append(b, '\n'), 0o640)
 }

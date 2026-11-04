@@ -45,14 +45,37 @@ func run(log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	r, err := newFleet()
+	_, attempts, err := fleet.LoadExecutor(time.Now)
 	if err != nil {
 		return err
+	}
+	r, err := newFleet(attempts)
+	if err != nil {
+		return err
+	}
+	var boot *fleet.BootServer
+	if attempts != nil {
+		boot = &fleet.BootServer{Attempts: attempts, Config: r.Config, Device: r.Device}
+		srv.V.Booted = func(ctx context.Context, s attest.BootSession) {
+			boot.BindBoot(ctx, fleet.BootSession{ID: s.ID, Node: s.Machine, AK: s.AK, Nonce: s.Nonce})
+		}
 	}
 	srv.V.Installer = attest.InstallerFunc(func(ctx context.Context, req attest.InstallRequest) error {
 		return r.Admit(ctx, fleet.RenderRequest{Serial: req.Serial, UUID: req.UUID, Node: req.Node, Class: req.Class, Code: req.Code})
 	})
 	srv.V.Expected = r.Expected
+	r.Identities = func() ([]fleet.Identity, error) {
+		ids, err := srv.V.Store.Identities()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]fleet.Identity, len(ids))
+		for i, id := range ids {
+			out[i] = fleet.Identity(id)
+		}
+		return out, nil
+	}
+	r.Retired = srv.V.Retire
 
 	var secret []byte
 	if f := os.Getenv("FLEET_WEBHOOK_SECRET_FILE"); f != "" {
@@ -92,7 +115,7 @@ func run(log *slog.Logger) error {
 			WriteTimeout: time.Minute, IdleTimeout: 2 * time.Minute,
 		}
 	}
-	// The DevID listener, which every node's renewal and daily check reach,
+	// The DevID listener, which every node's renewal and hourly check reach,
 	// and the others bind first and on their own: the boot listener's
 	// certificate or address never takes them down.
 	listeners := []struct {
@@ -116,9 +139,10 @@ func run(log *slog.Logger) error {
 		log.Info("listening", "addr", l.addr)
 		go func() { errc <- s.Serve(ln) }()
 	}
-	boot := server(bootHandler(srv, r.Installer))
-	servers = append(servers, boot)
-	go serveBoot(ctx, log, boot, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
+	bootServer := server(bootHandler(srv, r.Installer, boot))
+	confirmAcks(bootServer)
+	servers = append(servers, bootServer)
+	go serveBoot(ctx, log, bootServer, env("FLEETD_BOOT_ADDR", ":8443"), kp, 10*time.Second)
 	go srv.V.RunBackfill(ctx, 10*time.Minute)
 	go r.Loop(ctx, trigger)
 	if r.Installer != nil {
@@ -140,8 +164,9 @@ func run(log *slog.Logger) error {
 }
 
 // newFleet builds the reconciler and its installer from the FLEET_*
-// environment.
-func newFleet() (*fleet.Reconciler, error) {
+// environment. With attempts, the boot executor's records keep the runs in
+// place of Tinkerbell's Workflows.
+func newFleet(attempts *fleet.Attempts) (*fleet.Reconciler, error) {
 	cfg, err := fleet.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -155,7 +180,7 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("NetBox token: %w", err)
 	}
-	netbox := &fleet.NetBox{URL: netboxURL, Token: token, Client: &http.Client{Timeout: 30 * time.Second}}
+	netbox := fleet.NewNetBox(netboxURL, token, &http.Client{Timeout: 30 * time.Second})
 	kube, err := fleet.NewKube(
 		env("FLEET_KUBE_SERVER", "https://localhost:6443"),
 		env("FLEET_KUBE_CA_FILE", "/etc/tinkerbell/ca.crt"),
@@ -166,6 +191,9 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("Tinkerbell API client: %w", err)
 	}
+	if attempts != nil {
+		kube.Workflows = attempts
+	}
 	cluster, err := fleet.LoadCluster()
 	if err != nil {
 		return nil, err
@@ -175,6 +203,9 @@ func newFleet() (*fleet.Reconciler, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cluster != nil {
+		installer.Tokens = cluster
+	}
 	var links *fleet.TFTPLinks
 	if dir := os.Getenv("FLEET_TFTP_DIR"); dir != "" {
 		target := os.Getenv("FLEET_TFTP_LINK_TARGET")
@@ -183,7 +214,19 @@ func newFleet() (*fleet.Reconciler, error) {
 		}
 		links = &fleet.TFTPLinks{Dir: dir, Target: target}
 	}
-	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), Now: time.Now}, nil
+	var kea *fleet.KeaReservations
+	if file := os.Getenv("FLEET_KEA_FILE"); file != "" {
+		boot := os.Getenv("FLEET_KEA_BOOT_FILE")
+		if boot == "" {
+			return nil, errors.New("FLEET_KEA_FILE needs FLEET_KEA_BOOT_FILE")
+		}
+		kea = &fleet.KeaReservations{File: file, Socket: os.Getenv("FLEET_KEA_SOCKET"), BootFile: boot}
+	}
+	dialBMC, runs, err := fleet.LoadBMC(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &fleet.Reconciler{Config: cfg, NetBox: netbox, Kube: kube, Cluster: cluster, Installer: installer, Metrics: metrics, Links: links, Kea: kea, SpireNodesFile: os.Getenv("FLEET_SPIRE_NODES_FILE"), BMC: dialBMC, Runs: runs, Now: time.Now}, nil
 }
 
 // serveBoot serves the boot listener, with TLS when kp is set. Until its
@@ -223,12 +266,30 @@ func serveBoot(ctx context.Context, log *slog.Logger, s *http.Server, addr strin
 	}
 }
 
+// confirmAcks lets the config's answer read its connection's send queue, so
+// the config burns only once the node acknowledged every byte. The listener
+// speaks HTTP/1.1 alone: HTTP/2 shares a connection among streams and writes
+// each stream's data after the handler's flush, so the queue would not
+// describe one answer. Talos's fetch and the device flow need nothing more.
+func confirmAcks(s *http.Server) {
+	s.ConnContext = fleet.ConnContext
+	s.Protocols = new(http.Protocols)
+	s.Protocols.SetHTTP1(true)
+}
+
 // bootHandler serves what a netbooting machine and a first boot reach: the
-// device flow under /attest/ and the one-time config at /talos/config.
-func bootHandler(srv *attest.Server, installer http.Handler) http.Handler {
+// device flow under /attest/, with fleet-boot's routes under the boot
+// executor, and the one-time config at /talos/config or /seed, by the
+// class's payload kind.
+func bootHandler(srv *attest.Server, installer http.Handler, boot *fleet.BootServer) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/attest/", http.StripPrefix("/attest", srv.Public()))
-	mux.Handle("/talos/config", installer)
+	if boot != nil {
+		mux.Handle("POST /attest/v1/boot/", http.StripPrefix("/attest", boot.Handler()))
+	}
+	for path := range fleet.Routes {
+		mux.Handle(path, installer)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/", http.NotFound)
 	return mux

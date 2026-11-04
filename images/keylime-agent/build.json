@@ -1,0 +1,12 @@
+[
+  {
+    "_comment": "folly's TPM nodes are amd64. The Dockerfile is architecture-neutral, so forge can build it for arm64 as a compile check.",
+    "image": "keylime-agent",
+    "context": "images/keylime-agent",
+    "file": "images/keylime-agent/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/keylime-agent"
+    ]
+  }
+]

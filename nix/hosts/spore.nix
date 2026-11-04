@@ -7,37 +7,14 @@
   ...
 }:
 let
-  # The EK public key hash read on each node that attests by EK, the fallback for a node with no
-  # LDevID (docs/platform/identity.md).
+  # The EK attestor's allow list: the EK public key hash read on each node that may attest by EK, the
+  # fallback for a node with no LDevID (docs/platform/identity.md). The list admits an agent only;
+  # its alias and workloads, by EK hash or LDevID CN, come from fleetd's spire-nodes.json as fleet-
+  # entries, so a node fleetd withdraws loses them.
   ekHashes = {
-    optiplex = "1fa41a06cb1425a5cf723b50273f38cbe992400ba1109e406baa92f97646fb14";
     riptide = "a4c83508a80e37c4c10334e4ecd951fe7aef56ce757b9a40e8a4e38be146b3b1";
   };
-  # With tpm_devid on, a node attests by the LDevID that fleetd issues it, whose subject
-  # CN is the node's name. SPIRE 1.15.5's tpm_devid gives selectors for the subject's CN only, not
-  # its OU (the class) or O (the site), so each node in the nodes file with a TPM 2.0 gets its own
-  # alias, and a new node needs a spore deploy. A failed or retired node keeps its alias until its
-  # entry goes, and fleetd refuses it an LDevID.
-  devidNodes = lib.attrNames (
-    lib.filterAttrs (_: n: n.tpm or null == "2.0") (import ../lib/inventory.nix { inherit lib; })
-  );
-  tpmNodes = lib.sort lib.lessThan (lib.unique (lib.attrNames ekHashes ++ devidNodes));
-  trustDomain = config.homelab.spire.trustDomain;
-  nodeID = name: "spiffe://${trustDomain}/node/${name}";
-  # One alias per node and attestor: an agent matches a node entry only when it has every selector.
-  nodeAliases =
-    lib.mapAttrsToList (name: hash: {
-      spiffeID = nodeID name;
-      selectors = [ "tpm:pub_hash:${hash}" ];
-    }) ekHashes
-    ++ lib.optionals config.homelab.spire.devid.enable (
-      map (name: {
-        spiffeID = nodeID name;
-        key = "tpm_devid";
-        selectors = [ "tpm_devid:subject:cn:${name}" ];
-      }) devidNodes
-    );
-  # Kubernetes service accounts that get an SVID on every TPM node.
+  # Kubernetes service accounts that get an SVID on every node fleetd registers.
   workloads = [
     {
       ns = "spire-smoke";
@@ -59,17 +36,43 @@ in
     ../profiles/pi5-nvme.nix
     ../services/fleetd.nix
     ../services/garage.nix
+    ../services/hookos-syslog.nix
+    ../services/kea.nix
     ../services/nfs-server.nix
     ../services/pxe-netboot.nix
     ../services/spire-server.nix
     ../services/spore-native-boot.nix
     ../services/talos-boot.nix
     ../services/tinkerbell.nix
+    ../services/tsidp.nix
+    ../services/tsidp-tripwires.nix
     ../system/sops.nix
   ];
 
   # A worker provision installs Talos from HookOS, with the config fleetd renders and serves.
   homelab.fleetd.installs = true;
+
+  # fleetd powers, stops and network-boots each node through its AMT itself and makes no Rufio
+  # Machine. "rufio" switches back (nix/services/fleetd.nix).
+  homelab.fleetd.bmc = "native";
+
+  # UniFi's DHCP names the iPXE and the iPXE's menu boots HookOS, so Smee's proxy offer, which
+  # riptide's firmware raced against UniFi's, and its per-MAC script add nothing a node can see.
+  # rsyslog takes over HookOS's syslog. Smee stays in tinkerbell.nix for the switch back.
+  homelab.tinkerbell.smee.enable = false;
+  homelab.hookosSyslog.enable = true;
+
+  # Kea answers the Kubernetes network's DHCP once the UDM relays it here
+  # (terraform/network/unifi/folly/k8s.tf). With Smee off it is the only DHCP server on the VLAN.
+  homelab.kea.enable = true;
+
+  # The tailnet's OIDC provider, a tailnet node of its own that kubectl signs in at
+  # (nix/services/tsidp.nix).
+  homelab.tsidp.enable = true;
+
+  # terraform/netbox/folly writes as this NetBox user once the owner switches its token to the user's own.
+  # Until then its writes record as admin and no approved EK binding counts.
+  homelab.fleetd.bindingAuthor = "terraform";
 
   # This board and drive run stable at Gen 3, above nvme-hat.nix's Gen 2 default.
   hardware.raspberry-pi.config.pi5.base-dt-params.pciex1_gen = {
@@ -108,19 +111,6 @@ in
       ../../terraform/pki/certs/folly-devid-ca-spore.pem
       ../../terraform/pki/certs/folly-devid-ca-capsule.pem
     ];
-    entries =
-      nodeAliases
-      ++ lib.concatMap (
-        name:
-        map (w: {
-          spiffeID = "spiffe://${trustDomain}/ns/${w.ns}/sa/${w.sa}";
-          parentID = nodeID name;
-          selectors = [
-            "k8s:ns:${w.ns}"
-            "k8s:sa:${w.sa}"
-          ];
-        }) workloads
-      ) tpmNodes;
   };
 
   sops.defaultSopsFile = ../secrets/spore.sops.yaml;

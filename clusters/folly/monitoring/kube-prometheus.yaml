@@ -9,7 +9,7 @@ spec:
   chart:
     spec:
       chart: kube-prometheus-stack
-      version: 92.14.0
+      version: 92.17.0
       sourceRef:
         kind: HelmRepository
         name: prometheus
@@ -118,7 +118,9 @@ spec:
           access: proxy
           url: http://victoria-logs-server.monitoring.svc.cluster.local:9428
           orgId: 1
-          version: 1
+          # Grafana ignores a provisioned data source whose version is not
+          # above the stored one, so a change here must raise the version.
+          version: 3
           jsonData:
             # Log shippers write as AccountID 1; a query with no header reads
             # the empty tenant 0. Strings: the plugin rejects integers here.
@@ -132,7 +134,7 @@ spec:
           access: proxy
           url: http://tempo.monitoring.svc.cluster.local:3200
           orgId: 1
-          version: 1
+          version: 3
           jsonData:
             tracesToLogs:
               datasourceUid: victorialogs

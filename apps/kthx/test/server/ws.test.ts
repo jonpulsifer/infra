@@ -4,15 +4,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { MAX_SOCKETS_PER_VISITOR } from '../../server/realtime.ts';
-import { ask, withServer, ZONE } from '../harness/server.ts';
+import { ask, withServer } from '../harness/server.ts';
 
 const kthx = withServer();
-
-let nextAddress = 0;
-function address(): string {
-  nextAddress += 1;
-  return `198.18.0.${nextAddress % 250}`;
-}
 
 interface Site {
   readonly name: string;
@@ -21,23 +15,9 @@ interface Site {
 }
 
 async function claimed(label: string): Promise<Site> {
-  const name = kthx().name(label);
-  const response = await kthx().fetch(
-    ask('/api/sites', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name }),
-      address: address(),
-    }),
-  );
-  expect(response.status).toBe(201);
-  await response.json();
+  const { name, host } = await kthx().site(label);
   const server = kthx().listen();
-  return {
-    name,
-    host: `${name}.${ZONE}`,
-    origin: `${server.url.origin}`,
-  };
+  return { name, host, origin: `${server.url.origin}` };
 }
 
 async function open(site: Site, cookie?: string) {

@@ -25,7 +25,11 @@ type Metrics struct {
 	RenderFailed     atomic.Int64
 	Released         atomic.Int64
 	Expired          atomic.Int64
+	ConfigEnded      atomic.Int64
 	AutoProvisioned  atomic.Int64
+	ConfigMissing    atomic.Int64
+	ConfigRefetched  atomic.Int64
+	HookOSAfter      atomic.Int64
 
 	mu               sync.Mutex
 	devices          map[string]int
@@ -35,6 +39,16 @@ type Metrics struct {
 	pendingOldest    time.Time
 	unreleased       int
 	unreleasedOldest time.Time
+	// approvalSubjects counts the subjects of ApprovalBinding, -1 when
+	// fleetd cannot read it, or is nil without the cluster's API.
+	approvalSubjects *int
+}
+
+// SetApprovalSubjects records the subjects of ApprovalBinding.
+func (m *Metrics) SetApprovalSubjects(n int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.approvalSubjects = &n
 }
 
 // SetPending records the configs not served yet with the render
@@ -93,6 +107,10 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	counter("fleet_install_renders_failed_total", "Renders fleetd could not do.", m.RenderFailed.Load())
 	counter("fleet_install_released_total", "Devices set active after their config was served.", m.Released.Load())
 	counter("fleet_install_expired_total", "Configs deleted unread after the TTL.", m.Expired.Load())
+	counter("fleet_install_config_ended_total", "Unread configs dropped because their Workflow was deleted or ended without success.", m.ConfigEnded.Load())
+	counter("fleet_install_config_missing_total", "Config fetches by a planned device's node after its provision that fleetd holds no config for.", m.ConfigMissing.Load())
+	counter("fleet_install_config_refetched_total", "Config fetches with a code whose config fleetd already served: the node did not keep it.", m.ConfigRefetched.Load())
+	counter("fleet_hookos_after_success_total", "Provision runs that succeeded and whose node then booted HookOS instead of its install.", m.HookOSAfter.Load())
 	counter("fleet_admit_autoprovisioned_total", "Admissions that started a provision the owner did not ask for.", m.AutoProvisioned.Load())
 	fmt.Fprintf(w, "# HELP fleet_install_configs_pending Rendered Talos configs not served yet.\n# TYPE fleet_install_configs_pending gauge\nfleet_install_configs_pending %d\n", m.pending)
 	age := func(t time.Time) float64 {
@@ -104,6 +122,9 @@ func (m *Metrics) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprintf(w, "# HELP fleet_install_configs_oldest_age_seconds Age of the oldest unserved config, 0 with none.\n# TYPE fleet_install_configs_oldest_age_seconds gauge\nfleet_install_configs_oldest_age_seconds %.0f\n", age(m.pendingOldest))
 	fmt.Fprintf(w, "# HELP fleet_install_unreleased Served configs whose release NetBox has not taken yet.\n# TYPE fleet_install_unreleased gauge\nfleet_install_unreleased %d\n", m.unreleased)
 	fmt.Fprintf(w, "# HELP fleet_install_unreleased_oldest_age_seconds Time since the oldest unreleased config was served, 0 with none.\n# TYPE fleet_install_unreleased_oldest_age_seconds gauge\nfleet_install_unreleased_oldest_age_seconds %.0f\n", age(m.unreleasedOldest))
+	if m.approvalSubjects != nil {
+		fmt.Fprintf(w, "# HELP fleet_node_client_approval_subjects Subjects the controller manager's approval of a kubelet's first certificate binds; 0 on folly, -1 when fleetd cannot read the binding.\n# TYPE fleet_node_client_approval_subjects gauge\nfleet_node_client_approval_subjects %d\n", *m.approvalSubjects)
+	}
 	fmt.Fprintf(w, "# HELP fleet_devices NetBox devices by status.\n# TYPE fleet_devices gauge\n")
 	statuses := make([]string, 0, len(m.devices))
 	for s := range m.devices {

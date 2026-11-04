@@ -41,10 +41,12 @@ type Config struct {
 
 // Result is what a pass leaves. InstallCode is the confirm's install code,
 // empty when the service gave none; it is a secret and is never logged.
+// Session is the session that passed, for the boot's later requests.
 type Result struct {
 	Verdict     protocol.Verdict
 	NVIndexes   []uint32
 	InstallCode string
+	Session     *Session
 }
 
 // RefusedError is the service's refusal.
@@ -200,7 +202,7 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		return nil, err
 	}
 	logf("verdict %s", verdict.Verdict)
-	res = &Result{Verdict: verdict}
+	res = &Result{Verdict: verdict, Session: &Session{ID: started.Session, Nonce: started.Nonce, akPublic: akPub, akPrivate: akPriv}}
 
 	if cfg.StoreNV {
 		for _, w := range []struct {
@@ -214,8 +216,8 @@ func Run(ctx context.Context, rw io.ReadWriter, cfg Config) (res *Result, err er
 		}
 		logf("certificates stored at NV %#x and %#x", protocol.NVLDevIDCert, protocol.NVLAKCert)
 	}
-	// The device flow is plain HTTP: the AK's signature is what lets this
-	// machine, and no one who saw the session, confirm it.
+	// The AK's signature, not the transport, is what lets this machine, and
+	// no one who saw the session, confirm it.
 	rawConfirmSig, err := akSign(rw, ak, scheme, append(append([]byte{}, started.Nonce...), protocol.ConfirmLabel...))
 	if err != nil {
 		return res, fmt.Errorf("sign the confirm: %w", err)

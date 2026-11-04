@@ -3,7 +3,9 @@ title: NixOS
 description: The flake that builds each Linux host and OS image, the fleet baseline each host shares, and the daily upgrade from main.
 ---
 
-Each Linux host in the lab runs NixOS, a Linux distribution that builds each system from Nix code. One flake builds every host, OS image and Nix-built package, and the registry, `nix/hosts/default.nix`, lists them.
+NixOS builds the lab's general-purpose Linux hosts from Nix code. Kubernetes nodes run Talos Linux.
+
+One flake builds the NixOS hosts, OS images and Nix-built packages. The registry, `nix/hosts/default.nix`, lists them.
 
 ## Parts
 
@@ -14,7 +16,9 @@ Each Linux host in the lab runs NixOS, a Linux distribution that builds each sys
 | sops-nix | Decrypts host secrets with the SSH host key | Hosts that import `nix/system/sops.nix` |
 | [Netboot](nixos/netboot.md) | Serves x86 PXE boot and forge's signed RAM-boot image | spore |
 | [Talos boot](nixos/talos-boot.md) | Serves folly's signed iPXE, HookOS and Talos ISO on the bootstrap VLAN | spore |
-| [Tinkerbell](nixos/tinkerbell.md) | Answers PXE for folly's nodes and runs their reprovisioning workflows | spore |
+| [fleet-boot](nixos/fleet-boot.md) | The lab's own signed RAM boot image: attests and runs the boot fleetd answers | a netbooted machine |
+| [Kea](nixos/kea.md) | Leases folly's netboot pool and names the signed iPXE, through the gateway's relay | spore |
+| [Tinkerbell](nixos/tinkerbell.md) | Runs folly's reprovisioning workflows and drives the nodes' BMCs | spore |
 | [Build host and cache](nixos/build-host-and-cache.md) | CI builds and the Nix caches | GitHub Actions, Cachix and forge |
 
 ## Registry

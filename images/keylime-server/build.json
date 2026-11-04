@@ -1,0 +1,12 @@
+[
+  {
+    "_comment": "forge is arm64 and the CI runner is amd64, so the image is built for both.",
+    "image": "keylime-server",
+    "context": "images/keylime-server",
+    "file": "images/keylime-server/Dockerfile",
+    "platforms": "linux/amd64,linux/arm64",
+    "watch": [
+      "images/keylime-server"
+    ]
+  }
+]

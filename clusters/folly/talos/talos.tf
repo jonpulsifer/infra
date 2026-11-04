@@ -55,6 +55,25 @@ locals {
   # rebooting a node already on the version: Create upgrades only a node
   # whose running version differs. fleet-controller renders a node of a class from the
   # class_inputs output below.
+  # The class table fleetd reads, every class with its os and workload. This
+  # root holds the Talos role and patches of each class whose os is talos;
+  # the check below keeps the two in step.
+  fleet_classes = jsondecode(file("${path.module}/../fleet/classes.json"))
+
+  # What a workload means on a Talos node: the labels a pod selects and the
+  # taints it tolerates, key => "value:Effect" as the module takes them.
+  # general sets none; a workload a pod needs, such as a sandbox node, is
+  # one more entry here and one class in the table that names it. Talos
+  # applies a taint when the kubelet registers the Node and refuses a later
+  # change, so a new taint on a registered node is applied once by hand
+  # (docs/platform/kubernetes.md).
+  workloads = {
+    general = {
+      labels = {}
+      taints = {}
+    }
+  }
+  class_workload = { for class, c in local.classes : class => local.workloads[local.fleet_classes[class].workload] }
   classes = {
     controlplane = {
       role      = "controlplane"
@@ -71,20 +90,40 @@ locals {
   }
   install_generation = "secureboot-2"
 
+  # Each class's own patches, in order. fleetd renders a node by its class, so
+  # a patch one node needs is its class's: the sensor NIC's drivers load on
+  # every worker-g2, which is shale (patches.tf).
+  class_patches = { for class, c in local.classes : class => concat(
+    [local.ephemeral_patch[class]],
+    class == "worker-g2" ? [local.sensor_nic_patch] : [],
+  ) }
+
   # The nodes are the declared machines NetBox holds active or failed: a
   # failed one is quarantined, not gone, and stays managed. A node being installed stays
   # planned until it fetches its config: fleet-controller renders that config
   # and the root applies none until NetBox holds the node active, so its
   # talos_machine is planned away and back across a reinstall, by design. A
   # control plane installs as a worker does, and joins the cluster. The
-  # install disk is the nodes file's.
+  # install disk is the nodes file's. A node of a class whose os is not
+  # talos is not this root's.
   nodes = { for name, m in local.machines : name => {
     class = m.class
     role  = local.classes[m.class].role
-  } if contains(["active", "failed"], m.status) }
+  } if contains(["active", "failed"], m.status) && lookup(local.fleet_classes, m.class, { os = "" }).os == "talos" }
 
   # The TPM 2.0 nodes, which seal disks and attest.
   tpm_nodes = sort([for name, m in local.machines : name if m.tpm == "2.0" && contains(keys(local.nodes), name)])
+
+  # The workers fleetd installs: those whose hardware has a TPM 2.0, which
+  # attests, whether or not tpm_off hides it now. Each joins with a bootstrap
+  # token fleetd creates for its install alone, which expires within hours
+  # (apps/fleetd). The config this root applies to them carries a token no
+  # Secret holds, so a disk with it cannot join folly again. A worker-g2
+  # node cannot attest, and joins with the bundle's token.
+  fleet_workers = [for name, n in local.nodes : name if n.role == "worker" && try(merge(
+    local.inventory.models[local.inventory.nodes[name].model], local.inventory.nodes[name],
+  ).tpm, null) == "2.0"]
+  no_join_token = "nojoin.0000000000000000"
 
   # A TPM node's running STATE and EPHEMERAL are encrypted, except these, which
   # were installed with plain volumes and keep them until a reinstall. Talos
@@ -109,11 +148,23 @@ locals {
       c.role == "controlplane" ? module.talos.render_inputs.controlplane_patches : [],
     )
     tpm_patches   = module.talos.render_inputs.tpm_patches
-    class_patches = [local.ephemeral_patch[class]]
-    labels        = {}
+    class_patches = local.class_patches[class]
+    labels        = local.class_workload[class].labels
+    taints        = local.class_workload[class].taints
     tpm_labels    = module.talos.render_inputs.tpm_labels
     node_network  = module.talos.render_inputs.node_network
   } }
+}
+
+# Every talos class in the class table has its role here, and every class
+# here is a talos class there.
+check "classes" {
+  assert {
+    condition = (
+      sort([for class, c in local.fleet_classes : class if c.os == "talos"]) == sort(keys(local.classes))
+    )
+    error_message = "The talos classes in clusters/folly/fleet/classes.json and local.classes in talos.tf must name the same classes."
+  }
 }
 
 module "talos" {
@@ -133,6 +184,8 @@ module "talos" {
     "siderolabs/intel-ucode",
     "siderolabs/kata-containers",
     "siderolabs/realtek-firmware",
+    # USB NIC drivers for the network sensor's AX88179 (patches.tf).
+    "siderolabs/usb-modem-drivers",
   ]
 
   op_vault          = local.op_vault_homelab
@@ -142,9 +195,12 @@ module "talos" {
     role               = n.role
     address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
-    patches            = [local.ephemeral_patch[n.class]]
+    patches            = local.class_patches[n.class]
+    labels             = local.class_workload[n.class].labels
+    taints             = local.class_workload[n.class].taints
     installer_image    = local.secureboot_installer
     install_generation = local.install_generation
+    bootstrap_token    = contains(local.fleet_workers, name) ? local.no_join_token : null
   } }
   tpm_nodes       = local.tpm_nodes
   encrypted_nodes = local.encrypted_nodes

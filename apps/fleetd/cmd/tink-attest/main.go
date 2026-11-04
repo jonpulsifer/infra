@@ -14,7 +14,7 @@
 // expires within -renew-before, it has the service certify the LDevID key
 // again on the strength of a LAK-signed quote, stores the new certificate in
 // NV and restarts the pods -restart-selector picks on the node. When none is
-// due, with -check (the default), it runs the daily check: the same LAK-signed
+// due, with -check (the default), it runs the hourly check: the same LAK-signed
 // quote and event log, which the service judges and records, and no new
 // certificate. It exits 0 when the node has no LDevID.
 //
@@ -34,13 +34,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/jonpulsifer/infra/apps/fleetd/client"
-	"github.com/jonpulsifer/infra/apps/fleetd/lldp"
 	"github.com/jonpulsifer/infra/apps/fleetd/protocol"
 )
 
@@ -49,14 +47,6 @@ func env(key, def string) string {
 		return v
 	}
 	return def
-}
-
-func readTrim(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(b))
 }
 
 // logf writes to stdout, which tink-agent ships to syslog, and to the
@@ -91,25 +81,15 @@ func main() {
 	device := flag.String("tpm", env("TPM_DEVICE", "/dev/tpmrm0"), "TPM resource manager device")
 	eventLog := flag.String("event-log", env("EVENT_LOG", "/sys/kernel/security/tpm0/binary_bios_measurements"), "TCG event log")
 	mac := flag.String("mac", env("MAC", ""), "MAC of the NIC the machine booted from")
-	serial := flag.String("serial", env("SERIAL", readTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
-	uuid := flag.String("uuid", env("UUID", readTrim("/sys/class/dmi/id/product_uuid")), "SMBIOS UUID")
+	serial := flag.String("serial", env("SERIAL", client.ReadTrim("/sys/class/dmi/id/product_serial")), "SMBIOS serial")
+	uuid := flag.String("uuid", env("UUID", client.ReadTrim("/sys/class/dmi/id/product_uuid")), "SMBIOS UUID")
 	storeNV := flag.Bool("store-nv", env("STORE_NV", "true") == "true", "store the certificates in TPM NV")
 	installCode := flag.String("install-code", env("INSTALL_CODE_FILE", "/tmp/fleet/install_code"), "where to write the install code the service answers")
 	timeout := flag.Duration("timeout", 10*time.Minute, "give up after this long")
 	flag.Parse()
 
-	// The SMBIOS facts fill the NetBox device the service creates on first sight.
-	m := protocol.Machine{
-		Serial:       *serial,
-		UUID:         *uuid,
-		MAC:          *mac,
-		Hostname:     readTrim("/proc/sys/kernel/hostname"),
-		Manufacturer: readTrim("/sys/class/dmi/id/sys_vendor"),
-		Model:        readTrim("/sys/class/dmi/id/product_name"),
-		SKU:          readTrim("/sys/class/dmi/id/product_sku"),
-		BIOS:         readTrim("/sys/class/dmi/id/bios_version"),
-	}
-	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout, network(m.MAC)); err != nil {
+	m := client.LocalMachine(*serial, *uuid, *mac)
+	if err := run(*url, *device, *eventLog, m, *storeNV, *installCode, *timeout, client.Network(m.MAC, logf)); err != nil {
 		logf("FAILED: %v", err)
 		os.Exit(exitCode(err))
 	}
@@ -125,34 +105,6 @@ func exitCode(err error) int {
 		return exitRefused
 	}
 	return 1
-}
-
-// network starts listening on the NIC with the MAC and answers what it
-// found when asked: the NIC's address, and the switch's LLDP neighbour when
-// a frame arrived. A NIC the action cannot see, as without the host's
-// network namespace, gives nothing.
-func network(mac string) func() *protocol.Network {
-	ifname := lldp.Interface("/sys", mac)
-	if ifname == "" {
-		logf("no NIC has the MAC %q; no network facts", mac)
-		return func() *protocol.Network { return nil }
-	}
-	heard := make(chan *protocol.LLDP, 1)
-	go func() {
-		l, err := lldp.Listen(ifname, lldp.Wait)
-		if err != nil {
-			logf("no LLDP: %v", err)
-			heard <- nil
-			return
-		}
-		logf("LLDP on %s: %s port %q (%s)", ifname, l.ChassisID, l.PortID, l.SystemName)
-		heard <- &l
-	}()
-	return func() *protocol.Network {
-		n := &protocol.Network{LLDP: <-heard, Address: lldp.Address(ifname)}
-		logf("network: %s address %q", ifname, n.Address)
-		return n
-	}
 }
 
 func run(url, device, eventLog string, m protocol.Machine, storeNV bool, installCode string, timeout time.Duration, net func() *protocol.Network) error {

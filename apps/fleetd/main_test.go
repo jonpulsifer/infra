@@ -34,7 +34,7 @@ func TestBootHandlerRoutes(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusTeapot)
 	})
-	h := bootHandler(srv, config)
+	h := bootHandler(srv, config, nil)
 	for _, c := range []struct {
 		method, path string
 		want         int
@@ -43,6 +43,8 @@ func TestBootHandlerRoutes(t *testing.T) {
 		{http.MethodGet, "/healthz", http.StatusOK},
 		{http.MethodGet, "/talos/config?uuid=x&code=y", http.StatusTeapot},
 		{http.MethodHead, "/talos/config?uuid=x&code=y", http.StatusMethodNotAllowed},
+		{http.MethodGet, "/seed?uuid=x&code=y", http.StatusTeapot},
+		{http.MethodHead, "/seed?uuid=x&code=y", http.StatusMethodNotAllowed},
 		{http.MethodGet, "/devid/SERIAL", http.StatusNotFound},
 		{http.MethodGet, "/v1/attest", http.StatusNotFound},
 		{http.MethodGet, "/", http.StatusNotFound},
@@ -109,13 +111,15 @@ func TestBootListenerWaitsForItsCertificate(t *testing.T) {
 	dir := t.TempDir()
 	kp := &keyPair{cert: filepath.Join(dir, "cert.pem"), key: filepath.Join(dir, "key.pem")}
 	srv := &attest.Server{V: &attest.Verifier{}, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	s := &http.Server{Handler: bootHandler(srv, http.NotFoundHandler())}
+	s := &http.Server{Handler: bootHandler(srv, http.NotFoundHandler(), nil)}
+	confirmAcks(s)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go serveBoot(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), s, addr, kp, 20*time.Millisecond)
 	defer s.Close()
 
-	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	// The client offers HTTP/2, and the listener answers in HTTP/1.1.
+	client := &http.Client{Timeout: time.Second, Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, ForceAttemptHTTP2: true}}
 	time.Sleep(100 * time.Millisecond)
 	if resp, err := client.Get("https://" + addr + "/healthz"); err == nil {
 		resp.Body.Close()
@@ -127,8 +131,8 @@ func TestBootListenerWaitsForItsCertificate(t *testing.T) {
 		resp, err := client.Get("https://" + addr + "/healthz")
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
-				t.Fatalf("healthz: %d", resp.StatusCode)
+			if resp.StatusCode != http.StatusOK || resp.ProtoMajor != 1 {
+				t.Fatalf("healthz: %d over %s", resp.StatusCode, resp.Proto)
 			}
 			return
 		}
