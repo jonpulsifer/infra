@@ -19,7 +19,7 @@ Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cl
 
 ## Limits
 
-- Each of the six workers offers 1 CPU and 1 GB, so the cluster has 6 CPUs and a job spreads over nodes rather than CPUs. A job that asks for more nodes than exist waits forever.
+- Each of the six workers offers one core, 2 CPUs on the hyper-threaded nodes, and 1 GB, so the cluster has 12 CPUs and a job spreads over nodes rather than CPUs. A job that asks for more nodes than exist waits forever.
 - No accounting. `sacct` has no database to read, and there is no federation with a second cluster.
 - The login pod's root keys are the owner's GitHub keys, copied into `clusters/folly/apps/slinky/helm-release-slurm.yaml`. A key change at GitHub needs a change there too.
 - The operator pins Slurm 26.05 through the `slurm` chart's image tags.
@@ -28,7 +28,7 @@ Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cl
 
 Three Helm charts from `ghcr.io/slinkyproject/charts` run in two namespaces. `slurm-operator-crds` and `slurm-operator` install the `slinky.slurm.net` kinds and the operator into `slinky`. The `slurm` chart turns its values into a `Controller`, a `RestApi`, a `LoginSet`, a `NodeSet` and a `Token` in `slurm`, and the operator turns those into pods. The webhook certificate comes from folly's cert-manager.
 
-The `NodeSet` is a StatefulSet-like set of `slurmd` pods. A `slurmd` registers the host's CPUs and memory unless the `NodeSet` pins them, so the values set `CPUs` and `RealMemory` inside the container limits. Two workers may share a Kubernetes node. The `Token` keeps a root JWT for the REST API in the Secret `slurm-token-root`. The demo scripts are a ConfigMap that the login pod mounts at `/opt/demos`.
+The `NodeSet` is a StatefulSet-like set of `slurmd` pods. A `slurmd` registers the host's topology and reserves whatever its container limits do not cover as specialized cores and memory, in whole cores, so the limits decide what a worker offers. Two workers may share a Kubernetes node, each worker keeps its node, and a worker's Slurm record goes when its pod does. The `Token` keeps a root JWT for the REST API in the Secret `slurm-token-root`. The demo scripts are a ConfigMap that the login pod mounts at `/opt/demos`.
 
 The `slurm` namespace runs the `privileged` pod-security profile, because `slurmd` puts each job step in a cgroup of its own.
 

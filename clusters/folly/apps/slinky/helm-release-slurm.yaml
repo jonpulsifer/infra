@@ -74,20 +74,23 @@ spec:
         # Without this the operator requires one slurmd per Kubernetes node,
         # and three of the six would never schedule.
         oversubscribeNode: true
-        # slurmd registers the host's CPUs and memory, not the container's,
-        # and a pod that lands on a different host re-registers as invalid.
-        # This pins what each node offers, inside the limits below.
-        extraConfMap:
-          CPUs: "1"
-          RealMemory: "900"
+        # A worker keeps its Kubernetes node, and its Slurm record goes with
+        # its pod: slurmd registers the host's topology, so a pod that moved
+        # to a host with another core count would re-register as invalid.
+        pinToNode: true
+        pruneSlurmNodeRecords: NodeNotFound
         slurmd:
-          # The requests stay small, so idle workers cost the cluster little.
+          # slurmd advertises the host and reserves what the limits do not
+          # cover as specialized cores and memory, in whole cores: on the
+          # hyper-threaded nodes a limit of 2 CPUs is one core, and a limit of
+          # 1 CPU leaves no usable core at all. The requests stay small, so
+          # idle workers cost the cluster little.
           resources:
             requests:
               cpu: 100m
               memory: 256Mi
             limits:
-              cpu: 1
+              cpu: 2
               memory: 1Gi
     partitions:
       all:

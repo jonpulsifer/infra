@@ -44,7 +44,7 @@ Run them in order. Each one is a shell script under `/opt/demos`.
 | --- | --- |
 | `00-tour.sh` | The partition, each node's CPUs and memory, and the scheduler's statistics |
 | `01-hello.sh` | `srun` placing one task on every node, then two tasks on two nodes |
-| `02-array.sh` | A twelve-task job array draining in waves over six CPUs |
+| `02-array.sh` | A job array of twice the cluster's CPUs draining in two waves |
 | `03-queue.sh` | A job that takes every CPU, a small job waiting with reason `Resources`, and a job that can never run |
 | `04-rest.sh` | `slurmrestd` with a JWT from `scontrol token`: ping, list the nodes, submit a job |
 
