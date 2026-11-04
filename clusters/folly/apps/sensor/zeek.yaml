@@ -6,6 +6,9 @@ metadata:
   labels:
     app.kubernetes.io/name: zeek
     app.kubernetes.io/part-of: sensor
+  annotations:
+    # The scripts are read at start, so a change to the ConfigMap rolls the pod.
+    configmap.reloader.stakater.com/reload: sensor-scripts
 spec:
   replicas: 1
   # One capture per interface: the old pod leaves before the new one starts.
