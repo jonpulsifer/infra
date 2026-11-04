@@ -1,6 +1,6 @@
 ---
-# One Slurm cluster, named folly, with three slurmd workers so a multi-node
-# job lands one task on each Kubernetes node. No accounting: sacct needs
+# One Slurm cluster, named folly, with six small slurmd workers, two to a
+# Kubernetes node, so a job spreads wide. No accounting: sacct needs
 # slurmdbd and a MariaDB, which the demos do without.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
@@ -70,16 +70,17 @@ spec:
             type: LoadBalancer
     nodesets:
       folly:
-        replicas: 3
+        replicas: 6
         slurmd:
-          # Slurm sizes each node from the container's limits: 2 CPUs, 2 GB.
+          # Slurm sizes each node from the container's limits: 1 CPU, 1 GB.
+          # The requests stay small, so idle workers cost the cluster little.
           resources:
             requests:
-              cpu: 500m
-              memory: 1Gi
+              cpu: 100m
+              memory: 256Mi
             limits:
-              cpu: 2
-              memory: 2Gi
+              cpu: 1
+              memory: 1Gi
         podSpec:
           affinity:
             podAntiAffinity:

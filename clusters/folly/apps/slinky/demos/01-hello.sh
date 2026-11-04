@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One task on every node, then one task per CPU on one node, with srun.
+# One task on every node, then two tasks on two nodes, with srun.
 # Each line names the Kubernetes node under the slurmd pod that ran it.
 set -euo pipefail
 
@@ -10,8 +10,8 @@ srun --nodes="$nodes" --ntasks-per-node=1 --label \
   bash -c 'echo "$(hostname) on ${SLURMD_NODENAME:-?}, cpus $(nproc)"'
 
 echo
-echo "== one task per CPU on a single node"
-srun --nodes=1 --ntasks=2 --label bash -c 'echo "task $SLURM_PROCID of $SLURM_NTASKS on $(hostname)"'
+echo "== two tasks on two nodes, each with one CPU"
+srun --nodes=2 --ntasks=2 --label bash -c 'echo "task $SLURM_PROCID of $SLURM_NTASKS on $(hostname)"'
 
 echo
 echo "== the job records the scheduler kept"

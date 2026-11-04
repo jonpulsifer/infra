@@ -4,7 +4,7 @@ description: Slurm on the folly cluster through the Slinky operator, a three-wor
 status: experiment
 ---
 
-Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cluster, named `folly`, with a controller, a REST API, a login pod and three `slurmd` workers that spread over the three nodes. The owner uses it to learn Slurm and to show the scheduler at work. It serves no production job.
+Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cluster, named `folly`, with a controller, a REST API, a login pod and six small `slurmd` workers that spread over the three nodes. The owner uses it to learn Slurm and to show the scheduler at work. It serves no production job.
 
 ## Use it
 
@@ -19,7 +19,7 @@ Slinky is SchedMD's Slurm operator for Kubernetes. On folly it runs one Slurm cl
 
 ## Limits
 
-- Each worker offers 2 CPUs and 2 GB, so the cluster has 6 CPUs. A job that asks for more nodes than exist waits forever.
+- Each of the six workers offers 1 CPU and 1 GB, so the cluster has 6 CPUs and a job spreads over nodes rather than CPUs. A job that asks for more nodes than exist waits forever.
 - No accounting. `sacct` has no database to read, and there is no federation with a second cluster.
 - The login pod's root keys are the owner's GitHub keys, copied into `clusters/folly/apps/slinky/helm-release-slurm.yaml`. A key change at GitHub needs a change there too.
 - The operator pins Slurm 26.05 through the `slurm` chart's image tags.

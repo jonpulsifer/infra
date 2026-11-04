@@ -14,7 +14,7 @@ Use this runbook to show Slurm at work on folly. [Slinky](../apps/slinky.md) des
   kubectl --context folly -n slurm get pods
   ```
 
-  Result: `slurm-controller-0`, a `slurm-restapi` pod, a `slurm-login-folly` pod and `slurm-worker-folly-0` to `-2` are `Running`.
+  Result: `slurm-controller-0`, a `slurm-restapi` pod, a `slurm-login-folly` pod and `slurm-worker-folly-0` to `-5` are `Running`.
 
 ## Reach the login pod
 
@@ -43,7 +43,7 @@ Run them in order. Each one is a shell script under `/opt/demos`.
 | Script | Shows |
 | --- | --- |
 | `00-tour.sh` | The partition, each node's CPUs and memory, and the scheduler's statistics |
-| `01-hello.sh` | `srun` placing one task on every node, then one task per CPU on one node |
+| `01-hello.sh` | `srun` placing one task on every node, then two tasks on two nodes |
 | `02-array.sh` | A twelve-task job array draining in waves over six CPUs |
 | `03-queue.sh` | A job that takes every CPU, a small job waiting with reason `Resources`, and a job that can never run |
 | `04-rest.sh` | `slurmrestd` with a JWT from `scontrol token`: ping, list the nodes, submit a job |
@@ -64,7 +64,7 @@ Run them in order. Each one is a shell script under `/opt/demos`.
 2. Submit a job that needs every node, and watch it wait.
 
    ```bash
-   sbatch --nodes=3 --wrap=hostname
+   sbatch --nodes=6 --wrap=hostname
    squeue
    ```
 
