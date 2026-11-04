@@ -4,14 +4,14 @@
 # A third job asks for more nodes than exist and never runs.
 set -euo pipefail
 
-cpus=$(sinfo -h -o %C | cut -d/ -f4)
+cpus=$(sinfo -h -o %C | cut -d/ -f2)
 nodes=$(sinfo -h -o %D | head -1)
 
 big=$(sbatch --parsable --job-name=hog --ntasks="$cpus" --wrap='sleep 20')
 small=$(sbatch --parsable --job-name=small --ntasks=1 --wrap='hostname')
 never=$(sbatch --parsable --job-name=toobig --nodes=$((nodes + 1)) --wrap='true' 2>/dev/null || echo rejected)
 
-echo "== hog $big took all $cpus CPUs; small $small waits; toobig: $never"
+echo "== hog $big took all $cpus idle CPUs; small $small waits; toobig: $never"
 for _ in $(seq 10); do
   echo "-- $(date +%T)"
   squeue -o "%.8i %.8j %.8T %.10M %.6D %R"
