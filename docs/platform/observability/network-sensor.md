@@ -24,7 +24,7 @@ Query VictoriaLogs in Grafana with the `kubernetes` job and the `sensor` namespa
 - A mirror copies both directions of a gigabit link onto one gigabit port, so the sensor port drops frames when the uplink runs above half its rate.
 - Both pods wait, and log that they wait, until a USB NIC is plugged into shale. They find the NIC by its USB bus, so its name does not matter.
 - Talos ships only the Realtek and Microchip USB NIC drivers. The ASIX AX88179 driver comes from the `usb-modem-drivers` extension in `clusters/folly/talos/talos.tf`, and shale's machine config loads it.
-- Talos runs DHCP on the NIC and gets no answer, because the mirror port forwards nothing. The log line is noise.
+- The NIC carries no address. Each pod's init container turns IPv6 off on it, flushes it and sets it promiscuous, because the kernel would otherwise autoconfigure an address and an on-link route from a mirrored router advertisement, through a port that forwards nothing.
 
 ## How it works
 
