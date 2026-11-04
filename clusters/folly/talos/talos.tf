@@ -90,6 +90,14 @@ locals {
   }
   install_generation = "secureboot-2"
 
+  # Each class's own patches, in order. fleetd renders a node by its class, so
+  # a patch one node needs is its class's: the sensor NIC's drivers load on
+  # every worker-g2, which is shale (patches.tf).
+  class_patches = { for class, c in local.classes : class => concat(
+    [local.ephemeral_patch[class]],
+    class == "worker-g2" ? [local.sensor_nic_patch] : [],
+  ) }
+
   # The nodes are the declared machines NetBox holds active or failed: a
   # failed one is quarantined, not gone, and stays managed. A node being installed stays
   # planned until it fetches its config: fleet-controller renders that config
@@ -140,7 +148,7 @@ locals {
       c.role == "controlplane" ? module.talos.render_inputs.controlplane_patches : [],
     )
     tpm_patches   = module.talos.render_inputs.tpm_patches
-    class_patches = [local.ephemeral_patch[class]]
+    class_patches = local.class_patches[class]
     labels        = local.class_workload[class].labels
     taints        = local.class_workload[class].taints
     tpm_labels    = module.talos.render_inputs.tpm_labels
@@ -187,7 +195,7 @@ module "talos" {
     role               = n.role
     address            = local.machines[name].address
     install            = "disk.dev_path == \"${local.machines[name].disk}\""
-    patches            = concat([local.ephemeral_patch[n.class]], name == "shale" ? [local.sensor_nic_patch] : [])
+    patches            = local.class_patches[n.class]
     labels             = local.class_workload[n.class].labels
     taints             = local.class_workload[n.class].taints
     installer_image    = local.secureboot_installer

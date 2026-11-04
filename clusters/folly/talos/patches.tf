@@ -199,7 +199,8 @@ locals {
 
   # The network sensor's USB NIC on shale is an ASIX AX88179, whose driver the
   # usb-modem-drivers extension carries and Talos does not load on its own
-  # (clusters/folly/apps/sensor/). usbnet is its dependency.
+  # (clusters/folly/apps/sensor/). usbnet is its dependency. talos.tf gives it
+  # to the worker-g2 class, shale's, so fleetd's class render carries it too.
   sensor_nic_patch = yamlencode({
     machine = {
       kernel = {
