@@ -26,7 +26,7 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 ## Rules
 
 - Apply before you merge. A merge without an apply changes nothing, and the next plan shows the change as pending.
-- If a PR changes only a file that a root reads with `file()`, such as `clients.yaml`, a topology file or `flux-values.yaml`, comment `atlantis plan -d <root>`, then `atlantis apply`, before you merge. Autoplan sees only files that match `ATLANTIS_AUTOPLAN_FILE_LIST`, so the change is otherwise never applied.
+- If a PR changes only a file that a root reads with `file()`, such as `clients.yaml`, a topology file or `flux-values.yaml`, comment `atlantis plan -d <root>`, then `atlantis apply`, before you merge. Autoplan sees only files that match `ATLANTIS_AUTOPLAN_FILE_LIST`, so the change is otherwise never applied. The exception is the two `clusters/<site>/talos/` roots: `atlantis.yaml` at the repo root lists the files each one reads, such as `kube-login.json` and `nodes.yaml`, and a change to one of them plans the root. A root that gains a `file()` input is added there.
 - Add every GitHub identity that opens PRs to `atlantis_users` in `only-me.rego`. `atlantis/plan` is a required check on every PR, so a PR from an unlisted GitHub identity is blocked.
 - Read network facts through `terraform/modules/cluster-topology`, which reads the [topology files](../reference/topology.md).
 - Keep `terraform/pki` on OpenTofu. Its `opentofu/tls` provider is only on the OpenTofu registry.
@@ -35,6 +35,7 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 ## Where it lives
 
 - `clusters/offsite/apps/atlantis/helm-release.yaml`: the autoplan list and repo config
+- `atlantis.yaml`: the Talos roots and the files outside them that plan each one
 - `clusters/offsite/apps/atlantis/policies/only-me.rego`: `atlantis_users`, who can plan
 - `clusters/offsite/apps/atlantis/policies/appliers.rego`: `atlantis_appliers`, who can apply and import
 - `clusters/base/atlantis-bootstrap-rbac.yaml`: the `cluster-admin` binding
