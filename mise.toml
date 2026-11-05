@@ -315,6 +315,10 @@ run = "bash scripts/devid-ca-yubikey.sh bundle"
 description = "Test the DevID CA script's firmware policy, ykman parsing, secrets and bundle"
 run = "bash scripts/devid-ca-yubikey_test.sh"
 
+[tasks."openbao:yubikey:init"]
+description = "Put OpenBao's unseal key into an anchor's YubiKey: new PIV secrets in SOPS and 1Password, the escrowed RSA-2048 key imported into slot 9d, and a decrypt through ykcs11 (arg: <host>)"
+run = "bash scripts/openbao-yubikey.sh init"
+
 [tasks."docs:check"]
 description = "Docs contract: renderer validation, referenced paths exist, no archaeology, references into the wiki resolve"
 run = "bash .github/scripts/docs-contract.sh"
