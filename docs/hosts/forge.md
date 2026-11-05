@@ -26,7 +26,7 @@ forge is the lab's native arm64 build host, a Raspberry Pi 5 on [the Anchor netw
 
 See [Build host and cache](../platform/nixos/build-host-and-cache.md).
 
-`clusters/folly/monitoring/forge.yaml` declares the alerts `ForgeCoreDnsDown` and `ForgeChronyDown`.
+`clusters/folly/monitoring/forge.yaml` declares the alerts `ForgeCoreDnsDown`, `ForgeChronyDown`, `ForgeOpenBaoDown` and `ForgeOpenBaoSealed`.
 
 ## Reach
 
