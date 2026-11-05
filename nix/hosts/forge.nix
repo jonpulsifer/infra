@@ -16,9 +16,11 @@ in
     ../system/sops.nix
   ];
 
-  # The YubiKey 5C that holds OpenBao's unseal key. `mise run openbao:yubikey:init forge` programs
-  # it and prints the serial; homelab.openbao turns on once the serial is here.
+  # The YubiKey 5C that holds OpenBao's unseal key in slot 9d, programmed by
+  # `mise run openbao:yubikey:init forge`.
   homelab.yubikey.enable = true;
+  homelab.yubikey.serial = 34074538;
+  homelab.openbao.enable = true;
 
   services.buildHost = {
     enable = true;

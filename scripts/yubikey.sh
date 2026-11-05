@@ -147,7 +147,7 @@ card_info() {
 # and stores them in 1Password '<item>' and the host's SOPS file under yubikey/. Both copies exist
 # before the card changes, so a failure after this loses no secret.
 new_piv_secrets() {
-  local host="$1" item="$2" slot="$3" notes="$4"
+  local host="$1" item="$2" piv_slot="$3" notes="$4"
   local sops_file="$root/nix/secrets/$host.sops.yaml"
   ! grep -q '^yubikey:' "$sops_file" || die "$sops_file already holds yubikey secrets"
   ! op item get "$item" --vault "$op_vault" >/dev/null 2>&1 || die "1Password item '$item' exists"
@@ -158,7 +158,7 @@ new_piv_secrets() {
 
   echo "==> storing the new PIV secrets in 1Password '$item' and ${sops_file#"$root/"}" >&2
   jq -n \
-    --arg title "$item" --arg host "$host" --arg slot "$slot" --arg serial "$serial" --arg notes "$notes" \
+    --arg title "$item" --arg host "$host" --arg slot "$piv_slot" --arg serial "$serial" --arg notes "$notes" \
     --rawfile pin "$work/piv-pin" --rawfile puk "$work/piv-puk" --rawfile mgmt "$work/piv-mgmt-key" '{
       title: $title,
       category: "SECURE_NOTE",
