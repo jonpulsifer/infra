@@ -51,7 +51,8 @@ func usage() {
 
   verify                       assert the committed chain links, anchors and admits its depth
   reissue                      mint replacement trust anchors with correct pathLen
-  jwks                         write jwks.json and openid-configuration.json
+  sign-ca                      sign a CA's certificate request with the root key
+  jwks                        write jwks.json and openid-configuration.json
   fingerprint <cert.pem>       SHA256 over the DER certificate
   spki <cert-or-key.pem>       SHA256 over the DER SubjectPublicKeyInfo
   expired <cert.pem>           exit 0 if notAfter has passed
@@ -72,6 +73,8 @@ func main() {
 		err = runVerify(repoCertsDir(), os.Stdout, os.Stderr)
 	case "reissue":
 		err = cmdReissue(os.Args[2:])
+	case "sign-ca":
+		err = cmdSignCA(os.Args[2:])
 	case "jwks":
 		err = cmdJWKS(os.Args[2:])
 	case "fingerprint":
@@ -122,6 +125,30 @@ func cmdReissue(args []string) error {
 		rootPathLen:    2,
 		intPathLen:     1,
 		stagingDirName: *staging,
+	}, os.Stdout)
+}
+
+func cmdSignCA(args []string) error {
+	fs := flag.NewFlagSet("sign-ca", flag.ExitOnError)
+	rootKey := fs.String("root-key", "", "PEM private key for the FML Root CA (offline; required)")
+	csr := fs.String("csr", "", "PEM certificate request of the CA to sign (required)")
+	out := fs.String("out", "", "where to write the certificate (required)")
+	pathLen := fs.Int("path-len", 1, "pathLenConstraint of the new CA")
+	days := fs.Int("days", 1826, "validity in days")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *rootKey == "" || *csr == "" || *out == "" || *days <= 0 {
+		fs.Usage()
+		return errFailed
+	}
+	return runSignCA(signCAOpts{
+		certsDir:    repoCertsDir(),
+		rootKeyPath: *rootKey,
+		csrPath:     *csr,
+		outPath:     *out,
+		pathLen:     *pathLen,
+		notAfter:    time.Now().UTC().AddDate(0, 0, *days),
 	}, os.Stdout)
 }
 

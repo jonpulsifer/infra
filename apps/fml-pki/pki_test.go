@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -463,5 +465,105 @@ func TestVerifyChecksTheDevIDBundle(t *testing.T) {
 	write("folly-devid-ca.pem", capsule.Raw, rogue.Raw, spore.Raw)
 	if got := verify(); !strings.Contains(got, "folly-devid-ca-rogue.pem is issued by") {
 		t.Errorf("a DevID CA outside the FML intermediate should fail, got %q", got)
+	}
+}
+
+func TestSignCASignsUnderTheRoot(t *testing.T) {
+	far := time.Now().AddDate(20, 0, 0)
+	root, rootKey := mintCA(t, "FML Root", 2, true, far, nil, nil)
+	dir := t.TempDir()
+	writeCertFile(t, filepath.Join(dir, "fml-root.pem"), root)
+	der, err := x509.MarshalPKCS8PrivateKey(rootKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(dir, "root.key")
+	if err := writePEM(keyPath, "PRIVATE KEY", der, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	csrKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject: pkix.Name{CommonName: "FML folly Issuing CA", Organization: []string{"Folly Mountain Laboratories"}},
+	}, csrKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPath := filepath.Join(dir, "issuing.csr")
+	if err := writePEM(csrPath, "CERTIFICATE REQUEST", csrDER, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	outPath := filepath.Join(dir, "folly-issuing-ca.pem")
+	var out bytes.Buffer
+	notAfter := time.Now().AddDate(5, 0, 0)
+	if err := runSignCA(signCAOpts{
+		certsDir: dir, rootKeyPath: keyPath, csrPath: csrPath, outPath: outPath, pathLen: 1, notAfter: notAfter,
+	}, &out); err != nil {
+		t.Fatalf("sign-ca: %v", err)
+	}
+	cert, err := readCert(outPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cert.IsCA || cert.MaxPathLen != 1 {
+		t.Fatalf("got CA=%t pathLen=%d, want a CA with pathLen 1", cert.IsCA, cert.MaxPathLen)
+	}
+	if cert.Subject.CommonName != "FML folly Issuing CA" {
+		t.Fatalf("subject %q does not come from the CSR", cert.Subject)
+	}
+	if !csrKey.PublicKey.Equal(cert.PublicKey) {
+		t.Fatal("the certificate does not carry the CSR's key")
+	}
+	if err := cert.CheckSignatureFrom(root); err != nil {
+		t.Fatalf("not signed by the root: %v", err)
+	}
+	if cert.NotAfter.Sub(notAfter).Abs() > time.Second {
+		t.Fatalf("notAfter %s, want %s", cert.NotAfter, notAfter)
+	}
+
+	// verify reads the committed file as the issuing CA under the root.
+	inter, _ := mintCA(t, "FML Intermediate", 1, true, far, root, rootKey)
+	writeCertFile(t, filepath.Join(dir, "fml-intermediate.pem"), inter)
+	var vout, verr bytes.Buffer
+	if err := runVerify(dir, &vout, &verr); err != nil {
+		t.Fatalf("verify: %v\n%s", err, verr.String())
+	}
+	if !strings.Contains(vout.String(), "==> issuing") {
+		t.Fatalf("verify did not report the issuing CA:\n%s", vout.String())
+	}
+
+	// A CSR the key cannot sign for is refused.
+	otherRoot, _ := mintCA(t, "Other Root", 2, true, far, nil, nil)
+	writeCertFile(t, filepath.Join(dir, "fml-root.pem"), otherRoot)
+	if err := runSignCA(signCAOpts{
+		certsDir: dir, rootKeyPath: keyPath, csrPath: csrPath, outPath: outPath, pathLen: 1, notAfter: notAfter,
+	}, &out); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("a mismatched root key was accepted: %v", err)
+	}
+}
+
+func TestVerifyRejectsAnIssuingCAWithoutRoom(t *testing.T) {
+	far := time.Now().AddDate(20, 0, 0)
+	root, rootKey := mintCA(t, "FML Root", 2, true, far, nil, nil)
+	inter, _ := mintCA(t, "FML Intermediate", 1, true, far, root, rootKey)
+	issuing, _ := mintCA(t, "FML folly Issuing CA", 0, true, far, root, rootKey)
+	dir := t.TempDir()
+	writeCertFile(t, filepath.Join(dir, "fml-root.pem"), root)
+	writeCertFile(t, filepath.Join(dir, "fml-intermediate.pem"), inter)
+	writeCertFile(t, filepath.Join(dir, "folly-issuing-ca.pem"), issuing)
+	var out, errOut bytes.Buffer
+	if err := runVerify(dir, &out, &errOut); err == nil || !strings.Contains(errOut.String(), "pathLen >= 1") {
+		t.Fatalf("verify accepted an issuing CA with pathLen 0: %v\n%s", err, errOut.String())
+	}
+}
+
+func writeCertFile(t *testing.T, path string, cert *x509.Certificate) {
+	t.Helper()
+	if err := writePEM(path, "CERTIFICATE", cert.Raw, 0o644); err != nil {
+		t.Fatal(err)
 	}
 }

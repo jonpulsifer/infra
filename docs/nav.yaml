@@ -121,6 +121,7 @@ sections:
           - runbooks/manage-sops-secrets.md
           - runbooks/switch-a-netbox-token.md
           - runbooks/initialize-openbao.md
+          - runbooks/sign-the-issuing-ca.md
           - runbooks/set-up-a-devid-ca-yubikey.md
       - group: Apps
         items:
