@@ -154,7 +154,8 @@ If a resource is different on each cluster, such as a BGP peer or a Gateway list
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| The reconcile prints the old commit. | The `infra` source has not fetched the merge. | Run `flux --context <site> reconcile source git infra -n flux-system` again. |
+| The reconcile prints the old commit. | The `infra` source has not fetched the merge. | Inspect `flux --context <site> get source git infra -n flux-system` before retrying the source reconcile. If the source is Ready, reconcile it and compare its revision with the merge commit. |
+| The `infra` GitRepository reports `GitOperationFailed` with an SSH authentication error. | The source cannot fetch new revisions, even if its Kustomizations remain Ready on a stored revision. | Check the GitRepository's Ready condition. Compare its deploy-key authorization with the bootstrap configuration in `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/main.tf`; repair any drift through [Apply an OpenTofu change](apply-an-opentofu-change.md). Confirm that the source fetches the merge commit before checking Kustomizations. |
 | A Flux Kustomization shows `var substitution failed`. | A file has a `${...}` that Flux cannot parse. | Escape it as `$${...}`, or disable substitution for the ConfigMap. |
 | A Flux Kustomization shows `no matches for kind`. | The CRD of that kind is not installed. | Do steps 7 and 8 of [Change a manifest](#change-a-manifest). |
 | A Flux Kustomization shows `kustomization path not found`. | Its directory is deleted, but its Flux Kustomization is not. | Delete the Flux Kustomization from git. |
