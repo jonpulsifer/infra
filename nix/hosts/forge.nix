@@ -1,5 +1,6 @@
 # forge: NVMe-rooted aarch64 build host: Nix remote builder, native arm64 OCI builds, and a
 # harmonia cache for the Pi fleet, and one of the three anchors that run the lab's DNS and NTP. Its EEPROM falls back to the rackpi5 RAM image spore publishes.
+# It runs OpenBao, the lab's online CA, sealed by the YubiKey in its USB port.
 { config, ... }:
 let
   fleet = import ../lib/fleet.nix;
@@ -11,8 +12,13 @@ in
     ../profiles/pi5-nvme.nix
     ../services/build-host.nix
     ../services/garage.nix
+    ../services/openbao.nix
     ../system/sops.nix
   ];
+
+  # The YubiKey 5C that holds OpenBao's unseal key. `mise run openbao:yubikey:init forge` programs
+  # it and prints the serial; homelab.openbao turns on once the serial is here.
+  homelab.yubikey.enable = true;
 
   services.buildHost = {
     enable = true;
