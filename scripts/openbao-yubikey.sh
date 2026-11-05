@@ -23,8 +23,8 @@ usage() {
 unseal_key() {
   if op item get "$key_item" --vault "$op_vault" >/dev/null 2>&1; then
     echo "==> reading the unseal key from 1Password '$key_item'" >&2
-    op item get "$key_item" --vault "$op_vault" --fields label=private-key --reveal --format json |
-      jq -j .value >"$work/unseal.pem"
+    op item get "$key_item" --vault "$op_vault" --fields label=private-key --reveal --format json \
+      | jq -j .value >"$work/unseal.pem"
     openssl pkey -in "$work/unseal.pem" -noout 2>/dev/null || die "1Password '$key_item' holds no readable private key"
     return
   fi
