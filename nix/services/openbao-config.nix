@@ -80,9 +80,8 @@ in
         # Not RemainAfterExit, so the timer's start runs it again.
         Type = "oneshot";
         DynamicUser = true;
-        # The CSR is read by the owner over ssh, so the directory is open to read.
+        # A DynamicUser's state lives under /var/lib/private, so the owner reads the CSR with sudo.
         StateDirectory = service;
-        StateDirectoryMode = "0755";
         LoadCredential = [ "token:${config.sops.secrets.${tokenSecret}.path}" ];
         UMask = "0022";
       };

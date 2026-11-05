@@ -17,7 +17,8 @@ for _ in $(seq 90); do
   sleep 2
 done
 bao status >/dev/null
-bao token renew-self >/dev/null
+# With no token named, renew renews the caller's own.
+bao token renew >/dev/null
 
 echo "==> policies"
 bao policy write openbao-config "$CONFIG_POLICY"
