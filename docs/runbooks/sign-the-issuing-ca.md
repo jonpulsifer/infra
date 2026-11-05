@@ -43,7 +43,7 @@ The issuing CA of the lab lives inside OpenBao on [forge](../hosts/forge.md), di
 1. Copy the request into the tree.
 
    ```bash
-   ssh <target> cat /var/lib/openbao-config/folly-issuing-ca.csr > terraform/pki/csr/folly-issuing-ca.csr
+   ssh <target> sudo cat /var/lib/openbao-config/folly-issuing-ca.csr > terraform/pki/csr/folly-issuing-ca.csr
    ```
 
 2. Read it.
