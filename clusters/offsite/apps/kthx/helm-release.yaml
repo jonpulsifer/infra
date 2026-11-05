@@ -21,7 +21,7 @@ spec:
       name: kthx-apps
       namespace: kthx-apps
     # CD rewrites this digest on each kthx build on main (`.github/containers.json`).
-    image: ghcr.io/jonpulsifer/kthx:latest@sha256:e3fe61d97d008ea7a5814c85e173a98f8814fa9f473bf12ee28475edf9f1f512
+    image: ghcr.io/jonpulsifer/kthx:latest@sha256:3e7792dfb58640b25ea0c6ba7a41cea9a8f19892c9fa3a9f15a6713f0769a43e
     zone: kthx.dev
     # Claiming and site control answer on this host only. The tunnel does not
     # serve it: it is reachable from the lab, the offsite LAN and the tailnet.
