@@ -1,6 +1,7 @@
-# A YubiKey that holds a hardware DevID CA key in a PIV slot, reached through pcscd and ykcs11.
-# scripts/devid-ca-yubikey.sh initializes the key over ssh; members of the devid-ca group, fleetd on
-# spore, may use the card and read its PIN (docs/runbooks/set-up-a-devid-ca-yubikey.md).
+# A YubiKey whose PIV applet holds a key for a service on this host, reached through pcscd and
+# ykcs11: spore's and capsule's DevID CA keys, forge's OpenBao unseal key. A setup script over ssh
+# programs the card and stores its PIV secrets in the host's SOPS file. Members of the yubikey group
+# may use the card and read its PIN.
 {
   config,
   lib,
@@ -8,30 +9,19 @@
   ...
 }:
 let
-  cfg = config.homelab.devidCa.yubikey;
+  cfg = config.homelab.yubikey;
   provisioned = cfg.serial != null;
-  pinSecret = "devid-ca/piv-pin";
+  pinSecret = "yubikey/piv-pin";
 in
 {
-  options.homelab.devidCa.yubikey = {
-    enable = lib.mkEnableOption "the YubiKey that holds this host's DevID CA key";
-
-    slot = lib.mkOption {
-      type = lib.types.enum [
-        "9a"
-        "9c"
-        "9d"
-        "9e"
-      ];
-      default = "9c";
-      description = "The PIV slot of the CA key. scripts/devid-ca-yubikey.sh reads it.";
-    };
+  options.homelab.yubikey = {
+    enable = lib.mkEnableOption "the YubiKey that holds a key for a service on this host";
 
     serial = lib.mkOption {
       type = lib.types.nullOr lib.types.ints.positive;
       default = null;
       description = ''
-        The YubiKey's serial number. Set it once `devid:yubikey:init` has stored the PIV secrets in
+        The YubiKey's serial number. Set it once a setup script has stored the PIV secrets in
         this host's SOPS file: it declares the PIN secret, which sops-nix fails to find before then.
       '';
     };
@@ -40,21 +30,21 @@ in
       type = lib.types.str;
       readOnly = true;
       default = "${pkgs.yubico-piv-tool}/lib/libykcs11.so";
-      description = "The ykcs11 PKCS#11 module, for ATTEST_CA_PKCS11_MODULE.";
+      description = "The ykcs11 PKCS#11 module.";
     };
 
     tokenLabel = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       readOnly = true;
       default = if provisioned then "YubiKey PIV #${toString cfg.serial}" else null;
-      description = "The token label that ykcs11 gives the key, for ATTEST_CA_PKCS11_TOKEN.";
+      description = "The token label that ykcs11 gives the card.";
     };
 
     pinFile = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       readOnly = true;
       default = if provisioned then config.sops.secrets.${pinSecret}.path else null;
-      description = "The PIV PIN, readable by the devid-ca group, for ATTEST_CA_PKCS11_PIN_FILE.";
+      description = "The PIV PIN, readable by the yubikey group.";
     };
   };
 
@@ -68,7 +58,7 @@ in
           polkit.addRule(function(action, subject) {
             if ((action.id == "org.debian.pcsc-lite.access_pcsc" ||
                  action.id == "org.debian.pcsc-lite.access_card") &&
-                (subject.user == "root" || subject.isInGroup("devid-ca"))) {
+                (subject.user == "root" || subject.isInGroup("yubikey"))) {
               return polkit.Result.YES;
             }
           });
@@ -79,7 +69,7 @@ in
           SUBSYSTEM=="usb", ATTR{idVendor}=="1050", GROUP="pcscd", MODE="0660"
         '';
 
-        users.groups.devid-ca = { };
+        users.groups.yubikey = { };
 
         environment.systemPackages = [
           pkgs.opensc
@@ -87,12 +77,12 @@ in
           pkgs.yubico-piv-tool
           pkgs.yubikey-manager
         ];
-        # A stable path for pkcs11-tool in the setup script, independent of the store path.
-        environment.etc."devid-ca/libykcs11.so".source = cfg.pkcs11Module;
+        # A stable path for pkcs11-tool in the setup scripts, independent of the store path.
+        environment.etc."yubikey/libykcs11.so".source = cfg.pkcs11Module;
       }
       (lib.mkIf provisioned {
         sops.secrets.${pinSecret} = {
-          group = "devid-ca";
+          group = "yubikey";
           mode = "0440";
         };
       })

@@ -24,7 +24,7 @@ spore is a Raspberry Pi 5 that serves x86 netboot, forge's boot image, and lab D
 - [Tinkerbell](../platform/nixos/tinkerbell.md), which reprovisions folly's Talos nodes (`tinkerbell.nix`), with HookOS's syslog in the journal (`hookos-syslog.nix`)
 - [Kea](../platform/nixos/kea.md), the Kubernetes network's DHCP once the gateway relays it here (`kea.nix`)
 - [Lab DNS and time](../platform/network/ingress-and-dns.md#lab-dns-and-time) through `nix/profiles/anchor.nix`, which imports `coredns-sinkhole.nix` and `ntp-server.nix`
-- [Talos boot](../platform/nixos/talos-boot.md) and [fleetd](../apps/fleetd.md) on the bootstrap VLAN (`talos-boot.nix`, `fleetd.nix`), with the DevID CA on its YubiKey (`devid-ca-yubikey.nix`)
+- [Talos boot](../platform/nixos/talos-boot.md) and [fleetd](../apps/fleetd.md) on the bootstrap VLAN (`talos-boot.nix`, `fleetd.nix`), with the DevID CA on its YubiKey (`yubikey-piv.nix`)
 - folly's [backup](../platform/backups.md) Garage store, with data in `/nfs/data/garage-ha` (`garage.nix`), as a node of the [Garage cluster](../platform/backups.md#garage-cluster). The old standalone store in `/nfs/data/garage` is the rollback.
 - The [SPIRE server](../platform/identity.md) that attests Talos nodes by TPM (`spire-server.nix`)
 - [tsidp](../platform/identity.md#people-on-the-tailnet), the tailnet's OIDC provider for kubectl, as the tailnet node `idp` with state in `/var/lib/tsidp` (`tsidp.nix`)

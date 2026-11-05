@@ -1,5 +1,5 @@
 # fleetd (apps/fleetd) on spore, beside Tinkerbell (./tinkerbell.nix). It attests folly's machines
-# and running nodes, issues each node's LDevID from spore's YubiKey CA (./devid-ca-yubikey.nix),
+# and running nodes, issues each node's LDevID from spore's YubiKey CA (./yubikey-piv.nix),
 # reads the site's kubernetes-node devices from NetBox on capsule, owns the Hardware, Machine and
 # Workflow objects in Tinkerbell's namespace, and renders and serves the Talos config a first boot
 # fetches.
@@ -66,7 +66,7 @@ let
   ];
   fleetd = pkgs.callPackage ../../apps/fleetd/package.nix { };
   talosctl = pkgs.callPackage ../../apps/fleetd/talosctl.nix { };
-  yubikey = config.homelab.devidCa.yubikey;
+  yubikey = config.homelab.yubikey;
   certs = ../../terraform/pki/certs;
   # spore's hardware DevID CA, which scripts/devid-ca-yubikey.sh commits after its apply, up to the
   # FML root.
@@ -289,8 +289,8 @@ in
     users.users.fleetd = {
       isSystemUser = true;
       group = "fleetd";
-      # The YubiKey's PIN and pcscd's card access go to this group (./devid-ca-yubikey.nix).
-      extraGroups = [ "devid-ca" ];
+      # The YubiKey's PIN and pcscd's card access go to this group (./yubikey-piv.nix).
+      extraGroups = [ "yubikey" ];
     };
     users.groups.fleetd = { };
 

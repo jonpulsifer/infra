@@ -83,8 +83,8 @@ in
   homelab.nfsServer.dataDevice = "/dev/disk/by-label/nfs-data";
 
   # The YubiKey 5 that holds the DevID CA key fleetd issues every LDevID with.
-  homelab.devidCa.yubikey.enable = true;
-  homelab.devidCa.yubikey.serial = 9758244;
+  homelab.yubikey.enable = true;
+  homelab.yubikey.serial = 9758244;
 
   # A node of the anchors' three-node cluster. The standalone store's /nfs/data/garage stays on
   # disk as the rollback (docs/runbooks/migrate-garage-to-three-nodes.md).
