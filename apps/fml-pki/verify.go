@@ -145,7 +145,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	var clusterCAs []string
 	for _, m := range matches {
 		base := filepath.Base(m)
-		if !strings.HasPrefix(base, "fml-") && !strings.HasPrefix(base, devidPrefix) {
+		if !strings.HasPrefix(base, "fml-") && !strings.HasPrefix(base, devidPrefix) && !strings.HasPrefix(base, issuingPrefix) {
 			clusterCAs = append(clusterCAs, m)
 		}
 	}
@@ -188,6 +188,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	}
 
 	problems = append(problems, checkDevIDCAs(certsDir, intermediate, root, out)...)
+	problems = append(problems, checkIssuingCA(certsDir, root, out)...)
 
 	if len(problems) > 0 {
 		fmt.Fprintln(errOut, "\nchain does not validate:")
@@ -281,6 +282,35 @@ func checkDevIDCAs(certsDir string, intermediate, root *x509.Certificate, out io
 		problems = append(problems, fmt.Sprintf(
 			"devid: %s.pem is not the %d issuing DevID CA(s) in file-name order; %s",
 			devidPrefix, len(want), fix))
+	}
+	return problems
+}
+
+// checkIssuingCA asserts the issuing CA that OpenBao holds sits directly under
+// the root with room for the CAs it signs: SPIRE's and the DevID CA.
+func checkIssuingCA(certsDir string, root *x509.Certificate, out io.Writer) []string {
+	path := filepath.Join(certsDir, issuingPrefix+".pem")
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	base := filepath.Base(path)
+	ca, err := readCert(path)
+	if err != nil {
+		return []string{fmt.Sprintf("issuing: %v", err)}
+	}
+	fmt.Fprintln(out, "==> issuing")
+	fmt.Fprintf(out, "      %s\n", describe(ca, base))
+	fmt.Fprintf(out, "      %s\n", describe(root, "fml-root.pem"))
+	problems := checkChain("issuing", []named{
+		{ca, base},
+		{root, "fml-root.pem"},
+	})
+	if ca.KeyUsage&x509.KeyUsageCertSign == 0 {
+		problems = append(problems, fmt.Sprintf("issuing: %s lacks keyCertSign, so it cannot sign a CA", base))
+	}
+	if limit, ok := pathLen(ca); !ok || limit < 1 {
+		problems = append(problems, fmt.Sprintf(
+			"issuing: %s needs pathLen >= 1 so that it may sign the SPIRE and DevID CAs", base))
 	}
 	return problems
 }

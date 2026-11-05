@@ -21,6 +21,8 @@ in
   homelab.yubikey.enable = true;
   homelab.yubikey.serial = 34074538;
   homelab.openbao.enable = true;
+  # The PKI that git declares, with the token `mise run openbao:config-token forge` stores.
+  homelab.openbao.pki.enable = true;
 
   services.buildHost = {
     enable = true;

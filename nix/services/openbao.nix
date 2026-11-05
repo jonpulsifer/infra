@@ -30,6 +30,8 @@ let
   '';
 in
 {
+  imports = [ ./openbao-config.nix ];
+
   options.homelab.openbao = {
     enable = lib.mkEnableOption "OpenBao on this anchor, sealed by its YubiKey";
 
@@ -83,8 +85,6 @@ in
         ui = true;
         api_addr = "https://${host}:${toString cfg.port}";
         cluster_addr = "https://${lab.hosts.${hostName}}:${toString cfg.clusterPort}";
-        # The unit runs with no CAP_IPC_LOCK, and Raft storage wants mlock off anyway.
-        disable_mlock = true;
         storage.raft = {
           path = stateDir;
           node_id = hostName;

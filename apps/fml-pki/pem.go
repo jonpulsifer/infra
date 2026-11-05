@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -143,6 +144,8 @@ func keyAlgorithm(pub crypto.PublicKey) string {
 		return "Ed25519"
 	case *rsa.PublicKey:
 		return "RSA"
+	case *ecdsa.PublicKey:
+		return "ECDSA " + pub.(*ecdsa.PublicKey).Curve.Params().Name
 	default:
 		return fmt.Sprintf("%T", pub)
 	}

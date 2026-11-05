@@ -319,6 +319,14 @@ run = "bash scripts/devid-ca-yubikey_test.sh"
 description = "Put OpenBao's unseal key into an anchor's YubiKey: new PIV secrets in SOPS and 1Password, the escrowed RSA-2048 key imported into slot 9d, and a decrypt through ykcs11 (arg: <host>)"
 run = "nix shell nixpkgs#openssl -c bash scripts/openbao-yubikey.sh init"
 
+[tasks."openbao:config-token"]
+description = "Give openbao-config.service on an anchor its token: the openbao-config policy and a periodic token made with the root token from 1Password, stored in the host's SOPS file (arg: <host>)"
+run = "bash scripts/openbao-config-token.sh"
+
+[tasks."pki:sign-ca"]
+description = "Sign a CA's certificate request with the FML root key, pathLen 1, five years (args: -root-key <pem> -csr <csr> -out <pem>)"
+run = "go -C apps/fml-pki run . sign-ca"
+
 [tasks."docs:check"]
 description = "Docs contract: renderer validation, referenced paths exist, no archaeology, references into the wiki resolve"
 run = "bash .github/scripts/docs-contract.sh"
