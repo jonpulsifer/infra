@@ -1,0 +1,15 @@
+---
+# The Gateway API CRDs, from the upstream release the GitRepository pins. Each
+# cluster's gateway-api.yaml applies its Gateway after this.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: gateway-api
+  namespace: flux-system
+spec:
+  interval: 1h0m0s
+  path: ./config/crd/experimental
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: gateway-api

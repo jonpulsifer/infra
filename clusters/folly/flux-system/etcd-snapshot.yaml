@@ -10,7 +10,9 @@ metadata:
 spec:
   interval: 1h0m0s
   path: ./clusters/folly/etcd-snapshot
-  prune: true
+  # Off while this moves into another Kustomization, so the hand-over deletes
+  # nothing. The next change removes this file.
+  prune: false
   sourceRef:
     kind: GitRepository
     name: infra

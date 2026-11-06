@@ -1,4 +1,6 @@
 ---
+# The Prometheus Operator CRDs, ahead of every Kustomization that carries a
+# monitoring.coreos.com object.
 apiVersion: kustomize.toolkit.fluxcd.io/v1
 kind: Kustomization
 metadata:
@@ -6,7 +8,7 @@ metadata:
   namespace: flux-system
 spec:
   interval: 1h0m0s
-  path: ./clusters/offsite/monitoring-crds
+  path: ./clusters/base/monitoring-crds
   prune: true
   sourceRef:
     kind: GitRepository

@@ -56,7 +56,6 @@ If a resource is different on each cluster, such as a BGP peer or a Gateway list
 | --- | --- |
 | A path in a `kustomization.yaml` of the cluster | `../../base/apps/reloader` in `clusters/folly/apps/kustomization.yaml` |
 | For a shared controller, a Flux Kustomization in `clusters/base/flux-system/` that applies `clusters/base/platform/<name>` | `clusters/base/flux-system/cloudnative-pg.yaml` |
-| For a cluster with no changes of its own, a Flux Kustomization with `spec.path` set to a `clusters/base/` directory | `clusters/offsite/flux-system/storage.yaml` |
 
 1. Make a directory under `clusters/base/`.
 2. In the directory, add a `kustomization.yaml` that lists each file.

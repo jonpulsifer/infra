@@ -19,12 +19,10 @@ cover what an agent needs beyond it. The `kubernetes-gitops` skill applies too.
 - Each shared component is a directory under `clusters/base/` with its own
   `kustomization.yaml`. A cluster references the directory, never a file in
   it.
-- A cluster picks up a shared component in one of three ways. Match the one
+- A cluster picks up a shared component in one of two ways. Match the one
   its neighbours use:
   - Its `kustomization.yaml` lists a relative path such as
     `../../base/apps/<name>`.
-  - One of its Flux `Kustomization` objects points `spec.path` at the base
-    directory, as `clusters/offsite/flux-system/storage.yaml` does.
   - `clusters/base/flux-system/` holds a Flux `Kustomization` for each shared
     platform component, and both clusters include that directory.
 - Put the values that differ between clusters in Flux substitutions:
@@ -33,9 +31,8 @@ cover what an agent needs beyond it. The `kubernetes-gitops` skill applies too.
   `clusters/base/flux-system/` objects substitute nothing.
 - A resource that differs in more than its substitutions goes in each
   cluster's directory.
-- folly has `nodes/` and its own storage overlay, and offsite has
-  `garage/`. A change that renders on one cluster can fail on the
-  other.
+- folly has `nodes/` and offsite has `garage/`. A change that renders on one
+  cluster can fail on the other.
 - Render both clusters with `mise run k8s:render-apps`. For one directory,
   such as `apps` or `monitoring`, run `kubectl kustomize clusters/<site>/<dir>`
   for each site.

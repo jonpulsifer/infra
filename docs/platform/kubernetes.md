@@ -72,7 +72,7 @@ tsidp runs on spore, as [Identity](identity.md#people-on-the-tailnet) describes.
 
 - `clusters/<site>/flux-system/` and `clusters/base/flux-system/`: the Flux Kustomizations
 - `clusters/<site>/bootstrap/` and `terraform/modules/flux-bootstrap/`: the bootstrap root, with its state in `gs://homelab-ng/clusters/<site>/bootstrap`
-- `clusters/base/platform/`, `clusters/*/storage/` and `clusters/folly/nodes/`: the shared controllers, storage and GPU plugin
+- `clusters/base/platform/` and `clusters/folly/nodes/`: the shared controllers, `local-path-provisioner/` among them, and the GPU plugin
 - `clusters/folly/node-features/`: the NodeFeatureRule that labels the GPU node
 - `clusters/base/cluster-runtimeclass.yaml`: the RuntimeClasses. The `kata-containers` and `gvisor` extensions in `clusters/<site>/talos/talos.tf` provide the handlers.
 - `clusters/<site>/talos/talos.tf`: each node's labels and taints, through `terraform/modules/talos-cluster`
