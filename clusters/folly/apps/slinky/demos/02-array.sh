@@ -6,6 +6,11 @@
 set -euo pipefail
 
 nodes=$(sinfo -h -t idle -o %D | head -1)
+[ "${nodes:-0}" -gt 0 ] || {
+  echo "no idle node; sinfo says:"
+  sinfo
+  exit 1
+}
 dir=/shared/demo-array
 mkdir -p "$dir"
 rm -f "$dir"/*.out
