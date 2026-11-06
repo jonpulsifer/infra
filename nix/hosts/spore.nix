@@ -97,6 +97,9 @@ in
 
   homelab.spire = {
     bundleNotifier.enable = true;
+    # The server's CA is signed by OpenBao's issuing CA on forge, with the secret ID
+    # `mise run openbao:approle-secret spire spore` stores.
+    upstream.enable = true;
     enable = true;
     ekHashes = lib.attrValues ekHashes;
     # Each issuing DevID CA's own certificate file, never the bundle: the server trusts the first
