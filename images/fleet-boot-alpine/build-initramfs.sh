@@ -24,11 +24,12 @@ case "$kver" in
 esac
 
 # udev-less: init loads each present device's driver by its modalias, so the
-# tree only decides what a boot can load.
+# tree only decides what a boot can load. af_packet is the packet socket
+# udhcpc sends from, a module in Alpine's kernel where NixOS's builds it in.
 modules='e1000e igb igc r8169 tg3 r8152 ax88179_178a cdc_ether
   nvme ahci sd_mod usb_storage uas xhci_pci
   vfat nls_cp437 nls_iso8859_1 ext4
-  tpm_tis tpm_crb efivarfs'
+  tpm_tis tpm_crb efivarfs af_packet'
 
 keep=$(mktemp)
 depends=$(mktemp)
@@ -60,6 +61,10 @@ mkdir -p "$out"
 mv "$tree/boot/vmlinuz-lts" "$out/vmlinuz"
 printf '%s\n' "$kver" >"$out/uname"
 rm -rf "${tree:?}/boot" "$tree/var/cache/apk" "$tree/etc/apk/cache"
+# No package in the tree lays out the root, so the mount points init needs
+# are made here; without them each mount fails and fleet-boot reads no
+# command line, finds no device and sees no NIC.
+mkdir -p "$tree/proc" "$tree/sys" "$tree/dev" "$tree/run" "$tree/tmp"
 
 (cd "$tree" && find . -print0 | cpio --null --quiet -o -H newc --reproducible | zstd -19 -T0 -q -o "$out/initramfs.zst")
 echo "kernel $kver: $(stat -c %s "$out/vmlinuz") bytes; initramfs: $(stat -c %s "$out/initramfs.zst") bytes, $(wc -l <"$keep") modules"

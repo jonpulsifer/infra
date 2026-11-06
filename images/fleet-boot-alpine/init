@@ -14,14 +14,18 @@ export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 mount -t proc proc /proc
 mount -t sysfs sysfs /sys
 mount -t devtmpfs devtmpfs /dev
-mkdir -p /dev/pts /run /tmp
+# The tree holds no console node, so the kernel opened none for init; from
+# here, what init and fleet-boot print reaches the console.
+exec </dev/console >/dev/console 2>&1
+mkdir -p /dev/pts
 mount -t devpts devpts /dev/pts
 mount -t tmpfs tmpfs /run
 mount -t tmpfs tmpfs /tmp
 echo "init: fleet-boot image, kernel $(uname -r)"
 
-# The TPM's drivers and efivarfs load whether or not a modalias names them.
-modprobe -a -q tpm_tis tpm_crb efivarfs || true
+# The TPM's drivers, efivarfs and the packet socket udhcpc sends from load
+# whether or not a modalias names them.
+modprobe -a -q tpm_tis tpm_crb efivarfs af_packet || true
 mount -t efivarfs efivarfs /sys/firmware/efi/efivars || echo "init: no EFI variable store"
 
 # coldplug loads the driver of each device the kernel has found. The second
