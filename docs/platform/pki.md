@@ -24,11 +24,11 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | FML Intermediate CA | The former root | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
 | `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
-| `FML DevID folly CA` | FML Intermediate CA | `terraform/pki` state; no service signs with it, and the bundle keeps the LDevIDs it issued trusted |
-| `folly-devid-ca-<host>` | FML Intermediate CA | The YubiKey on the anchor `<host>` |
+| `folly-devid-ca-<host>` | FML folly Issuing CA | The YubiKey on the anchor `<host>` |
+| `FML DevID folly CA` | FML Intermediate CA, under the former root | `terraform/pki` state; no service signs with it. riptide's LDevID is under it until `tpm-reattest` renews it, so the bundle keeps it |
 | A node's LDevID and LAK | A DevID CA | The node's TPM |
 
-The signers and the DevID CAs still chain to the former root, through the intermediate, until each is signed again under the issuing CA. `terraform/pki` issues them, and its state holds every private key it generates or reads. The former root and the intermediate do not expire. Signers last one year, and the DevID CAs five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
+The signers still chain to the former root, through the intermediate, until they are signed again under the issuing CA. `terraform/pki` issues them, and its state holds every private key it generates or reads. The former root and the intermediate do not expire; `folly-devid-ca-software-chain.pem` under `terraform/pki/certs/` carries both, and no other file in the tree does. Signers last one year, and the DevID CAs five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
 
 Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
 
@@ -64,7 +64,7 @@ The UKI and HookOS signing keys are RSA-2048. HP's EliteDesk 800 G2 and G5 firmw
 
 ## DevID CAs
 
-The DevID CAs sign each attested machine's LDevID and LAK certificates. Each one is a CA under the FML intermediate, which allows no further CA below it. Two of them are hardware CAs, one on a YubiKey in each of two anchors, so losing a key loses one CA, and its machines attest again under the other.
+The DevID CAs sign each attested machine's LDevID and LAK certificates. Each hardware CA is a CA under the FML folly issuing CA, with pathLen 0, so it signs no CA. There is one on a YubiKey in each of two anchors, so losing a key loses one CA, and its machines attest again under the other. The software CA is under the former root, and stays only for the LDevIDs it issued.
 
 | CA | Key | Anchor |
 | --- | --- | --- |
@@ -76,11 +76,10 @@ A key never leaves its card. Its PIN policy is once and its touch policy is neve
 
 ### Issuance and deployment
 
-- `scripts/devid-ca-yubikey.sh` sets each card's PIN, PUK and management key, stores them in the host's SOPS file and the 1Password item `devid-ca-<host>`, and commits the key's CSR.
-- `terraform/pki/devid.tf` issues the software CA. `scripts/pki/devid-ca.sh` writes it to `folly-devid-ca-software.pem` and its chain to `folly-devid-ca-software-chain.pem` in `terraform/pki/certs/`.
-- `terraform/pki/devid-ca.tf` gives each committed CSR a 5-year CA certificate, `folly-devid-ca-<host>.pem` in the same directory.
-- `folly-devid-ca.pem` in the same directory bundles every issuing DevID CA, for a verifier that takes one trust file. A `folly-devid-ca-<name>-chain.pem` beside a CA is its chain up to the FML root, and stays out of the bundle. spore's SPIRE server lists each CA file in `homelab.spire.devid.caChains`, as [Identity](identity.md) says.
-- `mise run pki:verify` fails when the bundle misses a CA, or a CA or chain file does not chain to the FML intermediate.
+- `scripts/devid-ca-yubikey.sh` sets each card's PIN, PUK and management key, stores them in the host's SOPS file and the 1Password item `devid-ca-<host>`, and commits the key's CSR. `mise run devid:yubikey:sign <host>` has the issuing CA in OpenBao sign that CSR, for five years or the rest of the issuing CA's term, and writes `folly-devid-ca-<host>.pem` and its chain `folly-devid-ca-<host>-chain.pem` in `terraform/pki/certs/`. `mise run devid:yubikey:install <host>` writes the certificate into the card.
+- `terraform/pki/devid.tf` issued the software CA under the former chain; `folly-devid-ca-software.pem` and `folly-devid-ca-software-chain.pem` in the same directory are its certificate and chain.
+- `folly-devid-ca.pem` in the same directory bundles every issuing DevID CA, for a verifier that takes one trust file. A chain file stays out of the bundle. spore's SPIRE server lists each CA file in `homelab.spire.devid.caChains`, as [Identity](identity.md) says, and fleetd serves `folly-devid-ca-spore-chain.pem` to the nodes it attests.
+- `mise run pki:verify` fails when the bundle misses a CA, when a CA under the issuing CA does not chain to the FML root, or when a CA under a former anchor has no chain file beside it.
 - `nix/services/yubikey-piv.nix` runs pcscd and the ykcs11 PKCS#11 module on an anchor that sets `homelab.yubikey.enable`. Members of the `yubikey` group, fleetd on spore, may use the card and read its PIN.
 - `packages/pkcs11signer` is the Go `crypto.Signer` that signs on the card. It finds the key whose public key matches the CA certificate. [fleetd](../apps/fleetd.md) signs every LDevID with it on spore's YubiKey.
 
@@ -96,7 +95,7 @@ Until `scripts/pki/devid-ca.sh` or the YubiKey runbook commits one, `terraform/p
 ## Rules
 
 - Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
-- Read a DevID CSR before `atlantis apply`. The intermediate makes a CA of every CSR that `terraform/pki/devid-ca.tf` finds.
+- Read a DevID CSR before `mise run devid:yubikey:sign`. The issuing CA makes a CA of whatever request it is given.
 - After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
 - After Atlantis applies or replaces the DevID CA, run `scripts/pki/devid-ca.sh` and commit what it writes. A new CA leaves every LDevID untrusted until its node attests again.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
@@ -118,7 +117,7 @@ A rotation of folly's Kubernetes CA leaves each worker in `fleet_workers` withou
 - `clusters/<site>/talos/patches.tf`: the issuer and the rule for tokens from the other cluster
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: `fml-pool`
 - `clusters/folly/talos/secureboot/`: the public halves of the Talos Secure Boot keys
-- `terraform/pki/devid-ca.tf`, `scripts/devid-ca-yubikey.sh` and `nix/services/yubikey-piv.nix`: the hardware DevID CAs
+- `scripts/devid-ca-yubikey.sh` and `nix/services/yubikey-piv.nix`: the hardware DevID CAs
 
 ## Related
 

@@ -68,14 +68,10 @@ let
   talosctl = pkgs.callPackage ../../apps/fleetd/talosctl.nix { };
   yubikey = config.homelab.yubikey;
   certs = ../../terraform/pki/certs;
-  # spore's hardware DevID CA, which scripts/devid-ca-yubikey.sh commits after its apply, up to the
-  # FML root.
+  # spore's hardware DevID CA and its chain up to the FML root, which scripts/devid-ca-yubikey.sh
+  # commits after OpenBao's issuing CA signs it.
   hardwareCert = certs + "/${site}-devid-ca-spore.pem";
-  caChain = pkgs.concatText "${site}-devid-ca-spore-chain.pem" [
-    hardwareCert
-    (certs + "/fml-intermediate.pem")
-    (certs + "/fml-root.pem")
-  ];
+  caChain = certs + "/${site}-devid-ca-spore-chain.pem";
   # Every issuing CA of the site: an LDevID capsule's or forge's CA issued before fleetd verifies
   # until the node renews it from spore's.
   bundle = certs + "/${site}-devid-ca.pem";
