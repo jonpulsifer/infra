@@ -10,7 +10,10 @@
 }:
 let
   cfg = config.homelab.spire;
+  fleet = import ../lib/fleet.nix;
   folly = (import ../lib/networks.nix).folly;
+  # The AppRole secret ID for OpenBao, an environment line the unit reads.
+  upstreamSecret = "openbao/spire-approle";
   spire = pkgs.callPackage ../lib/spire.nix {
     inherit (inputs.unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}) go_1_27;
   };
@@ -139,6 +142,25 @@ in
       every rotation. It needs `${bundleWriterToken}` in the host's sops file, and the server
       fails to start while folly's API server refuses it
     '';
+    upstream = {
+      enable = lib.mkEnableOption ''
+        the `vault` upstream authority: the server's CA is signed by OpenBao's issuing CA on forge
+        instead of itself, so the trust bundle is the FML root. It logs in with the AppRole `spire`
+        and the secret ID in `${upstreamSecret}` in the host's sops file, which
+        `mise run openbao:approle-secret spire <host>` stores
+      '';
+      address = lib.mkOption {
+        type = lib.types.str;
+        default = "https://forge.${fleet.dnsZone}:8200";
+        defaultText = "https://forge.<dnsZone>:8200";
+        description = "The OpenBao server.";
+      };
+      mount = lib.mkOption {
+        type = lib.types.str;
+        default = "pki/folly";
+        description = "The PKI mount of the issuing CA that signs the server's CA.";
+      };
+    };
     ekHashes = lib.mkOption {
       type = lib.types.listOf (lib.types.strMatching "[0-9a-f]{64}");
       default = [ ];
@@ -269,6 +291,17 @@ in
               endorsement_ca_path = "${endorsementCAs}";
             };
           };
+          # The secret ID comes from the environment: VAULT_APPROLE_SECRET_ID is the plugin's default.
+          UpstreamAuthority = lib.mkIf cfg.upstream.enable {
+            vault.plugin_data = {
+              vault_addr = cfg.upstream.address;
+              pki_mount_point = cfg.upstream.mount;
+              approle_auth = {
+                approle_auth_mount_point = "approle";
+                approle_id = "spire";
+              };
+            };
+          };
           Notifier = lib.mkIf cfg.bundleNotifier.enable {
             k8sbundle.plugin_data = {
               namespace = "spire";
@@ -298,11 +331,19 @@ in
           RestartSec = "30s";
         };
       })
+      (lib.mkIf cfg.upstream.enable {
+        serviceConfig.EnvironmentFile = config.sops.secrets.${upstreamSecret}.path;
+      })
     ];
 
-    sops.secrets = lib.mkIf cfg.bundleNotifier.enable {
-      ${bundleWriterToken}.restartUnits = [ "spire-server.service" ];
-    };
+    sops.secrets = lib.mkMerge [
+      (lib.mkIf cfg.bundleNotifier.enable {
+        ${bundleWriterToken}.restartUnits = [ "spire-server.service" ];
+      })
+      (lib.mkIf cfg.upstream.enable {
+        ${upstreamSecret}.restartUnits = [ "spire-server.service" ];
+      })
+    ];
 
     systemd.services.spire-server-entries = {
       description = "Sync the SPIRE registration entries declared in git";

@@ -62,7 +62,7 @@ A second OpenBao runs on folly with no consumers. Flux deploys the HelmRelease `
 - `nix/secrets/`: the host SOPS files
 - `clusters/base/platform/`: ESO, 1Password Connect and the stores
 - `nix/services/openbao.nix`, `nix/services/yubikey-piv.nix` and `scripts/openbao-yubikey.sh`: OpenBao on forge and its unseal key
-- `nix/services/openbao-config.nix`, `nix/services/openbao/` and `scripts/openbao-config-token.sh`: the PKI inside it, and the token that puts it there
+- `nix/services/openbao-config.nix`, `nix/services/openbao/`, `scripts/openbao-config-token.sh` and `scripts/openbao-approle-secret.sh`: the PKI and the AppRoles inside it, the token that puts them there, and a service's secret ID
 - `terraform/gcp/projects/homelab-ng/kms.tf`: the unseal key of OpenBao on folly
 
 ## Related

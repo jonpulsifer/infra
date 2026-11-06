@@ -323,6 +323,10 @@ run = "nix shell nixpkgs#openssl -c bash scripts/openbao-yubikey.sh init"
 description = "Give openbao-config.service on an anchor its token: the openbao-config policy and a periodic token made with the root token from 1Password, stored in the host's SOPS file (arg: <host>)"
 run = "bash scripts/openbao-config-token.sh"
 
+[tasks."openbao:approle-secret"]
+description = "Give a service on a host its OpenBao AppRole secret ID: made on forge with the root token from 1Password, stored in the host's SOPS file as openbao/<role>-approle (args: <role> <host>)"
+run = "bash scripts/openbao-approle-secret.sh"
+
 [tasks."pki:sign-ca"]
 description = "Sign a CA's certificate request with the FML root key, pathLen 1, five years (args: -root-key <pem> -csr <csr> -out <pem>)"
 run = "go -C apps/fml-pki run . sign-ca"
