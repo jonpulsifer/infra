@@ -40,6 +40,7 @@ iPXE displays a menu with a 10-second timeout.
 | --- | --- |
 | `hookos` (default) | Load `${boot-url}/hookos-amd64-secureboot-uki.efi` with the command line from `nix/images/hookos-folly.nix`. Hardware scripts use the same command line. |
 | `fleetboot` | Load `${boot-url}/fleet-boot-amd64-secureboot-uki.efi` with the command line from `nix/images/fleet-boot.nix`. |
+| `alpine` | Load `${boot-url}/fleet-boot-alpine-amd64-secureboot-uki.efi`, the [Alpine fleet-boot](fleet-boot.md#alpine-image), with that command line less its systemd unit. |
 | `enroll` | Use sanboot to load the signed ISO. |
 | `exit` | Return to firmware. An item that cannot load also returns to firmware. |
 
@@ -68,10 +69,11 @@ HookOS is one UKI for every node, signed with the HookOS key. Its signed command
 | `/talos/folly/metal-amd64-secureboot.iso` | `current/metal-amd64-secureboot.iso` |
 | `/talos/folly/hookos-amd64-secureboot-uki.efi` | `current/hookos-amd64-secureboot-uki.efi` |
 | `/talos/folly/fleet-boot-amd64-secureboot-uki.efi` | `current/fleet-boot-amd64-secureboot-uki.efi` |
+| `/talos/folly/fleet-boot-alpine-amd64-secureboot-uki.efi` | `current/fleet-boot-alpine-amd64-secureboot-uki.efi` |
 
 ## The mirror
 
-Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads its ISO, iPXE and HookOS, and fleet-boot when the release has it. It skips the download while it already serves that release's tag. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for iPXE, and the HookOS certificate for HookOS and fleet-boot. A new release moves `current` to `prev`. A failed run changes neither.
+Each image build is its own immutable GitHub release, tagged `talos-folly/<talos_version>-<run id>`. The mirror asks the releases API for the newest one of the version and downloads its ISO, iPXE and HookOS, and each fleet-boot UKI the release has. It skips the download while it already serves that release's tag. `.github/scripts/talos-uki-verify.sh`, the image pipeline's check, requires one signature that the committed certificate's key made over the image's own hash: the UKI signing certificate for iPXE, and the HookOS certificate for HookOS and the fleet-boot UKIs. A new release moves `current` to `prev`. A failed run changes neither.
 
 A Talos version bump fails the mirror until that version's release exists. spore serves the old release until then. A release without the ISO, iPXE or HookOS also fails it.
 
@@ -107,8 +109,9 @@ The cluster cannot reach the bootstrap VLAN, so spore's node exporter carries `t
 - `terraform/network/unifi/folly/firewall.tf`: the policies `kubernetes_to_boot`
 - `clusters/folly/talos/talos.tf`: `talos_version`, which names the release
 - `clusters/folly/talos/secureboot/uki-signing-cert.pem`, `hookos-signing-cert.pem`: the certificates the mirror checks
-- `clusters/folly/talos/netboot.json`: the HookOS release, the agent image digest and fleet-boot's kernel series
+- `clusters/folly/talos/netboot.json`: the HookOS release, the agent and Alpine image digests, fleet-boot's kernel series and the menu's default
 - `nix/images/ipxe-folly.nix`, `nix/images/hookos-folly.nix`, `nix/images/fleet-boot.nix`: the unsigned iPXE, with its menu, HookOS and fleet-boot
+- `images/fleet-boot-alpine`: the Alpine fleet-boot image
 - `images/tink-agent-autoid/`: the agent image
 - `.github/scripts/talos-uki-verify.sh`: the signature check, shared with the image pipeline
 

@@ -1,5 +1,5 @@
 {
-  "_comment": "Inputs of folly's generic HookOS UKI and its own fleet-boot UKI, which .github/workflows/talos-images.yml signs. hookos is a tinkerbell/hook release and the sha512 of its hook_latest-lts-x86_64.tar.gz, as its checksum.txt lists it; Renovate bumps both together. The containers workflow's delivery rewrites tink_agent_image when images/tink-agent-autoid builds. fleet_boot.kernel is the nixpkgs kernel package set nix/images/fleet-boot.nix boots, a series the owner moves by hand. menu_default is the iPXE menu item a netboot takes when nobody picks one, hookos or fleetboot, and spore's fleetd executor must run the same.",
+  "_comment": "Inputs of folly's generic HookOS UKI and its own fleet-boot UKIs, which .github/workflows/talos-images.yml signs. hookos is a tinkerbell/hook release and the sha512 of its hook_latest-lts-x86_64.tar.gz, as its checksum.txt lists it; Renovate bumps both together. The containers workflow's delivery rewrites tink_agent_image when images/tink-agent-autoid builds, and fleet_boot_alpine_image when images/fleet-boot-alpine builds; an all-zero digest is no image yet, and the release carries no Alpine UKI until one is pinned. fleet_boot.kernel is the nixpkgs kernel package set nix/images/fleet-boot.nix boots, a series the owner moves by hand. menu_default is the iPXE menu item a netboot takes when nobody picks one, hookos, fleetboot or alpine, and spore's fleetd executor must run the same: tinkerbell for hookos, boot for the other two.",
   "hookos": {
     "version": "v0.11.1",
     "sha512": "24bc6ccf225b5ce1033cdfa155d14c01da175a2e1c5268e5e64bda76fd94af7f72d841e0e0045fbf232486bc89f35251ba551aa810e30d4bebce0d5083bce61d"
@@ -8,5 +8,6 @@
   "fleet_boot": {
     "kernel": "linuxPackages_6_18"
   },
+  "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "menu_default": "hookos"
 }

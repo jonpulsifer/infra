@@ -195,7 +195,7 @@ in
         "boot"
       ];
       default = "tinkerbell";
-      description = "What runs a device's runs: tinkerbell, Tinkerbell's Workflows from HookOS; boot, fleet-boot (../images/fleet-boot.nix), with each run an attempt record in fleetd's state directory. The iPXE menu's default (clusters/folly/talos/netboot.json menu_default) must boot the same.";
+      description = "What runs a device's runs: tinkerbell, Tinkerbell's Workflows from HookOS; boot, fleet-boot from either of its images (../images/fleet-boot.nix, or the Alpine one images/fleet-boot-alpine), with each run an attempt record in fleetd's state directory. The iPXE menu's default (clusters/folly/talos/netboot.json menu_default) must boot the same: hookos under tinkerbell, fleetboot or alpine under boot.";
     };
     autoProvision = lib.mkOption {
       type = lib.types.bool;

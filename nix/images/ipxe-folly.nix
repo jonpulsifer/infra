@@ -2,9 +2,11 @@
 # script shows the menu below, from spore's bootstrap address. Its default boots HookOS as a
 # Hardware's script does (apps/fleetd), which attests and waits for a Workflow. The script asks Smee
 # (nix/services/tinkerbell.nix) for nothing: with Smee on, its per-MAC script boots the same HookOS,
-# and with it off the chain only cost each boot a failed request. The fleet-boot item boots the
+# and with it off the chain only cost each boot a failed request. The fleetboot item boots the
 # lab's own RAM boot image (./fleet-boot.nix) instead, which attests and runs what fleetd's boot
-# executor answers. menu_default in clusters/folly/talos/netboot.json picks the default item.
+# executor answers, and the alpine item its Alpine build (../../images/fleet-boot-alpine), the same
+# program on Alpine's kernel and busybox. menu_default in clusters/folly/talos/netboot.json picks
+# the default item.
 # .github/workflows/talos-images.yml signs iPXE with the Talos UKI key. The firmware verifies every
 # image iPXE loads.
 {
@@ -36,6 +38,7 @@ let
     menu folly netboot
     item hookos Boot HookOS, attest and wait for a Workflow
     item fleetboot Boot fleet-boot, attest and run what fleetd answers
+    item alpine Boot the Alpine fleet-boot, attest and run what fleetd answers
     item enroll Enroll the lab's Secure Boot keys (firmware in Setup Mode)
     item exit Back to the firmware
     choose --timeout 10000 --default ${menuDefault} target || set target ${menuDefault}
@@ -47,6 +50,10 @@ let
     :fleetboot
     imgfree
     chain --autofree ''${boot-url}/fleet-boot-amd64-secureboot-uki.efi ${fleetBoot.cmdline} || goto failed
+    exit 1
+    :alpine
+    imgfree
+    chain --autofree ''${boot-url}/fleet-boot-alpine-amd64-secureboot-uki.efi ${fleetBoot.bootCmdline} || goto failed
     exit 1
     :enroll
     sanboot --no-describe ''${boot-url}/metal-amd64-secureboot.iso || goto failed

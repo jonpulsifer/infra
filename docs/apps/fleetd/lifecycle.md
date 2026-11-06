@@ -79,9 +79,9 @@ If retirement fails at its netboot, no disk action runs. fleetd journals the BMC
 
 ## Executors
 
-`homelab.fleetd.executor` on spore, `FLEET_EXECUTOR`, picks what runs a run. It is `tinkerbell` by default: HookOS runs the Workflow's Template. Under `boot`, [fleet-boot](../../platform/nixos/fleet-boot.md) runs the same steps, and fleetd keeps the run as an attempt record in its state directory in place of a Workflow. The attempt takes the session of the machine's intake pass, and fleet-boot's requests over it are signed by that session's AK, so its reports never rest on a MAC. The rules on this page hold under both: one run per device, the overdue end, and a failure that waits for a new request.
+`homelab.fleetd.executor` on spore, `FLEET_EXECUTOR`, picks what runs a run. It is `tinkerbell` by default: HookOS runs the Workflow's Template. Under `boot`, [fleet-boot](../../platform/nixos/fleet-boot.md) runs the same steps, from its NixOS image or its Alpine one, and fleetd keeps the run as an attempt record in its state directory in place of a Workflow. The attempt takes the session of the machine's intake pass, and fleet-boot's requests over it are signed by that session's AK, so its reports never rest on a MAC. The rules on this page hold under both: one run per device, the overdue end, and a failure that waits for a new request.
 
-`menu_default` in `clusters/folly/talos/netboot.json` must boot the same image as the executor; the `fleet-boot-image` check fails otherwise. A device that cannot attest, such as a TPM 1.2 node, gets no session, so under `boot` its run never starts and ends as overdue.
+`menu_default` in `clusters/folly/talos/netboot.json` must boot the same executor's image, `hookos` under `tinkerbell` and `fleetboot` or `alpine` under `boot`; the `fleet-boot-image` check fails otherwise. A device that cannot attest, such as a TPM 1.2 node, gets no session, so under `boot` its run never starts and ends as overdue.
 
 ## Configuration access
 

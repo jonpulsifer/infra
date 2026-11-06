@@ -440,13 +440,20 @@ in
 
   # The lab's own RAM boot image must reach the fleetd, NTP server and syslog receiver HookOS does,
   # boot its own target rather than look for a root, and keep the kernel series netboot.json pins.
-  # The drvPath makes the image evaluate without building it.
+  # Its Alpine build takes the same words, less the unit, and netboot.json must pin that image by
+  # digest before the menu can default to it. The drvPath makes the image evaluate without
+  # building it.
   fleet-boot-image =
     let
       image = pkgs.callPackage ../images/fleet-boot.nix { };
       hookos = pkgs.callPackage ../images/hookos-folly.nix { };
       pins = lib.importJSON ../../clusters/folly/talos/netboot.json;
       words = lib.splitString " " image.cmdline;
+      bootWords = lib.splitString " " image.bootCmdline;
+      alpinePinned =
+        builtins.match "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:[0-9a-f]{64}" pins.fleet_boot_alpine_image
+        != null;
+      alpineEmpty = lib.hasSuffix "@sha256:${lib.concatStrings (lib.replicate 64 "0")}" pins.fleet_boot_alpine_image;
       shared = lib.filter (
         w:
         lib.any (k: lib.hasPrefix "${k}=" w) [
@@ -468,14 +475,25 @@ in
           !(units ? "fleet-boot.target" && units ? "fleet-boot.service")
         ) "the initrd defines no fleet-boot target or service"
         ++ lib.optional (lib.any (lib.hasPrefix "worker_id=") words) "fleet-boot's command line names a worker"
+        ++ lib.optional (lib.any (lib.hasPrefix "rd.systemd.unit=") bootWords) "the words every fleet-boot image shares name a systemd unit"
+        ++ lib.optional (
+          image.cmdline != "rd.systemd.unit=fleet-boot.target ${image.bootCmdline}"
+        ) "fleet-boot's command line is not its unit before the shared words"
+        ++ lib.optional (
+          !alpinePinned
+        ) "netboot.json's fleet_boot_alpine_image is not ghcr.io/jonpulsifer/fleet-boot-alpine by digest"
         ++ lib.optional (
           !(lib.elem pins.menu_default [
             "hookos"
             "fleetboot"
+            "alpine"
           ])
-        ) "netboot.json's menu_default is neither hookos nor fleetboot"
+        ) "netboot.json's menu_default is none of hookos, fleetboot and alpine"
+        ++ lib.optional (
+          pins.menu_default == "alpine" && alpineEmpty
+        ) "the iPXE menu boots alpine by default, but netboot.json pins no Alpine fleet-boot image yet"
         ++
-          lib.optional ((spore.homelab.fleetd.executor == "boot") != (pins.menu_default == "fleetboot"))
+          lib.optional ((spore.homelab.fleetd.executor == "boot") != (pins.menu_default != "hookos"))
             "spore's fleetd executor is ${spore.homelab.fleetd.executor} and the iPXE menu boots ${pins.menu_default} by default"
         ++ lib.optional (
           !(pkgs ? ${pins.fleet_boot.kernel})

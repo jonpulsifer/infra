@@ -1,0 +1,54 @@
+#!/bin/sh
+# PID 1 of the Alpine fleet-boot image. Mounts the kernel's file systems, loads
+# the driver of every device present by its modalias, brings each Ethernet NIC
+# up with a DHCP lease, and runs fleet-boot (apps/fleetd/cmd/fleet-boot), which
+# picks the boot NIC from the firmware's BootCurrent entry, sets the clock,
+# attests against fleetd and runs the boot fleetd answers. The command line is
+# the UKI's, and fleet-boot reads fleet_attest_url, fleet_ntp_server and
+# syslog_host from it. fleet-boot reboots the machine itself when a run ends;
+# when it returns, this boot does nothing more, as the NixOS initrd's does.
+
+export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+# The tree holds no console node, so the kernel opened none for init; from
+# here, what init and fleet-boot print reaches the console.
+exec </dev/console >/dev/console 2>&1
+mkdir -p /dev/pts
+mount -t devpts devpts /dev/pts
+mount -t tmpfs tmpfs /run
+mount -t tmpfs tmpfs /tmp
+echo "init: fleet-boot image, kernel $(uname -r)"
+
+# The TPM's drivers, efivarfs and the packet socket udhcpc sends from load
+# whether or not a modalias names them.
+modprobe -a -q tpm_tis tpm_crb efivarfs af_packet || true
+mount -t efivarfs efivarfs /sys/firmware/efi/efivars || echo "init: no EFI variable store"
+
+# coldplug loads the driver of each device the kernel has found. The second
+# pass takes the devices the first pass's drivers exposed: USB hubs and
+# storage, the disks behind a controller.
+coldplug() {
+  find /sys/devices -name modalias -exec cat {} + 2>/dev/null | sort -u | xargs -r modprobe -a -b -q 2>/dev/null || true
+}
+coldplug
+sleep 1
+coldplug
+
+# Each Ethernet NIC asks for a lease; the first answer holds the default route
+# fleet-boot waits for, and busybox's default script writes resolv.conf.
+# udhcpc keeps trying in the background after its first tries.
+for dev in /sys/class/net/*; do
+  name=${dev##*/}
+  [ "$name" = lo ] && continue
+  [ "$(cat "$dev/type")" = 1 ] || continue
+  ip link set "$name" up
+  udhcpc -i "$name" -b -t 5 -T 3 -A 10 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
+done
+
+fleet-boot
+echo "init: fleet-boot returned $?; this boot does nothing more"
+while :; do sleep 3600; done
