@@ -68,6 +68,8 @@ in
       wants = [ "network-online.target" ];
       path = [
         config.services.openbao.package
+        # The CLI's token helper runs sh before a login, even with no token on disk.
+        pkgs.bash
         pkgs.coreutils
         pkgs.rclone
       ];
