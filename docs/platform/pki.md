@@ -87,14 +87,14 @@ A key never leaves its card. Its PIN policy is once and its touch policy is neve
 | `ATTEST_CA_PKCS11_PIN_FILE` | The PIN, `homelab.yubikey.pinFile` |
 | `ATTEST_CA_CERT` | A PEM file whose first certificate is the CA's |
 
-Until `scripts/pki/devid-ca.sh` or the YubiKey runbook commits one, `terraform/pki/certs/` holds no DevID CA. [Make a YubiKey a DevID CA](../runbooks/set-up-a-devid-ca-yubikey.md) makes one.
+[Make a YubiKey a DevID CA](../runbooks/set-up-a-devid-ca-yubikey.md) makes a DevID CA and commits it under `terraform/pki/certs/`.
 
 ## Rules
 
 - Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
 - Read a DevID CSR before `mise run devid:yubikey:sign`. The issuing CA makes a CA of whatever request it is given.
 - After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
-- After Atlantis applies or replaces the DevID CA, run `scripts/pki/devid-ca.sh` and commit what it writes. A new CA leaves every LDevID untrusted until its node attests again.
+- Sign a DevID CA's request again only with the same key. A new key leaves every LDevID it issued untrusted until its node attests again.
 - For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
 - On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one, and `--kubernetes=false` limits the rotation to the Talos API CA, which is all a talosconfig needs.
 - On folly, rotate the Kubernetes CA only with a plan for the workers [fleetd](../apps/fleetd.md) installed, `fleet_workers` in `clusters/folly/talos/talos.tf`. Talos deletes a kubelet certificate that no accepted CA signed, and their kubelets then bootstrap with the token the Talos root gives them, which no Secret holds, so they stay off the cluster until [they install again](#rejoin-fleetds-workers-after-a-ca-rotation).
