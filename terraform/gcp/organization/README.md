@@ -26,14 +26,14 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | Name | Version |
 | ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.8.3 |
-| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 8.3.0 |
-| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 8.3.0 |
+| <a name="requirement_google"></a> [google](#requirement\_google) | ~> 8.9.0 |
+| <a name="requirement_google-beta"></a> [google-beta](#requirement\_google-beta) | ~> 8.9.0 |
 
 ## Providers
 
 | Name | Version |
 | ---- | ------- |
-| <a name="provider_google"></a> [google](#provider\_google) | 8.3.0 |
+| <a name="provider_google"></a> [google](#provider\_google) | 8.9.0 |
 
 ## Modules
 
@@ -58,6 +58,7 @@ Atlantis plans this root on a pull request that changes it. Comment `atlantis ap
 | [google_folder.dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.hidden](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
 | [google_folder.production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/folder) | resource |
+| [google_org_policy_custom_constraint.firewall_ssh_rdp_ingress](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_custom_constraint) | resource |
 | [google_org_policy_policy.compute_setNewProjectDefaultToZonalDNSOnly](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_dev](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |
 | [google_org_policy_policy.gcp_restrictCmekCryptoKeyProjects_production](https://registry.terraform.io/providers/hashicorp/google/latest/docs/resources/org_policy_policy) | resource |

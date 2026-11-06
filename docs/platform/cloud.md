@@ -42,6 +42,7 @@ The Workspace root declares the `pulsifer.ca` domain, its alias `pulsifer.dev`, 
 
 - Create a project in `terraform/gcp/organization/projects.tf`, or it has no folder, billing account or deletion lien. Then give it a root.
 - The organization blocks new service account keys. Give a workload a federated identity.
+- `homelab-ng` enforces `custom.firewallSshRdpIngressFromIapOnly`, declared in `terraform/gcp/organization/custom-constraints.tf`: an ingress firewall rule that allows SSH or RDP sources only from IAP's TCP forwarding range or a private range. Reach a VM with `gcloud compute ssh --tunnel-through-iap`.
 - Keep a new App zone in step with the external-dns and cert-manager lists in [Ingress and DNS](network/ingress-and-dns.md), or its names do not resolve.
 
 ## Where it lives

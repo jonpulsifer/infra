@@ -167,3 +167,15 @@ resource "google_org_policy_policy" "allowed_locations" {
     }
   }
 }
+
+# SSH and RDP ingress only from IAP or a private range. The constraint is declared in
+# terraform/gcp/organization/custom-constraints.tf and must exist before this applies.
+resource "google_org_policy_policy" "firewall_ssh_rdp_ingress" {
+  name   = "projects/${local.project}/policies/custom.firewallSshRdpIngressFromIapOnly"
+  parent = "projects/${local.project}"
+  spec {
+    rules {
+      enforce = "TRUE"
+    }
+  }
+}
