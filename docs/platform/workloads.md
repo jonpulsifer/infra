@@ -46,7 +46,6 @@ The render check reports errors. It does not print the objects.
 | Monitoring | both | [Observability](observability.md) |
 | Atlantis | offsite | [OpenTofu and Atlantis](opentofu.md) |
 | GitHub Actions runners | both | [Build and release](build-and-release.md) |
-| OpenBao | folly | [Secrets](secrets.md) |
 | Postgres databases | both | [Operate Postgres](../runbooks/operate-postgres.md) |
 
 Argo CD runs on folly from `clusters/folly/apps/argo/`. Git declares no Argo `Application`. The kthx engine creates Applications in `argo` for a folly `kubernetes` Target that delivers through Argo ([Built apps](../apps/kthx/built-apps.md#targets)).

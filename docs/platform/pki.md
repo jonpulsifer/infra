@@ -38,7 +38,6 @@ Both clusters run the self-signed Kubernetes CA from their secrets bundle, so no
 
 | Workload | Cluster | Gets |
 | --- | --- | --- |
-| OpenBao | folly | The KMS key that unseals it |
 | ESO store `gcp-secret-manager` | Both | Secret Manager in `bluenose` |
 | Prowler | offsite | Read access to the GCP organization |
 | kthx | offsite | See [Ownership and security](../apps/kthx/security.md#federation) |

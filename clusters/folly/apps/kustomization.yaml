@@ -26,7 +26,6 @@ resources:
   - ../../base/apps/reloader
   # - satisfactory
   - tronbyt
-  - vault
 patches:
   - target:
       group: helm.toolkit.fluxcd.io

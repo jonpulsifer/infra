@@ -47,8 +47,6 @@ What the server holds is declared in git. `openbao-config.service` (`nix/service
 
 The API is open to the Anchor network, folly's nodes and pods, and the tailnet. Prometheus on folly scrapes `/v1/sys/metrics` with no token, and `clusters/folly/monitoring/forge.yaml` alerts when the unit is down or the server is sealed.
 
-A second OpenBao runs on folly with no consumers. Flux deploys the HelmRelease `vault` from `clusters/folly/apps/vault/`, one pod with Raft storage and a UI at `https://vault.lolwtf.ca/ui/`. It unseals itself with the GCP KMS key `openbao` through workload identity, so a restarted pod stays sealed while `oidc.lolwtf.ca` or the folly token signer fails. Velero copies its volume each night, best effort. It goes once forge's server has taken its role.
-
 ## Rules
 
 - Keep a recovery copy of each host secret in a `homelab` item titled `<host> <thing>`. If the operator key and the host key are lost, SOPS cannot decrypt the file.
@@ -63,7 +61,6 @@ A second OpenBao runs on folly with no consumers. Flux deploys the HelmRelease `
 - `clusters/base/platform/`: ESO, 1Password Connect and the stores
 - `nix/services/openbao.nix`, `nix/services/yubikey-piv.nix` and `scripts/openbao-yubikey.sh`: OpenBao on forge and its unseal key
 - `nix/services/openbao-config.nix`, `nix/services/openbao/`, `scripts/openbao-config-token.sh` and `scripts/openbao-approle-secret.sh`: the PKI and the AppRoles inside it, the token that puts them there, and a service's secret ID
-- `terraform/gcp/projects/homelab-ng/kms.tf`: the unseal key of OpenBao on folly
 
 ## Related
 
