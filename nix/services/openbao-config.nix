@@ -1,8 +1,7 @@
 # The PKI inside OpenBao, as code: a oneshot that puts the mounts, roles and policies that git
 # declares into the server after it unseals, and again each day, the way spire-server-entries
-# keeps the SPIRE entries. The issuing CA's key is born in the server; its CSR waits in
-# /var/lib/openbao-config for the root ceremony, and the signed certificate comes back through
-# git. docs/runbooks/sign-the-issuing-ca.md has the steps.
+# keeps the SPIRE entries. The root and the issuing CA are born in the server and never leave it.
+# docs/runbooks/configure-openbao-pki.md has the steps.
 {
   config,
   lib,
@@ -12,13 +11,30 @@
 let
   cfg = config.homelab.openbao;
   pki = cfg.pki;
-  issuingCertPath = ../../terraform/pki/certs/folly-issuing-ca.pem;
   tokenSecret = "openbao/config-token";
   service = "openbao-config";
 in
 {
   options.homelab.openbao.pki = {
     enable = lib.mkEnableOption "the PKI that git declares inside this OpenBao server";
+
+    rootMount = lib.mkOption {
+      type = lib.types.str;
+      default = "pki/root";
+      description = "The PKI mount of the FML root, which signs the issuing CA and nothing else.";
+    };
+
+    rootCommonName = lib.mkOption {
+      type = lib.types.str;
+      default = "FML Root CA";
+      description = "The CN of the root.";
+    };
+
+    rootTTL = lib.mkOption {
+      type = lib.types.str;
+      default = "175320h";
+      description = "The root's term, and its mount's longest certificate: twenty years.";
+    };
 
     mount = lib.mkOption {
       type = lib.types.str;
@@ -29,20 +45,13 @@ in
     issuingCommonName = lib.mkOption {
       type = lib.types.str;
       default = "FML folly Issuing CA";
-      description = "The CN of the issuing CA, under the FML root.";
+      description = "The CN of the issuing CA, under the root.";
     };
 
-    issuingCert = lib.mkOption {
-      type = lib.types.nullOr lib.types.path;
-      default = if builtins.pathExists issuingCertPath then issuingCertPath else null;
-      defaultText = "terraform/pki/certs/folly-issuing-ca.pem when it exists";
-      description = "The issuing CA's certificate, signed by the root. Null while the ceremony has not signed it.";
-    };
-
-    maxLeaseTTL = lib.mkOption {
+    issuingTTL = lib.mkOption {
       type = lib.types.str;
       default = "43830h";
-      description = "The mount's longest certificate: five years, the DevID CA's term. Each role caps its own.";
+      description = "The issuing CA's term, and its mount's longest certificate: five years, the DevID CA's term. Each role caps its own.";
     };
   };
 
@@ -65,14 +74,14 @@ in
       ];
       environment = {
         BAO_ADDR = config.environment.variables.BAO_ADDR;
+        ROOT_MOUNT = pki.rootMount;
+        ROOT_CN = pki.rootCommonName;
+        ROOT_TTL = pki.rootTTL;
         MOUNT = pki.mount;
-        STATE_DIR = "/var/lib/${service}";
         ISSUING_CN = pki.issuingCommonName;
+        ISSUING_TTL = pki.issuingTTL;
         ORG = "Folly Mountain Laboratories";
-        MAX_TTL = pki.maxLeaseTTL;
-        # Interpolation copies each file into the store; toString would name the checkout.
-        ISSUING_CERT = if pki.issuingCert == null then "" else "${pki.issuingCert}";
-        ROOT_CERT = "${../../terraform/pki/certs/fml-root.pem}";
+        # Interpolation copies each directory into the store; toString would name the checkout.
         POLICY_DIR = "${./openbao/policies}";
         CONFIG_POLICY = "${./openbao/config-policy.hcl}";
       };
@@ -80,8 +89,6 @@ in
         # Not RemainAfterExit, so the timer's start runs it again.
         Type = "oneshot";
         DynamicUser = true;
-        # A DynamicUser's state lives under /var/lib/private, so the owner reads the CSR with sudo.
-        StateDirectory = service;
         LoadCredential = [ "token:${config.sops.secrets.${tokenSecret}.path}" ];
         UMask = "0022";
       };

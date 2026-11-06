@@ -2,7 +2,7 @@
 # Gives openbao-config.service on an anchor its token: with the root token from 1Password
 # 'openbao-forge', writes the openbao-config policy and makes a periodic orphan token with it on
 # the anchor, and stores the token in the host's SOPS file as openbao/config-token. Nothing secret
-# reaches argv or stdout. docs/runbooks/sign-the-issuing-ca.md.
+# reaches argv or stdout. docs/runbooks/configure-openbao-pki.md.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
