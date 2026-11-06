@@ -23,10 +23,11 @@ forge is the lab's native arm64 build host, a Raspberry Pi 5 on [the Anchor netw
 - harmonia, a Nix binary cache behind nginx on port 80, which the firewall blocks. No host trusts its key.
 - A node of folly's [Garage cluster](../platform/backups.md#garage-cluster), with data in `/var/lib/garage` (`nix/services/garage.nix`)
 - [OpenBao](../platform/secrets.md#openbao), the lab's online CA and secrets server, with Raft storage in `/var/lib/openbao` and its unseal key in the YubiKey 5C in its USB port (`nix/services/openbao.nix`, `nix/services/yubikey-piv.nix`). `openbao-config.service` puts the PKI that git declares into it (`nix/services/openbao-config.nix`)
+- An NFS export of `/srv/slurm` to folly's nodes and pods, the shared scratch of [Slinky](../apps/slinky.md)'s Slurm cluster (`nix/services/slurm-nfs.nix`). Demo data only, and nothing backs it up.
 
 See [Build host and cache](../platform/nixos/build-host-and-cache.md).
 
-`clusters/folly/monitoring/forge.yaml` declares the alerts `ForgeCoreDnsDown`, `ForgeChronyDown`, `ForgeOpenBaoDown` and `ForgeOpenBaoSealed`.
+`clusters/folly/monitoring/forge.yaml` declares the alerts `ForgeCoreDnsDown`, `ForgeChronyDown`, `ForgeOpenBaoDown`, `ForgeOpenBaoSealed` and `ForgeNfsServerDown`.
 
 ## Reach
 
