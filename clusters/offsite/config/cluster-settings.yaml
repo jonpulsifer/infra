@@ -11,6 +11,7 @@ data:
   # Garage in this cluster, on oldschool's host network, is the S3 endpoint for
   # backups. Its push to GCS runs nightly.
   GARAGE_S3_ENDPOINT: http://oldschool.lolwtf.ca:3900
+  BACKUP_PUSH_BUCKETS: "velero cnpg etcd"
   BACKUP_PUSH_SCHEDULE: "0 5 * * *"
 
   # offsite's nodes run Talos: the kubelet's own root, and the `data` user

@@ -30,7 +30,10 @@ let
   '';
 in
 {
-  imports = [ ./openbao-config.nix ];
+  imports = [
+    ./openbao-config.nix
+    ./openbao-snapshot.nix
+  ];
 
   options.homelab.openbao = {
     enable = lib.mkEnableOption "OpenBao on this anchor, sealed by its YubiKey";

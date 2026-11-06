@@ -331,6 +331,10 @@ run = "bash scripts/openbao-config-token.sh"
 description = "Give a service on a host its OpenBao AppRole secret ID: made on forge with the root token from 1Password, stored in the host's SOPS file as openbao/<role>-approle (args: <role> <host>)"
 run = "bash scripts/openbao-approle-secret.sh"
 
+[tasks."garage:bucket"]
+description = "Add a bucket with a key of its own to folly's Garage: key escrowed in 1Password garage-folly and stored in the host's SOPS file, bucket created and granted on the anchor (args: <name> <host>)"
+run = "bash scripts/garage-bucket.sh"
+
 [tasks."pki:sign-ca"]
 description = "Sign a CA's certificate request with the FML root key, pathLen 1, five years (args: -root-key <pem> -csr <csr> -out <pem>)"
 run = "go -C apps/fml-pki run . sign-ca"
