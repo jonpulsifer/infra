@@ -3,7 +3,9 @@
 # already there. nix/services/openbao-config.nix runs it as openbao-config.service with a token
 # credential, after the server unseals, and daily. Environment: BAO_ADDR, ROOT_MOUNT, ROOT_CN,
 # ROOT_TTL, MOUNT, ISSUING_CN, ISSUING_TTL, ORG, POLICY_DIR (<name>.hcl per policy), CONFIG_POLICY,
-# APPROLES (space-separated names; each is an AppRole bound to the policy of its name).
+# APPROLES (space-separated names; each is an AppRole bound to the policy of its name), K8S_HOST,
+# K8S_CA, K8S_AUDIENCE (folly's API server, its CA and its ServiceAccount token audience, for
+# cert-manager's login).
 set -euo pipefail
 
 BAO_TOKEN="$(cat "$CREDENTIALS_DIRECTORY/token")"
@@ -124,5 +126,16 @@ for role in $APPROLES; do
     token_ttl=1h token_max_ttl=24h secret_id_ttl=0 secret_id_num_uses=0 >/dev/null
   bao write "auth/approle/role/$role/role-id" role_id="$role" >/dev/null
 done
+
+# cert-manager on folly logs in with a ServiceAccount token, which the server checks with folly's
+# TokenReview API using that same token, so the token's audience is the API server's own.
+echo "==> kubernetes auth"
+if ! bao auth list -format=json | jq -e 'has("kubernetes/")' >/dev/null; then
+  bao auth enable kubernetes
+fi
+bao write auth/kubernetes/config kubernetes_host="$K8S_HOST" kubernetes_ca_cert=@"$K8S_CA" >/dev/null
+bao write auth/kubernetes/role/cert-manager \
+  bound_service_account_names=cert-manager-openbao bound_service_account_namespaces=cert-manager \
+  audience="$K8S_AUDIENCE" token_policies=cert-manager token_ttl=1h token_max_ttl=1h >/dev/null
 
 echo "ok"

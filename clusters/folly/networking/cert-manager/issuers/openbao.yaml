@@ -1,0 +1,67 @@
+# The lab's own CA for internal names: OpenBao on forge signs from the issuing CA's services role.
+# cert-manager logs in with a token of the ServiceAccount below, whose audience is folly's own,
+# so OpenBao reviews the token with folly's TokenReview API as that ServiceAccount.
+# nix/services/openbao/configure.sh declares the role cert-manager and its policy.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-manager-openbao
+  namespace: cert-manager
+---
+# cert-manager mints the tokens.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-manager-openbao-token
+  namespace: cert-manager
+rules:
+  - apiGroups: [""]
+    resources: ["serviceaccounts/token"]
+    resourceNames: ["cert-manager-openbao"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-manager-openbao-token
+  namespace: cert-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-manager-openbao-token
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager
+    namespace: cert-manager
+---
+# OpenBao reviews the login token with the login token itself.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-manager-openbao-auth-delegator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: cert-manager-openbao
+    namespace: cert-manager
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: openbao
+spec:
+  vault:
+    server: https://forge.lolwtf.ca:8200
+    path: pki/folly/sign/services
+    auth:
+      kubernetes:
+        role: cert-manager
+        mountPath: /v1/auth/kubernetes
+        serviceAccountRef:
+          name: cert-manager-openbao
+          audiences:
+            - https://oidc.lolwtf.ca/folly
