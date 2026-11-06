@@ -1,6 +1,6 @@
 # pki
 
-The public half of the FML PKI, and the OIDC discovery documents of both clusters. No OpenTofu resource lives here any more: the root and the issuing CA are inside OpenBao on forge, the DevID CAs are on YubiKeys, and the ServiceAccount token signers are keys in the Talos secrets bundles. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
+The public half of the FML PKI, and the OIDC discovery documents of both clusters. It is not an OpenTofu root: the root and the issuing CA are inside OpenBao on forge, the DevID CAs are on YubiKeys, and the ServiceAccount token signers are keys in the Talos secrets bundles. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
 
 - `certs/` holds the public certificates. `fml-root.pem` and `folly-issuing-ca.pem` are the root and the issuing CA that OpenBao holds. `folly-devid-ca-<name>.pem` is one issuing DevID CA alone, the file SPIRE's `devid.caChains` lists. `folly-devid-ca-<name>-chain.pem` is that CA up to the FML root, for fleetd. `folly-devid-ca.pem` bundles every issuing DevID CA. `<cluster>-sa-signer.pub` is the public key of that cluster's ServiceAccount token signer, which the JWKS carries.
 - `csr/` holds the CSR of each hardware DevID CA, whose key a YubiKey on an anchor generated. `mise run devid:yubikey:sign <host>` has OpenBao sign it into `certs/folly-devid-ca-<host>.pem`.

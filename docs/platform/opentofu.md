@@ -29,7 +29,6 @@ A comment of `atlantis apply` applies the plans, and Atlantis then merges the PR
 - If a PR changes only a file that a root reads with `file()`, such as `clients.yaml`, a topology file or `flux-values.yaml`, comment `atlantis plan -d <root>`, then `atlantis apply`, before you merge. Autoplan sees only files that match `ATLANTIS_AUTOPLAN_FILE_LIST`, so the change is otherwise never applied. The exception is the two `clusters/<site>/talos/` roots: `atlantis.yaml` at the repo root lists the files each one reads, such as `kube-login.json` and `nodes.yaml`, and a change to one of them plans the root. A root that gains a `file()` input is added there.
 - Add every GitHub identity that opens PRs to `atlantis_users` in `only-me.rego`. `atlantis/plan` is a required check on every PR, so a PR from an unlisted GitHub identity is blocked.
 - Read network facts through `terraform/modules/cluster-topology`, which reads the [topology files](../reference/topology.md).
-- Keep `terraform/pki` on OpenTofu. Its `opentofu/tls` provider is only on the OpenTofu registry.
 - A plan of a `clusters/<site>/talos/` root touches no node. An apply that changes the installer image reboots the nodes, the control plane first, and one that changes `kubernetes_version` upgrades the Kubernetes components, so read the plan before you comment `atlantis apply`.
 
 ## Where it lives

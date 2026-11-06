@@ -8,6 +8,10 @@
 version: 3
 autodiscover:
   mode: enabled
+  # terraform/pki holds certificates and OIDC documents, not a root; its last .tf files left
+  # with an emptied state, and Atlantis must not plan the directory again.
+  ignore_paths:
+    - terraform/pki
 projects:
   - dir: clusters/folly/talos
     autoplan:
