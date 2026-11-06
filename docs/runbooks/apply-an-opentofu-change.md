@@ -116,7 +116,6 @@ Use this runbook to change the OpenTofu code in `terraform/`, `clusters/<site>/b
 | Atlantis prints `Automerging failed` and `Required status check "<check>" is in progress` or `is failing`. | A required check did not pass before the apply completed. | When the checks pass, merge the pull request. |
 | Atlantis prints `Automerging failed` and `405 Pull Request has merge conflicts`. | The branch conflicts with `main`. | Rebase the branch on `main`. Push the branch. Comment `atlantis plan -d <root>`. Comment `atlantis apply`. |
 | The pull request merged, but the change is not live. | Atlantis did not plan the root. | Open a new pull request. Comment `atlantis plan -d <root>`. Comment `atlantis apply`. |
-| `init` cannot install an `opentofu/*` provider, such as the `opentofu/tls` provider of `terraform/pki`. | You ran `terraform`. | Run `tofu`. |
 | The state of a root is not at the path of the root in the bucket. | The `prefix` in the `backend` block of the root differs from its path. | Use the `prefix` from the `backend` block. |
 | The plan or apply fails with a lock error. | An earlier Atlantis pod was killed mid-command and left the state lock behind. | Follow [Release a stale state lock](release-a-stale-state-lock.md). |
 
