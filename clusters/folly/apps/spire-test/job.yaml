@@ -28,9 +28,8 @@ metadata:
     # A Job's template is immutable, so Flux replaces the Job to change it.
     kustomize.toolkit.fluxcd.io/force: enabled
 spec:
-  # Suspended until a node carries lolwtf.ca/tpm=true and its agent attests;
-  # a Pending pod would raise KubeJobNotCompleted. Remove the line to run it.
-  suspend: true
+  # Set suspend: true while no node carries lolwtf.ca/tpm=true with an
+  # attested agent; a Pending pod would raise KubeJobNotCompleted.
   backoffLimit: 6
   template:
     metadata:
