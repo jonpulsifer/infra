@@ -68,13 +68,15 @@ in
       wants = [ "network-online.target" ];
       path = [
         config.services.openbao.package
-        # The CLI's token helper runs sh before a login, even with no token on disk.
+        # The CLI's token helper runs sh to find ~/.vault-token before a login, even with no token.
         pkgs.bash
         pkgs.coreutils
         pkgs.rclone
       ];
       environment = {
         BAO_ADDR = config.environment.variables.BAO_ADDR;
+        # A DynamicUser has no home; the token helper needs one to look in.
+        HOME = "/run/${service}";
         RCLONE_CONFIG_GARAGE_TYPE = "s3";
         RCLONE_CONFIG_GARAGE_PROVIDER = "Other";
         RCLONE_CONFIG_GARAGE_ENDPOINT = backups.s3Endpoint site;
