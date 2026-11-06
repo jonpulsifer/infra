@@ -6,9 +6,15 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"math/big"
 	"path/filepath"
 	"time"
 )
+
+// serial is a random 128-bit certificate serial number.
+func serial() (*big.Int, error) {
+	return rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+}
 
 // issuingPrefix names the issuing CA that OpenBao holds, folly-issuing-ca.pem,
 // signed by the root directly: the intermediate's pathLen 1 leaves no room for

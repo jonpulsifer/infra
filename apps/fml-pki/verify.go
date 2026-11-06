@@ -138,47 +138,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 		return fmt.Errorf("cannot load trust anchors: %w", err)
 	}
 
-	matches, err := filepath.Glob(filepath.Join(certsDir, "*-ca.pem"))
-	if err != nil {
-		return err
-	}
-	var clusterCAs []string
-	for _, m := range matches {
-		base := filepath.Base(m)
-		if !strings.HasPrefix(base, "fml-") && !strings.HasPrefix(base, devidPrefix) && !strings.HasPrefix(base, issuingPrefix) {
-			clusterCAs = append(clusterCAs, m)
-		}
-	}
-	sort.Strings(clusterCAs)
-
 	problems := checkIssuingCA(issuing, root, out)
-	for _, path := range clusterCAs {
-		base := filepath.Base(path)
-		cluster := strings.TrimSuffix(base, "-ca.pem")
-		clusterCA, err := readCert(path)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", cluster, err))
-			continue
-		}
-		chain := []named{
-			{clusterCA, base},
-			{issuing, issuingPrefix + ".pem"},
-			{root, "fml-root.pem"},
-		}
-		fmt.Fprintf(out, "==> %s\n", cluster)
-		for _, n := range chain {
-			fmt.Fprintf(out, "      %s\n", describe(n.cert, n.name))
-		}
-		problems = append(problems, checkChain(cluster, chain)...)
-
-		chainPath := filepath.Join(certsDir, cluster+"-ca-chain.pem")
-		if _, statErr := os.Stat(chainPath); statErr == nil {
-			problems = append(problems, checkChainFile(cluster, chainPath, clusterCA)...)
-		} else {
-			fmt.Fprintf(out, "      %s-ca-chain.pem absent — pods still receive the cluster CA alone\n", cluster)
-		}
-	}
-
 	problems = append(problems, checkDevIDCAs(certsDir, issuing, root, out)...)
 
 	if len(problems) > 0 {

@@ -38,14 +38,15 @@ func b64url(b []byte) string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-func jwkFromCert(path string) (jwk, error) {
-	cert, err := readCert(path)
+// jwkFromFile reads a signer's public key, or the certificate that carries it.
+func jwkFromFile(path string) (jwk, error) {
+	key, err := readPublicKey(path)
 	if err != nil {
 		return jwk{}, err
 	}
-	pub, ok := cert.PublicKey.(*rsa.PublicKey)
+	pub, ok := key.(*rsa.PublicKey)
 	if !ok {
-		return jwk{}, fmt.Errorf("%s: signer key is %s, JWKS needs RSA", path, keyAlgorithm(cert.PublicKey))
+		return jwk{}, fmt.Errorf("%s: signer key is %s, JWKS needs RSA", path, keyAlgorithm(key))
 	}
 	// kid must be base64url(SHA256(DER SPKI)), as k8s.io/kubernetes pkg/serviceaccount
 	// keyIDFromPublicKey derives it, or apiserver-minted tokens will not resolve.
@@ -88,15 +89,15 @@ func writeJSON(path string, v any) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-func runJWKS(issuer, outDir string, certs []string, errOut io.Writer) error {
+func runJWKS(issuer, outDir string, keys []string, errOut io.Writer) error {
 	issuer = strings.TrimRight(issuer, "/")
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
 	}
 	doc := jwksDoc{}
 	var kids []string
-	for _, c := range certs {
-		k, err := jwkFromCert(c)
+	for _, c := range keys {
+		k, err := jwkFromFile(c)
 		if err != nil {
 			return err
 		}
