@@ -25,6 +25,9 @@ in
   homelab.openbao.enable = true;
   # The PKI that git declares, with the token `mise run openbao:config-token forge` stores.
   homelab.openbao.pki.enable = true;
+  # A nightly Raft snapshot into Garage, with the AppRole secret `mise run openbao:approle-secret
+  # snapshot forge` stores and the bucket key `mise run garage:bucket openbao forge` stores.
+  homelab.openbao.snapshot.enable = true;
 
   services.buildHost = {
     enable = true;
