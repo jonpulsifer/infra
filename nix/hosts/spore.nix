@@ -110,7 +110,6 @@ in
       inherit workloads;
     };
     devid.caChains = [
-      ../../terraform/pki/certs/folly-devid-ca-software.pem
       ../../terraform/pki/certs/folly-devid-ca-spore.pem
       ../../terraform/pki/certs/folly-devid-ca-capsule.pem
     ];
