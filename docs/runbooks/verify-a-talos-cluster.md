@@ -103,13 +103,13 @@ Use this runbook after [Rebuild a cluster on Talos](rebuild-a-cluster-on-talos.m
 
    Result: A plan, with no `Unauthorized`.
 
-3. On folly, make sure that OpenBao unsealed with its KMS key.
+3. Make sure that a workload reached GCP with a federated token.
 
    ```bash
-   kubectl --context folly -n vault exec vault-openbao-0 -- bao status
+   kubectl --context <site> get clustersecretstore gcp-secret-manager
    ```
 
-   Result: `Sealed false`.
+   Result: `READY` is `True`.
 
 4. Make sure that a pod verifies the API server with its own CA, that the CA is the pin, and that it is the only client CA.
 

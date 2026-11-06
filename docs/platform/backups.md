@@ -61,7 +61,7 @@ Velero runs in opt-in mode: `defaultVolumesToFsBackup` is `false`, so it copies 
 
 | Answer | Claims | Why |
 | --- | --- | --- |
-| Velero | `jellyfin-config`, `prom-stack-grafana`, `smiirl-data`, `tronbyt-data`, `data-vault-openbao-0` | The state is not in the repo and cannot be rebuilt. Grafana keeps what the UI adds, such as public dashboard links; its dashboards and data sources come from the repo. |
+| Velero | `jellyfin-config`, `prom-stack-grafana`, `smiirl-data`, `tronbyt-data` | The state is not in the repo and cannot be rebuilt. Grafana keeps what the UI adds, such as public dashboard links; its dashboards and data sources come from the repo. |
 | CloudNativePG | `tally-db-*`, `tronbyt-*` | The barman-cloud plugin archives base backups and WAL, so Velero skips them. |
 | Excluded | Prometheus, VictoriaLogs and Tempo volumes | Metrics, logs and traces history. Losing it costs history only. Rules, alerts and dashboards come from the repo. |
 | Excluded | `valkey-applol-cache-0-0-data` | A cache that the kthx engine owns. |
