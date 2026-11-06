@@ -56,6 +56,11 @@ in
   # Machine. "rufio" switches back (nix/services/fleetd.nix).
   homelab.fleetd.bmc = "native";
 
+  # fleet-boot runs each run from the image the iPXE menu boots by default (menu_default in
+  # clusters/folly/talos/netboot.json, the Alpine one). "tinkerbell" switches back to HookOS
+  # and its Workflows, with menu_default at hookos.
+  homelab.fleetd.executor = "boot";
+
   # UniFi's DHCP names the iPXE and the iPXE's menu boots HookOS, so Smee's proxy offer, which
   # riptide's firmware raced against UniFi's, and its per-MAC script add nothing a node can see.
   # rsyslog takes over HookOS's syslog. Smee stays in tinkerbell.nix for the switch back.
