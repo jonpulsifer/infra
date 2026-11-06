@@ -1,0 +1,11 @@
+[
+  {
+    "image": "spiffe-adc-test",
+    "context": "images/spiffe-adc-test",
+    "file": "images/spiffe-adc-test/Dockerfile",
+    "platforms": "linux/amd64",
+    "watch": [
+      "images/spiffe-adc-test"
+    ]
+  }
+]

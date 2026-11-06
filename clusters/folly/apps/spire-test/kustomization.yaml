@@ -7,3 +7,4 @@ components:
 resources:
   - namespace.yaml
   - job.yaml
+  - clients.yaml

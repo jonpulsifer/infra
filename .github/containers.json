@@ -16,6 +16,7 @@
     "smiirl",
     "spire-agent-tpm",
     "spiffe-adc",
+    "spiffe-adc-test",
     "kthx-engine",
     "kthx-engine-verifier",
     "gcsfuse",
@@ -77,7 +78,11 @@
       "clusters/folly/apps/spire/daemonset.yaml"
     ],
     "spiffe-adc": [
-      "clusters/folly/apps/spire-test/job.yaml"
+      "clusters/folly/apps/spire-test/job.yaml",
+      "clusters/folly/apps/spire-test/clients.yaml"
+    ],
+    "spiffe-adc-test": [
+      "clusters/folly/apps/spire-test/clients.yaml"
     ],
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",

@@ -30,6 +30,7 @@ on:
       - 'apps/smiirl/**'
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/spiffe-adc/**'
+      - 'images/spiffe-adc-test/go/**'
       # fleetd's tests read these.
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
@@ -53,6 +54,7 @@ on:
       - 'apps/smiirl/**'
       - 'images/spire-agent-tpm/devid-init/**'
       - 'images/spiffe-adc/**'
+      - 'images/spiffe-adc-test/go/**'
       # fleetd's tests read these.
       - 'clusters/folly/talos/secureboot/**'
       - 'nix/services/spire/roots/**'
@@ -87,6 +89,7 @@ jobs:
           - apps/smiirl
           - images/spire-agent-tpm/devid-init
           - images/spiffe-adc
+          - images/spiffe-adc-test/go
           - packages/pkcs11signer
     defaults:
       run:
