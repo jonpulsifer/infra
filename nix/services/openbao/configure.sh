@@ -2,7 +2,8 @@
 # Puts the PKI that git declares into the OpenBao server on this host, and does nothing when it is
 # already there. nix/services/openbao-config.nix runs it as openbao-config.service with a token
 # credential, after the server unseals, and daily. Environment: BAO_ADDR, ROOT_MOUNT, ROOT_CN,
-# ROOT_TTL, MOUNT, ISSUING_CN, ISSUING_TTL, ORG, POLICY_DIR (<name>.hcl per policy), CONFIG_POLICY.
+# ROOT_TTL, MOUNT, ISSUING_CN, ISSUING_TTL, ORG, POLICY_DIR (<name>.hcl per policy), CONFIG_POLICY,
+# APPROLES (space-separated names; each is an AppRole bound to the policy of its name).
 set -euo pipefail
 
 BAO_TOKEN="$(cat "$CREDENTIALS_DIRECTORY/token")"
@@ -111,5 +112,17 @@ bao write "$MOUNT/roles/services" \
   allowed_domains="lolwtf.ca" allow_subdomains=true allow_bare_domains=false allow_glob_domains=false \
   enforce_hostnames=true allow_ip_sans=true allow_any_name=false require_cn=false \
   server_flag=true client_flag=true key_type=any ttl=72h max_ttl=168h organization="$ORG" >/dev/null
+
+# A service on another host logs in with an AppRole whose role ID is its name and whose secret ID
+# scripts/openbao-approle-secret.sh stores in that host's SOPS file.
+echo "==> approles"
+if ! bao auth list -format=json | jq -e 'has("approle/")' >/dev/null; then
+  bao auth enable approle
+fi
+for role in $APPROLES; do
+  bao write "auth/approle/role/$role" token_policies="$role" \
+    token_ttl=1h token_max_ttl=24h secret_id_ttl=0 secret_id_num_uses=0 >/dev/null
+  bao write "auth/approle/role/$role/role-id" role_id="$role" >/dev/null
+done
 
 echo "ok"

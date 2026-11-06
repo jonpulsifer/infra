@@ -1,6 +1,6 @@
 ---
 title: Configure OpenBao's PKI
-description: Give OpenBao's configuration its token, deploy it, and make sure the server serves the FML chain.
+description: Give OpenBao's configuration its token, deploy it, make sure the server serves the FML chain, and give a service its AppRole secret.
 ---
 
 The root and the issuing CA of the lab live inside OpenBao on [forge](../hosts/forge.md), as [PKI](../platform/pki.md) describes. Their keys are born in the server and never leave it. `openbao-config.service` (`nix/services/openbao-config.nix`) puts the mounts, the CAs, the roles and the policies that git declares into the server. Use this runbook to give that service its token and to check its work.
@@ -56,6 +56,29 @@ The root and the issuing CA of the lab live inside OpenBao on [forge](../hosts/f
 
    Result: The root, self-signed, with `pathlen:2` and a `notAfter` twenty years out.
 
+## Give a service its AppRole secret
+
+`openbao-config.service` declares an AppRole for each name in `homelab.openbao.pki.appRoles`, bound to the policy of that name in `nix/services/openbao/policies/`. A service on another host logs in with the role's name as its role ID and a secret ID in that host's SOPS file.
+
+1. On a branch, make the secret ID. For SPIRE on spore:
+
+   ```bash
+   export SOPS_AGE_KEY_FILE=~/.config/age/keys.txt
+   mise run openbao:approle-secret spire spore
+   ```
+
+   Result: `Done: nix/secrets/spore.sops.yaml holds the AppRole secret ID of spire for spore.` The secret ID does not expire; run this again to replace it, and the service's unit restarts on the next deploy.
+
+2. Turn the service's upstream option on: for SPIRE, `homelab.spire.upstream.enable = true` in `nix/hosts/spore.nix`.
+3. Commit, open a pull request, merge it, and deploy the host.
+4. Make sure that the server's CA chains to the FML root. For SPIRE:
+
+   ```bash
+   ssh spore.<tailnet> sudo spire-server bundle show -socketPath /run/spire/server/private/api.sock | openssl x509 -noout -subject
+   ```
+
+   Result: `subject=O=Folly Mountain Laboratories, CN=FML Root CA`.
+
 ## If something goes wrong
 
 | Symptom | Cause | Action |
@@ -65,6 +88,8 @@ The root and the issuing CA of the lab live inside OpenBao on [forge](../hosts/f
 | `openbao-config.service` fails at `bao status` | The server is sealed or not listening | Read `journalctl -u openbao` and [Initialize OpenBao](initialize-openbao.md), "If something goes wrong". |
 | `the server did not import the issuing CA certificate` | The mount's key `folly` is not the one the request named | Read `bao list pki/folly/keys` on forge. The service signs a request for the key named after the mount. |
 | The chain shows a root that is not the one in `pki/root` | The root was made again, and the issuing CA was signed under the former one | Run `ssh <target> sudo systemctl start openbao-config`. The service signs the issuing CA again under the root it finds. |
+| `the server returned no secret ID` | The role is not declared, or forge has not run the configuration since it was | Add the name to `homelab.openbao.pki.appRoles`, deploy forge, run the task again. |
+| `spire-server` logs `permission denied` from forge | The secret ID is stale or belongs to another role | Run `mise run openbao:approle-secret spire spore` again, commit, deploy spore. |
 
 ## Related
 

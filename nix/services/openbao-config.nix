@@ -53,6 +53,12 @@ in
       default = "43830h";
       description = "The issuing CA's term, and its mount's longest certificate: five years, the DevID CA's term. Each role caps its own.";
     };
+
+    appRoles = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "spire" ];
+      description = "The AppRoles, each named for the policy in openbao/policies/ it is bound to, with its name as its role ID. `mise run openbao:approle-secret <role> <host>` stores a secret ID.";
+    };
   };
 
   config = lib.mkIf (cfg.enable && pki.enable) {
@@ -81,6 +87,7 @@ in
         ISSUING_CN = pki.issuingCommonName;
         ISSUING_TTL = pki.issuingTTL;
         ORG = "Folly Mountain Laboratories";
+        APPROLES = lib.concatStringsSep " " pki.appRoles;
         # Interpolation copies each directory into the store; toString would name the checkout.
         POLICY_DIR = "${./openbao/policies}";
         CONFIG_POLICY = "${./openbao/config-policy.hcl}";

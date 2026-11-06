@@ -25,7 +25,7 @@ Read [Node lifecycle](node-lifecycle.md) first for the installation sequence. Th
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| `spire-server` | Attests agents and signs SVIDs with its own CA, which lasts 24 hours. Agents reach it on TCP 8081 at `spore.lolwtf.ca`. | spore, data in `/var/lib/spire` |
+| `spire-server` | Attests agents and signs SVIDs with its CA, which lasts 24 hours. When `homelab.spire.upstream.enable` is true, OpenBao's issuing CA on forge signs that CA, so the trust bundle is the FML root in [PKI](pki.md#chain); the server logs in with the AppRole `spire`. Agents reach it on TCP 8081 at `spore.lolwtf.ca`. | spore, data in `/var/lib/spire` |
 | `tpm` node attestor | Checks an agent's EK hash against `/etc/spire/tpm-hashes`, and proves that its attestation key is in the same TPM. It reads no PCRs. It runs while `homelab.spire.ekHashes` is not empty. | spore, the boxboat `spire-tpm-plugin` built in `nix/lib/spire.nix` |
 | `tpm_devid` node attestor | Checks the LDevID's chain against the DevID CA, the EK certificate's chain against the manufacturer CAs in `nix/services/spire/roots/`, and that the LDevID key and the EK are in one TPM. It runs when `homelab.spire.devid.enable` is true. | spore, built into SPIRE |
 | `k8sbundle` notifier | Writes the server's bundle into folly's `spire/spire-bundle` at startup and on every CA rotation, as the ServiceAccount `spire-bundle-writer` | spore, in the server, when `homelab.spire.bundleNotifier.enable` is true |
