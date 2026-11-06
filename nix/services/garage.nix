@@ -21,6 +21,7 @@ let
     "cnpg"
     "etcd"
     "netbox"
+    "openbao"
     "push"
   ];
   buckets = [
@@ -28,6 +29,7 @@ let
     "cnpg"
     "etcd"
     "netbox"
+    "openbao"
   ];
   # Each key owns its own bucket; the push key only reads them all.
   grants =

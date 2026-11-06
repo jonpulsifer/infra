@@ -56,7 +56,7 @@ spec:
                   RCLONE_CONFIG_CRYPT_PASSWORD=$(printf %s "$CRYPT_PASSWORD" | rclone obscure -)
                   RCLONE_CONFIG_CRYPT_PASSWORD2=$(printf %s "$CRYPT_SALT" | rclone obscure -)
                   export RCLONE_CONFIG_CRYPT_PASSWORD RCLONE_CONFIG_CRYPT_PASSWORD2
-                  for bucket in velero cnpg etcd; do
+                  for bucket in ${BACKUP_PUSH_BUCKETS}; do
                     # A wiped or rebuilt Garage holds empty buckets; mirroring
                     # one would delete the off-site copy.
                     if [ -z "$(rclone lsf --max-depth 1 "garage:$bucket" | head -n 1)" ] &&

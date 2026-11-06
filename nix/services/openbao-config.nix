@@ -57,7 +57,10 @@ in
 
     appRoles = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ "spire" ];
+      default = [
+        "spire"
+        "snapshot"
+      ];
       description = "The AppRoles, each named for the policy in openbao/policies/ it is bound to, with its name as its role ID. `mise run openbao:approle-secret <role> <host>` stores a secret ID.";
     };
 

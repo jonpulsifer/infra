@@ -9,11 +9,12 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| Garage | Stores the buckets `velero`, `cnpg` and `etcd`, and folly's `netbox` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
+| Garage | Stores the buckets `velero`, `cnpg` and `etcd`, and folly's `netbox` and `openbao` | A NixOS service on [spore](../hosts/spore.md), [capsule](../hosts/capsule.md) and [forge](../hosts/forge.md) for folly, a StatefulSet on [oldschool](../hosts/oldschool.md)'s `data` volume for offsite |
 | Velero | Backs up objects, and the volumes of pods with the annotation `backup.velero.io/backup-volumes` | The `velero` namespace |
 | barman-cloud plugin | Archives each database's base backups and WAL, through an `ObjectStore` named `garage` | The `cloudnative-pg` namespace |
 | `etcd-snapshot` | Snapshots the cluster's etcd through the Talos API into `etcd/<site>/` | The `backups` namespace on each site |
-| `backup-push` | Syncs each bucket to GCS through an rclone crypt remote | The `backups` namespace |
+| `openbao-snapshot` | Snapshots OpenBao's Raft store, the whole FML PKI, into `openbao/` | forge, `nix/services/openbao-snapshot.nix` |
+| `backup-push` | Syncs the buckets in `BACKUP_PUSH_BUCKETS` to GCS through an rclone crypt remote | The `backups` namespace |
 | `restore-drill` | Recovers the kthx database on offsite, and the tronbyt database on folly, into a throwaway cluster | The `restore-drill` namespace on each site |
 
 ## Schedule
@@ -23,6 +24,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 | Velero Schedule `daily` | 02:00 Halifax |
 | CNPG `ScheduledBackup` | Daily, 01:00 to 04:00 Halifax |
 | etcd snapshot | 02:30 Halifax |
+| `openbao-snapshot` | 03:30 Halifax |
 | `backup-push` | `BACKUP_PUSH_SCHEDULE`: weekly on folly, because of Starlink, and daily on offsite |
 | `restore-drill` | 06:00 Halifax: the 1st of the month on offsite, the 15th on folly |
 
@@ -30,7 +32,7 @@ Backups write to a Garage S3 store at each site. A CronJob copies each store to 
 
 - Velero keeps a backup 720 hours.
 - Each `ObjectStore` keeps 30 days.
-- The etcd jobs delete snapshots older than 14 days.
+- The etcd jobs delete snapshots older than 14 days, and `openbao-snapshot` does the same.
 - GCS has object versioning, and keeps a deleted or replaced object 30 days.
 
 ## Garage cluster
@@ -43,7 +45,7 @@ A node with `homelab.garage.clustered` unset is a standalone store with replicat
 
 ## Credentials
 
-1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
+1Password holds the Garage keys in `garage-<site>`, and the crypt and Velero repository passwords in `backup-crypt`. The NixOS hosts read theirs from SOPS under `garage/`. `mise run garage:bucket <name> <host>` adds a bucket to folly's Garage with a key of its own, escrows the key, stores it for the host, and grants the push key; `nix/services/garage.nix` lists the same buckets and keys. The three anchors share one `garage/rpc-secret` in their own SOPS files. `backup-push` reaches GCS through [workload identity](pki.md#workload-identity), as `backups:backup-push`.
 
 ### Velero permissions
 
@@ -83,20 +85,22 @@ Velero skips a pod that is not running when the backup starts, and records a war
 
 ## Where it lives
 
-- `nix/services/garage.nix`: Garage on the anchors
+- `nix/services/garage.nix` and `scripts/garage-bucket.sh`: Garage on the anchors, and a new bucket
+- `nix/services/openbao-snapshot.nix`: the OpenBao snapshot
 - `clusters/<site>/etcd-snapshot/`: the etcd snapshots
 - `clusters/offsite/garage/`: offsite's Garage
 - `scripts/backup-coverage.sh`, `scripts/backup-coverage.exclusions`: the volume coverage check
 - `clusters/base/platform/velero/`, `barman-cloud/`, `backups/`: Velero, the plugin and `backup-push`
 - `clusters/base/platform/kthx-engine-target/backup/`: the store the kthx Datastores archive to
 - `clusters/offsite/apps/restore-drill/`, `clusters/folly/apps/restore-drill/`: the restore drill
-- `clusters/<site>/config/cluster-settings.yaml`: `GARAGE_S3_ENDPOINT`, `BACKUP_PUSH_SCHEDULE`
+- `clusters/<site>/config/cluster-settings.yaml`: `GARAGE_S3_ENDPOINT`, `BACKUP_PUSH_SCHEDULE`, `BACKUP_PUSH_BUCKETS`
 - `terraform/gcp/projects/homelab-ng/backups.tf`: the buckets
 - `clusters/base/monitoring/backup-rules.yaml`, `clusters/base/monitoring/etcd-snapshot-rules.yaml`: the alerts
 
 ## Related
 
 - [Restore a database](../runbooks/restore-a-database.md)
+- [Restore OpenBao](../runbooks/restore-openbao.md)
 - [Recover a re-created database](../runbooks/recover-a-re-created-database.md)
 - [Restore a volume](../runbooks/restore-a-volume.md)
 - [Restore etcd on Talos](../runbooks/restore-etcd-on-talos.md)

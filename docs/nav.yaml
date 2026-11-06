@@ -122,6 +122,7 @@ sections:
           - runbooks/switch-a-netbox-token.md
           - runbooks/initialize-openbao.md
           - runbooks/configure-openbao-pki.md
+          - runbooks/restore-openbao.md
           - runbooks/set-up-a-devid-ca-yubikey.md
       - group: Apps
         items:
