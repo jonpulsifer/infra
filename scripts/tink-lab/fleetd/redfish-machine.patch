@@ -1,0 +1,30 @@
+--- a/apps/fleetd/fleet/objects.go
++++ b/apps/fleetd/fleet/objects.go
+@@ -145,6 +145,9 @@
+ 	}
+ }
+ 
++// LabBMCPorts is each tink-lab machine's Redfish BMC port, by device name.
++var LabBMCPorts = map[string]int{}
++
+ // Machine is the device's Rufio Machine. AMT speaks plain HTTP digest auth
+ // on 16992, because its TLS offers only RSA key exchange, which Go refuses.
+ func (c Config) Machine(d Device) (Object, error) {
+@@ -163,6 +166,17 @@
+ 			"preferredOrder": []any{"IntelAMT"},
+ 			"intelAMT":       map[string]any{"hostScheme": "http", "port": c.AMTPort},
+ 		}
++	case "redfish":
++		port := c.AMTPort
++		if p, ok := LabBMCPorts[d.Name]; ok {
++			port = p
++		}
++		conn["port"] = port
++		conn["insecureTLS"] = true
++		conn["providerOptions"] = map[string]any{
++			"preferredOrder": []any{"gofish"},
++			"redfish":        map[string]any{"port": port},
++		}
+ 	default:
+ 		return nil, fmt.Errorf("bmc_type %q has no Rufio provider here", d.BMCType)
+ 	}
