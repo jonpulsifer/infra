@@ -64,4 +64,4 @@ spec:
         serviceAccountRef:
           name: cert-manager-openbao
           audiences:
-            - https://oidc.lolwtf.ca/folly
+            - https://kubernetes.default.svc
