@@ -11,7 +11,6 @@
 let
   cfg = config.homelab.openbao;
   pki = cfg.pki;
-  fleet = import ../lib/fleet.nix;
   folly = (import ../lib/networks.nix).folly;
   tokenSecret = "openbao/config-token";
   service = "openbao-config";
@@ -77,9 +76,9 @@ in
       };
       audience = lib.mkOption {
         type = lib.types.str;
-        default = "https://${fleet.oidcHost}/folly";
-        defaultText = "https://oidc.<dnsZone>/folly";
-        description = "The audience a token must carry: the API server's own, so the server can review the token with it.";
+        # Talos's API server accepts "api" and this, not its OIDC issuer URL.
+        default = "https://kubernetes.default.svc";
+        description = "The audience a token must carry: one the API server accepts, so the server can review the token with the token itself.";
       };
     };
   };
