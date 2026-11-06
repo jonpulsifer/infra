@@ -232,7 +232,7 @@ A run opens `/dev/tpmrm0` and reads the event log before it sends anything. With
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
-| `oidc-discovery-provider` | Publishes the keys that check JWT-SVIDs, as the issuer `https://spire.lolwtf.ca` | Two pods in `spire-oidc`, each on a different labelled node |
+| `oidc-discovery-provider` | Publishes the keys that check JWT-SVIDs, as the issuer `https://spire.lolwtf.ca` | `spire-oidc` requests two pods on different TPM-labelled nodes |
 | folly Cloudflare Tunnel | Serves `/.well-known/openid-configuration` and `/keys` on `spire.lolwtf.ca`, and no other path | Cloudflare, to the provider's Service |
 | `fml-pool` provider `spire` | Trades a JWT-SVID for a GCP token whose subject is the SPIFFE ID | GCP |
 
@@ -301,7 +301,7 @@ Any signal that the API servers' fetches, spore's own issuer check or a replaced
 
 ## Live state
 
-riptide, surge and swell carry the `lolwtf.ca/tpm=true` label. riptide's and surge's agents attest by their LDevIDs, and fleetd lists both nodes. swell is down. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
+Only riptide has the `lolwtf.ca/tpm=true` label among the ready nodes. `clusters/folly/apps/spire-oidc/deployment.yaml` requires each provider pod on a different labelled node, so one of its two replicas remains pending until another eligible node joins. optiplex has no SPIRE identity: its node has no `/dev/tpmrm0`, so `tpm_off` in `clusters/folly/talos/nodes.tf` keeps the label off it, its EK hash is off the allow list, and fleetd does not list it. The allow list holds riptide's EK hash. shale has a TPM 1.2 and runs no agent. The smoke Job is suspended.
 
 ## Where it lives
 
