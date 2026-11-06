@@ -1,37 +1,25 @@
 # pki
 
-OpenTofu root that issues each cluster's FML Kubernetes CA and ServiceAccount token signer from the FML intermediate CA, whose key it reads from 1Password. The DevID CAs are signed by OpenBao's issuing CA, outside this root. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
+The public half of the FML PKI, and the OIDC discovery documents of both clusters. No OpenTofu resource lives here any more: the root and the issuing CA are inside OpenBao on forge, the DevID CAs are on YubiKeys, and the ServiceAccount token signers are keys in the Talos secrets bundles. See [PKI](https://wiki.lolwtf.ca/platform/pki/) on the wiki.
 
-This root needs OpenTofu, because only the OpenTofu registry publishes the `opentofu/tls` provider fork that sets `max_path_length`.
-
-- `certs/` holds the public certificates. `<cluster>-ca-bundle.pem` is the current and previous CA, for `caFile`. `<cluster>-ca-chain.pem` is the CA up to the FML root, for `--root-ca-file`. `fml-root.pem` and `folly-issuing-ca.pem` are the root and the issuing CA that OpenBao holds. `folly-devid-ca-<name>.pem` is one issuing DevID CA alone, the file SPIRE's `devid.caChains` lists. `folly-devid-ca-<name>-chain.pem` is that CA up to the FML root, for fleetd. `folly-devid-ca.pem` bundles every issuing DevID CA.
+- `certs/` holds the public certificates. `fml-root.pem` and `folly-issuing-ca.pem` are the root and the issuing CA that OpenBao holds. `folly-devid-ca-<name>.pem` is one issuing DevID CA alone, the file SPIRE's `devid.caChains` lists. `folly-devid-ca-<name>-chain.pem` is that CA up to the FML root, for fleetd. `folly-devid-ca.pem` bundles every issuing DevID CA. `<cluster>-sa-signer.pub` is the public key of that cluster's ServiceAccount token signer, which the JWKS carries.
 - `csr/` holds the CSR of each hardware DevID CA, whose key a YubiKey on an anchor generated. `mise run devid:yubikey:sign <host>` has OpenBao sign it into `certs/folly-devid-ca-<host>.pem`.
-- `oidc/<cluster>/` holds each cluster's OIDC discovery documents, served at `https://oidc.lolwtf.ca/<cluster>`.
-- `apps/fml-pki/` is the Go tool that handles the certificates and derives the OIDC documents.
-- `scripts/pki/` holds the post-apply and trust-anchor scripts.
+- `oidc/<cluster>/` holds each cluster's OIDC discovery documents, served at `https://oidc.lolwtf.ca/<cluster>`. `.github/workflows/oidc.yml` publishes them.
+- `apps/fml-pki/` is the Go tool that checks the chain and derives the OIDC documents.
 
-## Rules
+`mise run pki:verify` checks the chain, signatures and path lengths in `certs/` and needs no secrets.
 
-- Never trust the FML root as a Kubernetes client CA. The API server would accept any certificate issued under it. Talos clusters use their own CA.
-- `max_path_length = 0` on the cluster CAs has no effect, and the issued certificates carry no path length constraint.
-- `prevent_destroy` guards each CA key's 1Password escrow item. Before you rotate a CA, move the old item to a versioned resource and title.
+## Rotate a ServiceAccount token signer
 
-## Develop
+The signer key of `<cluster>` is `serviceAccount.key` in its Talos secrets bundle, the 1Password item `talos-<cluster>-secrets`. A token names its key by `kid`, the SHA-256 of the key's SubjectPublicKeyInfo, and a verifier finds the key in the JWKS, so the JWKS must carry the new key before any token is signed with it, and the old key until no token signed with it is alive.
 
-```bash
-tofu -chdir=terraform/pki init -backend=false
-tofu -chdir=terraform/pki validate
-TF_DIR=terraform/pki mise run tf:plan
-mise run pki:verify
-```
+1. Write the new key's public half beside the old one, as `certs/<cluster>-sa-signer-next.pub`.
+2. Write the documents with both keys, and commit them.
 
-`mise run pki:verify` checks the chain, signatures and path lengths in `certs/` and needs no secrets. A local plan needs Google credentials for the state bucket and `OP_SERVICE_ACCOUNT_TOKEN` for a 1Password service account that can read the FML CA items in the `homelab` vault. `mise run tf:docs` regenerates the tables below.
+   ```bash
+   go -C apps/fml-pki run . jwks -issuer https://oidc.lolwtf.ca/<cluster> -out terraform/pki/oidc/<cluster> \
+     certs/<cluster>-sa-signer.pub certs/<cluster>-sa-signer-next.pub
+   ```
 
-## Deploy
-
-Atlantis plans this root on a pull request that changes it. Comment `atlantis apply` to apply the plan, and a successful apply merges the pull request. State is in `gs://homelab-ng/terraform/pki`.
-
-After an apply that issues a signer, run `scripts/pki/post-rotate.sh offsite` and commit what it writes. It updates the signer certificates in `certs/` and `oidc/<cluster>/`. Both clusters run the self-signed Kubernetes CA from their Talos secrets bundle, so no cluster CA file is committed. `.github/workflows/oidc.yml` publishes the OIDC documents on merge.
-
-<!-- BEGIN_TF_DOCS -->
-<!-- END_TF_DOCS -->
+3. Put the new key into the bundle and apply the cluster's Talos root, as [Apply an OpenTofu change](https://wiki.lolwtf.ca/runbooks/apply-an-opentofu-change/) describes. The API servers sign with the new key from their next start.
+4. After the longest token lifetime, rename `-next.pub` over `<cluster>-sa-signer.pub`, write the documents with it alone, and commit them.

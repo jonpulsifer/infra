@@ -1,6 +1,6 @@
 // Command fml-pki is the crypto half of the FML PKI tooling: it verifies the
-// committed chain, reissues the trust anchors, derives the OIDC documents, and
-// answers the certificate questions the rotation scripts used to shell out for.
+// committed chain, signs a CA's request with an offline root key, derives the
+// OIDC documents, and answers certificate questions the scripts shell out for.
 //
 // Standard library only, so the toolchain needs go and nothing else. It exists
 // because the shell path needed openssl, which neither mise's registry nor the
@@ -50,9 +50,8 @@ func usage() {
 	fmt.Fprint(os.Stderr, `usage: fml-pki <command> [options]
 
   verify                       assert the committed chain links, anchors and admits its depth
-  reissue                      mint replacement trust anchors with correct pathLen
   sign-ca                      sign a CA's certificate request with the root key
-  jwks                        write jwks.json and openid-configuration.json
+  jwks                        write jwks.json and openid-configuration.json from signer public keys
   fingerprint <cert.pem>       SHA256 over the DER certificate
   spki <cert-or-key.pem>       SHA256 over the DER SubjectPublicKeyInfo
   expired <cert.pem>           exit 0 if notAfter has passed
@@ -71,8 +70,6 @@ func main() {
 	switch os.Args[1] {
 	case "verify":
 		err = runVerify(repoCertsDir(), os.Stdout, os.Stderr)
-	case "reissue":
-		err = cmdReissue(os.Args[2:])
 	case "sign-ca":
 		err = cmdSignCA(os.Args[2:])
 	case "jwks":
@@ -96,37 +93,6 @@ func main() {
 	}
 }
 
-func cmdReissue(args []string) error {
-	fs := flag.NewFlagSet("reissue", flag.ExitOnError)
-	rootKey := fs.String("root-key", "", "PEM private key for the FML Root CA (offline; required)")
-	intKey := fs.String("intermediate-key", "", "PEM private key for the Intermediate CA (required)")
-	rootDays := fs.Int("root-days", 0, "bound the root instead of never expiring")
-	intDays := fs.Int("intermediate-days", 0, "bound the intermediate instead of never expiring")
-	staging := fs.String("staging", "staging", "output directory name under the certs directory")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if *rootKey == "" || *intKey == "" {
-		fs.Usage()
-		return errFailed
-	}
-	until := func(days int) time.Time {
-		if days <= 0 {
-			return noExpiry
-		}
-		return time.Now().UTC().AddDate(0, 0, days)
-	}
-	return runReissue(reissueOpts{
-		certsDir:       repoCertsDir(),
-		rootKeyPath:    *rootKey,
-		intKeyPath:     *intKey,
-		rootNotAfter:   until(*rootDays),
-		intNotAfter:    until(*intDays),
-		rootPathLen:    2,
-		intPathLen:     1,
-		stagingDirName: *staging,
-	}, os.Stdout)
-}
 
 func cmdSignCA(args []string) error {
 	fs := flag.NewFlagSet("sign-ca", flag.ExitOnError)

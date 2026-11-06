@@ -166,7 +166,6 @@ The roots `terraform/gcp/projects/bluenose/` and `terraform/gcp/projects/trusted
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| A Target call fails with `unable to get issuer certificate`. | `ca-bundle.yaml` lacks part of that chain. | Run `nix develop -c bash scripts/pki/post-rotate.sh folly offsite`. Commit and merge the output ([PKI](../platform/pki.md)). |
 | A credential fails with "cannot be opened by this keyring". | The keyring lost its key. | Restore that key. |
 | You cannot sign in. | The passkey is lost. | Rotate the enrolment token in `secret.sops.yaml` and merge. Select "Recover with a rotated token". |
 

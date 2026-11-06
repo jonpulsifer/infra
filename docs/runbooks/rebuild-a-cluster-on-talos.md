@@ -109,7 +109,7 @@ On folly, the root gives each TPM 2.0 worker, `fleet_workers` in `clusters/folly
    rclone purge garage:etcd/<control-plane>/
    ```
 
-5. In a pull request, remove the cluster's hosts from `nix/hosts/default.nix` and its CA files from `terraform/pki/certs/`. Keep `<site>-sa-signer.pem`, which the JWKS reads.
+5. In a pull request, remove the cluster's hosts from `nix/hosts/default.nix` and its CA files from `terraform/pki/certs/`. Keep `<site>-sa-signer.pub`, which the JWKS reads.
 
 ## Add a node later
 

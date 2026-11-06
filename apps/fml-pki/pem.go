@@ -123,6 +123,33 @@ func parseKey(raw []byte, path string) (crypto.Signer, error) {
 	return signer, nil
 }
 
+// readPublicKey reads a PEM public key, or the public key of a PEM certificate.
+func readPublicKey(path string) (crypto.PublicKey, error) {
+	raw, err := readBytes(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("%s: no PEM block", path)
+	}
+	switch block.Type {
+	case "PUBLIC KEY":
+		pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		return pub, nil
+	case "CERTIFICATE":
+		cert, err := parseCert(raw, path)
+		if err != nil {
+			return nil, err
+		}
+		return cert.PublicKey, nil
+	}
+	return nil, fmt.Errorf("%s: a %s block, not a public key or a certificate", path, block.Type)
+}
+
 func writePEM(path, blockType string, der []byte, perm os.FileMode) error {
 	encoded := pem.EncodeToMemory(&pem.Block{Type: blockType, Bytes: der})
 	return os.WriteFile(path, encoded, perm)

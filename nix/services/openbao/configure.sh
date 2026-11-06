@@ -101,14 +101,9 @@ bao write "$MOUNT/issuer/default" leaf_not_after_behavior=truncate \
   usage="read-only,issuing-certificates,crl-signing" >/dev/null
 
 echo "==> roles"
-# The Kubernetes ServiceAccount token signers, one leaf a year each; the chain is cosmetic, the
-# JWKS carries the public key.
-bao write "$MOUNT/roles/sa-signer" \
-  allowed_domains="FML K8s folly ServiceAccount token signer,FML K8s offsite ServiceAccount token signer" \
-  allow_bare_domains=true allow_subdomains=false allow_glob_domains=false enforce_hostnames=false \
-  allow_ip_sans=false allow_any_name=false require_cn=true use_csr_common_name=true use_csr_sans=false \
-  server_flag=false client_flag=false key_usage="DigitalSignature" ext_key_usage="" \
-  key_type=any ttl=8760h max_ttl=8760h organization="$ORG" >/dev/null
+# The Kubernetes ServiceAccount token signers are keys, not certificates: the JWKS carries the
+# public key, so no role issues for them.
+bao delete "$MOUNT/roles/sa-signer" >/dev/null
 # Internal service names, short-lived, for cert-manager.
 bao write "$MOUNT/roles/services" \
   allowed_domains="lolwtf.ca" allow_subdomains=true allow_bare_domains=false allow_glob_domains=false \

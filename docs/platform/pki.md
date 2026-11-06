@@ -1,16 +1,16 @@
 ---
 title: PKI
-description: The FML certificate chain, the Kubernetes cluster CAs and token signers, the cluster OIDC issuers, workload identity federation and the hardware DevID CAs.
+description: The FML certificate chain in OpenBao, the Kubernetes token signers and OIDC issuers, workload identity federation and the hardware DevID CAs.
 ---
 
-The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the private certificate chain of the lab. It signs a ServiceAccount token signer for each cluster. The signers make each cluster an OIDC issuer, which publishes the keys that other systems use to check its ServiceAccount tokens. With the issuers, workloads get GCP credentials and reach the other cluster with no stored key.
+The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the private certificate chain of the lab, inside OpenBao on forge. It signs the SPIRE server's CA, the DevID CAs and service certificates for internal names. Beside it, each cluster signs ServiceAccount tokens with a key of its own and publishes the public half as an OIDC issuer, which other systems use to check those tokens. With the issuers, workloads get GCP credentials and reach the other cluster with no stored key.
 
 ## Parts
 
 | Part | Job | Where it runs |
 | --- | --- | --- |
 | API server | Signs ServiceAccount tokens as the issuer `https://oidc.lolwtf.ca/<cluster>` | Each control plane |
-| OIDC documents | Publish the public keys of each signer | Cloudflare Pages, from `terraform/pki/oidc/<cluster>/` |
+| OIDC documents | Publish the public key of each signer, `<cluster>-sa-signer.pub` in `terraform/pki/certs/`, which `apps/fml-pki jwks` turns into `jwks.json` | Cloudflare Pages, from `terraform/pki/oidc/<cluster>/` |
 | `fml-pool` | Exchanges a ServiceAccount token for a GCP credential | GCP |
 
 ## Chain
@@ -24,13 +24,13 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | Folly Mountain Laboratories Root CA, the former root | Itself | Offline, and nobody can produce it. 1Password holds the certificate only. |
 | FML Intermediate CA | The former root | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
-| `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
+| `<cluster>` ServiceAccount token signer | Nobody: a key with no certificate | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
 | `folly-devid-ca-<host>` | FML folly Issuing CA | The YubiKey on the anchor `<host>` |
 | A node's LDevID and LAK | A DevID CA | The node's TPM |
 
-The signers still chain to the former root, through the intermediate, until they are signed again under the issuing CA. `terraform/pki` issues them, and its state holds every private key it generates or reads. The former root and the intermediate do not expire, and no file in the tree carries them. Signers last one year, and the DevID CAs five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
+The former root and the intermediate are retired, and no file in the tree carries them. The DevID CAs last five years, the SPIRE server's CA a day, and a service certificate three days.
 
-Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
+Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents from the signer public keys. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
 
 ## Workload identity
 
@@ -94,9 +94,8 @@ A key never leaves its card. Its PIN policy is once and its touch policy is neve
 
 - Never trust the FML Root as a client CA of a cluster, or its API server would accept every client certificate under the FML Root.
 - Read a DevID CSR before `mise run devid:yubikey:sign`. The issuing CA makes a CA of whatever request it is given.
-- After Atlantis applies a new signer, follow the rotation steps in `terraform/pki/README.md`.
+- Rotate a signer with the overlap in `terraform/pki/README.md`: the JWKS carries the new key before any token names it, and the old key until no such token is alive.
 - Sign a DevID CA's request again only with the same key. A new key leaves every LDevID it issued untrusted until its node attests again.
-- For a key change, follow the overlap and escrow steps in `terraform/pki/README.md`. `prevent_destroy` on the escrow item blocks a replacement.
 - On a Talos cluster, a talosconfig's client certificate lasts one year, and the Talos API cannot revoke it. Issue the owner's and Rowbutt's again before they expire, as [Issue a talosconfig](../runbooks/issue-a-talosconfig.md) says. Only `talosctl rotate-ca` withdraws a lost one, and `--kubernetes=false` limits the rotation to the Talos API CA, which is all a talosconfig needs.
 - On folly, rotate the Kubernetes CA only with a plan for the workers [fleetd](../apps/fleetd.md) installed, `fleet_workers` in `clusters/folly/talos/talos.tf`. Talos deletes a kubelet certificate that no accepted CA signed, and their kubelets then bootstrap with the token the Talos root gives them, which no Secret holds, so they stay off the cluster until [they install again](#rejoin-fleetds-workers-after-a-ca-rotation).
 
@@ -111,7 +110,7 @@ A rotation of folly's Kubernetes CA leaves each worker in `fleet_workers` withou
 
 ## Where it lives
 
-- `terraform/pki/`: the certificates, the OIDC documents and the rotation procedure in `README.md`
+- `terraform/pki/`: the public certificates and keys, the OIDC documents and the signer rotation in `README.md`
 - `clusters/<site>/talos/patches.tf`: the issuer and the rule for tokens from the other cluster
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: `fml-pool`
 - `clusters/folly/talos/secureboot/`: the public halves of the Talos Secure Boot keys

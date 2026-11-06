@@ -1,6 +1,6 @@
 name: oidc
 
-# Publishes the FML cluster OIDC issuers that scripts/pki/post-rotate.sh writes to
+# Publishes the FML cluster OIDC issuers that apps/fml-pki jwks writes to
 # terraform/pki/oidc/<cluster>/ to Cloudflare Pages.
 # terraform/network/cloudflare/oidc.tf declares the Pages project, domain and DNS.
 
