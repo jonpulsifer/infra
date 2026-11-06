@@ -1,0 +1,30 @@
+# An ordinary ADC `external_account` document whose subject token comes from
+# an executable, so every Google client library and gcloud read it through
+# GOOGLE_APPLICATION_CREDENTIALS with GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1.
+# The library runs spiffe-adc (images/spiffe-adc) with the audience below in
+# its environment when it needs a subject token, about once an hour; the
+# executable asks the node's agent for a JWT-SVID. With no
+# service_account_impersonation_url, GCP sees the SPIFFE ID itself, so a grant
+# in terraform/gcp/projects/homelab-ng/ names
+# principal://iam.googleapis.com/<fml-pool>/subject/spiffe://lolwtf.ca/ns/<ns>/sa/<sa>.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spiffe-adc
+  labels:
+    app.kubernetes.io/name: spiffe-adc
+    app.kubernetes.io/part-of: spire
+data:
+  gcp-credentials.json: |
+    {
+      "type": "external_account",
+      "audience": "//iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/spire",
+      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+      "token_url": "https://sts.googleapis.com/v1/token",
+      "credential_source": {
+        "executable": {
+          "command": "/opt/spiffe-adc/spiffe-adc",
+          "timeout_millis": 15000
+        }
+      }
+    }
