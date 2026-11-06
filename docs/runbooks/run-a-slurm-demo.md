@@ -16,6 +16,14 @@ Use this runbook to show Slurm at work on folly. [Slinky](../apps/slinky.md) des
 
   Result: `slurm-controller-0`, a `slurm-restapi` pod, a `slurm-login-folly` pod and `slurm-worker-folly-0` to `-5` are `Running`.
 
+- Make sure forge serves the shared scratch. A pod whose `/shared` mount fails stays `ContainerCreating`, and a job that touches `/shared` while the server is down hangs.
+
+  ```bash
+  rpcinfo -T tcp forge.lolwtf.ca nfs
+  ```
+
+  Result: `program 100003 version 4 ready and waiting`.
+
 ## Reach the login pod
 
 1. Read the login Service's address.
@@ -44,7 +52,7 @@ Run them in order. Each one is a shell script under `/opt/demos`.
 | --- | --- |
 | `00-tour.sh` | The partition, each node's CPUs and memory, and the scheduler's statistics |
 | `01-hello.sh` | `srun` placing one task on every node, then two tasks on two nodes |
-| `02-array.sh` | A job array of twice the cluster's CPUs draining in two waves |
+| `02-array.sh` | A job array of twice the cluster's nodes draining in two waves, with every task's output read back from `/shared` |
 | `03-queue.sh` | A job that takes every CPU, a small job waiting with reason `Resources`, and a job that can never run |
 | `04-rest.sh` | `slurmrestd` with a JWT from `scontrol token`: ping, list the nodes, submit a job |
 

@@ -1,7 +1,8 @@
 ---
 # One Slurm cluster, named folly, with six small slurmd workers, two to a
-# Kubernetes node, so a job spreads wide. No accounting: sacct needs
-# slurmdbd and a MariaDB, which the demos do without.
+# Kubernetes node, so a job spreads wide. The login pod and the workers share
+# /shared, an NFS export from forge. No accounting: sacct needs slurmdbd and
+# a MariaDB, which the demos do without.
 apiVersion: helm.toolkit.fluxcd.io/v2
 kind: HelmRelease
 metadata:
@@ -59,12 +60,20 @@ spec:
             - name: demos
               mountPath: /opt/demos
               readOnly: true
+            - name: shared
+              mountPath: /shared
         podSpec:
           volumes:
             - name: demos
               configMap:
                 name: slinky-demos
                 defaultMode: 0755
+            # forge's NFS export (nix/services/slurm-nfs.nix), the one
+            # filesystem the login pod and the workers share.
+            - name: shared
+              nfs:
+                server: ${FORGE_IP}
+                path: /srv/slurm
         service:
           spec:
             type: LoadBalancer
@@ -92,6 +101,15 @@ spec:
             limits:
               cpu: 2
               memory: 1Gi
+          volumeMounts:
+            - name: shared
+              mountPath: /shared
+        podSpec:
+          volumes:
+            - name: shared
+              nfs:
+                server: ${FORGE_IP}
+                path: /srv/slurm
     partitions:
       all:
         enabled: true
