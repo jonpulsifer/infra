@@ -17,15 +17,17 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 
 | Certificate | Signed by | Private key |
 | --- | --- | --- |
-| FML Root CA | Itself | Offline. 1Password holds the certificate only. |
-| FML Intermediate CA | FML Root CA | 1Password |
+| FML Root CA | Itself | OpenBao on forge, mount `pki/root`. Twenty years, pathLen 2. It signs the issuing CA and nothing else. |
+| FML folly Issuing CA | FML Root CA | OpenBao on forge, mount `pki/folly`. Five years, pathLen 1. |
+| Folly Mountain Laboratories Root CA, the former root | Itself | Offline, and nobody can produce it. 1Password holds the certificate only. |
+| FML Intermediate CA | The former root | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
 | `<cluster>` ServiceAccount token signer | FML K8s `<cluster>` CA | The Talos secrets bundle, imported from the signer key |
 | `FML DevID folly CA` | FML Intermediate CA | `terraform/pki` state; no service signs with it, and the bundle keeps the LDevIDs it issued trusted |
 | `folly-devid-ca-<host>` | FML Intermediate CA | The YubiKey on the anchor `<host>` |
 | A node's LDevID and LAK | A DevID CA | The node's TPM |
 
-`terraform/pki` issues the signers and the DevID CAs, and its state holds every private key it generates or reads. The root and intermediate do not expire. Signers last one year, and the DevID CAs five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
+The signers and the DevID CAs still chain to the former root, through the intermediate, until each is signed again under the issuing CA. `terraform/pki` issues them, and its state holds every private key it generates or reads. The former root and the intermediate do not expire. Signers last one year, and the DevID CAs five years. The intermediate allows one CA below it, so a CA that a signer's issuer signs fails validation.
 
 Both clusters run the self-signed Kubernetes CA from their secrets bundle, so nodes and pods trust that CA and no cluster CA file is committed under `terraform/pki/certs/`. `apps/fml-pki` checks the chain with `mise run pki:verify` and writes the OIDC documents. The other `apps/fml-*` directories hold an offline root ceremony. No real ceremony transcript is committed.
 
