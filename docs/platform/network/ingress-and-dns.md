@@ -3,7 +3,7 @@ title: Ingress and DNS
 description: The Gateways, DNS records, certificates, tunnels and lab resolvers that give cluster services a name and a path from the LAN, tailnet or internet.
 ---
 
-Ingress gives a cluster service a Gateway address, a Cloudflare DNS name from external-dns and a Let's Encrypt certificate from cert-manager. The lab resolvers, [capsule](../../hosts/capsule.md) and [spore](../../hosts/spore.md), serve DNS and time to the lab networks.
+Ingress gives a cluster service a Gateway address, a Cloudflare DNS name from external-dns and a Let's Encrypt certificate from cert-manager. On folly, cert-manager also has the ClusterIssuer `openbao`, the lab's own CA in [PKI](../pki.md#chain), for a name only the lab resolves. The lab resolvers, [capsule](../../hosts/capsule.md) and [spore](../../hosts/spore.md), serve DNS and time to the lab networks.
 
 ## Private names
 

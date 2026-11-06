@@ -11,6 +11,8 @@
 let
   cfg = config.homelab.openbao;
   pki = cfg.pki;
+  fleet = import ../lib/fleet.nix;
+  folly = (import ../lib/networks.nix).folly;
   tokenSecret = "openbao/config-token";
   service = "openbao-config";
 in
@@ -59,6 +61,27 @@ in
       default = [ "spire" ];
       description = "The AppRoles, each named for the policy in openbao/policies/ it is bound to, with its name as its role ID. `mise run openbao:approle-secret <role> <host>` stores a secret ID.";
     };
+
+    kubernetes = {
+      host = lib.mkOption {
+        type = lib.types.str;
+        default = folly.apiServer;
+        defaultText = "folly's API server";
+        description = "The API server whose ServiceAccount tokens the kubernetes auth method accepts, for cert-manager's role.";
+      };
+      caFile = lib.mkOption {
+        type = lib.types.path;
+        default = folly.apiServerCA;
+        defaultText = "folly's cluster CA";
+        description = "The CA of that API server.";
+      };
+      audience = lib.mkOption {
+        type = lib.types.str;
+        default = "https://${fleet.oidcHost}/folly";
+        defaultText = "https://oidc.<dnsZone>/folly";
+        description = "The audience a token must carry: the API server's own, so the server can review the token with it.";
+      };
+    };
   };
 
   config = lib.mkIf (cfg.enable && pki.enable) {
@@ -88,6 +111,9 @@ in
         ISSUING_TTL = pki.issuingTTL;
         ORG = "Folly Mountain Laboratories";
         APPROLES = lib.concatStringsSep " " pki.appRoles;
+        K8S_HOST = pki.kubernetes.host;
+        K8S_CA = "${pki.kubernetes.caFile}";
+        K8S_AUDIENCE = pki.kubernetes.audience;
         # Interpolation copies each directory into the store; toString would name the checkout.
         POLICY_DIR = "${./openbao/policies}";
         CONFIG_POLICY = "${./openbao/config-policy.hcl}";

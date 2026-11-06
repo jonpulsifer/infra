@@ -1,0 +1,20 @@
+# Proves the openbao ClusterIssuer issues: a certificate for an internal name, renewed every two
+# days. Nothing serves it; cert-manager's Ready condition is the check.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: openbao-check
+  namespace: cert-manager
+spec:
+  secretName: openbao-check
+  dnsNames:
+    - openbao-check.lolwtf.ca
+  duration: 72h
+  renewBefore: 24h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: openbao

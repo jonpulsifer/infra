@@ -20,6 +20,7 @@ The FML (Folly Mountain Laboratories) PKI (public key infrastructure) is the pri
 | FML Root CA | Itself | OpenBao on forge, mount `pki/root`. Twenty years, pathLen 2. It signs the issuing CA and nothing else. |
 | FML folly Issuing CA | FML Root CA | OpenBao on forge, mount `pki/folly`. Five years, pathLen 1. |
 | The SPIRE server's CA | FML folly Issuing CA | spore's `/var/lib/spire`. 24 hours; the server asks for a new one through the AppRole `spire`, as [Identity](identity.md#server) says. |
+| A service certificate for an internal name | FML folly Issuing CA | Its Secret on folly. cert-manager asks the ClusterIssuer `openbao` in `clusters/folly/networking/cert-manager/issuers/`, which signs from the role `services` for three days at most, after a login with a ServiceAccount token that OpenBao reviews against folly's API server. `openbao-check` in `certificates/` proves the path. |
 | Folly Mountain Laboratories Root CA, the former root | Itself | Offline, and nobody can produce it. 1Password holds the certificate only. |
 | FML Intermediate CA | The former root | 1Password |
 | Kubernetes CA of `<cluster>` | Itself | The Talos secrets bundle, the 1Password item `talos-<cluster>-secrets` |
