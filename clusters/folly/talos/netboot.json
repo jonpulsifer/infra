@@ -9,5 +9,5 @@
     "kernel": "linuxPackages_6_18"
   },
   "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:50cd228b19fcd148a9507decf91b108876a44ec26f49bfd128261ecd2d837af2",
-  "menu_default": "hookos"
+  "menu_default": "alpine"
 }
