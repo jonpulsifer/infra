@@ -402,7 +402,7 @@ func TestVerifyChecksTheDevIDBundle(t *testing.T) {
 	far := time.Now().AddDate(50, 0, 0)
 	fiveYears := time.Now().AddDate(5, 0, 0)
 	root, rootKey := mintCA(t, "root", 2, true, far, nil, nil)
-	inter, interKey := mintCA(t, "intermediate", 1, true, far, root, rootKey)
+	inter, interKey := mintCA(t, "issuing", 1, true, far, root, rootKey)
 	capsule, _ := mintCA(t, "folly-devid-ca-capsule", 0, false, fiveYears, inter, interKey)
 	spore, _ := mintCA(t, "folly-devid-ca-spore", 0, false, fiveYears, inter, interKey)
 	write := func(name string, ders ...[]byte) {
@@ -412,7 +412,7 @@ func TestVerifyChecksTheDevIDBundle(t *testing.T) {
 		}
 	}
 	write("fml-root.pem", root.Raw)
-	write("fml-intermediate.pem", inter.Raw)
+	write("folly-issuing-ca.pem", inter.Raw)
 	write("folly-devid-ca-capsule.pem", capsule.Raw)
 	write("folly-devid-ca-spore.pem", spore.Raw)
 
@@ -459,12 +459,26 @@ func TestVerifyChecksTheDevIDBundle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A CA signed under a former anchor stays trusted through its own chain file, and fails without one.
+	oldRoot, oldRootKey := mintCA(t, "former root", 2, true, far, nil, nil)
+	oldInter, oldInterKey := mintCA(t, "former intermediate", 1, true, far, oldRoot, oldRootKey)
+	software, _ := mintCA(t, "folly-devid-ca-software", 0, false, fiveYears, oldInter, oldInterKey)
+	write("folly-devid-ca-software.pem", software.Raw)
+	write("folly-devid-ca.pem", capsule.Raw, software.Raw, spore.Raw)
+	if got := verify(); !strings.Contains(got, "folly-devid-ca-software.pem is not under folly-issuing-ca.pem and has no folly-devid-ca-software-chain.pem") {
+		t.Errorf("a legacy CA without a chain file should fail, got %q", got)
+	}
+	write("folly-devid-ca-software-chain.pem", software.Raw, oldInter.Raw, oldRoot.Raw)
+	if got := verify(); got != "" {
+		t.Errorf("a legacy CA with its chain file should pass, got %q", got)
+	}
+
 	stranger, strangerKey := mintCA(t, "stranger", 1, true, far, nil, nil)
 	rogue, _ := mintCA(t, "folly-devid-ca-rogue", 0, false, fiveYears, stranger, strangerKey)
 	write("folly-devid-ca-rogue.pem", rogue.Raw)
 	write("folly-devid-ca.pem", capsule.Raw, rogue.Raw, spore.Raw)
-	if got := verify(); !strings.Contains(got, "folly-devid-ca-rogue.pem is issued by") {
-		t.Errorf("a DevID CA outside the FML intermediate should fail, got %q", got)
+	if got := verify(); !strings.Contains(got, "folly-devid-ca-rogue.pem is not under folly-issuing-ca.pem and has no folly-devid-ca-rogue-chain.pem") {
+		t.Errorf("a DevID CA outside the chain should fail, got %q", got)
 	}
 }
 
@@ -526,8 +540,6 @@ func TestSignCASignsUnderTheRoot(t *testing.T) {
 	}
 
 	// verify reads the committed file as the issuing CA under the root.
-	inter, _ := mintCA(t, "FML Intermediate", 1, true, far, root, rootKey)
-	writeCertFile(t, filepath.Join(dir, "fml-intermediate.pem"), inter)
 	var vout, verr bytes.Buffer
 	if err := runVerify(dir, &vout, &verr); err != nil {
 		t.Fatalf("verify: %v\n%s", err, verr.String())
@@ -549,11 +561,9 @@ func TestSignCASignsUnderTheRoot(t *testing.T) {
 func TestVerifyRejectsAnIssuingCAWithoutRoom(t *testing.T) {
 	far := time.Now().AddDate(20, 0, 0)
 	root, rootKey := mintCA(t, "FML Root", 2, true, far, nil, nil)
-	inter, _ := mintCA(t, "FML Intermediate", 1, true, far, root, rootKey)
 	issuing, _ := mintCA(t, "FML folly Issuing CA", 0, true, far, root, rootKey)
 	dir := t.TempDir()
 	writeCertFile(t, filepath.Join(dir, "fml-root.pem"), root)
-	writeCertFile(t, filepath.Join(dir, "fml-intermediate.pem"), inter)
 	writeCertFile(t, filepath.Join(dir, "folly-issuing-ca.pem"), issuing)
 	var out, errOut bytes.Buffer
 	if err := runVerify(dir, &out, &errOut); err == nil || !strings.Contains(errOut.String(), "pathLen >= 1") {

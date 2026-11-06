@@ -133,7 +133,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("cannot load trust anchors: %w", err)
 	}
-	intermediate, err := readCert(filepath.Join(certsDir, "fml-intermediate.pem"))
+	issuing, err := readCert(filepath.Join(certsDir, issuingPrefix+".pem"))
 	if err != nil {
 		return fmt.Errorf("cannot load trust anchors: %w", err)
 	}
@@ -151,15 +151,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 	}
 	sort.Strings(clusterCAs)
 
-	var problems []string
-	if len(clusterCAs) == 0 {
-		// Talos clusters carry their own CA outside the FML chain; the anchors still link.
-		fmt.Fprintln(out, "==> fml")
-		problems = append(problems, checkChain("fml", []named{
-			{intermediate, "fml-intermediate.pem"},
-			{root, "fml-root.pem"},
-		})...)
-	}
+	problems := checkIssuingCA(issuing, root, out)
 	for _, path := range clusterCAs {
 		base := filepath.Base(path)
 		cluster := strings.TrimSuffix(base, "-ca.pem")
@@ -170,7 +162,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 		}
 		chain := []named{
 			{clusterCA, base},
-			{intermediate, "fml-intermediate.pem"},
+			{issuing, issuingPrefix + ".pem"},
 			{root, "fml-root.pem"},
 		}
 		fmt.Fprintf(out, "==> %s\n", cluster)
@@ -187,8 +179,7 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 		}
 	}
 
-	problems = append(problems, checkDevIDCAs(certsDir, intermediate, root, out)...)
-	problems = append(problems, checkIssuingCA(certsDir, root, out)...)
+	problems = append(problems, checkDevIDCAs(certsDir, issuing, root, out)...)
 
 	if len(problems) > 0 {
 		fmt.Fprintln(errOut, "\nchain does not validate:")
@@ -210,9 +201,11 @@ func runVerify(certsDir string, out, errOut io.Writer) error {
 // folly-devid-ca.pem, which verifiers such as SPIRE's tpm_devid trust.
 const devidPrefix = "folly-devid-ca"
 
-// checkDevIDCAs asserts each issuing DevID CA sits under the FML intermediate,
-// and that the bundle holds every one of them in file-name order and nothing else.
-func checkDevIDCAs(certsDir string, intermediate, root *x509.Certificate, out io.Writer) []string {
+// checkDevIDCAs asserts each issuing DevID CA sits under the issuing CA, or,
+// for a CA signed under a former anchor, that its chain file still builds a
+// path, and that the bundle holds every one of them in file-name order and
+// nothing else.
+func checkDevIDCAs(certsDir string, issuing, root *x509.Certificate, out io.Writer) []string {
 	matches, err := filepath.Glob(filepath.Join(certsDir, devidPrefix+"-*.pem"))
 	if err != nil {
 		return []string{err.Error()}
@@ -246,11 +239,21 @@ func checkDevIDCAs(certsDir string, intermediate, root *x509.Certificate, out io
 		want = append(want, ca.Raw)
 		byPath[path] = ca
 		fmt.Fprintf(out, "      %s\n", describe(ca, base))
-		problems = append(problems, checkChain("devid", []named{
-			{ca, base},
-			{intermediate, "fml-intermediate.pem"},
-			{root, "fml-root.pem"},
-		})...)
+		if ca.CheckSignatureFrom(issuing) == nil {
+			problems = append(problems, checkChain("devid", []named{
+				{ca, base},
+				{issuing, issuingPrefix + ".pem"},
+				{root, "fml-root.pem"},
+			})...)
+		} else {
+			// A CA under a former anchor: its chain file, checked below, is what still anchors it.
+			fmt.Fprintf(out, "      %s is not under %s.pem; its chain file anchors it\n", base, issuingPrefix)
+			chainPath := strings.TrimSuffix(path, ".pem") + "-chain.pem"
+			if _, statErr := os.Stat(chainPath); statErr != nil {
+				problems = append(problems, fmt.Sprintf(
+					"devid: %s is not under %s.pem and has no %s beside it", base, issuingPrefix, filepath.Base(chainPath)))
+			}
+		}
 		if ca.KeyUsage&x509.KeyUsageCertSign == 0 {
 			problems = append(problems, fmt.Sprintf("devid: %s lacks keyCertSign, so it cannot issue an LDevID", base))
 		}
@@ -287,17 +290,9 @@ func checkDevIDCAs(certsDir string, intermediate, root *x509.Certificate, out io
 }
 
 // checkIssuingCA asserts the issuing CA that OpenBao holds sits directly under
-// the root with room for the CAs it signs: SPIRE's and the DevID CA.
-func checkIssuingCA(certsDir string, root *x509.Certificate, out io.Writer) []string {
-	path := filepath.Join(certsDir, issuingPrefix+".pem")
-	if _, err := os.Stat(path); err != nil {
-		return nil
-	}
-	base := filepath.Base(path)
-	ca, err := readCert(path)
-	if err != nil {
-		return []string{fmt.Sprintf("issuing: %v", err)}
-	}
+// the root with room for the CAs it signs: SPIRE's and the DevID CAs.
+func checkIssuingCA(ca, root *x509.Certificate, out io.Writer) []string {
+	base := issuingPrefix + ".pem"
 	fmt.Fprintln(out, "==> issuing")
 	fmt.Fprintf(out, "      %s\n", describe(ca, base))
 	fmt.Fprintf(out, "      %s\n", describe(root, "fml-root.pem"))

@@ -303,8 +303,12 @@ run = "go -C apps/fml-attest run . ${TRANSCRIPT:-../fml-ceremony/testdata/transc
 description = "Make an anchor's YubiKey a DevID CA: new PIV secrets in SOPS and 1Password, an RSA-2048 key generated on the card, and its CSR in terraform/pki/csr (arg: <host>)"
 run = "bash scripts/devid-ca-yubikey.sh init"
 
+[tasks."devid:yubikey:sign"]
+description = "Have OpenBao's issuing CA on forge sign an anchor's DevID CA CSR, pathLen 0, five years, and write the certificate, its chain and the bundle under terraform/pki/certs (arg: <host>)"
+run = "bash scripts/devid-ca-yubikey.sh sign"
+
 [tasks."devid:yubikey:install"]
-description = "Write the DevID CA certificate that terraform/pki issued into the anchor's YubiKey and sign through ykcs11 (arg: <host>)"
+description = "Write the committed DevID CA certificate into the anchor's YubiKey and sign through ykcs11 (arg: <host>)"
 run = "bash scripts/devid-ca-yubikey.sh install"
 
 [tasks."devid:bundle"]

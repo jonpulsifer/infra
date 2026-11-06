@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Makes the YubiKey on an anchor a hardware DevID CA, from the operator machine over ssh. init stores
-# new PIV secrets and writes the CSR of a key generated on the card; install writes the issued
-# certificate into the card; bundle writes certs/folly-devid-ca.pem. docs/runbooks/set-up-a-devid-ca-yubikey.md.
+# new PIV secrets and writes the CSR of a key generated on the card; sign has OpenBao's issuing CA on
+# forge sign that CSR and writes the certificate, its chain and the bundle under certs/; install
+# writes the certificate into the card; bundle writes certs/folly-devid-ca.pem.
+# docs/runbooks/set-up-a-devid-ca-yubikey.md.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -12,10 +14,20 @@ readonly pki_dir="$root/terraform/pki"
 readonly certs_dir="$pki_dir/certs"
 readonly algorithm="RSA2048"
 readonly slot="9c"
+readonly openbao_host="forge"
+readonly openbao_item="openbao-forge"
+readonly openbao_mount="pki/folly"
+# Five years, or what is left of the issuing CA's term less an hour, since a CA must not outlive
+# its issuer.
+readonly devid_ttl_seconds=$((43830 * 3600))
 
 usage() {
-  echo "usage: $0 {init <host> | install <host> | bundle}" >&2
+  echo "usage: $0 {init <host> | sign <host> | install <host> | bundle}" >&2
   exit 2
+}
+
+pem_certs() {
+  sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p'
 }
 
 # write_bundle <certs dir> concatenates every issuing DevID CA, in byte order of file name. A
@@ -93,15 +105,71 @@ Next:
 EOF
 }
 
+# sign_cert <host> has the issuing CA in OpenBao on forge sign the committed CSR, with the root token
+# from 1Password, and writes the CA certificate, its chain to the FML root, and the bundle. The CSR's
+# subject is kept, so every LDevID the key signed before still names its issuer.
+sign_cert() {
+  local host="${1:-}"
+  [[ -n "$host" ]] || usage
+  check_host "$host"
+  need jq op ssh
+
+  local csr="$pki_dir/csr/folly-devid-ca-$host.csr"
+  local cert="$certs_dir/folly-devid-ca-$host.pem"
+  local chain="$certs_dir/folly-devid-ca-$host-chain.pem"
+  [[ -s "$csr" ]] || die "${csr#"$root/"} does not exist; run init first"
+
+  local tgt dns_zone
+  tgt="$(target "$openbao_host")"
+  dns_zone="$(jq -er .locals.fleet.dns_zone "$root/terraform/network/tailscale/fleet.tf.json")"
+  make_work
+
+  echo "==> reading the root token from 1Password '$openbao_item'" >&2
+  op item get "$openbao_item" --vault "$op_vault" --fields label=root-token --reveal >"$work/root-token"
+  [[ -s "$work/root-token" ]] || die "1Password '$openbao_item' holds no root-token"
+
+  echo "==> signing ${csr#"$root/"} with $openbao_mount on $tgt: pathLen 0, five years at most" >&2
+  remote "$tgt" >"$work/signed.json" <<EOF
+export BAO_ADDR="https://$openbao_host.$dns_zone:8200"
+export BAO_TOKEN="$(cat "$work/root-token")"
+ends="\$(bao read -field=certificate $openbao_mount/cert/ca | openssl x509 -noout -enddate | cut -d= -f2)"
+left=\$((\$(date -d "\$ends" +%s) - \$(date +%s) - 3600))
+ttl=$devid_ttl_seconds
+((left < ttl)) && ttl=\$left
+bao write -format=json $openbao_mount/root/sign-intermediate csr=- ttl=\${ttl}s max_path_length=0 use_csr_values=true <<'CSR'
+$(cat "$csr")
+CSR
+EOF
+  jq -er '.data.certificate' "$work/signed.json" | pem_certs >"$cert"
+  [[ -s "$cert" ]] || die "the server returned no certificate"
+  # ca_chain may repeat the signed certificate first; the chain file holds it once, then the issuing
+  # CA and the root.
+  {
+    cat "$cert"
+    jq -er '(.data.certificate | gsub("\\s"; "")) as $c | .data.ca_chain[] | select((gsub("\\s"; "")) != $c)' "$work/signed.json"
+  } | pem_certs >"$chain"
+  write_bundle "$certs_dir"
+
+  echo "==> checking the committed chain" >&2
+  go -C "$root/apps/fml-pki" run . verify
+
+  cat >&2 <<EOF
+
+Done: ${cert#"$root/"} and ${chain#"$root/"} hold the CA certificate of folly-devid-ca-$host under the FML root.
+Commit them and terraform/pki/certs/folly-devid-ca.pem in a pull request, then run: mise run devid:yubikey:install $host
+EOF
+}
+
 install_cert() {
   local host="${1:-}"
   [[ -n "$host" ]] || usage
   check_host "$host"
-  need go jq nix sops ssh tofu
+  need go jq nix sops ssh
   : "${SOPS_AGE_KEY_FILE:?set SOPS_AGE_KEY_FILE to the operator key}"
 
   local sops_file="$root/nix/secrets/$host.sops.yaml"
   local cert="$certs_dir/folly-devid-ca-$host.pem"
+  [[ -s "$cert" ]] || die "${cert#"$root/"} does not exist; run sign first"
 
   echo "==> reading homelab.yubikey of $host" >&2
   local config id serial
@@ -109,13 +177,6 @@ install_cert() {
   id="$(slot_id "$slot")"
   serial="$(jq -r '.serial // empty' <<<"$config")"
   [[ -n "$serial" ]] || die "set homelab.yubikey.serial in nix/hosts/$host.nix"
-
-  echo "==> reading the issued certificate from terraform/pki state" >&2
-  local pem
-  pem="$(tofu -chdir="$pki_dir" output -json devid_ca_yubikey_certs | jq -er --arg h "$host" '.[$h]')" \
-    || die "terraform/pki has issued no certificate for $host; apply the CSR's pull request with Atlantis"
-  printf '%s\n' "$pem" | sed -n '/-----BEGIN CERTIFICATE-----/,/-----END CERTIFICATE-----/p' >"$cert"
-  write_bundle "$certs_dir"
 
   local tgt pin mgmt_key
   tgt="$(target "$host")"
@@ -151,13 +212,13 @@ EOF
   cat >&2 <<EOF
 
 Done: slot $slot of YubiKey $serial on $host holds ${cert#"$root/"}, and ykcs11 signs with it.
-Commit ${cert#"$root/"} and terraform/pki/certs/folly-devid-ca.pem in a pull request.
 EOF
 }
 
 main() {
   case "${1:-}" in
     init) init_key "${2:-}" ;;
+    sign) sign_cert "${2:-}" ;;
     install) install_cert "${2:-}" ;;
     bundle)
       write_bundle "$certs_dir"
