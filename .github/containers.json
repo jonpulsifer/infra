@@ -15,6 +15,7 @@
     "mate-voice",
     "smiirl",
     "spire-agent-tpm",
+    "spiffe-adc",
     "kthx-engine",
     "kthx-engine-verifier",
     "gcsfuse",
@@ -74,6 +75,9 @@
     ],
     "spire-agent-tpm": [
       "clusters/folly/apps/spire/daemonset.yaml"
+    ],
+    "spiffe-adc": [
+      "clusters/folly/apps/spire-test/job.yaml"
     ],
     "switchboard": [
       "clusters/folly/apps/pbx/switchboard.yaml",

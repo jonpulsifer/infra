@@ -1,4 +1,3 @@
----
 # terraform/gcp/projects/homelab-ng/spire-test.tf grants
 # spiffe://lolwtf.ca/ns/spire-test/sa/uploader object create on the bucket,
 # so the name matters. The pod holds no Kubernetes token and no GCP key.
@@ -12,20 +11,24 @@ metadata:
     app.kubernetes.io/part-of: spire
 automountServiceAccountToken: false
 ---
-# Proves the SPIRE path to GCP: a JWT-SVID for the fml-pool provider `spire`
-# goes to STS through an external_account config, and the token uploads one
-# object. Nothing here names a cluster. Bump the suffix in the name to run it
-# again.
+# Proves the SPIRE path to GCP as a workload would use it: gcloud reads the
+# ADC document from the spiffe-adc component, runs spiffe-adc for a JWT-SVID
+# through the csi.spiffe.io volume, trades it at STS, and the token uploads
+# one object. No sidecar, no hostPath, no file to keep fresh. Nothing here
+# names a cluster. Bump the suffix in the name to run it again.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: upload-1
+  name: upload-2
   namespace: spire-test
   labels:
     app.kubernetes.io/name: uploader
     app.kubernetes.io/part-of: spire
+  annotations:
+    # A Job's template is immutable, so Flux replaces the Job to change it.
+    kustomize.toolkit.fluxcd.io/force: enabled
 spec:
-  # Suspended until a node carries lolwtf.ca/tpm=true and the agents attest;
+  # Suspended until a node carries lolwtf.ca/tpm=true and its agent attests;
   # a Pending pod would raise KubeJobNotCompleted. Remove the line to run it.
   suspend: true
   backoffLimit: 6
@@ -38,7 +41,7 @@ spec:
       restartPolicy: Never
       serviceAccountName: uploader
       automountServiceAccountToken: false
-      # Only these nodes run a SPIRE agent.
+      # Only these nodes run a SPIRE agent and its CSI driver.
       nodeSelector:
         lolwtf.ca/tpm: "true"
       securityContext:
@@ -59,44 +62,40 @@ spec:
             - |
               set -euo pipefail
               umask 077
-              mkdir -p /tmp/gcp
-              /opt/spire-agent/opt/spire/bin/spire-agent api fetch jwt \
-                -socketPath /run/spire/sockets/agent.sock \
-                -audience "$GCP_AUDIENCE" -output json > /tmp/gcp/svid.json
+              mkdir -p /tmp/gcloud
+              # The SPIFFE ID, from one reply of the executable the library runs.
+              GOOGLE_EXTERNAL_ACCOUNT_AUDIENCE="$(python3 -c 'import json; print(json.load(open("/var/run/spiffe/adc/gcp-credentials.json"))["audience"])')" \
+                /opt/spiffe-adc/spiffe-adc > /tmp/reply.json
               python3 - <<'PY'
-              import json, os
+              import base64, json, os
 
-              svid = json.load(open("/tmp/gcp/svid.json"))[0]["svids"][0]
-              open("/tmp/gcp/jwt", "w").write(svid["svid"])
-              json.dump(
-                  {
-                      "type": "external_account",
-                      "audience": os.environ["GCP_AUDIENCE"],
-                      "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-                      "token_url": "https://sts.googleapis.com/v1/token",
-                      "credential_source": {
-                          "file": "/tmp/gcp/jwt",
-                          "format": {"type": "text"},
-                      },
-                  },
-                  open("/tmp/gcp/credentials.json", "w"),
+              reply = json.load(open("/tmp/reply.json"))
+              if not reply.get("success"):
+                  raise SystemExit(f"spiffe-adc: {reply.get('message')}")
+              payload = reply["id_token"].split(".")[1]
+              sub = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["sub"]
+              open("/tmp/object.txt", "w").write(
+                  f"Uploaded by {sub} from {os.environ['NODE_NAME']} with no key file and no sidecar.\n"
               )
-              open("/tmp/gcp/object.txt", "w").write(
-                  f"Uploaded by {svid['spiffe_id']} from {os.environ['NODE_NAME']} with no key file.\n"
-              )
-              print("SVID:", svid["spiffe_id"])
+              print("SVID:", sub)
               PY
-              gcloud --quiet auth login --cred-file=/tmp/gcp/credentials.json
-              printf 'Authorization: Bearer %s\n' "$(gcloud auth print-access-token)" > /tmp/gcp/auth-header
+              gcloud --quiet auth login --cred-file="$GOOGLE_APPLICATION_CREDENTIALS"
+              printf 'Authorization: Bearer %s\n' "$(gcloud auth print-access-token)" > /tmp/auth-header
               object="uploads/$(date -u +%Y%m%dT%H%M%SZ)-$NODE_NAME.txt"
-              curl --fail-with-body -sS -X POST -H @/tmp/gcp/auth-header \
-                -H 'Content-Type: text/plain' --data-binary @/tmp/gcp/object.txt \
+              curl --fail-with-body -sS -X POST -H @/tmp/auth-header \
+                -H 'Content-Type: text/plain' --data-binary @/tmp/object.txt \
                 "https://storage.googleapis.com/upload/storage/v1/b/$BUCKET/o?uploadType=media&name=$object" > /dev/null
               echo "Uploaded gs://$BUCKET/$object"
           env:
-            # The full resource name of the fml-pool provider `spire`, its default audience.
-            - name: GCP_AUDIENCE
-              value: //iam.googleapis.com/projects/629296473058/locations/global/workloadIdentityPools/fml-pool/providers/spire
+            # The ADC document from the spiffe-adc component, and the library's
+            # consent to run the executable it names.
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /var/run/spiffe/adc/gcp-credentials.json
+            - name: GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES
+              value: "1"
+            # Where the csi.spiffe.io volume puts the agent's socket.
+            - name: SPIFFE_ENDPOINT_SOCKET
+              value: unix:///spiffe-workload-api/agent.sock
             # Declared in terraform/gcp/projects/homelab-ng/spire-test.tf.
             - name: BUCKET
               value: homelab-ng-spire-test
@@ -120,21 +119,30 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
-            - name: sockets
-              mountPath: /run/spire/sockets
+            - name: spiffe-workload-api
+              mountPath: /spiffe-workload-api
               readOnly: true
-            # The spire-agent CLI. Its image has no shell to write the SVID to a file.
-            - name: spire-agent
-              mountPath: /opt/spire-agent
+            - name: spiffe-adc
+              mountPath: /var/run/spiffe/adc
+              readOnly: true
+            - name: spiffe-adc-bin
+              mountPath: /opt/spiffe-adc
               readOnly: true
       volumes:
         - name: tmp
           emptyDir: {}
-        - name: sockets
-          hostPath:
-            path: /run/spire/sockets
-            type: Directory
-        - name: spire-agent
+        # The agent's socket, from the driver in clusters/folly/apps/spire/csi-driver.yaml.
+        - name: spiffe-workload-api
+          csi:
+            driver: csi.spiffe.io
+            readOnly: true
+        - name: spiffe-adc
+          configMap:
+            name: spiffe-adc
+        # The executable. CD rewrites this digest (`.github/containers.json`) by
+        # matching the whole `ghcr.io/…/spiffe-adc…@sha256:` string, so keep it
+        # one literal. The zero digest stands until main builds the first image.
+        - name: spiffe-adc-bin
           image:
-            reference: ghcr.io/spiffe/spire-agent:1.15.5
+            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
             pullPolicy: IfNotPresent
