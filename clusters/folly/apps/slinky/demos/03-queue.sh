@@ -5,6 +5,11 @@
 set -euo pipefail
 
 nodes=$(sinfo -h -t idle -o %D | head -1)
+[ "${nodes:-0}" -gt 0 ] || {
+  echo "no idle node; sinfo says:"
+  sinfo
+  exit 1
+}
 
 big=$(sbatch --parsable --job-name=hog --nodes="$nodes" --exclusive --output=/dev/null --wrap='sleep 20')
 small=$(sbatch --parsable --job-name=small --ntasks=1 --output=/dev/null --wrap='hostname')

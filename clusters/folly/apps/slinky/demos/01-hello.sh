@@ -4,6 +4,11 @@
 set -euo pipefail
 
 nodes=$(sinfo -h -t idle -o %D | head -1)
+[ "${nodes:-0}" -gt 0 ] || {
+  echo "no idle node; sinfo says:"
+  sinfo
+  exit 1
+}
 
 echo "== one task on each of the $nodes idle nodes"
 srun --nodes="$nodes" --ntasks-per-node=1 --label --time=1 \

@@ -23,6 +23,12 @@ spec:
     clusterName: folly
     asciiArt: false
     controller:
+      # The operator's preStop marks a terminating worker down, and its
+      # uncordon after the roll changes the reason but not the state. With
+      # ReturnToService=2 the new slurmd's registration returns the node to
+      # service by itself, so a NodeSet roll needs no hand resume.
+      extraConf: |
+        ReturnToService=2
       slurmctld:
         resources:
           requests:
