@@ -3,7 +3,7 @@
 # weather: one Bun process that runs its source as committed, with no build step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:d0db506a46ecf9fca69413576d9621988d1e879956e8f9241c87d7fb5a200a68 AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
@@ -12,7 +12,7 @@ RUN apk add --no-cache bash curl unzip \
 
 FROM base AS pruner
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.9
+ARG TURBO_VERSION=2.11.10
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune weather --docker
