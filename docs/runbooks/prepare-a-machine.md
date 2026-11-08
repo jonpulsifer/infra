@@ -49,14 +49,21 @@ Use this runbook once for each new machine, before [Provision a node](provision-
 
 3. Open the firmware setup, turn on Secure Boot, and power off the machine.
 
-## Set AMT's address
+## Check AMT's address
 
-AMT shares the node's NIC, and fleetd's Rufio `Machine` dials it at the node's own address. Talos sets that address statically, so AMT holds it statically too. Do this once the node has an address in NetBox: the stub's `--address`, or the one its binding allocates.
+AMT shares the node's NIC and keeps its wired IPv4 on DHCP, as MEBx sets it by default. fleetd dials it at the node's NetBox address. Once the machine attests, fleetd writes a Kea reservation for its MAC at that address, and AMT takes it at its next lease.
 
-1. In MEBx, or in MeshCommander from the future network, turn off DHCP for AMT's wired IPv4.
-2. Set the address to the node's NetBox address, shared with the host, with the prefix length of `K8S_NODE_CIDR` and the gateway `ROUTER_IP` from `clusters/folly/config/cluster-topology.json`.
+1. In MEBx, leave DHCP on for AMT's wired IPv4.
+2. After the machine's first attestation, make sure that AMT answers at the node's address.
 
-   Result: AMT answers on port 16992 at the node's address.
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' http://<address>:16992/
+   ```
+
+   Result: `303`. Before the next lease, AMT answers at the machine's pool address in Kea's log.
+
+> [!NOTE]
+> Talos sets the host's address statically, and Intel does not support a static host with AMT on DHCP. AMT renews its lease from Kea by unicast. If it stops answering at the node's address, replug the machine, or turn off DHCP in MEBx and set AMT to the node's address with the prefix length of `K8S_NODE_CIDR` and the gateway `ROUTER_IP` from `clusters/folly/config/cluster-topology.json`.
 
 ## If something goes wrong
 
@@ -64,7 +71,8 @@ AMT shares the node's NIC, and fleetd's Rufio `Machine` dials it at the node's o
 | --- | --- | --- |
 | iPXE says that `sanboot` failed | The firmware cannot boot the ISO over HTTP | Write `/talos/folly/metal-amd64-secureboot.iso` from spore to a USB stick, and boot it |
 | systemd-boot shows no enrollment message | The firmware is not in Setup Mode | Clear the Secure Boot keys again |
-| `Selected boot image did not authenticate` | `db` lacks the lab's certificate | Turn off Secure Boot, clear the keys, enroll again, then turn on Secure Boot |
+| `Selected boot image did not authenticate` on the netboot image | `db` lacks the lab's certificate | Turn off Secure Boot, clear the keys, enroll again, then turn on Secure Boot |
+| Each boot stops at `Selected boot image did not authenticate` and netboots after a key press | The disk holds another operating system, which the lab's keys do not sign | Once the machine attests, set its device's `desired_action` to `wipe`, as [Provision a node](provision-a-node.md#plug-a-machine-in) says |
 | The screen is black after the enrollment | An option ROM is not signed by a certificate in `db` | Clear the Secure Boot keys, and note the model |
 
 ## Related
