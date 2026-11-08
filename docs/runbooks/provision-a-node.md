@@ -126,7 +126,7 @@ A binding needs independent evidence: a receiving scan of the machine's TPM, or 
 
    Result: `attest: PASSED`.
 
-A replaced TPM, as after a board swap, needs the same change: a binding, or the EKs fleetd proved earlier, refuses the new TPM until the entry names its EKs.
+A replaced TPM, as after a board swap, needs the same change: a binding, the EKs fleetd proved earlier, or an `ek_hash` pin in NetBox refuses the new TPM until the entry names its EKs.
 
 ## If something goes wrong
 

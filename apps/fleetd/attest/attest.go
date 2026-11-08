@@ -378,8 +378,10 @@ func (v *Verifier) open(s *session) string {
 // the serial proved in an earlier pass, so a reboot into HookOS needs no new
 // approval. A planned device with neither passes when every EK carries a
 // manufacturer certificate: git declaring the serial is the authorization.
-// A serial NetBox lacks, or an uncertified EK, waits. NetBox's ek_hash pins
-// are a note and never authorize: anyone who can write NetBox can write them.
+// Its NetBox ek_hash pins, when it has any, must match too, so a stale pin
+// refuses a replaced TPM until the pin is cleared. A serial NetBox lacks, or
+// an uncertified EK, waits. NetBox's ek_hash pins never authorize alone:
+// anyone who can write NetBox can write them.
 // A device past planned with no proof on file is refused, unless it has no
 // pins either and waits like any unbound claim.
 func checkPinned(m Machine, proven map[string]string, eks []VerifiedEK) error {
@@ -387,6 +389,8 @@ func checkPinned(m Machine, proven map[string]string, eks []VerifiedEK) error {
 	switch {
 	case len(m.Approved) > 0:
 		return matchPins(m, m.Approved, "approved", eks)
+	case planned && len(proven) == 0 && len(m.Pins) > 0:
+		return matchPins(m, m.Pins, "pinned", eks)
 	case planned && len(proven) == 0:
 		if i := slices.IndexFunc(eks, func(e VerifiedEK) bool { return e.Issuer == "" }); i >= 0 {
 			return fail(reasonEKPending, "%s is planned, but its %s EK has no manufacturer certificate; its entry in the nodes file names its EKs to admit %s", m.Name, eks[i].Alg, ekSummary(eks))

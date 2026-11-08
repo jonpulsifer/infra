@@ -115,7 +115,8 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   checks and authorizes nothing. A manufacturer certificate admits no device on its own.
 - A `planned` device without a binding, and no earlier proof of EKs for its serial, passes when
   every EK it sends carries a manufacturer certificate that chains to the roots, activates its
-  credential, and the quote and boot policy pass. The declared serial authorizes it. One EK
+  credential, and the quote and boot policy pass. The declared serial authorizes it. The device's
+  `ek_hash` pins in NetBox, when it has any, must match too: they refuse, never admit. One EK
   without a certificate, or a serial NetBox lacks, waits as a claim in
   `pending/`, which authorizes nothing and creates no device. A claim is rewritten only when it
   changes, its journal line and NetBox note come at most every ten minutes per serial, and claims

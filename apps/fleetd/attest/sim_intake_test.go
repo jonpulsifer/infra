@@ -122,15 +122,28 @@ func TestDeclaredStubBinds(t *testing.T) {
 	}
 }
 
-// A planned stub without an approved binding waits, though its maker
-// certified every EK, and so does one whose EK has no certificate. Neither
-// binds, issues or pins anything.
+// A planned stub without an approved binding passes when its maker certified
+// every EK, and binds its MAC and pins its EKs.
+func TestUnboundStubWithCertifiedEKsPasses(t *testing.T) {
+	f := newFakeNetBox(t)
+	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
+	f.add("swell", "SIM-STUB", statusPlanned, "", map[string]any{"class": "worker-g5"})
+	if _, err := h.run("SIM-STUB", simMAC); err != nil {
+		t.Fatalf("certified unbound stub: %v", err)
+	}
+	d := f.settled(t, "SIM-STUB", 2)
+	if !h.intakeAudited("SIM-STUB") || f.macOf("SIM-STUB") == "" || d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
+		t.Fatalf("after the pass: %+v", d.CustomFields)
+	}
+}
+
+// A planned stub without an approved binding waits when an EK has no
+// certificate. It binds, issues or pins nothing.
 func TestUnboundStubWaits(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		opts harnessOpts
 	}{
-		{"certified EKs", harnessOpts{inventory: emptyInventory}},
 		{"uncertified EK", harnessOpts{inventory: emptyInventory, noEKCerts: true}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -347,12 +360,14 @@ func TestABindingChangeReplacesTheTPM(t *testing.T) {
 	f := newFakeNetBox(t)
 	h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 	f.add("swell", "SIM-STUB", statusPlanned, simMAC, map[string]any{"ek_hash": strings.Repeat("ab", 32), "ek_hash_ecc": strings.Repeat("cd", 32)})
-	h.pending(t, "SIM-STUB")
+	if r := refusal(t, func() error { _, err := h.run("SIM-STUB", simMAC); return err }()); r.Verdict.Reason != reasonEKHash {
+		t.Fatalf("the old TPM's pins: %+v, want %s", r.Verdict, reasonEKHash)
+	}
 	f.set("SIM-STUB", func(d *fakeDevice) { maps.Copy(d.CustomFields, h.bound(nil)) })
 	if _, err := h.run("SIM-STUB", simMAC); err != nil {
 		t.Fatalf("after the binding changed: %v", err)
 	}
-	if d := f.settled(t, "SIM-STUB", 3); d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
+	if d := f.settled(t, "SIM-STUB", 2); d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] {
 		t.Fatalf("pins after the replacement: %+v", d.CustomFields)
 	}
 }
