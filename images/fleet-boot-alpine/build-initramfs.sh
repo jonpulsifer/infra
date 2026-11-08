@@ -27,7 +27,7 @@ esac
 # tree only decides what a boot can load. af_packet is the packet socket
 # udhcpc sends from, a module in Alpine's kernel where NixOS's builds it in.
 modules='e1000e igb igc r8169 tg3 r8152 ax88179_178a cdc_ether
-  nvme ahci sd_mod usb_storage uas xhci_pci
+  nvme vmd ahci sd_mod usb_storage uas xhci_pci
   vfat nls_cp437 nls_iso8859_1 ext4
   tpm_tis tpm_crb efivarfs af_packet'
 

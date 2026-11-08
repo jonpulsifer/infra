@@ -69,8 +69,9 @@ let
         boot.initrd = {
           compressor = "zstd";
           # The lab's NICs: Intel on every node, Realtek and USB adapters on spares; its disks: NVMe,
-          # SATA and USB; the file systems an install mounts to write a seed. udev loads each by
-          # modalias, so the list only decides what the initrd carries.
+          # also behind Intel VMD when the firmware's RAID or Optane mode remaps it, SATA and USB;
+          # the file systems an install mounts to write a seed. udev loads each by modalias, so the
+          # list only decides what the initrd carries.
           availableKernelModules = [
             "e1000e"
             "igb"
@@ -81,6 +82,7 @@ let
             "ax88179_178a"
             "cdc_ether"
             "nvme"
+            "vmd"
             "ahci"
             "sd_mod"
             "usb_storage"
