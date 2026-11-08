@@ -36,7 +36,7 @@ yq = "latest"
 # tally (apps/tally) is the first Python app: uv owns its env, lockfile and Python.
 uv = "latest"
 # Atlantis applies with OpenTofu; run tofu locally to match.
-opentofu = "1.13.2"
+opentofu = "1.13.9"
 terraform = "latest"
 terraform-docs = "latest"
 trivy = "latest"
