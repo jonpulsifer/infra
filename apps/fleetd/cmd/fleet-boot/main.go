@@ -58,6 +58,9 @@ func run(ctx context.Context, log *logger, url, ntp string) error {
 	}
 	// The clock waits for the route the NTP server is reached over.
 	setClock(ntp, log)
+	for _, d := range fleetboot.Inventory("/sys") {
+		log.Printf("disk %s", d)
+	}
 	rw, err := openTPM(ctx, 30*time.Second)
 	if err != nil {
 		return err
