@@ -4,10 +4,10 @@
     "version": "v0.11.1",
     "sha512": "24bc6ccf225b5ce1033cdfa155d14c01da175a2e1c5268e5e64bda76fd94af7f72d841e0e0045fbf232486bc89f35251ba551aa810e30d4bebce0d5083bce61d"
   },
-  "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:6a1e42378aa2de2f2af23f341552010fac4a677f946d5d483ddcd694114d08b0",
+  "tink_agent_image": "ghcr.io/jonpulsifer/tink-agent-autoid@sha256:db24290f82f053a941cb20899ac2c2f3696cc659159e2c2253d129b815aa8302",
   "fleet_boot": {
     "kernel": "linuxPackages_6_18"
   },
-  "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:50cd228b19fcd148a9507decf91b108876a44ec26f49bfd128261ecd2d837af2",
+  "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:bf7b24511b04012924ceae4b4725b167a469f85aa6cfa8168486a378a81dbb6c",
   "menu_default": "alpine"
 }
