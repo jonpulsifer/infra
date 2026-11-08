@@ -45,11 +45,14 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 
    Result: HookOS boots, and the console shows `attest: PASSED`. The device holds the machine's MAC, its `attested_*` fields and `attest_verdict` `attested`. If it shows `pending-approval` instead, the machine sent an EK that has no maker certificate, or no entry names its serial; [approve its EKs](#approve-a-machines-eks) or declare the node.
 
+   > [!NOTE]
+   > A provision wipes the disk only once fleetd issues the install code, so a run whose render fails leaves the disk as it is. A disk that holds another operating system stops each boot at `Selected boot image did not authenticate` until a key press. Set the device's `desired_action` to `wipe`, which needs no install code, and power-cycle the machine. The next boot finds no system on the disk and netboots on its own.
+
 3. Watch the device's NetBox journal, and [the run](#watch-the-run).
 
    Result: `started Workflow provision-<node>-<unix seconds>`, with the note that the machine attested from HookOS. HookOS takes the run, and the installed Talos boots with its address set statically.
 
-4. Set the machine's AMT to the node's address, as [Prepare a machine](prepare-a-machine.md#set-amts-address) says, so Rufio reaches it for every later run.
+4. Make sure that AMT answers at the node's address, as [Prepare a machine](prepare-a-machine.md#check-amts-address) says, so fleetd reaches it for every later run.
 5. Once NetBox holds the node `active`, open a pull request, comment `atlantis plan -d clusters/folly/talos`, then `atlantis apply`.
 
    Result: the Talos root manages the node, since it reads each node's status from NetBox.
@@ -133,7 +136,7 @@ A replaced TPM, as after a board swap, needs the same change: a binding, the EKs
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | The journal says `on port N, expected M` | A switch port the device does not expect | Move the machine, or correct `switch_port` in the nodes file, and power-cycle it |
-| The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Set AMT's address, or power the machine on by hand |
+| The `Workflow`'s Rufio job fails to power the machine | AMT does not answer at the node's address | Replug the machine so AMT takes its Kea reservation, as [Prepare a machine](prepare-a-machine.md#check-amts-address) says, or power the machine on by hand |
 | The firmware gets no DHCP offer on a node port | Kea on spore is down, the gateway does not relay the Kubernetes network to it, or the gateway drops Kea's reply before its relay sees it | Check `kea-dhcp4-server` on spore and `SporeKeaDown`, then `dhcp_relay` in `terraform/network/unifi/folly/k8s.tf`. Kea's `pkt4-offer-sent` rising with `pkt4-request-received` at zero is the dropped reply: in the UniFi console, the `Allow Boot DHCP Replies to Gateway` policy must sit above `Block Bootstrap to Gateway` |
 | The journal says the device `lacks` a field | `terraform/netbox/folly` has not applied the node's entry | Comment `atlantis plan -d terraform/netbox/folly` and apply it |
 | The console says `attest: try 5 failed` | fleetd did not answer | Read `journalctl -u fleetd` on spore |
