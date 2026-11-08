@@ -165,3 +165,33 @@ func diskSize(path string) (int64, error) {
 	defer f.Close()
 	return f.Seek(0, 2)
 }
+
+// Inventory describes each whole disk under sys/block that sits on a
+// device: its kernel name, model, serial, size, and whether it is removable
+// or on USB, one line each, so a new machine's log names its install disk's
+// serial.
+func Inventory(sys string) []string {
+	block := filepath.Join(sys, "block")
+	entries, err := os.ReadDir(block)
+	if err != nil {
+		return []string{fmt.Sprintf("read %s: %v", block, err)}
+	}
+	var lines []string
+	for _, b := range entries {
+		dir := filepath.Join(block, b.Name())
+		if _, err := os.Stat(filepath.Join(dir, "device")); err != nil {
+			continue
+		}
+		sectors, _ := strconv.ParseInt(readTrim(filepath.Join(dir, "size")), 10, 64)
+		target, _ := filepath.EvalSymlinks(dir)
+		lines = append(lines, fmt.Sprintf("%s model=%q serial=%q size=%dGB removable=%s usb=%t",
+			b.Name(), readTrim(filepath.Join(dir, "device/model")), serialOf(dir), sectors*512/1e9,
+			readTrim(filepath.Join(dir, "removable")), onUSB(target)))
+	}
+	return lines
+}
+
+func readTrim(path string) string {
+	b, _ := os.ReadFile(path)
+	return strings.TrimSpace(string(b))
+}
