@@ -117,3 +117,4 @@ nodes:
     switch_port: 24
     address: 10.3.0.15
     bmc: amt
+    disk_serial: "11APC2VCQL42"
