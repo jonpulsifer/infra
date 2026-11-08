@@ -31,10 +31,6 @@ resource "unifi_network" "fml" {
 }
 
 
-data "unifi_ap_group" "all_aps" {
-  name = "All APs"
-}
-
 data "onepassword_item" "wifi" {
   vault = local.vault_id
   uuid  = "a2etujelxm3zqseawe3phxtyc4"
@@ -46,7 +42,7 @@ resource "unifi_wlan" "fml" {
   passphrase = data.onepassword_item.wifi.password
 
   ap_group = {
-    ids = [data.unifi_ap_group.all_aps.id]
+    ids = [unifi_ap_group.role["people"].id]
   }
 
   network_id    = unifi_network.fml.id
