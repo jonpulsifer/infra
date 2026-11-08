@@ -49,6 +49,8 @@ for dev in /sys/class/net/*; do
   udhcpc -i "$name" -b -t 5 -T 3 -A 10 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
 done
 
-fleet-boot
+# fleet-boot writes each line to tty0 and ttyS0 itself, and stdout here is the
+# console, which is tty0, so its stdout goes nowhere; stderr keeps a panic.
+fleet-boot >/dev/null
 echo "init: fleet-boot returned $?; this boot does nothing more"
 while :; do sleep 3600; done
