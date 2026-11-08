@@ -49,6 +49,15 @@ for dev in /sys/class/net/*; do
   udhcpc -i "$name" -b -t 5 -T 3 -A 10 -s /usr/share/udhcpc/default.script >/dev/null 2>&1 || true
 done
 
+# busybox's syslogd sends the kernel's messages, from boot on, to the
+# receiver the command line names, beside fleet-boot's own lines, so a driver
+# that fails to bring up a disk or a NIC shows in spore's journal.
+syslog_host=$(sed -n 's/.*syslog_host=\([^ ]*\).*/\1/p' /proc/cmdline)
+if [ -n "$syslog_host" ]; then
+  syslogd -R "$syslog_host:514"
+  klogd
+fi
+
 # fleet-boot writes each line to tty0 and ttyS0 itself, and stdout here is the
 # console, which is tty0, so its stdout goes nowhere; stderr keeps a panic.
 fleet-boot >/dev/null
