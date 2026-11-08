@@ -58,8 +58,6 @@ func (v *Verifier) installCode(ctx context.Context, rec Record, s *session) (pro
 	uuid, ok := smbiosUUID(rec.UUID)
 	switch {
 	case err != nil:
-	case len(s.machine.Approved) == 0:
-		err = errors.New("the pass matched no approved EK binding")
 	case !ok:
 		err = errors.New("the session's SMBIOS UUID is not 8-4-4-4-12 hex")
 	default:

@@ -520,7 +520,7 @@ func (n *NetBox) Backfill(ctx context.Context, r Record) (bool, error) {
 	return true, nil
 }
 
-// MarkPending notes on the device that an intake waits for its approved binding.
+// MarkPending notes on the device that an intake waits for approval.
 // A claim proved nothing, so it writes neither status nor pins, and never
 // over a pass on file: the device's verdict stays attested.
 func (n *NetBox) MarkPending(ctx context.Context, serial, detail string) error {
@@ -537,7 +537,7 @@ func (n *NetBox) MarkPending(ctx context.Context, serial, detail string) error {
 			return err
 		}
 	}
-	n.journalLater(ctx, d.ID, "warning", "fleetd: an intake waits for an approved EK binding in the nodes file: "+netbox.Plain(detail), serial)
+	n.journalLater(ctx, d.ID, "warning", "fleetd: an intake waits for approval: "+netbox.Plain(detail), serial)
 	return nil
 }
 

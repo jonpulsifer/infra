@@ -21,7 +21,7 @@ fleetd exposes device, administration and monitoring endpoints. Use this page to
 
 ## Trust in the machine
 
-An approved EK binding depends on independent evidence: a receiving scan or supplier record that ties the chassis serial to its keys. A reported serial, pending claim or unchecked console cannot establish that binding.
+An approved EK binding depends on independent evidence: a receiving scan or supplier record that ties the chassis serial to its keys. A reported serial, pending claim or unchecked console cannot establish that binding. A machine without a binding is admitted on maker-certified EKs, with its declared serial as the authorization.
 
 TPM 1.2 nodes and class `worker-g2` cannot attest or install through fleetd.
 
@@ -92,7 +92,7 @@ The disk check trusts the serial that the disk reports. Duplicate serials cause 
 | `FleetInstallConfigRefetched` | A node asks again for a config fleetd served it and did not keep it | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `FleetNodeBootedHookOSAfterInstall` | A planned device attested from HookOS after its provision succeeded, so its firmware did not boot the disk | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
 | `TalosAttestQuarantined` | A node's newest verdict is a quarantine | [Provision a node](../../runbooks/provision-a-node.md#if-something-goes-wrong) |
-| `TalosAttestWaitingForApproval` | An intake waits for an approved EK binding | [Provision a node](../../runbooks/provision-a-node.md#approve-a-machines-eks) |
+| `TalosAttestWaitingForApproval` | An intake waits: it sent an EK with no maker certificate, or no entry names its serial | [Provision a node](../../runbooks/provision-a-node.md#approve-a-machines-eks) |
 | `TalosAttestNotChecked`, `TalosAttestLDevIDExpiring` | A node's hourly quote or renewal fails | [Add a TPM node to SPIRE](../../runbooks/add-a-tpm-node-to-spire.md#if-something-goes-wrong) |
 | `TalosAttestCheckFailed`, `TalosAttestPCR0Changed` | A hourly check failed, or PCR 0 moved at one BIOS version | Read the device's NetBox journal |
 | `KubeletCSRPending` | A kubelet's first certificate request has waited an hour | [Install Talos on a node](../../runbooks/install-talos-on-a-node.md#approve-the-nodes-first-certificate) |

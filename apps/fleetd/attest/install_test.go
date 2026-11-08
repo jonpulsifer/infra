@@ -49,7 +49,11 @@ func (f *fakeInstaller) requests() []InstallRequest {
 func installVerifier(t *testing.T, f Installer, audit io.Writer) (*Verifier, *fakeNetBox) {
 	nb := newFakeNetBox(t)
 	nb.add("testbox", "SIM-0001", "planned", "", map[string]any{"approved_ek_hash_ecc": "ek-under-test"})
-	return &Verifier{NetBox: nb.client(), BindingAuthor: fakeTerraform, Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}, nb
+	store, err := OpenStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &Verifier{Store: store, NetBox: nb.client(), BindingAuthor: fakeTerraform, Installer: f, Audit: &Audit{W: audit, Site: "folly"}, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: time.Now}, nb
 }
 
 // keySession is a session with an ECC EK and an AK in AKTemplate's shape,
@@ -80,6 +84,14 @@ func keySession(t *testing.T, nb *fakeNetBox) *session {
 		bind:    true,
 		machine: Machine{Name: "testbox", Serial: "SIM-0001", NetBoxID: d.ID, Approved: map[string]string{"ecc": "ek-under-test"}},
 	}
+}
+
+func unbind(nb *fakeNetBox, s *session) {
+	nb.set("SIM-0001", func(d *fakeDevice) {
+		delete(d.CustomFields, "approved_ek_hash")
+		delete(d.CustomFields, "approved_ek_hash_ecc")
+	})
+	s.machine.Approved = nil
 }
 
 var installRecord = Record{Machine: "testbox", Serial: "SIM-0001", UUID: "4C4C4544-0000-0000-0000-000000000000", Class: "worker-g5"}
@@ -113,6 +125,18 @@ func TestInstallCodeAfterTheInstallerRendered(t *testing.T) {
 	}
 }
 
+func TestInstallCodeForAnUnboundPlannedDeviceWithCertifiedEKs(t *testing.T) {
+	f := newFakeInstaller(nil)
+	var audit strings.Builder
+	v, nb := installVerifier(t, f, &audit)
+	s := keySession(t, nb)
+	unbind(nb, s)
+	s.eks[0].Issuer = "maker"
+	if _, ok := v.installCode(context.Background(), installRecord, s); !ok || len(f.requests()) != 1 {
+		t.Fatalf("issued %v after %d install requests; audit:\n%s", ok, len(f.requests()), audit.String())
+	}
+}
+
 func TestInstallCodeWithheld(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -127,7 +151,7 @@ func TestInstallCodeWithheld(t *testing.T) {
 		{"no UUID", nil, "", 0, "not 8-4-4-4-12 hex", nil},
 		{"not a UUID", nil, "../../etc/passwd", 0, "not 8-4-4-4-12 hex", nil},
 		{"braced UUID", nil, "{" + installRecord.UUID + "}", 0, "not 8-4-4-4-12 hex", nil},
-		{"no binding", nil, installRecord.UUID, 0, "no approved EK binding", func(_ *fakeNetBox, s *session) { s.machine.Approved = nil }},
+		{"unbound and uncertified", nil, installRecord.UUID, 0, "no manufacturer certificate", unbind},
 		{"binding removed", nil, installRecord.UUID, 0, reasonBinding, func(nb *fakeNetBox, _ *session) {
 			nb.set("SIM-0001", func(d *fakeDevice) { delete(d.CustomFields, "approved_ek_hash_ecc") })
 		}},

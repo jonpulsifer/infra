@@ -10,7 +10,7 @@ A folly node is an entry in `clusters/folly/inventory/nodes.yaml`, which `terraf
 1. The owner adds the node to the nodes file in a pull request. Atlantis creates a `planned` device with no MAC address.
 2. The owner connects the machine to its node port. Firmware PXE loads signed iPXE from spore, then signed HookOS.
 3. HookOS proves its TPM identity and boot state to fleetd. fleetd records the MAC against the device's serial.
-4. fleetd checks every approved EK, then issues the LDevID and LAK certificates. Without an approved binding, the machine waits.
+4. fleetd checks every approved EK, or without a binding, a manufacturer certificate on every EK, then issues the LDevID and LAK certificates. A machine that has neither waits.
 5. The signed confirmation triggers admission. fleetd checks the reported switch port, starts a Tinkerbell `provision` Workflow and renders the Talos configuration.
 6. fleetd returns an install code wrapped to the TPM. The Workflow wipes the system disk, installs Talos and stores the code in META.
 7. Talos boots from disk and fetches its configuration from `/talos/config` with the UUID and code. The configuration supplies its static address.
@@ -41,7 +41,7 @@ See [Identity](identity.md#terms) for the credential terms and [Tinkerbell](nixo
 
 | Component | What it owns | Where it lives |
 | --- | --- | --- |
-| Nodes file | Each node's name, serial, model, class, switch port, address, BMC type and approved EK binding | `clusters/folly/inventory/nodes.yaml` |
+| Nodes file | Each node's name, serial, model, class, switch port, address, BMC type and optional approved EK binding | `clusters/folly/inventory/nodes.yaml` |
 | `terraform/netbox/folly` | The device, its address and cable, its declared custom fields, the custom field definitions, fleetd's webhook | Atlantis on offsite |
 | NetBox | Status, `desired_action`, verdicts, MACs | capsule |
 | fleetd | Attestation, the LDevID and LAK, install codes, renewal, `Hardware`, `Machine`, `Workflow`, the rendered config, retirement | spore |

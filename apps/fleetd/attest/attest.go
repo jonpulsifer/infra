@@ -182,12 +182,12 @@ func (v *Verifier) Start(ctx context.Context, req protocol.StartRequest, remote 
 	if err != nil {
 		return protocol.StartResponse{}, v.reject(nil, req.Machine, err)
 	}
-	// A planned device's approved binding is the authorization, and the
-	// pass binds the box's MAC to the device.
+	// A planned device is the authorization, held to its approved binding
+	// when it has one, and the pass binds the box's MAC to the device.
 	bind := ok && m.FromNetBox && m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned)
 	if !ok {
 		// NetBox answered that it has no such device. The claim waits: only
-		// a node entry in git with an approved binding admits a serial.
+		// a node entry in git admits a serial.
 		m = Machine{Name: intakeName(req.Machine), Serial: req.Machine.Serial, FromNetBox: true}
 	}
 	if m.blocked() {
@@ -279,7 +279,7 @@ func (v *Verifier) pend(ctx context.Context, m Machine, claim protocol.Machine, 
 			v.Log.Error("record pending claim", "serial", m.Serial, "err", serr)
 		}
 	}
-	v.Log.Warn("intake waits for an approved binding", "machine", m.Name, "serial", m.Serial, "eks", ekSummary(eks))
+	v.Log.Warn("intake waits for approval", "machine", m.Name, "serial", m.Serial, "eks", ekSummary(eks))
 	v.count(protocol.VerdictPending, f.Reason)
 	v.Audit.Emit(AuditEntry{Event: auditVerdict, Node: m.Name, Serial: m.Serial, Class: m.Class, Status: protocol.VerdictPending, Reason: f.Error()})
 	if v.notePending(m.Serial) {
@@ -372,21 +372,27 @@ func (v *Verifier) open(s *session) string {
 }
 
 // checkPinned matches the EKs against the device's approved binding, the
-// hashes git declares for it and Terraform projects into NetBox: every
-// approved EK must be sent, and no other EK without a certificate. A
-// planned device or a serial NetBox lacks waits without one, whatever
-// certificates its EKs carry, since a manufacturer's certificate never names
-// the machine its TPM sits in. A device past planned without a binding is
-// held to proven, the EKs fleetd's own record of the serial proved in an
-// earlier pass, so a reboot into HookOS needs no new approval. NetBox's
-// ek_hash pins are a note and never authorize: anyone who can write NetBox
-// can write them. Such a device with no proof on file is refused, unless it
-// has no pins either and waits like any unbound claim.
+// hashes git declares for it and Terraform projects into NetBox, when it has
+// one: every approved EK must be sent, and no other EK without a certificate.
+// Without one, the device is held to proven, the EKs fleetd's own record of
+// the serial proved in an earlier pass, so a reboot into HookOS needs no new
+// approval. A planned device with neither passes when every EK carries a
+// manufacturer certificate: git declaring the serial is the authorization.
+// A serial NetBox lacks, or an uncertified EK, waits. NetBox's ek_hash pins
+// are a note and never authorize: anyone who can write NetBox can write them.
+// A device past planned with no proof on file is refused, unless it has no
+// pins either and waits like any unbound claim.
 func checkPinned(m Machine, proven map[string]string, eks []VerifiedEK) error {
+	planned := m.NetBoxID != 0 && strings.EqualFold(m.Status, statusPlanned)
 	switch {
 	case len(m.Approved) > 0:
 		return matchPins(m, m.Approved, "approved", eks)
-	case m.NetBoxID == 0 || strings.EqualFold(m.Status, statusPlanned) || (len(proven) == 0 && len(m.Pins) == 0):
+	case planned && len(proven) == 0:
+		if i := slices.IndexFunc(eks, func(e VerifiedEK) bool { return e.Issuer == "" }); i >= 0 {
+			return fail(reasonEKPending, "%s is planned, but its %s EK has no manufacturer certificate; its entry in the nodes file names its EKs to admit %s", m.Name, eks[i].Alg, ekSummary(eks))
+		}
+		return nil
+	case m.NetBoxID == 0 || (len(proven) == 0 && len(m.Pins) == 0):
 		return fail(reasonEKPending, "%s has no approved EK binding; its entry in the nodes file names its EKs once the owner checks %s against independent evidence", m.Name, ekSummary(eks))
 	case len(proven) == 0:
 		return fail(reasonBindingRemoved, "%s has no approved EK binding and no earlier pass of fleetd proved an EK for it; NetBox's ek_hash pins authorize nothing", m.Name)

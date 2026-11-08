@@ -33,7 +33,7 @@ func quietVerifier(t *testing.T) (*Verifier, *bytes.Buffer) {
 
 func ek(alg, hash, issuer string) VerifiedEK { return VerifiedEK{Alg: alg, Hash: hash, Issuer: issuer} }
 
-func TestCheckPinnedHoldsAPastPlannedDeviceToTheStoresProof(t *testing.T) {
+func TestCheckPinnedHoldsADeviceToItsBindingOrProof(t *testing.T) {
 	proven := map[string]string{"rsa": "r1", "ecc": "e1"}
 	active := Machine{Name: "testbox", NetBoxID: 7, Status: "active"}
 	withPins := active
@@ -58,7 +58,10 @@ func TestCheckPinnedHoldsAPastPlannedDeviceToTheStoresProof(t *testing.T) {
 		{"pins and no proof", withPins, nil, []VerifiedEK{ek("rsa", "r2", "maker"), ek("ecc", "e2", "maker")}, reasonBindingRemoved},
 		{"no pins and no proof waits", active, nil, []VerifiedEK{ek("rsa", "r1", "maker")}, reasonEKPending},
 		{"a serial NetBox lacks waits", unknown, proven, []VerifiedEK{ek("rsa", "r1", "maker")}, reasonEKPending},
-		{"a planned device waits", planned, proven, []VerifiedEK{ek("rsa", "r1", "maker")}, reasonEKPending},
+		{"a planned device is held to its proof", planned, proven, []VerifiedEK{ek("rsa", "r1", "maker"), ek("ecc", "e1", "maker")}, ""},
+		{"a planned device's other EKs are not its proof", planned, proven, []VerifiedEK{ek("rsa", "r2", "maker"), ek("ecc", "e2", "maker")}, reasonBindingRemoved},
+		{"a planned device with certified EKs", planned, nil, []VerifiedEK{ek("rsa", "r2", "maker"), ek("ecc", "e2", "maker")}, ""},
+		{"a planned device with an uncertified EK waits", planned, nil, []VerifiedEK{ek("rsa", "r2", "maker"), ek("ecc", "e2", "")}, reasonEKPending},
 		{"an approved binding is not the proof", approved, proven, []VerifiedEK{ek("rsa", "r1", "maker"), ek("ecc", "e1", "maker")}, reasonEKHash},
 		{"an approved binding", approved, nil, []VerifiedEK{ek("rsa", "r2", "maker"), ek("ecc", "e2", "maker")}, ""},
 	} {

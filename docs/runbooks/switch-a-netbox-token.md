@@ -12,7 +12,7 @@ Use this runbook after Atlantis applies `terraform/netbox/folly` with the `terra
 
 - Atlantis has applied the pull request that declares the users, so `terraform` and `fleetd` exist in NetBox.
 - `mise run devshell`, `op` signed in, and `SOPS_AGE_KEY_FILE` set as [Manage SOPS secrets](manage-sops-secrets.md#before-you-start) says.
-- Until the `terraform` token is switched, Terraform's writes record as `admin` and fleetd counts no approved EK binding, so a planned machine waits.
+- Until the `terraform` token is switched, Terraform's writes record as `admin` and fleetd counts no approved EK binding, so a planned machine whose entry binds EKs is refused, and one without a binding is admitted only on maker-certified EKs.
 
 ## Switch the tokens
 

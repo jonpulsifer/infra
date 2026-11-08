@@ -119,7 +119,7 @@ func FromEnv(log *slog.Logger) (*Server, error) {
 	v.NetBox = nb
 	v.BindingAuthor = strings.TrimSpace(os.Getenv("ATTEST_BINDING_AUTHOR"))
 	if v.BindingAuthor == "" {
-		log.Warn("ATTEST_BINDING_AUTHOR is unset, so no approved EK binding counts and every planned machine waits")
+		log.Warn("ATTEST_BINDING_AUTHOR is unset, so no approved EK binding counts and every bound planned machine is refused")
 	}
 	v.Recorders = append(v.Recorders, nb)
 	log.Info("NetBox is the system of record", "url", u, "site", site)

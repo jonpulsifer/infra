@@ -32,10 +32,10 @@ A node can declare two optional endorsement key (EK) hashes:
 Each value is the lowercase hexadecimal SHA-256 hash of the key's DER SubjectPublicKeyInfo.
 Keep these as flat keys: every reader expects scalar values.
 
-[fleetd](../apps/fleetd.md) admits a `planned` node only when its TPM proves every approved EK.
-A node without a binding waits. Admission permits identity issuance and install-code delivery.
+[fleetd](../apps/fleetd.md) admits a `planned` node with a binding only when its TPM proves every approved EK.
+A node without a binding is admitted when every EK it sends has a maker certificate that chains to fleetd's trusted roots; otherwise it waits. Admission permits identity issuance and install-code delivery.
 
-The binding needs independent evidence: a receiving scan or an authenticated supplier record that ties the chassis serial to its EKs.
+A binding pins the TPM and needs independent evidence: a receiving scan or an authenticated supplier record that ties the chassis serial to its EKs.
 A claim from fleetd is insufficient evidence. `mise run attest:approve <serial>` prints candidate lines for comparison; it approves nothing.
 See [Approve a machine's EKs](../runbooks/provision-a-node.md#approve-a-machines-eks).
 

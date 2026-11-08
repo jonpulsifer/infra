@@ -11,7 +11,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | `attest` | Attests, and boots the installed disk | The status stays, and the node has a new LDevID |
 | `wipe` | Wipes the system disk, with no attestation | The node stays in HookOS until a Workflow runs |
 
-`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. A `planned` device attests only against the approved EK binding in its nodes-file entry, so a `provision` of a node without one waits in HookOS; [Approve a machine's EKs](provision-a-node.md#approve-a-machines-eks) adds it. `attest` leaves the status alone, and an `active` node without a binding attests against its `ek_hash` pins. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
+`provision` and `wipe` move the device back to `planned`, which the Talos root applies no config to, until the node fetches its config. A `planned` device attests against the approved EK binding in its nodes-file entry, or, without one, against the EKs fleetd proved earlier. A `provision` of a node whose TPM has no maker certificate and no binding waits in HookOS; [Approve a machine's EKs](provision-a-node.md#approve-a-machines-eks) adds one. `attest` leaves the status alone, and an `active` node without a binding attests against its `ek_hash` pins. A class that the controller does not render, such as the control plane, stays in HookOS after a `provision`.
 
 > [!WARNING]
 > This procedure changes live state by hand. It is an exception to the GitOps rule because NetBox holds each machine's lifecycle.
@@ -85,7 +85,7 @@ Use this runbook to run an installed folly node through [Provision a node](provi
 | The console shows `Talos is already installed to disk but booted from another media` | META is on the disk | Set `desired_action` to `wipe` |
 | The node fetched its config and is cordoned | Its `attest_verdict` is `quarantined: <reason>`, so fleetd cordons it | Read the reason, and clear the verdict once it is explained. The next hourly check that passes restores the node's LDevID; then uncordon the node |
 | `attest: FAILED` with `ek-hash-mismatch` | The approved binding or a pin names another TPM, such as after a board swap | Read the refused EK hash in the `attest.verdict` audit line in `journalctl -u fleetd`, and compare it with your evidence and with `approved_ek_hash` and `ek_hash`. A replaced TPM needs a binding change in the nodes file |
-| `attest: FAILED` with `pending-approval` | A `planned` device whose entry approves no EK | [Approve its EKs](provision-a-node.md#approve-a-machines-eks) |
+| `attest: FAILED` with `pending-approval` | A `planned` device whose entry approves no EK sent an EK with no maker certificate | [Approve its EKs](provision-a-node.md#approve-a-machines-eks) |
 | Talos stops at `failed to read pcr signing public key` | Talos booted by kexec | Power-cycle the node |
 | The journal says the run waits for `install_disk_serial` | The node's entry has no `disk_serial`, so fleetd starts no run that wipes | Add the serial that `talosctl --nodes <addr> get disks` shows for the install disk, as [Hardware inventory](../reference/inventory.md#nodes-file) says, and apply `terraform/netbox/folly` |
 | Another symptom of a run | See [Provision a node](provision-a-node.md#if-something-goes-wrong) | Follow its table |

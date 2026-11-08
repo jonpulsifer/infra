@@ -60,7 +60,7 @@ The DevID CA and the SPIRE CA have different jobs. The DevID CA certifies device
 
 ### Declaration and boot
 
-Automatic installation requires a complete machine declaration, including an approved EK binding in the node's entry. The binding comes from a receiving scan or a supplier record, not from the claim. fleetd honours it only when NetBox's changelog shows Terraform's user wrote it. A planned device without a binding, and an unknown serial, wait as claims that authorize nothing.
+Automatic installation requires a complete machine declaration. An approved EK binding in the node's entry is optional: it comes from a receiving scan or a supplier record, not from the claim, and fleetd honours it only when NetBox's changelog shows Terraform's user wrote it. A planned device without a binding is admitted when every EK it sends has a maker certificate that chains to fleetd's trusted roots. Without that, and for an unknown serial, it waits as a claim that authorizes nothing.
 
 UniFi DHCP directs PXE to spore. Firmware loads signed iPXE, which loads signed HookOS. The HookOS command line pins the agent image by digest.
 
@@ -159,7 +159,7 @@ The model trusts the configured manufacturer roots, firmware measurements, crypt
 | --- | --- | --- | --- |
 | Replay an earlier attestation response | Solved | Session nonce, credential activation and quote checks in `apps/fleetd/attest/attest.go`. | Assumes trusted verifier state and sound TPM cryptography. |
 | Substitute a different TPM for an existing EK pin | Solved | EK matching and activation in `apps/fleetd/attest/attest.go`. A device past `planned` is held to the EK hashes fleetd's own store proves; NetBox's `ek_hash` fields authorize nothing. | Does not establish who controls the correct TPM. |
-| Win first enrollment with a copied serial and MAC | Solved | A planned device admits only the EKs its Terraform-written binding names, in `apps/fleetd/attest/attest.go`. | Rests on the receiving evidence behind the binding and on the Terraform user's token and NetBox admin. |
+| Win first enrollment with a copied serial and MAC | Solved | A planned device admits only the EKs its Terraform-written binding names, or without a binding only maker-certified EKs for a declared serial, in `apps/fleetd/attest/attest.go`. | Rests on the declaration in git, on the receiving evidence behind a binding, and on the Terraform user's token and NetBox admin. |
 | Forge a physical switch location | Not solved | `apps/fleetd/attest/network.go` checks signed reports; admission checks `expected_port`. | LLDP observations do not authenticate a cable or switch. |
 | Replay an event log that differs from the quoted PCRs | Solved | Quote verification and event-log replay in `apps/fleetd/attest/attest.go`. A quoted PCR with no log events must read its initial value. | Does not establish that firmware measures all relevant code correctly. |
 | Run an old but accepted signed image | Not solved | Signing-authority checks apply in the class's profile under `apps/fleetd/attest/policy/`. | Empty `boot_applications` provides no exact-image restriction or version floor. A filled pin also requires a boot application in PCR 4's log, so a log stripped of PCR 4 fails. |
@@ -195,6 +195,6 @@ Identity withdrawal needs an exercise with both registration owners and both nod
 
 An operating-system class, new signing authority or broader renewal policy changes the trust boundary. Such a change needs its own negative tests and target-hardware evidence. A simulator result can establish feasibility without authorizing deployment.
 
-Independent EK binding is an admission requirement; its assurance depends on receiving evidence. Open design decisions include exact-image policy, complete credential withdrawal and management-host recovery. Acceptance requires rejection of a substitute TPM and an unacceptable signed image, bounded withdrawal, and restoration without folly.
+Admission requires a declared serial and maker-certified EKs, or an independent EK binding whose assurance depends on receiving evidence. Open design decisions include exact-image policy, complete credential withdrawal and management-host recovery. Acceptance requires rejection of a substitute TPM and an unacceptable signed image, bounded withdrawal, and restoration without folly.
 
 The owner controls lifecycle policy, explicit actions and infrastructure deployment. Enabled auto-provision authorizes an eligible worker's first installation. Git remains the source of desired state. [How changes ship](../platform/how-changes-ship.md) defines which controller applies each layer.
