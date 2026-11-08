@@ -109,3 +109,10 @@ nodes:
     disk_serial: "30LPD1AZPTLL"
     approved_ek_rsa2048: 364b905a1e446a03d1d29209c90970e7209fc8cb539f30a863bf76c4d090672e
     approved_ek_eccp256: dc5083485a884f4383cfd6f40e73b65897dedded3652b779ab46b81fcb19260b
+  undertow:
+    model: hp-elitedesk-800-g5-desktop-mini
+    serial: MXL0443HJ7
+    class: worker-g5
+    switch_port: 24
+    address: 10.3.0.15
+    bmc: amt
