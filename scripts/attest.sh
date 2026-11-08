@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Lists the intakes that wait on fleetd for an approved EK binding, and prints the nodes-file lines
-# that would approve a waiting claim, through `tailscale serve` on spore's tailnet name, port 8445.
-# A claim is unauthenticated: whoever knows a serial can make one, so approve authorizes nothing.
-# It prints the claim's EK hashes as the lines of the node's entry in the nodes file, for the owner
-# to compare with independent evidence of the chassis, a receiving scan or the supplier's record,
-# before a pull request adds them. ATTEST_ADMIN_URL names another server.
+# Lists the intakes that wait on fleetd, and prints the nodes-file lines that would approve a
+# waiting claim, through `tailscale serve` on spore's tailnet name, port 8445. A claim is
+# unauthenticated: whoever knows a serial can make one, so approve authorizes nothing. It prints
+# the claim's EK hashes as the lines of the node's entry in the nodes file, for the owner to
+# compare with evidence of the chassis before a pull request adds them. ATTEST_ADMIN_URL names
+# another server.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -42,20 +42,29 @@ case "${1:-}" in
     [[ $# -eq 2 ]] || usage
     serial="$2"
     for base in "${bases[@]}"; do
-      claim="$(pending "$base" | jq -c --arg s "$serial" 'map(select((.serial | ascii_upcase) == ($s | ascii_upcase))) | first // empty')" || continue
+      claims="$(pending "$base")" || {
+        echo "# $base did not answer" >&2
+        failed=1
+        continue
+      }
+      claim="$(jq -c --arg s "$serial" 'map(select((.serial | ascii_upcase) == ($s | ascii_upcase))) | first // empty' <<<"$claims")"
       [[ -n "$claim" ]] || continue
       echo "# $base holds this unauthenticated claim:" >&2
       jq . <<<"$claim" >&2
       node="$(S="$serial" yq -r '.nodes | to_entries[] | select((.value.serial | upcase) == (strenv(S) | upcase)) | .key' "$nodes_file")"
       if [[ -n "$node" ]]; then
-        echo "# Under nodes.$node in ${nodes_file#"$root"/}, once independent evidence names these EKs:" >&2
+        echo "# Under nodes.$node in ${nodes_file#"$root"/}, once evidence of the chassis names these EKs:" >&2
       else
-        echo "# No node in ${nodes_file#"$root"/} has serial $serial; its new entry takes, once independent evidence names these EKs:" >&2
+        echo "# No node in ${nodes_file#"$root"/} has serial $serial; its new entry takes, once evidence of the chassis names these EKs:" >&2
       fi
       jq -r '.ek_hashes | [(.rsa // empty | "    approved_ek_rsa2048: \(.)"), (.ecc // empty | "    approved_ek_eccp256: \(.)")] | .[]' <<<"$claim"
       exit 0
     done
-    echo "fleetd holds no waiting claim for serial $serial" >&2
+    if [[ -n "${failed:-}" ]]; then
+      echo "no fleetd answered, so no claim for serial $serial was read" >&2
+    else
+      echo "fleetd holds no waiting claim for serial $serial" >&2
+    fi
     exit 1
     ;;
   *) usage ;;

@@ -42,9 +42,9 @@ FLEET_HOOKOS_URL=http://10.9.0.11/talos/folly/hookos-amd64-secureboot-uki.efi FL
 | `ATTEST_EK_ROOTS`, `ATTEST_POLICY` | `/etc/fleetd/…` | Pinned TPM manufacturer certificates and the directory of event-log policy profiles, one `<name>.yaml` each |
 | `ATTEST_STATE_DIR` | `/var/lib/fleetd/attest` | Records, issued certificates, key blobs, waiting claims and `verdicts.jsonl`, which rotates once to `verdicts.jsonl.1` at 64 MiB |
 | `ATTEST_APPROVERS` | none, required | Comma-separated tailnet logins for the admin API |
-| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE` | required, `/run/credentials/fleetd.service/netbox-token` | NetBox, the only source of machines and of each one's approved EK binding. A serial it lacks waits for its node entry, and a NetBox that does not answer refuses every request |
-| `ATTEST_PENDING_MAX` | `50` | How many claims wait at once for an approved EK binding |
-| `ATTEST_BINDING_AUTHOR` | none | The NetBox user Terraform writes as. A binding counts only when NetBox's changelog shows this user made its newest change; unset, no binding counts |
+| `ATTEST_NETBOX_URL`, `ATTEST_NETBOX_TOKEN_FILE` | required, `/run/credentials/fleetd.service/netbox-token` | NetBox, the only source of machines and of each one's optional approved EK binding. A serial it lacks waits for its node entry, and a NetBox that does not answer refuses every request |
+| `ATTEST_PENDING_MAX` | `50` | How many claims wait at once for an approved EK binding or a certified EK |
+| `ATTEST_BINDING_AUTHOR` | none | The NetBox user Terraform writes as. An approved binding counts only when NetBox's changelog shows this user made its newest change; unset, no binding counts |
 | `ATTEST_METRICS_FILE` | none | A node-exporter textfile rewritten at most every 5 seconds after a change |
 
 ### Fleet
@@ -96,7 +96,7 @@ dropped. So a request that proves nothing cannot end a node's open renewal.
 
 | Route | Does |
 | --- | --- |
-| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding waits; [Approved EK binding](#approved-ek-binding) has the rules |
+| `POST /v1/attest` | Takes the machine's serial, UUID, MAC, hostname, SMBIOS facts, EKs and a new AK. Finds the device by serial, checks each EK certificate against the roots, refuses a ROCA-weak RSA EK, matches the MAC and the approved EK binding when it has one, and answers a session, a nonce and one credential challenge per EK. A `planned` device with no binding is admitted on maker-certified EKs, and waits otherwise; [Approved EK binding](#approved-ek-binding) has the rules |
 | `POST /v1/attest/{session}/evidence` | Takes the activated secrets, a quote over PCRs 0 to 7, the event log, the LDevID key certified by the AK, both keys' blobs, and optionally `network` signed by the AK. Replays the log against the policy profile of the device's class: every PCR the profile names must have an event in the log or still read all zeros, and a profile that pins `boot_applications` needs a boot application after PCR 4's separator. Issues the LDevID and LAK with `CN=<name>, serialNumber=<serial>, OU=<class>, O=<site>`. Unsigned network facts are dropped and the pass stands |
 | `POST /v1/attest/{session}/confirm` | Takes the NV indexes and the AK's signature over the nonce. A wrong signature is refused and leaves the session open. An intake pass's signed confirm answers the install code |
 | `GET /devid/{serial}`, `GET /devid/{serial}/{file}` | On the DevID listener only, as are the two routes below. The LDevID of the newest pass with its blobs, or one file raw. 403 for a quarantined machine. 404 for a retired record, whatever NetBox answers, and with NetBox down |
@@ -105,7 +105,7 @@ dropped. So a request that proves nothing cannot end a node's open renewal.
 
 ## Approved EK binding
 
-The nodes file approves a node's EKs as `approved_ek_rsa2048` and `approved_ek_eccp256`, each the
+The nodes file can approve a node's EKs as `approved_ek_rsa2048` and `approved_ek_eccp256`, each the
 `EKHash` of the key: lowercase hex SHA-256 of its DER SubjectPublicKeyInfo. `terraform/netbox/folly`
 projects them into the device's `approved_ek_hash` and `approved_ek_hash_ecc`, which fleetd reads
 and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which only fleetd writes.
@@ -113,7 +113,11 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
 - A `planned` device passes only when every approved EK is sent, matches its hash exactly and
   activates its credential, and the quote and the boot policy pass. Another EK passes the usual
   checks and authorizes nothing. A manufacturer certificate admits no device on its own.
-- A `planned` device without a binding, and a serial NetBox lacks, wait as a claim in
+- A `planned` device without a binding, and no earlier proof of EKs for its serial, passes when
+  every EK it sends carries a manufacturer certificate that chains to the roots, activates its
+  credential, and the quote and boot policy pass. The declared serial authorizes it. The device's
+  `ek_hash` pins in NetBox, when it has any, must match too: they refuse, never admit. One EK
+  without a certificate, or a serial NetBox lacks, waits as a claim in
   `pending/`, which authorizes nothing and creates no device. A claim is rewritten only when it
   changes, its journal line and NetBox note come at most every ten minutes per serial, and claims
   for serials NetBox lacks have their own quota of 10, so junk serials evict no known device's claim.
@@ -130,19 +134,20 @@ and never writes. The EKs a pass proves go to `ek_hash` and `ek_hash_ecc`, which
   by someone else since the start. No claim changes the binding: fleetd never writes it.
 - A pass that matched the binding pins the binding alone: each approved hash, and null for an
   algorithm the binding leaves out, journaled, so neither a removed TPM's EK nor an extra EK the
-  pass sent stays a pin. Without a binding only an empty pin is written. A replaced TPM needs a
-  change to the binding in the nodes file.
+  pass sent stays a pin. Without a binding, a pass writes each EK it proved into an empty pin and
+  keeps a pin on file, journaled. A replaced TPM needs a change to the binding in the nodes file.
 - A renewal and the hourly check prove the LAK on file and read no EK. A `planned` device gets no
   renewal, since its identity comes from an intake pass; it is refused and journaled. A HookOS
-  attestation of a device past `planned` without a binding is held to the EK hashes fleetd's own
-  record proved at its intake pass, and gets no install code. `ek_hash` and `ek_hash_ecc` only note
-  what a pass proved and authorize nothing: a device whose record holds no proof, or a retired one,
+  attestation of a device without a binding is held to the EK hashes fleetd's own
+  record proved at its intake pass. A device past `planned` gets no install code; a `planned` one
+  with a record gets its code like a bound device. `ek_hash` and `ek_hash_ecc` only note
+  what a pass proved: a device past `planned` whose record holds no proof, or a retired one,
   is refused as `ek-binding-removed` and journaled, and nothing is recorded or quarantined.
 
 A planned stub binds to the first box that passes for its serial: fleetd puts the claimed MAC on
 the stub's interface. `mise run attest:approve <serial>` prints the nodes-file lines for a waiting
 claim's hashes, for the owner to compare with a receiving scan or the supplier's record before a
-pull request adds them; it authorizes nothing.
+pull request adds them, to pin a TPM or admit one with no maker certificate; it authorizes nothing.
 
 ## Install code and admission
 
@@ -493,7 +498,7 @@ When the retire Workflow succeeds, fleetd marks the verifier's record of the dev
 stay for audit. A retired record serves nothing: `/devid`, its files and a renewal answer 404 and
 a refusal whatever NetBox says, including during a NetBox outage, and the LDevID expiry, check and
 PCR 0 metrics leave it out. `talos_attest_machine_status` reports it as `retired`. A device planned
-again with an approved binding attests from HookOS and gets a fresh record.
+again attests from HookOS and gets a fresh record.
 
 ## Boot executor
 

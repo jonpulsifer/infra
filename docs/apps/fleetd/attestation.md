@@ -9,13 +9,13 @@ fleetd checks machine identity before installation and boot evidence throughout 
 
 HookOS checks its identity on every boot, before tink-agent waits for work. The entrypoint in `images/tink-agent-autoid` sets the clock from `fleet_ntp_server`. It then calls `tink-attest` at `fleet_attest_url`.
 
-The SMBIOS serial identifies the NetBox device. Admission requires a `planned` device and an approved endorsement-key (EK) binding. A device past `planned` that boots HookOS again, for `attest` or a reprovision, needs no new approval: its EKs must match the hashes fleetd's own store holds from its earlier pass, and nothing in NetBox stands in for them.
+The SMBIOS serial identifies the NetBox device. Admission requires a `planned` device and endorsement keys (EKs) that fit its declaration: the approved binding when the entry has one, otherwise a manufacturer certificate on every EK. A device past `planned` that boots HookOS again, for `attest` or a reprovision, needs no new approval: its EKs must match the hashes fleetd's own store holds from its earlier pass, and nothing in NetBox stands in for them.
 
-The nodes file declares that binding. `terraform/netbox/folly` writes it to `approved_ek_hash` and `approved_ek_hash_ecc`. NetBox's latest binding change must come from Terraform's user, configured by `homelab.fleetd.bindingAuthor` in `nix/services/fleetd.nix`.
+The nodes file can declare a binding. `terraform/netbox/folly` writes it to `approved_ek_hash` and `approved_ek_hash_ecc`. NetBox's latest binding change must come from Terraform's user, configured by `homelab.fleetd.bindingAuthor` in `nix/services/fleetd.nix`.
 
-Every approved EK must match and activate its credential. A manufacturer certificate alone cannot authorize admission.
+Every approved EK must match and activate its credential. Without a binding, and with no earlier proof for the serial, every EK sent must chain to fleetd's trusted EK roots and activate its credential; the declared serial is the authorization. If an earlier pass proved EKs for the serial, those hold the device like a binding, and a mismatch is refused as `ek-binding-removed`.
 
-- An unknown serial or missing binding creates a pending claim. The claim grants no access.
+- An unknown serial, or an EK with no manufacturer certificate and no binding, creates a pending claim. The claim grants no access.
 - A different EK is refused and journaled without changing the binding.
 
 fleetd checks the evidence in this order:

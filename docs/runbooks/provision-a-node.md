@@ -12,7 +12,6 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 
 - A new machine is ready, as [Prepare a machine](prepare-a-machine.md) describes.
 - You can sign in to NetBox at `https://capsule.<tailnet>`.
-- You hold independent evidence of the machine's EKs: a receiving scan of its TPM, or the supplier's authenticated record that ties its chassis serial to its EK hashes. [Approve a machine's EKs](#approve-a-machines-eks) says what counts.
 - You have the serial of the machine's install disk, from the disk's label or a receiving scan.
 - You are a tailnet login in `ATTEST_APPROVERS`, and you can read the console.
 - `<node>` is the host name and `<serial>` the SMBIOS serial. An `<addr>` is a free address in `K8S_NODE_CIDR` of `clusters/folly/config/cluster-topology.json`.
@@ -26,7 +25,7 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
    - Host name, model, SMBIOS serial and Talos class.
    - Switch port, address and BMC type.
    - Install disk serial as `disk_serial`.
-   - Approved EK binding from independent evidence: `approved_ek_rsa2048` and `approved_ek_eccp256`.
+   - Optionally, an approved EK binding as `approved_ek_rsa2048` and `approved_ek_eccp256`. [Approve a machine's EKs](#approve-a-machines-eks) says when to add one.
 
    If the model is new, add it under `models`.
    [Hardware inventory](../reference/inventory.md#nodes-file) defines each key.
@@ -37,14 +36,14 @@ Use this runbook to install a new folly node. Its entry in the nodes file become
 
 3. Comment `atlantis apply`.
 
-   Result: a `planned` device with the serial, class, address, `install_disk_serial`, `approved_ek_hash` and `approved_ek_hash_ecc`, and a cable to the switch port, and no MAC.
+   Result: a `planned` device with the serial, class, address, `install_disk_serial`, `approved_ek_hash` and `approved_ek_hash_ecc` when the entry binds EKs, and a cable to the switch port, and no MAC.
 
 ## Plug a machine in
 
 1. [Declare the node](#declare-the-node), with the machine's serial in its entry.
 2. Connect the machine to its node port and power it on. Every node port carries the Kubernetes network: each declared node's `switch_port`, and `free_node_ports` in `terraform/network/unifi/folly/bootstrap.tf`. The machine stays on this port.
 
-   Result: HookOS boots, and the console shows `attest: PASSED`. The device holds the machine's MAC, its `attested_*` fields and `attest_verdict` `attested`. If it shows `pending-approval` instead, the entry approves no EK; [approve its EKs](#approve-a-machines-eks).
+   Result: HookOS boots, and the console shows `attest: PASSED`. The device holds the machine's MAC, its `attested_*` fields and `attest_verdict` `attested`. If it shows `pending-approval` instead, the machine sent an EK that has no maker certificate, or no entry names its serial; [approve its EKs](#approve-a-machines-eks) or declare the node.
 
 3. Watch the device's NetBox journal, and [the run](#watch-the-run).
 
@@ -101,9 +100,11 @@ A control plane installs the same way and joins the running cluster. The cluster
 
 ## Approve a machine's EKs
 
-fleetd admits a `planned` device only when its TPM proves every EK that the node's entry approves. A device with no binding waits, and the console shows `attest: FAILED` with `pending-approval`, even when a trusted maker certified each EK. So does a serial no entry names.
+A binding is optional. fleetd admits a `planned` device whose entry has no binding when every EK it sends carries a maker certificate that chains to fleetd's trusted EK roots: the entry that declares the serial authorizes the machine. A device whose entry has a binding passes only when its TPM proves every approved EK.
 
-The trust source is the receiving step. Accept a receiving scan of the machine's TPM, or a supplier's authenticated record that ties the chassis serial to its EK hashes. A platform certificate counts only when its validated contents tie the two. A serial that SMBIOS or Redfish reports does not.
+Add a binding to pin a machine to its TPM, or to admit a TPM whose EK has no maker certificate. Without one, such a device waits, and the console shows `attest: FAILED` with `pending-approval`. So does a serial no entry names.
+
+A binding needs independent evidence: a receiving scan of the machine's TPM, or a supplier's authenticated record that ties the chassis serial to its EK hashes. A platform certificate counts only when its validated contents tie the two. A serial that SMBIOS or Redfish reports does not.
 
 > [!CAUTION]
 > A waiting claim proves nothing, because another machine can send one with this serial. Compare it with your evidence; never approve it alone.
@@ -125,7 +126,7 @@ The trust source is the receiving step. Accept a receiving scan of the machine's
 
    Result: `attest: PASSED`.
 
-A replaced TPM, as after a board swap, needs the same change: the old binding refuses the new TPM until the entry names its EKs.
+A replaced TPM, as after a board swap, needs the same change: a binding, the EKs fleetd proved earlier, or an `ek_hash` pin in NetBox refuses the new TPM until the entry names its EKs.
 
 ## If something goes wrong
 

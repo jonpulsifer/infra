@@ -104,14 +104,18 @@ func TestPlannedMachineNeedsAnApprovedBinding(t *testing.T) {
 			t.Fatalf("NetBox after the pass: %s %+v", d.Status, d.CustomFields)
 		}
 	})
-	// Certificates from a trusted maker do not name the machine: without a binding it waits.
+	// Without a binding, the declared serial and a trusted maker's certificates admit it.
 	t.Run("certified but unbound", func(t *testing.T) {
 		f := newFakeNetBox(t)
 		h := newHarness(t, harnessOpts{inventory: emptyInventory, netbox: f})
 		f.add("testbox", simSerial, "planned", simMAC, map[string]any{"class": "worker-g5"})
-		h.pending(t, simSerial)
-		if d := f.bySerial(simSerial); d.CustomFields["ek_hash"] != nil || h.issued() {
-			t.Fatalf("an unbound planned machine was admitted: %+v", d.CustomFields)
+		res, err := h.run(simSerial, simMAC)
+		if err != nil || res.Verdict.Verdict != protocol.VerdictPass {
+			t.Fatalf("certified unbound machine: %v", err)
+		}
+		f.settled(t, simSerial, 2)
+		if d := f.bySerial(simSerial); d.CustomFields["ek_hash"] != h.hashes["rsa"] || d.CustomFields["ek_hash_ecc"] != h.hashes["ecc"] || !h.issued() {
+			t.Fatalf("NetBox after the pass: %+v", d.CustomFields)
 		}
 	})
 	// From an unpinned maker the supply chain says nothing, and the chain check refuses.
@@ -315,11 +319,10 @@ func TestNetBoxIsTheSystemOfRecord(t *testing.T) {
 		t.Fatalf("a status refusal wrote to NetBox: %s after %d writes", d.Status, d.Patches)
 	}
 
-	// A planned device NetBox holds without a binding waits.
-	f.add("swell", "SW-PLANNED", "planned", "", map[string]any{"class": "worker-g5"})
-	h.pending(t, "SW-PLANNED")
-	if d := f.bySerial("SW-PLANNED"); d.CustomFields["ek_hash"] != nil {
-		t.Fatalf("an unbound planned device was pinned: %+v", d.CustomFields)
+	// A serial NetBox lacks waits, and nothing creates its device.
+	h.pending(t, "SW-UNKNOWN")
+	if d := f.bySerial("SW-UNKNOWN"); d != nil {
+		t.Fatalf("a claim created a device: %+v", d)
 	}
 }
 

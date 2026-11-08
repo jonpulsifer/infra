@@ -109,8 +109,8 @@ spec:
           labels:
             severity: warning
           annotations:
-            message: "{{ $labels.machine }} waits for an approved EK binding"
-            description: "The nodes file approves no EK for {{ $labels.machine }}, or names no node with its serial. Add the binding from independent evidence, as docs/runbooks/provision-a-node.md says."
+            message: "{{ $labels.machine }} waits for approval"
+            description: "The nodes file names no node with {{ $labels.machine }}'s serial, or the machine sent an EK with no manufacturer certificate and its entry approves none. Declare the node, or approve its EKs, as docs/runbooks/provision-a-node.md says."
         # tpm-reattest renews an LDevID from 30 days before its expiry, once a day, so
         # this fires only after a week of failed renewals. The newest expiry counts.
         - alert: TalosAttestLDevIDExpiring

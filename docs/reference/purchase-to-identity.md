@@ -13,7 +13,7 @@ This brief follows a TPM 2.0 worker through the current path, then compares it w
 
 ### Receive it and create its record
 
-We begin with the delivered chassis. We check its label and hardware, identify the disk we intend to erase, and obtain its TPM endorsement-key hashes through a trusted receiving scan or supplier record. An endorsement key, or EK, identifies the Trusted Platform Module; it does not by itself tell us which chassis contains it.
+We begin with the delivered chassis. We check its label and hardware, identify the disk we intend to erase, and may obtain its TPM endorsement-key hashes through a trusted receiving scan or supplier record. fleetd admits a declared serial without them when every EK carries a maker certificate that chains to its trusted roots; the hashes pin a TPM or cover one with no such certificate. An endorsement key, or EK, identifies the Trusted Platform Module; it does not by itself tell us which chassis contains it.
 
 For folly nodes, we enter the static details in `clusters/folly/inventory/nodes.yaml` through a pull request. Atlantis applies those values into NetBox as a device with status `planned`. This is how we populate the NetBox record today; lifecycle requests then come from the owner in NetBox. The [inventory contract](inventory.md) describes which fields Git owns and which observations fleetd adds.
 
@@ -30,7 +30,7 @@ The device's `class` selects an entry in `clusters/folly/fleet/classes.json`. Th
 | MAC address | Connects the machine to its Tinkerbell Hardware record and boot script. |
 | `install_disk`, `install_disk_serial` | Select the intended disk and require its serial to match before destructive work. |
 | `bmc_type`, management address | Select the power-control connection; the implemented provider here is Intel AMT. |
-| Approved EK hashes | Constrain which TPM may enroll as this planned device. |
+| Approved EK hashes (optional) | Constrain which TPM may enroll as this planned device. |
 | Primary address, `expected_port` | Supply the node address and the expected connection used in admission checks. |
 
 A new device has no recorded MAC yet, so the inventory alone is not enough to submit a runnable workflow. fleetd waits for the first HookOS boot to identify the machine. An explicit request can remain pending while we prepare and boot it.
@@ -41,7 +41,7 @@ For the first installation, we prepare firmware and start the machine's PXE boot
 
 On a later explicit run, when the MAC and AMT connection are known, fleetd can submit the workflow first and have Rufio request power and one-time PXE boot operations. AMT gets the machine into the installation environment; the disk actions still run on the machine itself.
 
-HookOS contacts fleetd before its Tinkerbell agent executes the installation. fleetd checks that the TPM matches the approved inventory binding, proves possession of its keys, and supplies fresh, acceptable boot evidence. It also checks the declaration and a signed report of the observed switch port. The signature protects the report; LLDP does not authenticate the physical switch or cable location. If admission fails, a provision receives no install code and its disk wipe cannot proceed.
+HookOS contacts fleetd before its Tinkerbell agent executes the installation. fleetd checks that the TPM matches the approved inventory binding, or without one that every EK has a maker certificate, proves possession of its keys, and supplies fresh, acceptable boot evidence. It also checks the declaration and a signed report of the observed switch port. The signature protects the report; LLDP does not authenticate the physical switch or cable location. If admission fails, a provision receives no install code and its disk wipe cannot proceed.
 
 A first installation can also start without an explicit action: an eligible planned worker can boot HookOS, pass admission and trigger auto-provision when enabled. That path requires no earlier workflow and no conflicting request. Control planes do not automatically provision. [The provisioning runbook](../runbooks/provision-a-node.md) gives the operating steps and exceptions.
 
