@@ -51,6 +51,15 @@ while read -r file; do
   }
 done <"$keep"
 
+# fleet-boot runs these, and busybox's applets of the same names lack the
+# flags it passes, so each must be a real file, not a busybox link.
+for c in wipefs sgdisk blkid blkdiscard blockdev efibootmgr nvme xz zstd; do
+  [ -n "$(find "$tree/bin" "$tree/sbin" "$tree/usr/bin" "$tree/usr/sbin" -maxdepth 1 -name "$c" -type f 2>/dev/null)" ] || {
+    echo "the tree has no $c binary but busybox's, which fleet-boot cannot run" >&2
+    exit 1
+  }
+done
+
 find "$tree/lib/modules/$kver" -type f -name '*.ko*' | grep -vxF -f "$keep" | xargs -r rm -f
 # Alpine's package links the kernel from the modules directory, which depmod
 # would read; the kernel leaves the tree below.
