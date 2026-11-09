@@ -1,5 +1,6 @@
 resource "google_project_service" "service" {
   for_each = toset([
+    "accesscontextmanager.googleapis.com",
     "admin.googleapis.com",
     "appengine.googleapis.com",
     "bigquery.googleapis.com",
