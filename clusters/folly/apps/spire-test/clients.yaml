@@ -118,5 +118,5 @@ spec:
         # The executable; CD rewrites this digest as it does the image above.
         - name: spiffe-adc-bin
           image:
-            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:ebb8a024525fb3b9d8278708ebe5bf6918dbed2771e720d6801d99f39136e791
+            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:fda71c894170e5ab5e65757cd6a38c425df64170718e5a03deb5b964529529a9
             pullPolicy: IfNotPresent
