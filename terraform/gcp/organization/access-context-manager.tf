@@ -39,6 +39,11 @@ resource "google_access_context_manager_gcp_user_access_binding" "cloud" {
       access_levels = ["${local.access_policy}/accessLevels/Canada"]
     }
   }
+
+  lifecycle {
+    # Import leaves organization_id empty, and a change to it forces replacement.
+    ignore_changes = [organization_id]
+  }
 }
 
 import {
