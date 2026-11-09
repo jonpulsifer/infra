@@ -19,8 +19,8 @@ resource "google_access_context_manager_gcp_user_access_binding" "cloud" {
     active_settings {
       access_levels = ["${local.access_policy}/accessLevels/Canada"]
       session_settings {
-        session_length         = "604800s"
-        session_length_enabled = true
+        session_length         = "0s"
+        session_length_enabled = false
         session_reauth_method  = "LOGIN"
         use_oidc_max_age       = false
       }
