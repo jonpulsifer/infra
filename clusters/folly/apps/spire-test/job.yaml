@@ -143,5 +143,5 @@ spec:
         # one literal. The zero digest stands until main builds the first image.
         - name: spiffe-adc-bin
           image:
-            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:9721d5b58614dc8825c65989bbd902b766cdbaa06ef8c3f4626ce585d593ff14
             pullPolicy: IfNotPresent

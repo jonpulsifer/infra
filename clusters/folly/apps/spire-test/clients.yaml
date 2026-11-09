@@ -41,7 +41,7 @@ spec:
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/spiffe-adc-test…@sha256:` string, so keep it one
           # literal. The zero digest stands until main builds the first image.
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:15c2c6b4c8ebd5ff07a09d4df5dcacc3f37e6d742e4aada5ee47c437cea9ffa4
           imagePullPolicy: IfNotPresent
           command: ["/test/go-upload"]
           env: &env
@@ -88,7 +88,7 @@ spec:
               mountPath: /opt/spiffe-adc
               readOnly: true
         - name: python
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:15c2c6b4c8ebd5ff07a09d4df5dcacc3f37e6d742e4aada5ee47c437cea9ffa4
           imagePullPolicy: IfNotPresent
           command: ["/opt/venv/bin/python", "/test/python/upload.py"]
           env: *env
@@ -96,7 +96,7 @@ spec:
           resources: *resources
           volumeMounts: *volumeMounts
         - name: bun
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:15c2c6b4c8ebd5ff07a09d4df5dcacc3f37e6d742e4aada5ee47c437cea9ffa4
           imagePullPolicy: IfNotPresent
           workingDir: /test/bun
           command: ["bun", "run", "upload.ts"]
@@ -118,5 +118,5 @@ spec:
         # The executable; CD rewrites this digest as it does the image above.
         - name: spiffe-adc-bin
           image:
-            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:0000000000000000000000000000000000000000000000000000000000000000
+            reference: ghcr.io/jonpulsifer/spiffe-adc:latest@sha256:9721d5b58614dc8825c65989bbd902b766cdbaa06ef8c3f4626ce585d593ff14
             pullPolicy: IfNotPresent
