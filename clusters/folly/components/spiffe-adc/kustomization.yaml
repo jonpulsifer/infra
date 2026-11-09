@@ -1,0 +1,8 @@
+# The one ADC document a SPIRE workload needs to reach GCP as its SPIFFE ID,
+# in the namespace of the kustomization that includes this component, which
+# must set `namespace:`. The pod adds the env and the three volumes that
+# clusters/folly/apps/spire-test/job.yaml shows.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - configmap.yaml

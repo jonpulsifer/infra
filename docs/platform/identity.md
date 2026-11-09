@@ -235,22 +235,26 @@ A run opens `/dev/tpmrm0` and reads the event log before it sends anything. With
 | `oidc-discovery-provider` | Publishes the keys that check JWT-SVIDs, as the issuer `https://spire.lolwtf.ca` | `spire-oidc` requests two pods on different TPM-labelled nodes |
 | folly Cloudflare Tunnel | Serves `/.well-known/openid-configuration` and `/keys` on `spire.lolwtf.ca`, and no other path | Cloudflare, to the provider's Service |
 | `fml-pool` provider `spire` | Trades a JWT-SVID for a GCP token whose subject is the SPIFFE ID | GCP |
+| `spiffe-csi-driver` | Mounts the agent's socket directory into a pod as an ephemeral `csi.spiffe.io` volume, so a workload needs no hostPath and no privileged namespace | `spire`, a DaemonSet on the TPM-labelled nodes |
+| `spiffe-adc` | The executable a Google client library runs for a subject token. It asks the agent for a JWT-SVID with the audience the library passes and prints it in the reply the library expects. | In the workload's pod, as an image volume, for the length of one request |
 
-A workload gets GCP access in four steps.
+A workload gets GCP access in three steps, and changes no code: every Google client library and gcloud read an `external_account` credential document through `GOOGLE_APPLICATION_CREDENTIALS`.
 
 1. spore registers its SPIFFE ID.
 2. A grant in `terraform/gcp/projects/homelab-ng/` names the principal `principal://iam.googleapis.com/<fml-pool>/subject/spiffe://lolwtf.ca/ns/<ns>/sa/<sa>`.
-3. The pod mounts the agent socket and runs `spire-agent api fetch jwt` with the audience `//iam.googleapis.com/<fml-pool>/providers/spire`.
-4. The pod writes the SVID to a file, and an `external_account` credential config whose `credential_source` is that file. With no `service_account_impersonation_url`, GCP sees the SPIFFE ID itself.
+3. Its kustomization sets `namespace:` and includes the component `clusters/folly/components/spiffe-adc`, which puts the credential document in a ConfigMap. The pod sets `GOOGLE_APPLICATION_CREDENTIALS` to that document, `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES` to `1` and `SPIFFE_ENDPOINT_SOCKET` to the socket, and mounts the ConfigMap, the `csi.spiffe.io` volume and the `spiffe-adc` image volume. `clusters/folly/apps/spire-test/job.yaml` is the whole stanza.
 
-`<fml-pool>` is `projects/<project-number>/locations/global/workloadIdentityPools/fml-pool`. A JWT-SVID is short-lived, so a long-running workload rewrites the file before it expires.
+`<fml-pool>` is `projects/<project-number>/locations/global/workloadIdentityPools/fml-pool`. The document's `credential_source` is the executable, so when the library needs a subject token, about once an hour, it runs `spiffe-adc` with `GOOGLE_EXTERNAL_ACCOUNT_AUDIENCE` set to `//iam.googleapis.com/<fml-pool>/providers/spire`, and the executable fetches a JWT-SVID for that audience. No process runs between two exchanges and no file goes stale. With no `service_account_impersonation_url`, GCP sees the SPIFFE ID itself.
 
-The test Job in `spire-test` runs as `uploader`, which can only create objects in the bucket `homelab-ng-spire-test`. Its log names the SPIFFE ID and the object it wrote. Bump the suffix of the Job's name to run it again.
+Two test Jobs in `spire-test` run as `uploader`, which can only create objects in the bucket `homelab-ng-spire-test`. `upload-<n>` uses gcloud, and its log names the SPIFFE ID and the object it wrote. `clients-<n>` runs the Go, Python and Bun programs of `images/spiffe-adc-test/` as three containers of one pod, each uploading one object through its Google client library and nothing else. Bump the suffix of a Job's name to run it again.
 
 - The provider `spire` admits every SPIFFE ID in the trust domain. Grant on one subject, never on the pool or on an `attribute.spiffe_id` prefix.
 - The server's `jwt_issuer`, the discovery provider's `jwt_issuer` and the provider's `issuer_uri` are one value. GCP rejects an SVID whose `iss` differs.
 - The discovery provider reads its keys through the Workload API as `spire-oidc/oidc-discovery-provider`. Without that entry, `spire.lolwtf.ca` serves no keys and every exchange fails.
 - `iam.workloadIdentityPoolProviders` in `terraform/gcp/projects/homelab-ng/policy.tf` lists the issuer. A new issuer needs an entry there first.
+- A pod on a node with no agent has no `csi.spiffe.io` volume to mount and stays Pending. A pod on a node whose agent has not attested gets a refusal from the executable, which the library reports as the error.
+- The library runs the executable only with `GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES=1` in its environment. Without it, every exchange fails with a message that names the variable.
+- A projected ServiceAccount token through the cluster's own provider in `fml-pool` is the path for a pod on a node with no agent. [PKI](pki.md#workload-identity) lists those workloads.
 
 ## People on the tailnet
 
@@ -311,8 +315,9 @@ Only riptide has the `lolwtf.ca/tpm=true` label among the ready nodes. `clusters
 - `nix/hosts/spore.nix`: the EK allow list `ekHashes` and the `workloads`
 - `nix/services/tsidp.nix`: tsidp, with its kubectl client in `clusters/base/config/kube-login.json`
 - `nix/lib/spire.nix`: the SPIRE and plugin builds, with `nix/lib/spire-tpm-plugin-sdk.patch`
-- `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest` and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
-- `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`
+- `clusters/folly/apps/`: the agent, its bundle, the bundle writer, `tpm-reattest`, the CSI driver and the smoke Job in `spire/`, the discovery provider in `spire-oidc/`, and the GCP test in `spire-test/`
+- `clusters/folly/components/spiffe-adc/`: the credential document a workload includes
+- `images/`: the agent image in `spire-agent-tpm/`, with `spire-devid-init` in `spire-agent-tpm/devid-init/`, the executable in `spiffe-adc/`, and the client-library tests in `spiffe-adc-test/`
 - `terraform/gcp/projects/homelab-ng/workload-identity.tf`: the provider `spire` in `fml-pool`, with the test bucket and its grant in `spire-test.tf` beside it
 - `terraform/network/cloudflare/lolwtf.ca.tf`: the tunnel rule for `spire.lolwtf.ca`
 - `clusters/folly/monitoring/spore.yaml`: the scrape, the SPIRE alerts and the tsidp tripwires

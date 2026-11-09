@@ -1,0 +1,137 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spiffe-csi-driver
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spiffe-csi-driver
+    app.kubernetes.io/part-of: spire
+automountServiceAccountToken: false
+---
+# Mounts the agent's socket directory into a pod as an ephemeral csi.spiffe.io
+# volume, so a workload reaches the Workload API with no hostPath and under the
+# restricted Pod Security level. The driver shares /run/spire/sockets with the
+# agent through the host, as the agent's DaemonSet does: a directory inside
+# one pod would go stale for every workload when that pod restarts.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: spiffe-csi-driver
+  namespace: spire
+  labels:
+    app.kubernetes.io/name: spiffe-csi-driver
+    app.kubernetes.io/part-of: spire
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: spiffe-csi-driver
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: spiffe-csi-driver
+        app.kubernetes.io/part-of: spire
+    spec:
+      serviceAccountName: spiffe-csi-driver
+      automountServiceAccountToken: false
+      priorityClassName: system-node-critical
+      # Only these nodes run a SPIRE agent, so only they have a socket to mount.
+      nodeSelector:
+        lolwtf.ca/tpm: "true"
+      containers:
+        - name: spiffe-csi-driver
+          image: ghcr.io/spiffe/spiffe-csi-driver:0.3.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -workload-api-socket-dir
+            - /spire-agent-socket
+            - -csi-socket-path
+            - /spiffe-csi/csi.sock
+          env:
+            - name: MY_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          # The driver bind-mounts into other pods' volume directories, which
+          # takes a privileged container with bidirectional propagation.
+          securityContext:
+            privileged: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: sockets
+              mountPath: /spire-agent-socket
+              readOnly: true
+            - name: csi-socket
+              mountPath: /spiffe-csi
+            - name: kubelet-pods
+              mountPath: /var/lib/kubelet/pods
+              mountPropagation: Bidirectional
+        # Registers the driver's socket with the kubelet.
+        - name: node-driver-registrar
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.18.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - -csi-address
+            - /spiffe-csi/csi.sock
+            - -kubelet-registration-path
+            - /var/lib/kubelet/plugins/csi.spiffe.io/csi.sock
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: csi-socket
+              mountPath: /spiffe-csi
+            - name: kubelet-registration
+              mountPath: /registration
+      volumes:
+        # The agent's socket directory, the same hostPath the agent writes.
+        - name: sockets
+          hostPath:
+            path: /run/spire/sockets
+            type: DirectoryOrCreate
+        - name: csi-socket
+          hostPath:
+            path: /var/lib/kubelet/plugins/csi.spiffe.io
+            type: DirectoryOrCreate
+        - name: kubelet-pods
+          hostPath:
+            path: /var/lib/kubelet/pods
+            type: Directory
+        - name: kubelet-registration
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry
+            type: Directory
+---
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: csi.spiffe.io
+  labels:
+    app.kubernetes.io/name: spiffe-csi-driver
+    app.kubernetes.io/part-of: spire
+spec:
+  # Ephemeral inline volumes only: nothing is provisioned or attached.
+  attachRequired: false
+  podInfoOnMount: true
+  # The socket is open to all, so no ownership change on the mount.
+  fsGroupPolicy: None
+  volumeLifecycleModes:
+    - Ephemeral
