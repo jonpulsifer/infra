@@ -6,7 +6,7 @@
 # The sign stage copies a key from the build context, which only a throwaway key may be: the lab's
 # pipeline would sign on the runner with sbsign, as .github/workflows/talos-images.yml signs HookOS,
 # or through a BuildKit secret, so no layer ever holds the key.
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS rootfs
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS rootfs
 COPY rootfs/ /overlay/
 RUN set -eux; \
   mkdir -p /rootfs/etc/apk /rootfs/etc/mkinitfs; \
@@ -23,7 +23,7 @@ RUN set -eux; \
   mkdir -p /rootfs/boot/efi; \
   tar -C /rootfs -cpf /alpine-rootfs.tar .
 
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS uki
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS uki
 RUN apk add --no-cache ukify systemd-efistub
 COPY --from=rootfs /rootfs/boot/ /boot/
 COPY --from=rootfs /rootfs/etc/os-release /os-release
@@ -37,7 +37,7 @@ RUN ukify build \
     --cmdline="root=LABEL=alpine-root rootfstype=ext4 modules=ext4 console=tty0 console=ttyS0,115200" \
     --output=/alpine-unsigned.efi
 
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS sign
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS sign
 RUN apk add --no-cache sbsigntool
 COPY --from=uki /alpine-unsigned.efi /alpine-unsigned.efi
 COPY keys/uki-signing-key.pem keys/uki-signing-cert.pem /keys/
@@ -45,7 +45,7 @@ RUN sbsign --key /keys/uki-signing-key.pem --cert /keys/uki-signing-cert.pem \
     --output /alpine.efi /alpine-unsigned.efi \
   && sbverify --cert /keys/uki-signing-cert.pem /alpine.efi
 
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache sgdisk dosfstools e2fsprogs efibootmgr util-linux tar
 COPY --from=rootfs /alpine-rootfs.tar /alpine-rootfs.tar
 COPY --from=sign /alpine.efi /alpine.efi

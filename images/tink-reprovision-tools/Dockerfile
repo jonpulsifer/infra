@@ -7,7 +7,7 @@
 # rejects with "unknown typeflag".
 # clusters/folly/tinkerbell/template.yaml and template-image.yaml pin this image by digest, which
 # the containers workflow's delivery rewrites.
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 RUN apk add --no-cache sgdisk util-linux efibootmgr docker-cli nvme-cli curl ca-certificates zstd xz tar \
  && for tool in nvme blkdiscard wipefs sgdisk efibootmgr docker sha256sum timeout curl zstd xz tar gzip mount; do command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 1; }; done \
  && tar --version | grep -q 'GNU tar'
