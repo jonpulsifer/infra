@@ -26,7 +26,7 @@ RUN go mod download
 COPY apps/fleetd/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/fleet-boot ./cmd/fleet-boot
 
-FROM docker.io/library/alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a AS initramfs
+FROM docker.io/library/alpine:3.24.4@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf AS initramfs
 # kmod prunes the modules and cpio and zstd pack the tree; the tree gets its own copies.
 RUN apk add --no-cache kmod cpio zstd
 # The initramfs's root, from the base image's repositories and keys. No scripts:
