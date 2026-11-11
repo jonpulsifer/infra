@@ -42,11 +42,11 @@ An agent's persona is edited live, not through git: the first message, the closi
 
 The file seeds a new agent with them and otherwise holds the last snapshot of what is live: [Switchboard](switchboard.md)'s persona routes write the leaves to the agent and open a pull request that puts the live values into the file. Everything else in the file, the tools, the LLM, the limits, the judges and the number bindings, is git's as before.
 
-A failed request for one agent fails the Job and leaves that agent as it is; the other agents and the number are still reconciled. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
+A failed request or a managed field that still differs after a write fails the Job for that agent. The reconciler still checks the other agents and the number. If ElevenLabs reports no inbound credentials after the bind, the run unbinds the number. Without the write key it only logs what it would create, patch or bind.
 
 ## Operate
 
-No alert is specific to it. A failed run fires `KubeJobFailed`, and the Job's log names the HTTP status or the field at fault.
+No alert is specific to it. A failed run fires `KubeJobFailed`, and the Job's log names the HTTP status or the field at fault. For `still differs after a write`, check the named path in `desired/agents/` against the API's returned shape before changing git; a successful PATCH does not prove the field stuck.
 
 ## Reference
 
