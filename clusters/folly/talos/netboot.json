@@ -8,6 +8,6 @@
   "fleet_boot": {
     "kernel": "linuxPackages_6_18"
   },
-  "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:719aef661aab3ee696dfb1a1b5e061f0672d633dbfc2d854f0f7b1227353697c",
+  "fleet_boot_alpine_image": "ghcr.io/jonpulsifer/fleet-boot-alpine@sha256:93688ffeeac3040b095f217f325abb59abd864aa5063df23e10c131da7115c3d",
   "menu_default": "alpine"
 }

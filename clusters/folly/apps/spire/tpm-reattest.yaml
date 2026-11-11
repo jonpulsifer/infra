@@ -128,7 +128,7 @@ spec:
         - name: renew
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/tink-attest@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/tink-attest@sha256:a0e00bf0ba0bb9b3022743d6101e903621c15ee3c2988a7535edd131434391c8
+          image: ghcr.io/jonpulsifer/tink-attest@sha256:33a862f4a57fcdfcf0dd7b76d7b7612f2ceff671021de72903ff513e9af2cc76
           imagePullPolicy: IfNotPresent
           command: ["/usr/local/bin/tink-attest"]
           # Each run reads the CA bundle again, so a rotated CA needs no restart.
