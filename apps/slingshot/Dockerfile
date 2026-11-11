@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS base
+FROM node:26-alpine@sha256:ce8c3a386c7649c1f9a38d29eb9f6b0c29e70707eb50f208643a75b3f763b60f AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 RUN apk add --no-cache bash curl libc6-compat \
@@ -26,7 +26,7 @@ RUN --mount=type=secret,id=gcp_credentials,required=true \
   GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcp_credentials \
   bun run build --filter=slingshot
 
-FROM node:26-alpine@sha256:8996bb5821d62a8fd9bb27c1cb07462f3fdce6e47d640c6a881ead0b064ce216 AS runner
+FROM node:26-alpine@sha256:ce8c3a386c7649c1f9a38d29eb9f6b0c29e70707eb50f208643a75b3f763b60f AS runner
 ENV HOSTNAME=0.0.0.0 \
   NODE_ENV=production \
   NEXT_TELEMETRY_DISABLED=1 \
