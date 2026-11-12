@@ -393,4 +393,24 @@ assert_lacks 'the agent PATCH carries no prompt text' "$patch" 'conversation_con
 assert_lacks 'the agent PATCH carries no tts leaf' "$patch" 'conversation_config.tts'
 cp "$work/troll.base.json" "$pristine/agent-agent_troll1.json"
 
+# ElevenLabs expands the mission criterion's schedule and adds evaluation
+# defaults on read. Git declares that read-back shape so a healthy job does
+# not repeatedly PATCH and fail its post-write check.
+jq '.agents += [{agent_id: "agent_mission", name: "pbx-mission"}]' \
+  "$pristine/agents.json" >"$pristine/next.json"
+mv "$pristine/next.json" "$pristine/agents.json"
+jq '. + {agent_id: "agent_mission"}' "$desired/agents/pbx-mission.json" >"$pristine/agent-agent_mission.json"
+run_case "$desired" "${write_env[@]}"
+assert_equal 'the API evaluation defaults leave the mission agent in sync' 0 "$status"
+assert_contains 'the mission agent is in sync' "$out" 'agent pbx-mission (agent_mission): in sync'
+assert_lacks 'the mission criterion is not patched again' "$requests" 'PATCH /v1/convai/agents/agent_mission'
+jq '.platform_settings.evaluation.criteria[0].analysis_schedule.messaging.idle_secs = 600' \
+  "$pristine/agent-agent_mission.json" >"$pristine/next.json"
+mv "$pristine/next.json" "$pristine/agent-agent_mission.json"
+run_case "$desired" "${write_env[@]}"
+assert_equal 'a real schedule drift is fixed' 0 "$status"
+assert_contains 'a real schedule drift is patched' "$out" \
+  'agent pbx-mission (agent_mission): patched platform_settings.evaluation.criteria'
+assert_contains 'the schedule patch is sent' "$requests" 'PATCH /v1/convai/agents/agent_mission'
+
 echo "elevenlabs-reconcile_test: ok"

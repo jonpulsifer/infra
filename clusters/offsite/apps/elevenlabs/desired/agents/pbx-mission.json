@@ -129,7 +129,13 @@
           "scope": "conversation",
           "llm": null,
           "llm_billed": false,
-          "analysis_schedule": null,
+          "analysis_schedule": {
+            "session": {"mode": "on_session_end", "delay_secs": null},
+            "messaging": {"mode": "after_idle", "idle_secs": 900}
+          },
+          "create_agent_issue_on_failure": false,
+          "checks": [],
+          "check_match": "all",
           "scoring_mode": "binary",
           "max_score": 100,
           "score_instructions": null
