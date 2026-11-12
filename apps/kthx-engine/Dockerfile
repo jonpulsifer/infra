@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # One image, two processes: `web` is the default command and the chart starts
 # `reconciler` with its own. The client ships as prebuilt files in dist/.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:81d77836dacab0c421ab4fbbf1cc2ffe56f9bc64793c1b077bbc1a30d61e1c05 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:be9a6457ffdfd97b0510cab010ac2188034f23d83c96c40f330f67847e70f2ed AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
@@ -37,7 +37,7 @@ RUN bun install --frozen-lockfile --production
 # First-party stand-in for the cosign and slsa-verifier CLIs.
 FROM ghcr.io/jonpulsifer/kthx-engine-verifier:latest@sha256:aa6def1fec3a94c3938df494bdecb838d68d7429f7ebc7ec711dcdac288769e2 AS supply-chain-tools
 
-FROM cgr.dev/chainguard/node:latest@sha256:6a066f8decea77c67ef2772a78fad81df7a78a346d0b22a05fc9dac14537f2b0 AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:5564bc90ca0933f9b217920d7285b5ea449d7e7406dc97782931e234475c45c5 AS runner
 ENV NODE_ENV=production \
   PORT=3000
 WORKDIR /app
