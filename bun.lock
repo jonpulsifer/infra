@@ -18,7 +18,7 @@
         "@x402/hono": "2.30.0",
         "@x402/mcp": "2.30.0",
         "@x402/svm": "2.30.0",
-        "hono": "4.13.13",
+        "hono": "4.13.16",
         "uqr": "0.1.3",
       },
       "devDependencies": {
@@ -235,7 +235,7 @@
     "apps/switchboard": {
       "name": "switchboard",
       "dependencies": {
-        "hono": "4.13.13",
+        "hono": "4.13.16",
       },
       "devDependencies": {
         "@repo/typescript-config": "workspace:*",
@@ -269,7 +269,7 @@
       "name": "weather",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.32.1",
-        "hono": "4.13.13",
+        "hono": "4.13.16",
         "zod": "4.6.7",
       },
       "devDependencies": {
@@ -1847,7 +1847,7 @@
 
     "highlightjs-vue": ["highlightjs-vue@1.0.0", "", {}, "sha512-PDEfEF102G23vHmPhLyPboFCD+BkMGu+GuJe2d9/eH4FsCwvgBpnc9n0pGE+ffKdph38s6foEZiEjdgHdzp+IA=="],
 
-    "hono": ["hono@4.13.13", "", {}, "sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA=="],
+    "hono": ["hono@4.13.16", "", {}, "sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A=="],
 
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
 
