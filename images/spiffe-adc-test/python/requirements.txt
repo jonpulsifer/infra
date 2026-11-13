@@ -1,2 +1,2 @@
-google-auth==2.62.1
+google-auth==2.62.2
 google-cloud-storage==3.17.1
