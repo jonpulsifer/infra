@@ -41,7 +41,7 @@ spec:
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/spiffe-adc-test…@sha256:` string, so keep it one
           # literal. The zero digest stands until main builds the first image.
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:3a389b7db0a03dc33741c1f84411aece8dd69268ce4a35065723818b5ddb4149
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:f1ea402f8b87e33ebe03064a391ac7d41276c3703f4db97904450046de4b1073
           imagePullPolicy: IfNotPresent
           command: ["/test/go-upload"]
           env: &env
@@ -88,7 +88,7 @@ spec:
               mountPath: /opt/spiffe-adc
               readOnly: true
         - name: python
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:3a389b7db0a03dc33741c1f84411aece8dd69268ce4a35065723818b5ddb4149
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:f1ea402f8b87e33ebe03064a391ac7d41276c3703f4db97904450046de4b1073
           imagePullPolicy: IfNotPresent
           command: ["/opt/venv/bin/python", "/test/python/upload.py"]
           env: *env
@@ -96,7 +96,7 @@ spec:
           resources: *resources
           volumeMounts: *volumeMounts
         - name: bun
-          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:3a389b7db0a03dc33741c1f84411aece8dd69268ce4a35065723818b5ddb4149
+          image: ghcr.io/jonpulsifer/spiffe-adc-test:latest@sha256:f1ea402f8b87e33ebe03064a391ac7d41276c3703f4db97904450046de4b1073
           imagePullPolicy: IfNotPresent
           workingDir: /test/bun
           command: ["bun", "run", "upload.ts"]
