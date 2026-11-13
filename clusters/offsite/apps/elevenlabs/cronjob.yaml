@@ -1,7 +1,7 @@
 ---
 # Makes the ElevenLabs agents and phone number match desired/. The script is
 # reconcile.sh, in a ConfigMap that Flux does not substitute. A failed run
-# fires KubeJobFailed, and the TTL clears the failed Job an hour later.
+# fires KubeJobFailed, and the TTL clears the failed Job ten minutes later.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -17,7 +17,7 @@ spec:
     spec:
       backoffLimit: 0
       activeDeadlineSeconds: 300
-      ttlSecondsAfterFinished: 3600
+      ttlSecondsAfterFinished: 600
       template:
         metadata:
           labels:
