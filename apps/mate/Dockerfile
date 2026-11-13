@@ -3,7 +3,7 @@
 # mate: one Bun process that runs its source as committed, with no build step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:be9a6457ffdfd97b0510cab010ac2188034f23d83c96c40f330f67847e70f2ed AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
@@ -14,7 +14,7 @@ FROM base AS pruner
 # At least 2.11.2: 2.10.3's prune drops a nested lockfile entry that pi-ai's
 # dependencies need, and the frozen install then refuses it.
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.9
+ARG TURBO_VERSION=2.11.10
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune mate --docker

@@ -11,7 +11,7 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@x402/core": "2.30.0",
     "@x402/evm": "2.30.0",
     "@x402/hono": "2.30.0",
@@ -22,7 +22,7 @@
   },
   "devDependencies": {
     "@repo/typescript-config": "workspace:*",
-    "@types/bun": "1.4.3",
+    "@types/bun": "1.4.4",
     "typescript": "5.9.3"
   }
 }

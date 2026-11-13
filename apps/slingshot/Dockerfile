@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 FROM node:26-alpine@sha256:6bd9ab43c0ec0190ca7b2d193906cb8b7edf6e7f4afa43ddeccd6452710bffb5 AS base
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.4
 RUN apk add --no-cache bash curl libc6-compat \
   && curl -fsSL https://bun.sh/install | bash -s -- "bun-v${BUN_VERSION}"
 ENV PATH="/root/.bun/bin:${PATH}" \
@@ -10,7 +10,7 @@ ENV PATH="/root/.bun/bin:${PATH}" \
 
 FROM base AS pruner
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.9
+ARG TURBO_VERSION=2.11.10
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune slingshot --docker
