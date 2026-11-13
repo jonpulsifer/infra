@@ -54,6 +54,8 @@ github.com/cloudflare/cloudflare-go/v7 v7.13.1 h1:fRe8JpKifizF3WafGmTQiI5+lNVZht
 github.com/cloudflare/cloudflare-go/v7 v7.13.1/go.mod h1:nHsJfu5TjVpYVJVpmRhB4WJ6Dd91fckUGgw5t9fKe54=
 github.com/cloudflare/cloudflare-go/v7 v7.14.0 h1:5+UBaPtXewYw6Bta1TLthCxTHFA0s1Mb3SCotpftc9o=
 github.com/cloudflare/cloudflare-go/v7 v7.14.0/go.mod h1:nHsJfu5TjVpYVJVpmRhB4WJ6Dd91fckUGgw5t9fKe54=
+github.com/cloudflare/cloudflare-go/v7 v7.15.0 h1:ikLyi+x2rJUv+Yk6MalebWa6sHRIikeLA48sjqZD01c=
+github.com/cloudflare/cloudflare-go/v7 v7.15.0/go.mod h1:nHsJfu5TjVpYVJVpmRhB4WJ6Dd91fckUGgw5t9fKe54=
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/gjson v1.14.4 h1:uo0p8EbA09J7RQaflQ1aBRffTR7xedD2bcIVSYxLnkM=
 github.com/tidwall/gjson v1.14.4/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
