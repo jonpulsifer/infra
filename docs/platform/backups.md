@@ -72,11 +72,11 @@ Velero runs in opt-in mode: `defaultVolumesToFsBackup` is `false`, so it copies 
 
 Velero skips a pod that is not running when the backup starts, and records a warning. A volume that the warnings name goes uncovered for that night.
 
-`mise run backup:coverage [context]` lists each claim with its answer and fails when a claim has none. `scripts/backup-coverage.exclusions` holds each excluded claim and its reason.
+`mise run backup:coverage [context]` lists each claim with its answer and fails when a claim has none. It defaults to folly; pass `offsite` to check offsite's claims. `scripts/backup-coverage.exclusions` holds each excluded claim and its reason.
 
 ## Rules
 
-- Give a new PVC a pod annotation `backup.velero.io/backup-volumes`, or a line in `scripts/backup-coverage.exclusions` that says why it needs no backup. Run `mise run backup:coverage` before you merge.
+- Give a new PVC a pod annotation `backup.velero.io/backup-volumes`, or a line in `scripts/backup-coverage.exclusions` that says why it needs no backup. Run `mise run backup:coverage folly` and `mise run backup:coverage offsite` before you merge.
 
 - Keep `backup-crypt` in 1Password. Without it the GCS copy cannot be read.
 - Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale` and `BackupJobFailed` watch only those.
