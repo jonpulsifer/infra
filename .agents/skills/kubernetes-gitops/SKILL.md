@@ -29,9 +29,16 @@ beyond them.
   Then make sure the revision moved in `flux --context <site> get sources git -A`.
   Without the source, a Kustomization reconcile re-applies the old revision
   and reports success.
-- If a HelmRelease did not upgrade after its Kustomization applied, run
-  `flux --context <site> reconcile helmrelease <name> -n <namespace>`. A
-  change to a `valuesFrom` source is one cause.
+- If a HelmRelease did not upgrade after its Kustomization applied, inspect
+  its Ready condition and upgrade failure before reconciling it. Run
+  `flux --context <site> reconcile helmrelease <name> -n <namespace>` after
+  correcting the cause. A change to a `valuesFrom` source is one cause.
+- If Kyverno's HelmRelease fails an upgrade, inspect the existing policies in
+  `clusters/base/platform/kthx-engine-policy/` and the HelmRelease conditions.
+  A failed upgrade also makes the `kyverno` Kustomization fail its health check
+  and blocks `kthx-engine-policy` through `dependsOn`. Keep image-verification
+  enforcement in place when changing the policy; do not bypass the chart's
+  legacy-policy check as a substitute for a compatible policy.
 - `kubectl kustomize` skips Flux's `postBuild` substitution. In Flux, an
   undefined `${VAR}` becomes empty, and a `${...}` that envsubst cannot parse
   fails the Kustomization. Escape a literal as
