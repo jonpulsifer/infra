@@ -22,7 +22,7 @@ ARG BAT_VERSION=0.26.1
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.4
 # renovate: datasource=github-releases depName=cilium/cilium-cli
-ARG CILIUM_CLI_VERSION=0.20.2
+ARG CILIUM_CLI_VERSION=0.20.3
 # Must equal the operator's version, the appVersion of the chart that
 # clusters/base/platform/cloudnative-pg/helm-release.yaml pins. Renovate reads
 # it from the chart index and bumps it with the chart, in one pull request.
@@ -42,9 +42,9 @@ ARG FLUX_VERSION=2.10.0
 # renovate: datasource=github-releases depName=junegunn/fzf
 ARG FZF_VERSION=0.75.0
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.103.3
+ARG GH_VERSION=2.104.0
 # renovate: datasource=github-releases depName=helm/helm
-ARG HELM_VERSION=4.3.1
+ARG HELM_VERSION=4.3.2
 # renovate: datasource=github-releases depName=cilium/hubble
 ARG HUBBLE_VERSION=1.20.4
 # renovate: datasource=github-releases depName=jqlang/jq extractVersion=^jq-(?<version>.*)$
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.2
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.11.6
+ARG MISE_VERSION=2026.11.7
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
@@ -69,9 +69,9 @@ ARG SHFMT_VERSION=3.14.1
 ARG SOPS_VERSION=3.13.3
 # The clusters' Talos API client; keep it on their Talos minor.
 # renovate: datasource=github-releases depName=siderolabs/talos
-ARG TALOSCTL_VERSION=1.14.5
+ARG TALOSCTL_VERSION=1.14.6
 # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
-ARG TERRAFORM_DOCS_VERSION=0.24.0
+ARG TERRAFORM_DOCS_VERSION=0.25.1
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
 # in its place.
 # renovate: datasource=github-releases depName=opentofu/opentofu
