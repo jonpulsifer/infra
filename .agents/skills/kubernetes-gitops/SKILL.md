@@ -62,6 +62,10 @@ beyond them.
 - Postgres is CloudNativePG. Reach a database with
   `kubectl cnpg psql <cluster> -n <namespace> --context <site>`.
   `docs/runbooks/operate-postgres.md` has the rest.
+- `mise run backup:coverage <site>` reports PVCs as `namespace/claim`.
+  Query the claim in that namespace before deciding it is gone; a workload
+  with the same name in another namespace is not the claim. If no pod mounts
+  an uncovered claim, inspect its ownership and data before excluding it.
 - For a failed Velero backup, name its resource explicitly:
   `kubectl --context <site> -n velero get backups.velero.io`.
   An unqualified `get backups` can select CloudNativePG backups instead.
