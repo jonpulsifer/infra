@@ -73,7 +73,7 @@ export function Sparkline({
     : values.indexOf(low);
 
   const markers = [
-    { key: 'high', index: highIndex, value: high, ring: accent },
+    { key: 'high', index: highIndex, value: high, ring: '#CC7E2F' },
     { key: 'low', index: lowIndex, value: low, ring: '#5D7E9B' },
     {
       key: 'now',
