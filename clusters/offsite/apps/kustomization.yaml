@@ -17,6 +17,7 @@ resources:
   - prowler
   - kthx-engine
   - weather
+  - wishlist-mirror
   - ../../base/platform/kthx-engine-target
   - ../../base/apps/reloader
 patches:

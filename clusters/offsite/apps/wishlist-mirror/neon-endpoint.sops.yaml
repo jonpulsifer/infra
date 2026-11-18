@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: neon-endpoint
+    namespace: wishlist-mirror
+    labels:
+        app.kubernetes.io/name: wishlist-mirror
+        app.kubernetes.io/part-of: wishlist
+type: Opaque
+stringData:
+    host: ENC[AES256_GCM,data:6eSaQ2v156gHYpgAp8OWwxVUH+mayjdAt0jbLwKodOV4WdbkMPJVBeNLBqIFVw==,iv:R2BizJG7TjlAC8dYE491gJGKBEyn0Ma3I7rOGXqyZZU=,tag:xRZ75esqlpJfzExnm1izkw==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBLaXpQSDFBRnJRaEFNM2hY
+            YU5lYXBXcFRCMlhMNWViZ3UzbUg0eHc2VUFZCmRpbzBNWHNzMVlLWXcyMFJVc041
+            U2diMzdyNjlNMFRzNDdtcHZERndBbmsKLS0tIElLcUs2eTRvYVpYaFRubllHcVBx
+            eUNoZ2lScVdFRVZ4cE95eHd5Y3BSd1EKaCXGfYwH0ux+aS+rIXVFnvMs+0x8IXT4
+            IS1LhcE5ESsOKYRTeuCGM16752PwAXq85vdWJjB+bwKMJlG7KmQVLQ==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-18T23:19:53Z"
+    mac: ENC[AES256_GCM,data:H82vm9VOhEl4lbjFe90bb3Nrxf0ggV116dV5lc3RoX7rBGlX72zOj2S3INwMojOAGK0PWu1F3VbZWpaJDYuxGIgQt6O1fLKCC5SSMVs+ZJxmWwy7FerJ7os8ZSIOGqAR9w6Kt9DhpCnhHY0DW9IS/ACYy/NdbVifQQuG2Qe4gCY=,iv:leMBW9M/XD/POgLCod2/D1oUkEehSfHA14q4kHYVT3I=,tag:9XZDwkxgCY/ZNAcC6LllsQ==,type:str]
+    version: 3.13.3
