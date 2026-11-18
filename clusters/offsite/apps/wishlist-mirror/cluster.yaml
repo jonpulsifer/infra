@@ -1,7 +1,6 @@
-# The template the refresh job creates. __NEON_HOST__ and __NEON_USER__ are
-# filled from the Secrets `neon-endpoint` and `neon-source`, which keeps the
-# endpoint out of a public repository; CloudNativePG reads only a password
-# from a Secret.
+# The template the refresh job creates, empty. The job then restores
+# production into it, because CloudNativePG's own import replays Neon's
+# `pg_attver` column options, which stock Postgres rejects.
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
@@ -27,24 +26,3 @@ spec:
       # Fixed, so the app's DATABASE_URL survives every refresh.
       secret:
         name: wishlist-app
-      import:
-        type: microservice
-        databases:
-          - wishlist
-        source:
-          externalCluster: neon
-        # The mirror holds no live credentials: production's sessions and the
-        # Google tokens stored at link time stay in production.
-        postImportApplicationSQL:
-          - DELETE FROM "Session"
-          - UPDATE "Account" SET access_token = NULL, refresh_token = NULL, id_token = NULL
-  externalClusters:
-    - name: neon
-      connectionParameters:
-        host: __NEON_HOST__
-        user: __NEON_USER__
-        dbname: wishlist
-        sslmode: require
-      password:
-        name: neon-source
-        key: password
