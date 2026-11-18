@@ -1,4 +1,4 @@
-# Rebuilds the mirror from a fresh import of production on Neon each night.
+# Rebuilds the mirror from a fresh dump of production on Neon each night.
 # Writes made to the mirror do not survive it. A failed import leaves no
 # database until the next good run; KubeJobFailed alerts on it.
 apiVersion: batch/v1
@@ -25,6 +25,7 @@ spec:
         metadata:
           labels:
             app.kubernetes.io/name: wishlist-mirror
+            app.kubernetes.io/component: refresh
             app.kubernetes.io/part-of: wishlist
         spec:
           restartPolicy: Never
@@ -35,8 +36,8 @@ spec:
             runAsGroup: 65534
             seccompProfile:
               type: RuntimeDefault
-          containers:
-            - name: refresh
+          initContainers:
+            - name: rebuild
               image: docker.io/alpine/k8s:1.37.2@sha256:7a82aeefea3d554a43a8676b137f2b88bae6c1fe11c13862b191b3a086cc28c0
               command:
                 - bash
@@ -44,12 +45,51 @@ spec:
                 - |
                   set -euo pipefail
                   kubectl delete cluster.postgresql.cnpg.io/wishlist --ignore-not-found --wait=true --timeout=10m
-                  sed -e "s|__NEON_HOST__|$NEON_HOST|" -e "s|__NEON_USER__|$NEON_USER|" /template/cluster.yaml \
-                    | kubectl create -f -
+                  kubectl create -f /template/cluster.yaml
                   kubectl wait --for=condition=Ready cluster.postgresql.cnpg.io/wishlist --timeout=20m
               env:
                 - name: HOME
                   value: /tmp
+              volumeMounts:
+                - name: template
+                  mountPath: /template
+                  readOnly: true
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests: {cpu: 25m, memory: 64Mi}
+                limits: {memory: 256Mi}
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+          containers:
+            # Neon stamps `pg_attver` on every column a migration adds, and
+            # pg_dump carries the stamp into `ALTER COLUMN ... SET`, which
+            # stock Postgres rejects. Those lines are dropped and nothing else.
+            # The mirror holds no live credentials: production's sessions and
+            # the Google tokens stored at link time stay in production.
+            - name: restore
+              image: ghcr.io/cloudnative-pg/postgresql:18.6-system-trixie@sha256:48a0038fdd9672d12853d5300666b2592f97f9d34a993ea42e3ecb5a9a5e43e3
+              command:
+                - bash
+                - -c
+                - |
+                  set -euo pipefail
+                  mirror="host=wishlist-rw user=wishlist dbname=wishlist"
+                  PGPASSWORD="$NEON_PASSWORD" pg_dump --format=plain --no-owner --no-privileges \
+                    --dbname="host=$NEON_HOST user=$NEON_USER dbname=wishlist sslmode=require" \
+                    | sed -E '/^ALTER TABLE ONLY .+ ALTER COLUMN .+ SET \(pg_attver=[0-9]+\);$/d' \
+                    | PGPASSWORD="$APP_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 --single-transaction --dbname="$mirror"
+                  PGPASSWORD="$APP_PASSWORD" psql -X -q -v ON_ERROR_STOP=1 --single-transaction --dbname="$mirror" \
+                    -c 'DELETE FROM "Session"' \
+                    -c 'UPDATE "Account" SET access_token = NULL, refresh_token = NULL, id_token = NULL'
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: PGCONNECT_TIMEOUT
+                  value: "30"
                 - name: NEON_HOST
                   valueFrom:
                     secretKeyRef:
@@ -60,15 +100,22 @@ spec:
                     secretKeyRef:
                       name: neon-source
                       key: username
+                - name: NEON_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: neon-source
+                      key: password
+                - name: APP_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: wishlist-app
+                      key: password
               volumeMounts:
-                - name: template
-                  mountPath: /template
-                  readOnly: true
                 - name: tmp
                   mountPath: /tmp
               resources:
-                requests: {cpu: 25m, memory: 64Mi}
-                limits: {memory: 256Mi}
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {memory: 512Mi}
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

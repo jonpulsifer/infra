@@ -1,5 +1,6 @@
 # The database takes connections from the operator, the monitoring exporter
-# scrape, and the app's namespace, which the kthx engine names `app-wishlist`.
+# scrape, the refresh job that restores into it, and the app's namespace,
+# which the kthx engine names `app-wishlist`.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -44,6 +45,13 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: app-wishlist
+      ports:
+        - port: 5432
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: refresh
       ports:
         - port: 5432
           protocol: TCP
