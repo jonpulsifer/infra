@@ -202,6 +202,14 @@ spec:
               value: "5027196"
             - name: MATE_GITHUB_APP_KEY_FILE
               value: /var/run/mate/github-app/private-key
+            # More of the owner's repos the turn's token names, with the same
+            # permissions; the App's installation must include each.
+            - name: MATE_GITHUB_EXTRA_REPOS
+              value: wishlist
+            # The Secret holding a Connect token for the Agent Sandbox vault
+            # (external-secret.yaml). An agent can read anything put there.
+            - name: MATE_CONNECT_SECRET
+              value: mate-onepassword
             # cluster-admin on offsite and folly. mate mints a bound token per
             # turn (sandbox-rbac.yaml).
             - name: MATE_SANDBOX_KUBE_SA

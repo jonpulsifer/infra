@@ -146,6 +146,7 @@ function keys(): Pick<ConfigOverrides, 'githubApp' | 'sshKeyFile'> {
       keyFile: join(dir, 'app.pem'),
       owner: 'jonpulsifer',
       repo: 'infra',
+      extraRepos: [],
     },
     sshKeyFile: join(dir, 'ssh.pem'),
   };
