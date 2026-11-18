@@ -1,0 +1,49 @@
+# The database takes connections from the operator, the monitoring exporter
+# scrape, and the app's namespace, which the kthx engine names `app-wishlist`.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: wishlist-mirror
+  labels:
+    app.kubernetes.io/name: wishlist-mirror
+    app.kubernetes.io/part-of: wishlist
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-database-clients
+  namespace: wishlist-mirror
+  labels:
+    app.kubernetes.io/name: wishlist-mirror
+    app.kubernetes.io/part-of: wishlist
+spec:
+  podSelector:
+    matchLabels:
+      cnpg.io/cluster: wishlist
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudnative-pg
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - port: 9187
+          protocol: TCP
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: app-wishlist
+      ports:
+        - port: 5432
+          protocol: TCP

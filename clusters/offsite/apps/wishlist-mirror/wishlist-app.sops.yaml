@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Secret
+metadata:
+    name: wishlist-app
+    namespace: wishlist-mirror
+    labels:
+        app.kubernetes.io/name: wishlist-mirror
+        app.kubernetes.io/part-of: wishlist
+type: kubernetes.io/basic-auth
+stringData:
+    username: ENC[AES256_GCM,data:RK6+v3+Z0CI=,iv:wNH4BEitjy/7ULSI3CaZ/vNwPA1IzzrPuDPPIlFNFIU=,tag:zhCvzzpq2/Aoe3iVUjJIzQ==,type:str]
+    password: ENC[AES256_GCM,data:lac8feNuXu6R8O+9lRaqaZFJ25ikODTd/5aLs7jvVOwsTJETHwdG5hCVXhVvefmY,iv:JYBJU4ZNTu99sKmMvv8n7E6FFCVezYBwmqOq+kq4NFg=,tag:DEuhptHUXkFMgfNb3QNV2Q==,type:str]
+sops:
+    age:
+        - enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB2ZkpBOFpZeGNxYVp4WTRB
+            TmFEaWlvek1ua3FWNldsZGxRU3JpTGxBemxRCnRnYUJocy9SNTVmTWRWcEYxcFZs
+            Wkw2VExjT3B4dzFiN3BudXppYWNObGsKLS0tIGRTV0s4OUtkZWltTEx1SlF0T2Jp
+            ZFpxdy9ieHNiQWZDQXJxUy92L3g1ZG8K4C7sdlEPNkKtFDA6w9qK2d3phE7tgNPG
+            nEyAa9yNp0YpY7yBed7ge0MvUEot/6XbXFH8xMMQYvXA0/xpQSeddw==
+            -----END AGE ENCRYPTED FILE-----
+          recipient: age1lpfxcn6qwrgtxzymzcxqu20cppsrhmgcpma59sc8ahq9t0w67d3sj8e3e6
+    encrypted_regex: ^(data|stringData)$
+    lastmodified: "2026-11-18T23:08:24Z"
+    mac: ENC[AES256_GCM,data:A2bnOkUWEDX3nyYtJQ3IRWYTHouIp8CNM5mG/Un4aDmCl+59Q2nP8v1LKYdrSbQMEawA+TXCa0CYqFBHL6h4MQxYQoxOdY6Cspl3AFa5cjIVzJOYjWogoEVjriIXOc9H9m8HnG3GK9SlzBywiFAp2X5x5uj1r6+kiAhP0ZOlKpQ=,iv:2DN1zvjaOCcIMPvmuWhM4feMnZBJGBsj9GENhY8uNK0=,tag:Qxx+be6ZEp91P7SBGEcE6A==,type:str]
+    version: 3.13.3

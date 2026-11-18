@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: wishlist-mirror
+resources:
+  - namespace.yaml
+  - rbac.yaml
+  - network-policy.yaml
+  - external-secret.yaml
+  - neon-endpoint.sops.yaml
+  - wishlist-app.sops.yaml
+  - cronjob.yaml
+configMapGenerator:
+  - name: wishlist-cluster
+    files:
+      - cluster.yaml
+generatorOptions:
+  disableNameSuffixHash: true
