@@ -62,6 +62,12 @@ beyond them.
 - Postgres is CloudNativePG. Reach a database with
   `kubectl cnpg psql <cluster> -n <namespace> --context <site>`.
   `docs/runbooks/operate-postgres.md` has the rest.
+- When a Job alert fires, inspect the named Job's final conditions before
+  treating failed pods as a failed run. A successful Job can retain failed
+  retry pods. Check the alert's rule and labels before calling it stale or
+  changing the rule. For `backup-push`, follow
+  `docs/runbooks/operate-postgres.md` to read every attempt and the final Job
+  status.
 - For a failed Velero backup, name its resource explicitly:
   `kubectl --context <site> -n velero get backups.velero.io`.
   An unqualified `get backups` can select CloudNativePG backups instead.
