@@ -19,7 +19,7 @@ let
   bootstrapIp = lab.bootstrap.hosts.spore;
 
   # renovate: datasource=github-releases depName=tinkerbell/tinkerbell
-  version = "v0.25.0";
+  version = "v0.26.0";
   # tinkerbell-embedded-linux-arm64 in the release's checksums-embedded.txt. Renovate cannot update it.
   sha256 = "e76cac8bd46a5a4123c5ac87dae18e68b72f60b4eaa6e73247f1364c92382b16";
 
