@@ -475,6 +475,9 @@ export class FakeSlack implements SlackApi {
 export class FakeSocket implements SocketLike {
   readonly sent: string[] = [];
   closed = false;
+  pings = 0;
+  /** False plays a peer that vanished: pings go out, nothing comes back. */
+  answering = true;
   private readonly listeners = new Map<string, ((event: unknown) => void)[]>();
 
   addEventListener(type: string, listener: (event: unknown) => void): void {
@@ -485,6 +488,12 @@ export class FakeSocket implements SocketLike {
 
   send(data: string): void {
     this.sent.push(data);
+  }
+
+  ping(): void {
+    if (this.closed) throw new Error('socket is closed');
+    this.pings += 1;
+    if (this.answering) this.emit('pong', {});
   }
 
   close(): void {

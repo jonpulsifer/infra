@@ -8,6 +8,8 @@ import { type Log, plain } from './log.ts';
 export interface SocketLike {
   addEventListener(type: string, listener: (event: unknown) => void): void;
   send(data: string): void;
+  /** A WebSocket ping frame; Slack answers each with a pong. */
+  ping(): void;
   close(code?: number, reason?: string): void;
 }
 
@@ -59,6 +61,13 @@ export const RECONNECT_MAX_MS = 30_000;
 export const REPLAY_WINDOW_MS = 60 * 60_000;
 /** A claim that takes longer falls back to the start-time cutoff. */
 export const CLAIM_TIMEOUT_MS = 3_000;
+/**
+ * mate pings this often and drops a socket that has not answered the last
+ * ping. A connection whose peer vanished, say when a router forgets its NAT
+ * state, never closes on its own: mate only ever sends acks, so nothing
+ * would notice.
+ */
+export const PING_MS = 30_000;
 
 export class SocketMode {
   private readonly seen = new Set<string>();
@@ -96,6 +105,7 @@ export class SocketMode {
     this.socket = socket;
     const ended = Promise.withResolvers<void>();
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return;
       this.frame(String((event as { data?: unknown }).data));
     });
     socket.addEventListener('close', () => ended.resolve());
@@ -105,8 +115,37 @@ export class SocketMode {
       });
       ended.resolve();
     });
+    let answered = true;
+    socket.addEventListener('pong', () => {
+      answered = true;
+    });
+    const { clock, log } = this.deps;
+    const beat = () => {
+      if (answered) {
+        answered = false;
+        if (this.ping(socket)) {
+          timer = clock.after(PING_MS, beat);
+          return;
+        }
+      }
+      log.warn('slack socket stopped answering pings; reconnecting');
+      socket.close(4000, 'no pong');
+      ended.resolve();
+    };
+    let timer = clock.after(PING_MS, beat);
     await ended.promise;
+    clock.cancel(timer);
     this.socket = null;
+  }
+
+  /** False when the ping cannot be sent, as on a socket that never opened. */
+  private ping(socket: SocketLike): boolean {
+    try {
+      socket.ping();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   private frame(raw: string): void {
