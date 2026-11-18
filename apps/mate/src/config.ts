@@ -202,6 +202,8 @@ export interface GithubAppConfig {
   /** Parsed from the checkout, so the App is never pointed at a repo nobody clones. */
   readonly owner: string;
   readonly repo: string;
+  /** More of the owner's repositories the turn's token also names, for reading another app's code or opening a PR there. */
+  readonly extraRepos: readonly string[];
 }
 
 type Env = Record<string, string | undefined>;
@@ -488,7 +490,24 @@ function githubApp(env: Env, checkoutRepo: string): GithubAppConfig | null {
       '/var/run/mate/github-app/private-key',
     ),
     ...slug,
+    extraRepos: extraRepos(env, slug.repo),
   };
+}
+
+// Names, not `owner/name`: one installation token covers one owner's repos.
+function extraRepos(env: Env, checkout: string): string[] {
+  const names = (env.MATE_GITHUB_EXTRA_REPOS ?? '')
+    .split(',')
+    .map((name) => name.trim())
+    .filter(Boolean);
+  for (const name of names) {
+    if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+      throw new ConfigError(
+        `MATE_GITHUB_EXTRA_REPOS takes repository names of the checkout's owner, got ${name}`,
+      );
+    }
+  }
+  return [...new Set(names)].filter((name) => name !== checkout);
 }
 
 export function repoSlug(url: string): { owner: string; repo: string } | null {

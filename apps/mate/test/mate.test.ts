@@ -515,6 +515,7 @@ describe('a degraded start', () => {
           keyFile: '/nonexistent/github-app/private-key',
           owner: 'jonpulsifer',
           repo: 'infra',
+          extraRepos: [],
         },
       },
       models: [fauxAssistantMessage('no pushing today')],

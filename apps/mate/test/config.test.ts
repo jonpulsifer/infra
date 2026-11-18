@@ -316,6 +316,7 @@ describe('config from the environment', () => {
       keyFile: '/var/run/mate/github-app/private-key',
       owner: 'jonpulsifer',
       repo: 'infra',
+      extraRepos: [],
     });
     // The sandbox gets the flag and never the App key.
     expect(
@@ -335,6 +336,19 @@ describe('config from the environment', () => {
         MATE_TURN_MINUTES: '55',
       }),
     ).toThrow('while a GitHub App is configured');
+  });
+
+  test("the token's extra repositories are the checkout owner's, named once", () => {
+    const extra = (value: string) =>
+      readConfig({
+        ...minimal,
+        MATE_GITHUB_APP_ID: '334190',
+        MATE_GITHUB_EXTRA_REPOS: value,
+      }).githubApp?.extraRepos;
+    expect(extra(' wishlist, infra ,wishlist,')).toEqual(['wishlist']);
+    expect(() => extra('jonpulsifer/wishlist')).toThrow(
+      "repository names of the checkout's owner",
+    );
   });
 
   test('kthx is two independent halves, each off until its URL is set', () => {

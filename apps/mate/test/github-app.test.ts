@@ -238,6 +238,19 @@ describe('a mint', () => {
     }
   });
 
+  test('names the extra repositories alongside the checkout, with the same permissions', async () => {
+    const { app, github } = build({ extraRepos: ['wishlist'] });
+    try {
+      await app.token();
+      const [call] = github.of('/app/installations/42/access_tokens');
+      const body = JSON.parse(call?.body ?? '{}');
+      expect(body.repositories).toEqual(['infra', 'wishlist']);
+      expect(body.permissions.contents).toBe('write');
+    } finally {
+      github.stop();
+    }
+  });
+
   test('discovers the installation once and reuses the id', async () => {
     const { app, github } = build();
     try {

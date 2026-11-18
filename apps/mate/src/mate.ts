@@ -555,6 +555,7 @@ export class Mate {
         privateKey,
         owner: app.owner,
         repo: app.repo,
+        extraRepos: app.extraRepos,
         turnTimeoutMs: config.sandbox.turnTimeoutMs,
         clock,
         log,

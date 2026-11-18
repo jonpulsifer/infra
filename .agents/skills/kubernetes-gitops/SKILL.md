@@ -66,6 +66,12 @@ beyond them.
   Query the claim in that namespace before deciding it is gone; a workload
   with the same name in another namespace is not the claim. If no pod mounts
   an uncovered claim, inspect its ownership and data before excluding it.
+- When a Job alert fires, inspect the named Job's final conditions before
+  treating failed pods as a failed run. A successful Job can retain failed
+  retry pods. Check the alert's rule and labels before calling it stale or
+  changing the rule. For `backup-push`, follow
+  `docs/runbooks/operate-postgres.md` to read every attempt and the final Job
+  status.
 - For a failed Velero backup, name its resource explicitly:
   `kubectl --context <site> -n velero get backups.velero.io`.
   An unqualified `get backups` can select CloudNativePG backups instead.

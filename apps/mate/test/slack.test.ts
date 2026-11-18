@@ -34,6 +34,7 @@ import {
 import {
   CLAIM_TIMEOUT_MS,
   type EventPayload,
+  PING_MS,
   REPLAY_WINDOW_MS,
   SocketMode,
 } from '../src/socket.ts';
@@ -1802,7 +1803,7 @@ describe('the socket', () => {
       onEvent: (payload) => events.push(payload),
       onStale: (payload) => stale.push(payload),
     });
-    return { socket, sockets, clock, events, stale };
+    return { socket, sockets, clock, events, stale, dialed: () => next };
   }
 
   /** mate-db's claims, shared by every process a test runs. */
@@ -2043,6 +2044,55 @@ describe('the socket', () => {
       1,
     );
     socket.stop();
+  });
+
+  test('a socket that stops answering pings is dropped and another dialed', async () => {
+    const first = new FakeSocket();
+    const second = new FakeSocket();
+    const { socket, clock, events, dialed } = drive({
+      sockets: [first, second],
+    });
+    void socket.run();
+    await settle();
+    first.answering = false;
+    await clock.advance(PING_MS);
+    expect(first.pings).toBe(1);
+    expect(first.closed).toBe(false);
+    await clock.advance(PING_MS);
+    expect(first.closed).toBe(true);
+    expect(
+      log.of('slack socket stopped answering pings; reconnecting'),
+    ).toHaveLength(1);
+    await clock.advance(1_000);
+    await settle();
+    expect(dialed()).toBe(2);
+    first.deliver(envelope('e1', 'EvLate'));
+    second.deliver(envelope('e2', 'Ev2'));
+    await settle();
+    expect(first.acks).toEqual([]);
+    expect(events).toEqual([expect.objectContaining({ event_id: 'Ev2' })]);
+    socket.stop();
+  });
+
+  test('a socket that answers its pings stays up', async () => {
+    const { socket, sockets, clock, dialed } = drive({});
+    void socket.run();
+    await settle();
+    await clock.advance(PING_MS * 10);
+    const wire = sockets[0] as FakeSocket;
+    expect(wire.pings).toBe(10);
+    expect(wire.closed).toBe(false);
+    expect(dialed()).toBe(1);
+    socket.stop();
+  });
+
+  test('a stopped socket leaves no ping timer behind', async () => {
+    const { socket, clock } = drive({});
+    void socket.run();
+    await settle();
+    socket.stop();
+    await settle();
+    expect(clock.pendingTimers).toBe(0);
   });
 
   test('a reconnect Slack asks for closes the socket and opens another', async () => {

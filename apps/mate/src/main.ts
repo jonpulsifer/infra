@@ -148,7 +148,8 @@ async function openSlack(slack: SlackConfig): Promise<SlackSide> {
         : null;
       socket = new SocketMode({
         open: () => openSocket(slack.appToken),
-        connect: (url) => new WebSocket(url),
+        // The DOM lib types the global without ping; Bun's client has it.
+        connect: (url) => new WebSocket(url) as Bun.WebSocket,
         clock: systemClock,
         log,
         since: Date.now(),
