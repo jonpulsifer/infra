@@ -57,6 +57,8 @@ export interface GithubAppOptions {
   readonly privateKey: string;
   readonly owner: string;
   readonly repo: string;
+  /** The owner's other repositories the token names, with the same permissions. */
+  readonly extraRepos?: readonly string[];
   /** The turn cap the reuse rule is measured against. */
   readonly turnTimeoutMs: number;
   readonly clock: Clock;
@@ -182,7 +184,7 @@ export class GithubApp {
       {
         method: 'POST',
         body: JSON.stringify({
-          repositories: [this.options.repo],
+          repositories: [this.options.repo, ...(this.options.extraRepos ?? [])],
           permissions: TOKEN_PERMISSIONS,
         }),
       },
