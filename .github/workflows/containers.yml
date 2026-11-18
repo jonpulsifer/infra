@@ -108,7 +108,7 @@ jobs:
       # detect-containers.sh compares this workflow's build job on a push to
       # main with yq.
       - if: github.event_name == 'push'
-        uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5
+        uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5
         with:
           install_args: yq
 
@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: jdx/mise-action@236a21c3b91f5db6d4e174b348674a0f0caac06d # v5
+      - uses: jdx/mise-action@90f833d396d0cc3674b631d2d225e306476c303a # v5
         with:
           # cd-digest-step_test.sh reads this workflow with yq, so it is not
           # left to the runner image.
@@ -309,7 +309,7 @@ jobs:
       - name: Mint a continuous-delivery App token
         id: cd-app-token
         if: vars.CD_APP_ID != ''
-        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        uses: actions/create-github-app-token@f418cff399f7aef4c2f0ad47e25ca7a6abbdd6fc # v3.4.0
         with:
           app-id: ${{ vars.CD_APP_ID }}
           private-key: ${{ secrets.CD_APP_PRIVATE_KEY }}
