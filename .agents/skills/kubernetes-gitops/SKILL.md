@@ -62,6 +62,10 @@ beyond them.
 - Postgres is CloudNativePG. Reach a database with
   `kubectl cnpg psql <cluster> -n <namespace> --context <site>`.
   `docs/runbooks/operate-postgres.md` has the rest.
+- `mise run backup:coverage <site>` reports PVCs as `namespace/claim`.
+  Query the claim in that namespace before deciding it is gone; a workload
+  with the same name in another namespace is not the claim. If no pod mounts
+  an uncovered claim, inspect its ownership and data before excluding it.
 - When a Job alert fires, inspect the named Job's final conditions before
   treating failed pods as a failed run. A successful Job can retain failed
   retry pods. Check the alert's rule and labels before calling it stale or
