@@ -89,6 +89,7 @@ test('batched commits receipt only durable batches and stop at a validation refu
   );
   expect(result.stored).toBe(2);
   expect(result.refused).toBeInstanceOf(Error);
+  expect(String(result.refused)).toBe('Error: ID 2 already belongs to entry');
   expect(receipts).toEqual([
     [0, 1],
     [1, 2],

@@ -41,9 +41,7 @@ export interface PreparedCommit {
   readonly nextId: number;
 }
 
-export class CommitRefusedError extends Error {
-  override readonly name = 'CommitRefusedError';
-}
+export class CommitRefusedError extends Error {}
 
 /** Folds the batch's document writes into one action per document. */
 export function prepareCommit(writes: readonly StorageWrite[]): PreparedCommit {
