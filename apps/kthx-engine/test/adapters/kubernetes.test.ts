@@ -974,6 +974,15 @@ describe('an exposed Component is LIVE only once its route is', () => {
     expect(verdict.detail).toContain('kthx-apps/kthx-apps');
   });
 
+  test('an identity that may not list routes is not held on them', async () => {
+    const { adapter } = adapterFor({
+      lists: { httproutes: [httpRoute(undefined)] },
+      forbidden: ['httproutes'],
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    expect(verdict.phase).toBe('LIVE');
+  });
+
   test('a Component with no reach has no route to wait for', async () => {
     const { adapter, cluster } = adapterFor({
       lists: { httproutes: [httpRoute(undefined)] },

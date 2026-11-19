@@ -888,14 +888,23 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const status = statusOf(connection.delivery.flavour, current);
     if (status.phase !== 'LIVE' || !routed(desired)) return status;
 
-    const routes = await api.list(
-      {
-        apiVersion: HTTP_ROUTE.apiVersion,
-        plural: HTTP_ROUTE.plural,
-        namespace: appNamespaceFor(connection, desired.app),
-      },
-      { labelSelector: componentSelector(desired.app, desired.component) },
-    );
+    const routes = await api
+      .list(
+        {
+          apiVersion: HTTP_ROUTE.apiVersion,
+          plural: HTTP_ROUTE.plural,
+          namespace: appNamespaceFor(connection, desired.app),
+        },
+        { labelSelector: componentSelector(desired.app, desired.component) },
+      )
+      .catch((cause: unknown) => {
+        // Permanent, unlike the reads the poll waits out: a Target whose
+        // identity may not list routes is not judged on them.
+        if (cause instanceof KubernetesRequestError && cause.status === 403) {
+          return null;
+        }
+        throw cause;
+      });
     // A cluster serving no HTTPRoute could not have installed one.
     if (routes === null) return status;
     const stall = unroutable(routes);
