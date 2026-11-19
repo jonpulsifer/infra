@@ -156,7 +156,9 @@ describe('the global operation ledgers', () => {
     expect(markup).toContain('Placement ledger');
     expect(markup).toContain('Folly');
     expect(markup).toContain('applying');
-    expect(markup).toContain('Loading Deploy evidence');
+    // Evidence loads when a row opens, which `deploy-ledger-mounted` presses.
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).not.toContain('Loading Deploy evidence');
   });
 
   test('a Source reads as staged bytes, not as the Build that used them', () => {
