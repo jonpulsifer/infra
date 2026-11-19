@@ -3,7 +3,7 @@
  * lock `createDeploy` uses. It refuses a Build that is not older, and locks the
  * App in the same transaction so the next push does not undo it.
  */
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { deploys } from '../../db/schema.ts';
 import { configVersionOf } from '../../domain/config-version.ts';
@@ -71,8 +71,10 @@ export const rollbackDeploy: Command<
 };
 
 /**
- * What the newest Deploy of this Build on this Target delivered, if any. The
- * version is recomputed from the document, not read from `config_version`.
+ * What the newest Deploy of this Build on this Target delivered, if any, a LIVE
+ * one first. A failed or faulty attempt's document is what went wrong, so it is
+ * never restored. The version is recomputed from the document, not read from
+ * `config_version`.
  */
 async function lastDeployOf(
   context: CommandContext,
@@ -89,9 +91,11 @@ async function lastDeployOf(
         eq(deploys.componentId, input.componentId),
         eq(deploys.targetId, input.targetId),
         eq(deploys.buildId, input.buildId),
+        ne(deploys.phase, 'FAILED'),
+        isNull(deploys.faultyAt),
       ),
     )
-    .orderBy(desc(deploys.id))
+    .orderBy(desc(sql`${deploys.phase} = 'LIVE'`), desc(deploys.id))
     .limit(1);
 
   if (previous === undefined) return null;

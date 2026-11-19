@@ -1,7 +1,8 @@
 /**
- * `deployApp`: deploys an App's newest artifact through {@link createDeploy},
- * or starts the Build it needs. A refused deploy is returned unchanged and never
- * falls back to a Build. This command writes no `deploys` row itself.
+ * `deployApp`: deploys a Component's newest artifact, or the Build named,
+ * through {@link createDeploy}, or starts the Build it needs. A refused deploy
+ * is returned unchanged and never falls back to a Build. This command writes no
+ * `deploys` row itself.
  */
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { z } from 'zod';
@@ -43,8 +44,10 @@ export const deployAppInput = z
      * otherwise a Build of this commit starts.
      */
     commit: z.string().trim().min(1).optional(),
-    /** The Component's name or id; absent means the App's oldest Component. */
+    /** The Component's name or id; absent only when the App has one. */
     component: z.string().trim().min(1).optional(),
+    /** A succeeded Build of that Component to deploy instead; never builds. */
+    buildId: z.number().int().positive().optional(),
     /**
      * The Target for a first deploy: its id, or `<vessel>/<adapter>`. One that
      * disagrees with the placement is refused; moves go through `placeComponent`.
@@ -235,8 +238,7 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         : eqOp(appsTable.name, input.name),
     with: {
       components: {
-        // Oldest first, as `getAppWorkspace` reads them, so a deploy naming no
-        // Component acts on the one the screen shows.
+        // Oldest first, as `getAppWorkspace` reads them.
         orderBy: (componentsTable, { asc }) => [asc(componentsTable.createdAt)],
         with: {
           builds: {
@@ -275,6 +277,15 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   }
 
   let component = primaryComponent;
+  if (input.component === undefined && app.components.length > 1) {
+    return failed(
+      'INVALID_INPUT',
+      `App '${app.name}' has ${app.components.length} Components, so this would deploy an arbitrary one — name one: ${app.components
+        .map((candidate) => candidate.name)
+        .join(', ')}`,
+      [{ path: 'component', message: 'names no Component of several' }],
+    );
+  }
   if (input.component !== undefined) {
     const named = app.components.find(
       (candidate) =>
@@ -335,6 +346,27 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
       `Component '${component.name}' has no target placement — name one: ` +
         'a first deploy is what writes it',
     );
+  }
+
+  if (input.buildId !== undefined) {
+    if (input.rebuild || input.commit !== undefined) {
+      return failed(
+        'INVALID_INPUT',
+        'a named Build is deployed as it is, so it cannot also be rebuilt or be of another commit',
+        [{ path: 'buildId', message: 'conflicts with rebuild or commit' }],
+      );
+    }
+    // `createDeploy` refuses a Build of another Component or with no artifact.
+    const named = await createDeploy(
+      { componentId: component.id, targetId, buildId: input.buildId },
+      context,
+    );
+    if (!named.ok) return named;
+    return ok({
+      deployId: named.value.deployId,
+      buildId: input.buildId,
+      phase: 'PENDING' as const,
+    });
   }
 
   const latestBuild = component.builds[0];
@@ -485,8 +517,8 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         status: 'PENDING',
         createdAt: now,
         // The build loop reads this when the Build finishes, after this caller
-        // has returned.
-        deployOnSuccess: input.commit !== undefined,
+        // has returned. A push or a Deploy press ships it; a Rebuild does not.
+        deployOnSuccess: input.commit !== undefined || !input.rebuild,
       })
       .returning();
 
@@ -505,8 +537,9 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
         // A fresh press resets the dispatch backoff.
         dispatchAttempts: 0,
         nextDispatchAt: null,
-        // `deployOnSuccess` stays set, so a Rebuild press never cancels the
-        // deploy a push asked for.
+        // Set by a Deploy press and never cleared, so a Rebuild press never
+        // cancels the deploy a push or a press asked for.
+        ...(input.rebuild ? {} : { deployOnSuccess: true }),
       })
       // Guarded in the WHERE: `dispatchBuild` claims rows concurrently, and
       // zero rows matched is the refusal.

@@ -874,16 +874,20 @@ export function enteredLive(
 }
 
 /**
- * Deploys the Component this attempt is of, on its Target. Without them
- * `deployApp` acts on the App's oldest Component. A Build of an unplaced
+ * Deploys the Component this attempt is of, on its Target: this attempt's
+ * Build for `build`, otherwise the Component's newest. A Build of an unplaced
  * Component has an empty `targetId`.
  */
-export function deployRequestOf(view: DeployView): InputOf<'deployApp'> {
+export function deployRequestOf(
+  view: DeployView,
+  act: 'build' | 'newest' = 'newest',
+): InputOf<'deployApp'> {
   return {
     // The App's id, since two Apps can share a name.
     name: view.appId,
     component: view.componentId,
     ...(view.targetId === '' ? {} : { target: view.targetId }),
+    ...(act === 'build' ? { buildId: view.buildId } : {}),
   };
 }
 
@@ -1187,9 +1191,12 @@ export function BuildScreen({
           : 'Redeploy';
     setBusy(kind);
     try {
-      // `deployApp` places the Component's newest artifact, or starts a Build
-      // when there is none.
-      const result = await command('deployApp', deployRequestOf(state.attempt));
+      // Deploy places this Build. Redeploy places the Component's newest
+      // artifact, or starts a Build when there is none.
+      const result = await command(
+        'deployApp',
+        deployRequestOf(state.attempt, kind === 'deploy' ? 'build' : 'newest'),
+      );
       if (result.ok) {
         onNavigate(
           result.value.deployId === null

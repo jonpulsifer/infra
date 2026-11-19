@@ -3,7 +3,7 @@
  * the pointer back, or asks an in-flight attempt to stop at its next event.
  * LIVE and FAILED refuse: cancelling a live release would be a rollback.
  */
-import { and, desc, eq, gte, isNotNull, isNull, lt, not } from 'drizzle-orm';
+import { and, desc, eq, gte, lt, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import type { DeployPhase } from '../../adapters/deploy/contract.ts';
 import { apps, componentTargetDesired, deploys } from '../../db/schema.ts';
@@ -107,8 +107,9 @@ export const cancelDeploy: Command<
       })
       .where(eq(deploys.id, deploy.id));
 
-    // Back to the newest earlier Deploy not cancelled before a claim; left
-    // here, deployApp would refuse the next redeploy as already desired.
+    // Back to the newest earlier Deploy that has not failed, which is what
+    // serves or is still applying; left here, deployApp would refuse the next
+    // redeploy as already desired.
     if (desired?.desiredDeployId === deploy.id) {
       const [previous] = await tx
         .select({ id: deploys.id, buildId: deploys.buildId })
@@ -118,12 +119,8 @@ export const cancelDeploy: Command<
             eq(deploys.componentId, deploy.componentId),
             eq(deploys.targetId, deploy.targetId),
             lt(deploys.id, deploy.id),
-            not(
-              and(
-                isNotNull(deploys.cancelRequestedAt),
-                isNull(deploys.attemptId),
-              )!,
-            ),
+            // Cancelled before a claim is FAILED too.
+            ne(deploys.phase, 'FAILED'),
           ),
         )
         .orderBy(desc(deploys.id))

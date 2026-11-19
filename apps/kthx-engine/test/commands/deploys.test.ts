@@ -843,6 +843,28 @@ describe('deployApp selects which Component it acts on', () => {
     expect(result.failure.message).toContain('no-such-target');
   });
 
+  test('an absent Component is refused when the App has more than one', async () => {
+    const { app, component, target } = await fixture();
+    await succeededBuild(component.id, 16);
+    await secondComponent(app.id, target.id);
+
+    const result = await deployApp(
+      { name: app.name },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(result.failure.message).toContain('worker');
+    expect(result.failure.issues?.[0]?.path).toBe('component');
+    const written = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.componentId, component.id));
+    expect(written).toEqual([]);
+  });
+
   test('an absent Component still deploys the primary, unchanged', async () => {
     const { app, component, target } = await fixture();
     const build = await succeededBuild(component.id, 13);
@@ -871,6 +893,151 @@ describe('deployApp selects which Component it acts on', () => {
       .from(deploys)
       .where(eq(deploys.id, result.value.deployId!));
     expect(deploy?.componentId).toBe(component.id);
+  });
+});
+
+describe('deployApp deploys the Build it is asked for', () => {
+  /** The fixture's Component placed on its Target. */
+  async function placed() {
+    const parts = await fixture();
+    await database().db.insert(componentTargetDesired).values({
+      componentId: parts.component.id,
+      targetId: parts.target.id,
+      updatedAt: FROZEN,
+    });
+    await database()
+      .db.update(components)
+      .set({ placedTargetId: parts.target.id })
+      .where(eq(components.id, parts.component.id));
+    return parts;
+  }
+
+  async function buildsOf(componentId: string) {
+    return database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.componentId, componentId));
+  }
+
+  test('a named Build is deployed, not the newest', async () => {
+    const { app, component, target } = await placed();
+    const shown = await succeededBuild(component.id, 90);
+    await succeededBuild(component.id, 91);
+
+    const result = await deployApp(
+      { name: app.id, component: component.id, buildId: shown.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { buildId: shown.id, phase: 'PENDING' },
+    });
+    expect((await desiredRow(component.id, target.id))?.desiredBuildId).toBe(
+      shown.id,
+    );
+  });
+
+  test('a named Build of another Component is refused', async () => {
+    const { app, component, target } = await placed();
+    const [other] = await database()
+      .db.insert(components)
+      .values({
+        appId: app.id,
+        name: 'worker',
+        kind: 'job',
+        reach: 'none',
+        auth: 'none',
+        placedTargetId: target.id,
+      })
+      .returning();
+    const theirs = await succeededBuild(other!.id, 92);
+
+    const result = await deployApp(
+      { name: app.id, component: component.id, buildId: theirs.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    expect(await desiredRow(component.id, target.id)).toMatchObject({
+      desiredBuildId: null,
+    });
+  });
+
+  test('a named Build with no artifact is refused, and nothing builds', async () => {
+    const { app, component } = await placed();
+    const failedBuild = await succeededBuild(component.id, 93);
+    await database()
+      .db.update(builds)
+      .set({ status: 'FAILED', artifactDigest: null })
+      .where(eq(builds.id, failedBuild.id));
+
+    // `registryOf` throws if anything looks up a build route.
+    const result = await deployApp(
+      { name: app.id, component: component.id, buildId: failedBuild.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('NOT_DEPLOYABLE');
+    expect((await buildsOf(component.id)).map((one) => one.id)).toEqual([
+      failedBuild.id,
+    ]);
+  });
+
+  test('a Deploy press that must build first deploys what it builds', async () => {
+    const { app, component } = await placed();
+    const failedBuild = await succeededBuild(component.id, 94);
+    await database()
+      .db.update(builds)
+      .set({ status: 'FAILED', artifactDigest: null })
+      .where(eq(builds.id, failedBuild.id));
+
+    const result = await deployApp(
+      { name: app.id, component: component.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result).toMatchObject({ ok: true, value: { phase: 'BUILDING' } });
+    if (!result.ok) return;
+    const [started] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, result.value.buildId));
+    expect(started?.id).not.toBe(failedBuild.id);
+    expect(started?.deployOnSuccess).toBe(true);
+  });
+
+  test('a Deploy press on a queued Rebuild deploys it once it succeeds', async () => {
+    const { app, component } = await placed();
+    const [queued] = await database()
+      .db.insert(builds)
+      .values({
+        componentId: component.id,
+        commit: digest(95),
+        targetShape: 'image',
+        artifactType: 'image',
+        bundleDigest: digest(95),
+        bundleLocation: 'https://depot.lolwtf.ca/bundles/95.zip',
+        status: 'PENDING',
+      })
+      .returning();
+
+    const result = await deployApp(
+      { name: app.id, component: component.id },
+      context(registryOf(capableAdapter())),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { buildId: queued!.id, phase: 'BUILDING' },
+    });
+    const [rearmed] = await database()
+      .db.select()
+      .from(builds)
+      .where(eq(builds.id, queued!.id));
+    expect(rearmed?.deployOnSuccess).toBe(true);
   });
 });
 
