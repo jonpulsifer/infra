@@ -9,6 +9,12 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       namespace: kthx-apps
+    # A built App's routes live in its own `app-<app>` namespace, and a grant
+    # names each one: `from` takes no wildcard or selector. One entry per App
+    # whose Components use `auth: proxy`.
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: app-wishlist
   to:
     # The ExternalAuth filter targets `-authz`. `oauth2-proxy` stays for stored
     # Targets whose `platform.externalAuth` still names the port-80 Service.
