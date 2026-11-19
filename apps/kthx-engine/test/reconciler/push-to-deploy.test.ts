@@ -5,6 +5,7 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deployApp } from '../../src/commands/apps/deploy.ts';
+import { DISPATCH_LEASE_TIMEOUT_MS } from '../../src/commands/builds/dispatch.ts';
 import { listRepositories } from '../../src/commands/repositories/list.ts';
 import type {
   AdapterRegistry,
@@ -412,7 +413,7 @@ describe('a push reaches a running deploy', () => {
     expect(rebuilt?.deployOnSuccess).toBe(false);
   });
 
-  test('the Build that succeeded is the one placed, even when a newer Build is already queued', async () => {
+  test("an older push's Build is not placed over the newer push", async () => {
     stager = new FakeSourceStager();
     const { fake, component } = await pushableApp(true);
 
@@ -441,16 +442,138 @@ describe('a push reaches a running deploy', () => {
     const route = new FakeBuildAdapter();
     expect(await runBuildPass(commandContext(fake, route))).toBe(2);
 
-    const placed = (await deploysFor(component.id)).sort(
-      (left, right) => left.id - right.id,
+    // Each Deploy names the Build that just succeeded, and only while its
+    // commit is still the one the repository adopted.
+    const placed = await deploysFor(component.id);
+    expect(placed.map((one) => one.buildId)).toEqual([queued[1]!.id]);
+    const refusals = await refusalsOn(component.id, queued[0]!.id);
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]).toContain(second);
+  });
+
+  test('a push Build left running by a restart is built again and deployed', async () => {
+    stager = new FakeSourceStager();
+    const { fake, component, build } = await pushableApp(true);
+    pushCommit(fake);
+    await tick(fake);
+
+    // A reconciler that claimed the Build and died: RUNNING, lease expired.
+    const [stranded] = await database()
+      .db.update(builds)
+      .set({
+        status: 'RUNNING',
+        dispatchId: crypto.randomUUID(),
+        leasedAt: new Date(NOW.getTime() - DISPATCH_LEASE_TIMEOUT_MS - 1_000),
+      })
+      .where(eq(builds.deployOnSuccess, true))
+      .returning();
+    expect(stranded?.id).not.toBe(build.id);
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(commandContext(fake, route))).toBe(1);
+
+    expect(route.built).toHaveLength(1);
+    const placed = await deploysFor(component.id);
+    expect(placed.map((one) => one.buildId)).toEqual([stranded!.id]);
+  });
+
+  test('a push Build under a live lease is left to the reconciler holding it', async () => {
+    stager = new FakeSourceStager();
+    const { fake, component } = await pushableApp(true);
+    pushCommit(fake);
+    await tick(fake);
+
+    await database()
+      .db.update(builds)
+      .set({
+        status: 'RUNNING',
+        dispatchId: crypto.randomUUID(),
+        leasedAt: NOW,
+      })
+      .where(eq(builds.deployOnSuccess, true));
+
+    const route = new FakeBuildAdapter();
+    expect(await runBuildPass(commandContext(fake, route))).toBe(0);
+    expect(route.built).toEqual([]);
+    expect(await deploysFor(component.id)).toEqual([]);
+  });
+
+  test('two overlapping passes place a push Build once', async () => {
+    stager = new FakeSourceStager();
+    // Queued first, so a pass reaches it before the push Build.
+    const other = await pushableApp(false);
+    const pressed = await deployApp(
+      { name: other.app.id, rebuild: true },
+      commandContext(other.fake),
     );
-    // `runBuildPass` dispatches oldest first, and each Deploy names the Build
-    // that just succeeded, never the App's newest.
-    expect(placed[0]?.buildId).toBe(queued[0]!.id);
-    expect(placed.map((one) => one.buildId)).toEqual([
-      queued[0]!.id,
-      queued[1]!.id,
-    ]);
+    if (!pressed.ok) throw new Error(pressed.failure.message);
+
+    const { fake, component } = await pushableApp(true);
+    pushCommit(fake);
+    await tick(fake);
+
+    // The first build the route is asked for is held open, so the slow pass
+    // reaches the push Build only after the other pass has placed it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    let started = false;
+    const route = new FakeBuildAdapter();
+    const scripted = route.build.bind(route);
+    route.build = async function* (source, spec, dispatchId) {
+      if (calls++ === 0) {
+        started = true;
+        await held;
+      }
+      return yield* scripted(source, spec, dispatchId);
+    };
+
+    const slow = runBuildPass(commandContext(fake, route));
+    for (let i = 0; i < 200 && !started; i += 1) await buildsFor(component.id);
+    expect(started).toBe(true);
+    expect(await runBuildPass(commandContext(fake, route))).toBe(1);
+    expect(await deploysFor(component.id)).toHaveLength(1);
+
+    release();
+    await slow;
+    expect(await deploysFor(component.id)).toHaveLength(1);
+  });
+
+  test('a Component moved while its push Build ran is not deployed to the Target it left', async () => {
+    stager = new FakeSourceStager();
+    const { fake, component, target } = await pushableApp(true);
+    pushCommit(fake);
+    await tick(fake);
+
+    const db = database().db;
+    const vessel = await insertVessel(db, 'kubernetes', {
+      name: `cluster-${crypto.randomUUID()}`,
+    });
+    const [elsewhere] = await db
+      .insert(targets)
+      .values(targetValues({ vesselId: vessel.id }))
+      .returning();
+
+    const route = new FakeBuildAdapter();
+    const scripted = route.build.bind(route);
+    route.build = async function* (source, spec, dispatchId) {
+      await db
+        .update(components)
+        .set({ placedTargetId: elsewhere!.id })
+        .where(eq(components.id, component.id));
+      return yield* scripted(source, spec, dispatchId);
+    };
+    expect(await runBuildPass(commandContext(fake, route))).toBe(1);
+
+    const placed = await deploysFor(component.id);
+    expect(placed.filter((one) => one.targetId === target.id)).toEqual([]);
+    const built = (await buildsFor(component.id)).find(
+      (one) => one.deployOnSuccess,
+    );
+    const refusals = await refusalsOn(component.id, built!.id);
+    expect(refusals).toHaveLength(1);
   });
 
   test('a refused deploy is recorded on the Build it is about', async () => {

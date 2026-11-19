@@ -145,7 +145,7 @@ async function placedComponentsOf(
  * The repository's governing commit and the App's lock, as they stand now.
  * `undefined` when the App is no longer in that repository.
  */
-async function currentStateOf(
+export async function currentStateOf(
   db: Database,
   repositoryId: string,
   appId: string,

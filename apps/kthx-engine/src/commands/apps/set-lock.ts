@@ -55,8 +55,9 @@ export async function lockApp(
 }
 
 /**
- * Dispatches the push the lock held back to each placed Component whose newest
- * Build is not of the adopted commit, as a push would have.
+ * Dispatches the push the lock held back to each placed Component, as a push
+ * would have, unless its newest Build of the adopted commit was deployed or
+ * failed.
  */
 async function resumeHeldPush(
   appId: string,
@@ -75,6 +76,7 @@ async function resumeHeldPush(
               desc(builds.id),
             ],
             limit: 1,
+            with: { deploys: { columns: { id: true }, limit: 1 } },
           },
         },
       },
@@ -86,8 +88,15 @@ async function resumeHeldPush(
   const attempts: AutoDeployAttempt[] = [];
   for (const { id, name, placedTargetId, builds } of app.components) {
     if (placedTargetId === null) continue;
-    // Already built: after a rollback, redeploying it would undo the rollback.
-    if (builds[0]?.commit.split('#')[0] === adopted) continue;
+    const newest = builds[0];
+    // Deployed: after a rollback, redeploying it would undo the rollback. A
+    // Build that finished under the lock was refused, so it has no Deploy.
+    if (
+      newest?.commit.split('#')[0] === adopted &&
+      (newest.deploys.length > 0 || newest.status === 'FAILED')
+    ) {
+      continue;
+    }
     // Never throws: the App is already unlocked, so a fault on one Component
     // must not leave the rest unresumed.
     attempts.push(

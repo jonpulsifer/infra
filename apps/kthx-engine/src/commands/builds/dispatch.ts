@@ -118,6 +118,8 @@ export interface DispatchBuildResult {
   /** The route that ran. */
   readonly runner: string;
   readonly dispatchId: string;
+  /** False for a verdict another attempt reached, which that attempt acts on. */
+  readonly ran: boolean;
 }
 
 export type BuildDispatchContext = Pick<
@@ -490,6 +492,7 @@ export const dispatchBuild = async (
       artifactDigest: build.artifactDigest,
       runner: build.runner ?? 'supplied',
       dispatchId: build.dispatchId ?? input.dispatchId ?? 'supplied',
+      ran: false,
     });
   }
 
@@ -881,6 +884,7 @@ export const dispatchBuild = async (
         artifactDigest: current.artifactDigest,
         runner: current.runner ?? 'supplied',
         dispatchId: current.dispatchId ?? dispatchId,
+        ran: false,
       });
     }
     if (current?.status === 'FAILED') {
@@ -890,6 +894,7 @@ export const dispatchBuild = async (
         artifactDigest: null,
         runner: current.runner ?? adapter.name,
         dispatchId: current.dispatchId ?? dispatchId,
+        ran: false,
       });
     }
     // Not recorded: another replica won this row and is writing its log now.
@@ -1020,6 +1025,7 @@ export const dispatchBuild = async (
         artifactDigest: null,
         runner: adapter.name,
         dispatchId: activeDispatchId,
+        ran: true,
       });
     }
 
@@ -1057,6 +1063,7 @@ export const dispatchBuild = async (
         artifactDigest: null,
         runner: adapter.name,
         dispatchId: activeDispatchId,
+        ran: true,
       });
     }
 
@@ -1088,6 +1095,7 @@ export const dispatchBuild = async (
       artifactDigest: result.artifact.digest,
       runner: adapter.name,
       dispatchId: activeDispatchId,
+      ran: true,
     });
   } catch (cause) {
     const detail = cause instanceof Error ? cause.message : String(cause);
@@ -1112,6 +1120,7 @@ export const dispatchBuild = async (
       artifactDigest: null,
       runner: adapter.name,
       dispatchId: activeDispatchId,
+      ran: true,
     });
   } finally {
     clearInterval(renewal);
