@@ -31,7 +31,7 @@ shellcheck = "latest"
 shfmt = "latest"
 sops = "latest"
 # The client for the Talos roots; move it with their talos_version.
-talosctl = "1.14.5"
+talosctl = "1.14.6"
 yq = "latest"
 # tally (apps/tally) is the first Python app: uv owns its env, lockfile and Python.
 uv = "latest"
