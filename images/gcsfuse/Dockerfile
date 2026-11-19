@@ -6,8 +6,8 @@
 FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 
 # renovate: datasource=github-releases depName=GoogleCloudPlatform/gcsfuse
-ARG GCSFUSE_VERSION=3.13.0
-ARG GCSFUSE_SHA256=6052b700b0406c7b8579bd7c0d1bbb90d510ca3872167844a6af7294a69c0308
+ARG GCSFUSE_VERSION=3.13.1
+ARG GCSFUSE_SHA256=e0b1b07f8f71fa7955a76eee77ff5d5ea37e9ba3fb77fab7b56aa416eeb3305f
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl fuse3 \
