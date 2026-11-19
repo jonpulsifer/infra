@@ -503,7 +503,6 @@ describe('a restart mid-turn', () => {
         'the kthx call',
       );
       await sigterm(first);
-      held.open();
 
       const empty = new FakeMcp({ tools: [] }).start();
       servers.push(empty);
@@ -531,6 +530,7 @@ describe('a restart mid-turn', () => {
         (await row(key)).sessionId,
       );
       expect(toolText(stored, 'c-kthx')).toContain(INTERRUPTED);
+      held.open();
       // The turn never needed a sandbox.
       expect(r.fake.sandboxes.size).toBe(0);
     },

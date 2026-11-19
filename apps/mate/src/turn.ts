@@ -214,6 +214,7 @@ export class TurnTranslator {
   /** Says why the fallback answers, until it streams text or calls a tool. */
   private routing: string | null = null;
   private readonly routes = new Set<Route>();
+  private fallbackRefused = false;
   /** The text already sent of the assistant message now open. */
   private shown = '';
   /** SIGTERM: the card is left as it was, so nothing more is drawn. */
@@ -240,12 +241,13 @@ export class TurnTranslator {
 
   /** Some request of the turn went to the fallback. */
   get fellBack(): boolean {
-    return this.routes.has('fallback');
+    return this.fallbackRefused;
   }
 
   /** A request of this turn's session was routed; sync and never throws. */
   routed(event: RouteEvent): void {
     this.routes.add(event.route);
+    if (event.route === 'fallback' && event.reason) this.fallbackRefused = true;
     this.routing =
       event.route === 'fallback' && event.reason
         ? `↪️ ${event.model.id} is answering — ${REASONS[event.reason]}`
@@ -295,7 +297,11 @@ export class TurnTranslator {
         this.routing = null;
         this.tool({
           id: event.toolCallId,
-          title: toolTitle(event.toolName, event.args),
+          title:
+            event.args === undefined
+              ? (this.seeded.get(event.toolCallId) ??
+                toolTitle(event.toolName, event.args))
+              : toolTitle(event.toolName, event.args),
           state: 'in_progress',
         });
         return;
@@ -378,6 +384,11 @@ export class TurnTranslator {
    */
   private ended(message: AssistantMessage | null): void {
     if (!message) return;
+    for (const block of message.content) {
+      if (block.type === 'toolCall') {
+        this.seed(block.id, block.name, block.arguments);
+      }
+    }
     this.costUsd += message.usage.cost.total;
     if (message.stopReason !== 'aborted' || this.shown) this.rest(message);
     this.shown = '';

@@ -1315,7 +1315,6 @@ describe('a restart mid-turn', () => {
       }
       await first.brain.abandon();
       expect(await outcome).toBeInstanceOf(TurnAbandoned);
-      held.open();
 
       const next = faux();
       answers(next, 'the answer');
@@ -1326,6 +1325,7 @@ describe('a restart mid-turn', () => {
       const result = await second.brain.resume(reopened, resumed, ASKER);
       expect(result.stopReason).toBe('end_turn');
       expect(resumed.text).toContain('the answer');
+      held.open();
     });
   }
 

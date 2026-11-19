@@ -244,6 +244,30 @@ describe('the translator', () => {
     expect(sink.updates.slice(drawn)).toEqual([]);
   });
 
+  test('a committed tool call supplies the title when a running slot has no arguments', () => {
+    turn.event(
+      ended(
+        assistant('', {
+          content: [
+            {
+              type: 'toolCall',
+              id: 'c1',
+              name: 'bash',
+              arguments: { command: 'cat notes.txt' },
+            },
+          ],
+        }),
+      ),
+    );
+    turn.event(toolStart('c1', 'bash', undefined));
+    turn.event(toolEnd('c1', 'bash'));
+    expect(sink.cards.at(-1)).toEqual({
+      id: 'c1',
+      title: '$ cat notes.txt',
+      state: 'complete',
+    });
+  });
+
   test('a recovered tool end it never saw start opens and closes its card in one step', () => {
     turn.event(toolEnd('c9', 'bash', null));
     turn.event(toolEnd('c10', 'read', false));
@@ -330,6 +354,16 @@ describe('the translator', () => {
     expect(sink.statuses.at(-1)).toBeNull();
     expect(turn.fellBack).toBe(true);
     expect(turn.route).toBe('mixed');
+  });
+
+  test('a resumed fallback model does not claim a ChatGPT refusal', () => {
+    turn.routed({
+      route: 'fallback',
+      reason: null,
+      model: { provider: 'opencode-go', id: 'qwen3.8-max' } as Model<Api>,
+    });
+    expect(turn.route).toBe('fallback');
+    expect(turn.fellBack).toBe(false);
   });
 
   test('sums the cost of every request in the run', () => {
