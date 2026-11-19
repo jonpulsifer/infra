@@ -1,6 +1,7 @@
 /**
- * The migration that moves the vanity label and pinned zone from the App onto
- * its one network-serving Component, against rows seeded before it.
+ * The migration that moves the pinned zone from the App onto each of its
+ * Components, and the vanity label onto its one network-serving Component,
+ * against rows seeded before it.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
@@ -16,6 +17,7 @@ import { join } from 'node:path';
 import { SQL } from 'bun';
 import { databaseUrl } from '../../src/db/client.ts';
 import { applyMigrations } from '../../src/db/migrate.ts';
+import { heldNames } from '../../src/domain/naming.ts';
 
 const MIGRATIONS = join(import.meta.dir, '../../src/db/migrations');
 const COMPONENT_NAMES = '0061_component_names';
@@ -103,7 +105,7 @@ async function namesOf(client: SQL, app: string) {
 }
 
 describe('the component names migration', () => {
-  test('copies the App label and zone onto its one serving Component only', async () => {
+  test('copies the label onto the one serving Component, and the zone onto every Component', async () => {
     const client = await databaseBeforeComponentNames();
     const shop = await insertApp(client, 'shop', 'shop', 'apps.example.test');
     await insertComponent(client, shop, 'web', 'website', true);
@@ -115,26 +117,21 @@ describe('the component names migration', () => {
     await applyMigrations(client);
 
     expect(await namesOf(client, 'shop')).toEqual([
-      { name: 'nightly', vanity_label: null, zone: null },
+      { name: 'nightly', vanity_label: null, zone: 'apps.example.test' },
       { name: 'web', vanity_label: 'shop', zone: 'apps.example.test' },
-      { name: 'worker', vanity_label: null, zone: null },
+      { name: 'worker', vanity_label: null, zone: 'apps.example.test' },
     ]);
     expect(await namesOf(client, 'api')).toEqual([
       { name: 'server', vanity_label: '@', zone: null },
     ]);
   });
 
-  test('copies nothing onto an App with several serving Components, or none', async () => {
+  test('copies no label onto an App with several serving Components, or none', async () => {
     const client = await databaseBeforeComponentNames();
-    const wishlist = await insertApp(
-      client,
-      'wishlist',
-      'wish',
-      'example.test',
-    );
+    const wishlist = await insertApp(client, 'wishlist', 'wish', null);
     await insertComponent(client, wishlist, 'next', 'website', true);
     await insertComponent(client, wishlist, 'offsite', 'service', true);
-    const batch = await insertApp(client, 'batch', 'batch', 'example.test');
+    const batch = await insertApp(client, 'batch', 'batch', null);
     await insertComponent(client, batch, 'worker', 'service', false);
 
     await applyMigrations(client);
@@ -145,6 +142,39 @@ describe('the component names migration', () => {
     ]);
     expect(await namesOf(client, 'batch')).toEqual([
       { name: 'worker', vanity_label: null, zone: null },
+    ]);
+  });
+
+  test("keeps every Component's canonical name in the App's pinned zone", async () => {
+    // The pinned zone is not the default, so a Component that lost the pin
+    // would mint its canonical name in `default.example.test` instead.
+    const zones = [
+      { name: 'default.example.test', reaches: ['private', 'public'] },
+      { name: 'pinned.example.test', reaches: ['private', 'public'] },
+    ] as const;
+    const client = await databaseBeforeComponentNames();
+    const shop = await insertApp(client, 'shop', 'shop', 'pinned.example.test');
+    await insertComponent(client, shop, 'web', 'website', true);
+    await insertComponent(client, shop, 'admin', 'service', true);
+    await insertComponent(client, shop, 'worker', 'service', false);
+
+    await applyMigrations(client);
+
+    const canonical = (await namesOf(client, 'shop')).map(
+      (row) =>
+        heldNames({
+          app: 'shop',
+          component: row.name,
+          reach: 'private',
+          zones,
+          zone: row.zone,
+          vanityLabel: null,
+        })[0],
+    );
+    expect(canonical).toEqual([
+      'shop-admin.pinned.example.test',
+      'shop-web.pinned.example.test',
+      'shop-worker.pinned.example.test',
     ]);
   });
 

@@ -4,16 +4,17 @@
 -- from belong to it. One label on the App cannot name two Components that serve
 -- the network, and one pinned zone cannot fit two Components of different reach.
 --
--- The App's label and zone move to the App's one network-serving Component: a
--- `website`, or a `service` with `expose`. That is the only Component the
--- reconciler published the label for, so the names that Component answers on
--- stay the same.
+-- The App's zone is copied onto every Component of the App. The deploy loop
+-- minted each Component's canonical name in that zone, so every name stays where
+-- it is. A Component whose reach the zone does not serve gets the pin too: the
+-- deploy loop falls through to the first zone serving its reach, as it does
+-- today, and the console warns on its card.
 --
--- An App with several serving Components published no vanity name, so neither
--- the label nor the zone is copied onto any of them: picking one would publish
--- a name nobody chose for it. Their owner sets each Component's name. The
--- zone is also not copied to a Component that does not serve the network,
--- which then takes the first zone that serves its reach.
+-- The App's label is copied onto the App's one network-serving Component: a
+-- `website`, or a `service` with `expose`. That is the only Component the
+-- reconciler published the label for. An App with several serving Components
+-- published no vanity name, so the label is copied onto none of them: picking
+-- one would publish a name nobody chose for it.
 --
 -- No App default is kept. The installation's zone order is the default, and an
 -- App-level pin would bring back the zone that cannot fit every reach.
@@ -22,8 +23,13 @@ ALTER TABLE "components" ADD COLUMN "zone" text;
 ALTER TABLE "components" ADD COLUMN "vanity_label" text;
 --> statement-breakpoint
 UPDATE "components" AS "component"
-SET "zone" = "app"."zone",
-	"vanity_label" = "app"."vanity_domain"
+SET "zone" = "app"."zone"
+FROM "apps" AS "app"
+WHERE "component"."app_id" = "app"."id"
+	AND "app"."zone" IS NOT NULL;
+--> statement-breakpoint
+UPDATE "components" AS "component"
+SET "vanity_label" = "app"."vanity_domain"
 FROM "apps" AS "app"
 WHERE "component"."app_id" = "app"."id"
 	AND ("component"."kind" = 'website' OR "component"."expose" IS TRUE)
