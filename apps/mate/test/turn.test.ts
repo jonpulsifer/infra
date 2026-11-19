@@ -1,7 +1,6 @@
 /** What a turn's events look like on a surface: text, status and cards. */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { AgentEvent } from '@earendil-works/pi-durable';
 import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import {
   CONNECTING,
@@ -12,6 +11,7 @@ import {
   WAITING,
 } from '../src/notices.ts';
 import type { PromptSink, Update } from '../src/sandbox.ts';
+import type { TurnEvent } from '../src/turn.ts';
 import {
   CARD_DELAY_MS,
   SandboxCard,
@@ -37,8 +37,8 @@ class Recorder implements PromptSink {
   }
 }
 
-function event(fields: Record<string, unknown>): AgentEvent {
-  return fields as unknown as AgentEvent;
+function event(fields: Record<string, unknown>): TurnEvent {
+  return fields as unknown as TurnEvent;
 }
 
 const delta = (type: 'text_delta' | 'thinking_delta', text: string) =>
@@ -179,6 +179,27 @@ describe('the translator', () => {
     turn.event(delta('text_delta', 'there'));
     expect(sink.text).toBe('hello there');
     expect(turn.firstTokenMs).toBe(1_200);
+  });
+
+  test('shows thinking from a persisted partial view before text arrives', () => {
+    turn.event(
+      event({
+        type: 'message_start',
+        message: {
+          ...assistant(''),
+          content: [{ type: 'thinking', thinking: 'plan' }],
+        },
+      }),
+    );
+    expect(sink.statuses).toEqual([THINKING]);
+    turn.event(
+      event({
+        type: 'message_update',
+        changes: [{ type: 'message', message: assistant('answer') }],
+      }),
+    );
+    expect(sink.text).toBe('answer');
+    expect(sink.statuses).toEqual([THINKING, null]);
   });
 
   test('shows the model thinking only before it speaks', () => {

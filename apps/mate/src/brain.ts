@@ -7,27 +7,27 @@
  * drained and opened again.
  */
 
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import { BACKGROUND_CONTEXT, withCancel } from '@earendil-works/chord/context';
 import type { Models } from '@earendil-works/pi-ai';
 import {
-  type AgentEvent,
-  type AgentEventStream,
   type Conversation,
   ConversationBusy,
   type ConversationRetryPolicy,
+  type ConversationView,
+  type ConversationWatch,
   createRegistry,
   DEFAULT_RETRY_POLICY,
   defineExtension,
+  type EntryRecord,
   type Extension,
   Harness,
+  type LiveState,
   type Registry,
   type SettledSubmissionRecord,
-  type SnapshotEvent,
   type Storage,
   type SubmissionId,
   section,
-  watchEvents,
 } from '@earendil-works/pi-durable';
 import {
   createBashTool,
@@ -78,7 +78,7 @@ import type { PromptResult, PromptSink } from './sandbox.ts';
 import { type Database, isStoreUnavailable, storeError } from './store.ts';
 import { type ThreadRef, threadKey } from './surface.ts';
 import type { ThreadRow, ThreadRowPatch, ThreadStore } from './thread-store.ts';
-import { TurnTranslator } from './turn.ts';
+import { type TurnEvent, TurnTranslator } from './turn.ts';
 import { WAKE_TOOL, type Wakes, wakeTool } from './wakes.ts';
 
 /** The model waits seconds before its first event on every step. */
@@ -196,7 +196,7 @@ interface ThreadBrain {
   harness: Harness;
   root: Conversation;
   registry: Registry;
-  events: AgentEventStream;
+  events: ConversationWatch;
   /** The run the store held open at attach, and the calls it had made. */
   open: OpenRun | null;
   interrupted: InterruptedRun | null;
@@ -259,11 +259,15 @@ function withSession(models: Models, sessionId: string): Models {
   });
 }
 
-/** The run a snapshot shows open, with the calls of its newest assistant message. */
-function openRun(snapshot: SnapshotEvent): OpenRun | null {
-  const submission = snapshot.run?.inputs[0];
+/** The run a conversation view shows open, with the calls of its newest assistant message. */
+function live(view: ConversationView): LiveState {
+  return (view.docs['pi.live'] ?? {}) as LiveState;
+}
+
+function openRun(view: ConversationView): OpenRun | null {
+  const submission = live(view).run?.inputs[0];
   if (submission === undefined) return null;
-  for (const entry of [...snapshot.entries].reverse()) {
+  for (const entry of [...view.entries].reverse()) {
     const message = entry.model?.[0];
     if (message?.role !== 'assistant') continue;
     return {
@@ -279,12 +283,148 @@ function openRun(snapshot: SnapshotEvent): OpenRun | null {
 }
 
 /** When the newest user message was placed, as far as the transcript says. */
-function lastAsked(snapshot: SnapshotEvent): number | null {
-  for (const entry of [...snapshot.entries].reverse()) {
+function lastAsked(view: ConversationView): number | null {
+  for (const entry of [...view.entries].reverse()) {
     const message = entry.model?.[0];
     if (message?.role === 'user') return message.timestamp;
   }
   return null;
+}
+
+function toolResult(
+  view: ConversationView,
+  callId: string,
+): EntryRecord | undefined {
+  return [...view.entries]
+    .reverse()
+    .find((entry) =>
+      entry.model?.some(
+        (message) =>
+          message.role === 'toolResult' && message.toolCallId === callId,
+      ),
+    );
+}
+
+/** Folded view changes can skip intermediate progress, but never a committed answer. */
+export function turnEvents(
+  before: ConversationView,
+  after: ConversationView,
+): TurnEvent[] {
+  const result: TurnEvent[] = [];
+  const old = live(before);
+  const now = live(after);
+  const lastId = before.entries.at(-1)?.id ?? 0;
+  for (const entry of after.entries) {
+    if (entry.id <= lastId) continue;
+    const message = entry.model?.[0];
+    if (message?.role === 'assistant')
+      result.push({ type: 'message_end', entry });
+  }
+  const earlier = old.generation?.message;
+  const partial = now.generation?.message;
+  if (
+    partial &&
+    (!earlier ||
+      old.run?.taskId !== now.run?.taskId ||
+      earlier.timestamp !== partial.timestamp)
+  ) {
+    result.push({ type: 'message_start', message: partial });
+  } else if (partial && earlier && partial !== earlier) {
+    result.push({
+      type: 'message_update',
+      changes: [{ type: 'message', message: partial }],
+    });
+  }
+  if (
+    now.generation?.retry &&
+    now.generation.retry.at !== old.generation?.retry?.at
+  ) {
+    result.push({ type: 'auto_retry_start', attempt: now.generation.attempt });
+  }
+  const oldSlots = [...(old.tools ?? []), ...(old.nestedTools ?? [])];
+  const newSlots = [...(now.tools ?? []), ...(now.nestedTools ?? [])];
+  const prior = new Map(oldSlots.map((slot) => [slot.callId, slot]));
+  for (const slot of newSlots) {
+    const previous = prior.get(slot.callId);
+    if (!previous && slot.status !== 'pending') {
+      const call = [...after.entries]
+        .reverse()
+        .flatMap(
+          (entry) =>
+            entry.model?.flatMap((message) =>
+              message.role === 'assistant'
+                ? message.content.filter((block) => block.type === 'toolCall')
+                : [],
+            ) ?? [],
+        )
+        .find((block) => block.id === slot.callId);
+      result.push({
+        type: 'tool_execution_start',
+        toolCallId: slot.callId,
+        toolName: slot.name,
+        args: 'arguments' in slot ? slot.arguments : call?.arguments,
+      });
+    }
+    if (slot.status === 'done' && previous?.status !== 'done') {
+      result.push({
+        type: 'tool_execution_end',
+        toolCallId: slot.callId,
+        toolName: slot.name,
+        entry: toolResult(after, slot.callId),
+        result: 'summary' in slot ? slot.summary : undefined,
+      });
+    }
+    prior.delete(slot.callId);
+  }
+  for (const slot of prior.values()) {
+    if (slot.status === 'done') continue;
+    result.push({
+      type: 'tool_execution_end',
+      toolCallId: slot.callId,
+      toolName: slot.name,
+      entry: toolResult(after, slot.callId),
+      result: 'summary' in slot ? slot.summary : undefined,
+    });
+  }
+  // A fast tool may start and finish between two folded watch deliveries.
+  for (const entry of after.entries) {
+    if (entry.id <= lastId) continue;
+    const message = entry.model?.[0];
+    if (message?.role !== 'toolResult') continue;
+    const callId = message.toolCallId;
+    if (
+      prior.has(callId) ||
+      oldSlots.some((slot) => slot.callId === callId) ||
+      newSlots.some((slot) => slot.callId === callId)
+    )
+      continue;
+    const call = [...after.entries]
+      .reverse()
+      .flatMap(
+        (item) =>
+          item.model?.flatMap((part) =>
+            part.role === 'assistant'
+              ? part.content.filter((block) => block.type === 'toolCall')
+              : [],
+          ) ?? [],
+      )
+      .find((block) => block.id === callId);
+    if (!call) continue;
+    result.push({
+      type: 'tool_execution_start',
+      toolCallId: callId,
+      toolName: call.name,
+      args: call.arguments,
+    });
+    result.push({
+      type: 'tool_execution_end',
+      toolCallId: callId,
+      toolName: call.name,
+      entry,
+    });
+  }
+  if (old.run && !now.run) result.push({ type: 'run_end' });
+  return result;
 }
 
 export function resetNote(reason: SandboxGoneReason): string {
@@ -1064,8 +1204,8 @@ export class PiBrain implements Brain {
       const root = await opened.root(CTX, {
         agent: { model, thinkingLevel: profile.thinking },
       });
-      const events = await watchEvents(opened, root.id, CTX);
-      const { agent } = events.snapshot;
+      const events = await root.watch(CTX);
+      const agent = await root.agent(CTX);
       if (
         agent.model?.provider !== model.provider ||
         agent.model.modelId !== model.modelId ||
@@ -1073,7 +1213,7 @@ export class PiBrain implements Brain {
       ) {
         await root.configure({ model, thinkingLevel: profile.thinking }, CTX);
       }
-      const open = openRun(events.snapshot);
+      const open = openRun(events.value);
       const fresh = {
         row,
         profile,
@@ -1085,10 +1225,10 @@ export class PiBrain implements Brain {
         interrupted: open
           ? {
               operationId: String(open.submission),
-              startedAt: lastAsked(events.snapshot) ?? this.clock.now(),
+              startedAt: lastAsked(events.value) ?? this.clock.now(),
             }
           : null,
-        resumed: events.snapshot.entries.length > 0,
+        resumed: events.value.entries.length > 0,
         broken: false,
         closing: null,
         closed: false,
@@ -1157,28 +1297,32 @@ export class PiBrain implements Brain {
     return [...byName.values()];
   }
 
-  /** Routes the harness's event batches to the running turn. */
+  /** Routes each committed conversation view to the running turn. */
   private subscribe(
     key: string,
     harness: Harness,
-    events: AgentEventStream,
+    events: ConversationWatch,
   ): void {
-    const route = (event: AgentEvent) => {
+    let previous = events.value;
+    events.start(async (call) => {
+      if (call.kind !== 'value') return;
+      const current = call.value;
+      const changes = turnEvents(previous, current);
+      previous = current;
       const tb = this.threads.get(key);
       const turn = tb?.harness === harness ? tb.turn : null;
       if (!turn?.live) return;
-      try {
-        turn.translator.event(event);
-      } catch (error) {
-        this.deps.log.warn('an event could not be drawn', {
-          key,
-          type: event.type,
-          error: plain(error),
-        });
+      for (const event of changes) {
+        try {
+          turn.translator.event(event);
+        } catch (error) {
+          this.deps.log.warn('a view change could not be drawn', {
+            key,
+            type: event.type,
+            error: plain(error),
+          });
+        }
       }
-    };
-    events.start(async (batch) => {
-      for (const event of batch) route(event);
     });
   }
 

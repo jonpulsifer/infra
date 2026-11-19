@@ -4,12 +4,13 @@
  * thread, so a new wake replaces the pending one. A pull request is polled
  * here, with no model turn, until it settles or the deadline passes.
  */
-import { Type } from '@earendil-works/pi-ai';
+
 import type {
   ToolExecutionResult,
   ToolRegistration,
 } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
+import { Type } from 'typebox';
 import { type Clock, systemClock } from './clock.ts';
 import { type Log, plain } from './log.ts';
 import { type ThreadRef, threadKey } from './surface.ts';

@@ -1,11 +1,12 @@
 /**
- * pi-durable's Storage for one session on Postgres. Each commit is one
+ * pi-durable's Storage for one session on Postgres. Each batch is one
  * transaction that holds the session's advisory lock and its row, so one
- * writer at a time assigns seqs, whichever process it runs in. Commits from
+ * writer at a time assigns seqs, whichever process it runs in. Batches from
  * one instance run in the order they were admitted.
  */
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import type {
+  CommitResult,
   ConversationId,
   ConversationQuery,
   ConversationRecord,
@@ -32,7 +33,7 @@ import type {
   TaskRecord,
 } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
-import { applyCommit, prepareCommit } from './commit.ts';
+import { applyCommit, CommitRefusedError, prepareCommit } from './commit.ts';
 import * as reads from './reads.ts';
 import { retrying } from './retry.ts';
 import { int } from './rows.ts';
@@ -105,12 +106,37 @@ class PostgresStorage implements Storage {
     this.nextSeq = nextSeq;
   }
 
-  commit(writes: readonly StorageWrite[], _context: Context): Promise<Seq> {
-    if (!this.open) {
-      return Promise.reject(this.closedError());
-    }
+  commit(
+    batches: readonly (readonly StorageWrite[])[],
+    receive: (index: number, seq: Seq) => void,
+    _context: Context,
+  ): Promise<CommitResult> {
+    if (!this.open) return Promise.reject(this.closedError());
     return this.admit(() => {
-      const result = this.tail.then(() => this.commitWithRetry(writes));
+      const result = this.tail.then(async (): Promise<CommitResult> => {
+        const receipts: Seq[] = [];
+        const deliver = () => {
+          for (const [index, seq] of receipts.entries()) receive(index, seq);
+        };
+        let failed = false;
+        let failure: unknown;
+        try {
+          for (const writes of batches) {
+            receipts.push(await this.commitWithRetry(writes));
+          }
+        } catch (error) {
+          failed = true;
+          failure = error;
+        }
+        deliver();
+        if (failed) {
+          if (failure instanceof CommitRefusedError) {
+            return { stored: receipts.length, refused: failure };
+          }
+          throw failure;
+        }
+        return { stored: receipts.length };
+      });
       this.tail = result.catch(() => {});
       return result;
     });
@@ -169,7 +195,7 @@ class PostgresStorage implements Storage {
         sql,
         this.sessionId,
         scoped ? (first as ConversationId) : undefined,
-        scoped ? second : (first as EntryId),
+        scoped ? (second as EntryId) : (first as EntryId),
       ),
     );
   }

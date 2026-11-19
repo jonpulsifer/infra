@@ -4,6 +4,7 @@
  * travel as one JSON document per statement: Bun's array parameters cannot
  * carry SQL nulls, and one parameter never meets Postgres's limit.
  */
+
 import type {
   DocumentContent,
   DocumentCopySource,
@@ -12,6 +13,7 @@ import type {
   DocumentRecord,
   StorageWrite,
 } from '@earendil-works/pi-durable';
+import { StorageRequestError } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
 import {
   addressColumns,
@@ -39,6 +41,10 @@ export interface PreparedCommit {
   readonly nextId: number;
 }
 
+export class CommitRefusedError extends Error {
+  override readonly name = 'CommitRefusedError';
+}
+
 /** Folds the batch's document writes into one action per document. */
 export function prepareCommit(writes: readonly StorageWrite[]): PreparedCommit {
   const tables: TableWrite[] = [];
@@ -58,7 +64,9 @@ export function prepareCommit(writes: readonly StorageWrite[]): PreparedCommit {
       found.copy !== undefined ||
       (creates && found.create !== undefined)
     ) {
-      throw new Error(`Document ${id} has more than one content command`);
+      throw new CommitRefusedError(
+        `Document ${id} has more than one content command`,
+      );
     }
   };
   for (const write of writes) {
@@ -95,7 +103,9 @@ export function prepareCommit(writes: readonly StorageWrite[]): PreparedCommit {
       case 'document.retire': {
         const found = action(write.id);
         if (found.retire) {
-          throw new Error(`Document ${write.id} is retired more than once`);
+          throw new CommitRefusedError(
+            `Document ${write.id} is retired more than once`,
+          );
         }
         found.retire = true;
         break;
@@ -147,12 +157,13 @@ async function checkRecordIds(
     const earlier = claimed.get(id);
     const shared = type === 'task' || type === 'submission';
     if (before !== undefined && (!shared || before !== type)) {
-      throw new Error(`ID ${id} already belongs to ${before}`);
+      throw new CommitRefusedError(`ID ${id} already belongs to ${before}`);
     }
     if (earlier !== undefined) {
-      if (!shared) throw new Error(`ID ${id} is written more than once`);
+      if (!shared)
+        throw new CommitRefusedError(`ID ${id} is written more than once`);
       if (earlier !== type) {
-        throw new Error(`ID ${id} is written as two record types`);
+        throw new CommitRefusedError(`ID ${id} is written as two record types`);
       }
     }
     claimed.set(id, type);
@@ -206,25 +217,27 @@ async function checkDocuments(
   const live = new Map<string, number>();
   for (const [id, action] of actions) {
     if (action.copy !== undefined && actions.has(action.copy.id)) {
-      throw new Error(
+      throw new CommitRefusedError(
         `Document copy ${id} source is changed in the copy batch`,
       );
     }
     const found = records.get(id);
     if (action.create === undefined && found === undefined) {
-      throw new Error(`Unknown document: ${id}`);
+      throw new CommitRefusedError(`Unknown document: ${id}`);
     }
     if (action.create !== undefined && found !== undefined) {
-      throw new Error(`Document ${id} already exists`);
+      throw new CommitRefusedError(`Document ${id} already exists`);
     }
     if (found?.retiredAt !== undefined)
-      throw new Error(`Document ${id} is retired`);
+      throw new CommitRefusedError(`Document ${id} is retired`);
     if (action.content?.kind === 'delta') {
       const previous = versions.get(id);
       if (previous === undefined)
-        throw new Error(`Document ${id} delta has no base`);
+        throw new CommitRefusedError(`Document ${id} delta has no base`);
       if (previous !== action.content.version) {
-        throw new Error(`Document ${id} version transition requires a base`);
+        throw new CommitRefusedError(
+          `Document ${id} version transition requires a base`,
+        );
       }
     }
     if (action.create === undefined && !action.retire) continue;
@@ -241,7 +254,9 @@ async function checkDocuments(
   }
   for (const count of live.values()) {
     if (count > 1) {
-      throw new Error('Document address already has a current incarnation');
+      throw new CommitRefusedError(
+        'Document address already has a current incarnation',
+      );
     }
   }
   return records;
@@ -447,7 +462,9 @@ async function copiedContent(
       source.at,
     );
     if (stored === undefined) {
-      throw new Error(`Fork source document ${source.id} cannot be read`);
+      throw new CommitRefusedError(
+        `Fork source document ${source.id} cannot be read`,
+      );
     }
     const create = action.create!;
     if (
@@ -458,14 +475,20 @@ async function copiedContent(
       stored.record.history !== create.history ||
       stored.record.fork !== create.fork
     ) {
-      throw new Error(
+      throw new CommitRefusedError(
         `Fork source document ${source.id} does not match the copied record`,
       );
     }
     return { kind: 'base', version: stored.version, value: stored.value };
   } catch (error) {
-    throw new Error(`Document copy ${id} was rejected`, {
-      cause: error,
-    });
+    if (
+      error instanceof CommitRefusedError ||
+      error instanceof StorageRequestError
+    ) {
+      throw new CommitRefusedError(`Document copy ${id} was rejected`, {
+        cause: error,
+      });
+    }
+    throw error;
   }
 }

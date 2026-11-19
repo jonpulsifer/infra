@@ -6,6 +6,7 @@ import { isTransient, RETRY_WINDOW_MS } from '../src/retry.ts';
 import { postgresStorage } from '../src/storage.ts';
 import { BEGIN, COMMIT, FaultProxy } from './proxy.ts';
 import {
+  commitOne,
   createRoot,
   ctx,
   entryIds,
@@ -36,7 +37,7 @@ async function proxiedStorage(label: string): Promise<{
 }> {
   const id = sessionId(label);
   const storage = await openStorage(proxied, id);
-  await storage.commit([createRoot, note(2)], ctx);
+  await commitOne(storage, [createRoot, note(2)]);
   return { id, storage };
 }
 
@@ -48,19 +49,19 @@ describe('a commit whose connection fails', () => {
     const { storage } = await proxiedStorage('before-writes');
     const cut = proxy.arm({ match: 'INSERT INTO pi_entries', when: 'before' });
 
-    const seq = await storage.commit([note(3)], ctx);
+    const seq = await commitOne(storage, [note(3)]);
     await cut;
 
     expect<number>(seq).toBe(2);
     expect(await entryIds(storage)).toEqual([2, 3]);
-    expect<number>(await storage.commit([note(4)], ctx)).toBe(3);
+    expect<number>(await commitOne(storage, [note(4)])).toBe(3);
   });
 
   test('is retried when COMMIT never reached the server', async () => {
     const { storage } = await proxiedStorage('before-commit');
     const cut = proxy.arm({ match: COMMIT, when: 'before' });
 
-    const seq = await storage.commit([note(3)], ctx);
+    const seq = await commitOne(storage, [note(3)]);
     await cut;
 
     expect<number>(seq).toBe(2);
@@ -71,7 +72,7 @@ describe('a commit whose connection fails', () => {
     const { storage } = await proxiedStorage('after-commit');
     const cut = proxy.arm({ match: COMMIT, when: 'after' });
 
-    const failed = storage.commit([note(3)], ctx);
+    const failed = commitOne(storage, [note(3)]);
     await cut;
 
     const error = await failure(failed);
@@ -86,13 +87,13 @@ describe('a commit whose connection fails', () => {
       .arm({ match: COMMIT, when: 'after' })
       .then(() => proxy.arm({ match: 'FOR UPDATE', when: 'before' }));
 
-    const failed = storage.commit([note(3)], ctx);
+    const failed = commitOne(storage, [note(3)]);
     await cuts;
 
     expect(await failure(failed)).toBeInstanceOf(CommitOutcomeUnknownError);
     const reopened = await openStorage(database().sql, id);
     expect(await entryIds(reopened)).toEqual([2, 3]);
-    expect<number>(await reopened.commit([note(4)], ctx)).toBe(3);
+    expect<number>(await commitOne(reopened, [note(4)])).toBe(3);
   });
 
   test('leaves the outcome unknown when the retries run out after COMMIT was sent', async () => {
@@ -101,7 +102,7 @@ describe('a commit whose connection fails', () => {
       .arm({ match: COMMIT, when: 'after' })
       .then(() => proxy.stop());
 
-    const failed = storage.commit([note(3)], ctx);
+    const failed = commitOne(storage, [note(3)]);
     await down;
 
     const error = await failure(failed);
@@ -119,7 +120,7 @@ describe('a commit whose connection fails', () => {
       .arm({ match: 'INSERT INTO pi_entries', when: 'before' })
       .then(() => proxy.stop());
 
-    const failed = storage.commit([note(3)], ctx);
+    const failed = commitOne(storage, [note(3)]);
     await down;
 
     const error = await failure(failed);
@@ -137,7 +138,7 @@ describe('a commit whose connection fails', () => {
       )
       .then(() => proxy.stop());
 
-    const failed = storage.commit([note(3)], ctx);
+    const failed = commitOne(storage, [note(3)]);
     await down;
 
     const error = await failure(failed);
@@ -150,7 +151,7 @@ describe('a commit whose connection fails', () => {
     const { storage } = await proxiedStorage('invalid');
     const before = proxy.sent.length;
 
-    const error = await failure(storage.commit([note(2)], ctx));
+    const error = await failure(commitOne(storage, [note(2)]));
 
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(CommitOutcomeUnknownError);
@@ -175,10 +176,10 @@ test('a read is retried when its connection drops', async () => {
 test('a commit refuses a session another writer moved', async () => {
   const id = sessionId('overtaken');
   const first = await openStorage(database().sql, id);
-  await first.commit([createRoot, note(2)], ctx);
-  await (await openStorage(database().sql, id)).commit([note(3)], ctx);
+  await commitOne(first, [createRoot, note(2)]);
+  await commitOne(await openStorage(database().sql, id), [note(3)]);
 
-  const error = await failure(first.commit([note(4)], ctx));
+  const error = await failure(commitOne(first, [note(4)]));
 
   expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
   expect(error).toMatchObject({ firstSeq: 2, foundSeq: 3 });
@@ -189,9 +190,9 @@ test('a first commit refuses a session another writer moved after it opened', as
   const id = sessionId('overtaken-first');
   const first = await openStorage(database().sql, id);
   const other = await openStorage(database().sql, id);
-  await other.commit([createRoot, note(2)], ctx);
+  await commitOne(other, [createRoot, note(2)]);
 
-  const error = await failure(first.commit([createRoot], ctx));
+  const error = await failure(commitOne(first, [createRoot]));
 
   expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
   expect(error).toMatchObject({ firstSeq: 1, foundSeq: 2 });
@@ -202,11 +203,11 @@ test('a commit refuses a session whose seq went backwards', async () => {
   const { sql } = database();
   const id = sessionId('lost-commit');
   const storage = await openStorage(sql, id);
-  await storage.commit([createRoot, note(2)], ctx);
-  await storage.commit([note(3)], ctx);
+  await commitOne(storage, [createRoot, note(2)]);
+  await commitOne(storage, [note(3)]);
   await sql`UPDATE pi_sessions SET next_seq = 2 WHERE id = ${id}`;
 
-  const error = await failure(storage.commit([note(4)], ctx));
+  const error = await failure(commitOne(storage, [note(4)]));
 
   expect(error).toBeInstanceOf(CommitOutcomeUnknownError);
   expect(error).toMatchObject({ firstSeq: 3, foundSeq: 2 });
@@ -259,7 +260,7 @@ describe('a server that is down', () => {
     );
     try {
       const failed = await failure(
-        postgresStorage(sql, sessionId('silent')).commit([createRoot], ctx),
+        commitOne(postgresStorage(sql, sessionId('silent')), [createRoot]),
       );
 
       expect(failed).toMatchObject({

@@ -68,7 +68,9 @@ describe('createModelSetup', () => {
     expect(made.model.provider).toBe('opencode-go');
     expect(made.model.id).toBe('qwen3.8-max');
     expect(made.model.api).toBe('anthropic-messages');
-    expect(made.model.baseUrl).toBe('https://opencode.ai/inference/go');
+    expect(made.model.baseUrl).toBe(
+      'https://opencode.ai/inference/go/anthropic',
+    );
     expect(made.thinking).toBe('medium');
     // `none` is the rollback: nothing routes, and a request drops another
     // model's reasoning, as the fallback's does.

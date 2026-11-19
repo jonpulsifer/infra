@@ -45,7 +45,7 @@ async function run(
   storage: Awaited<ReturnType<typeof openStorage>>,
 ) {
   const commit = (index: number) =>
-    storage.commit([write(index)], BACKGROUND_CONTEXT);
+    storage.commit([[write(index)]], () => {}, BACKGROUND_CONTEXT);
   for (let index = 0; index < WARMUP; index++) await commit(index);
   const latencies: number[] = [];
   const started = performance.now();
@@ -80,17 +80,20 @@ try {
   const storage = await openStorage(sql, 'bench');
   await storage.commit(
     [
-      { type: 'conversation', value: { id: ROOT_CONVERSATION_ID } },
-      {
-        type: 'document.create',
-        record: {
-          id: DOCUMENT,
-          kind: 'bench.live',
-          scope: { kind: 'session' },
+      [
+        { type: 'conversation', value: { id: ROOT_CONVERSATION_ID } },
+        {
+          type: 'document.create',
+          record: {
+            id: DOCUMENT,
+            kind: 'bench.live',
+            scope: { kind: 'session' },
+          },
+          content: { kind: 'base', version: 1, value: { text: '' } },
         },
-        content: { kind: 'base', version: 1, value: { text: '' } },
-      },
+      ],
     ],
+    () => {},
     BACKGROUND_CONTEXT,
   );
   console.table({
