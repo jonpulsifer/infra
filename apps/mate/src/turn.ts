@@ -268,7 +268,12 @@ export class TurnTranslator {
    * it again, and its end carries no arguments. Nothing is drawn until then.
    */
   seed(id: string, name: string, args: unknown): void {
-    this.seeded.set(id, toolTitle(name, args));
+    const title = toolTitle(name, args);
+    this.seeded.set(id, title);
+    const running = this.tools.get(id);
+    if (running && running.title === toolTitle(name, undefined)) {
+      this.tool({ ...running, title });
+    }
   }
 
   /** Sync and never throws: pi awaits its listeners. */
@@ -278,6 +283,7 @@ export class TurnTranslator {
         const message = assistant(event.message);
         if (!message) return;
         this.shown = '';
+        this.rememberCalls(message);
         if (message.content.some((block) => block.type === 'thinking')) {
           this.thinking = true;
           this.retrying = null;
@@ -365,6 +371,7 @@ export class TurnTranslator {
         this.refresh();
         return;
       case 'message':
+        this.rememberCalls(change.message);
         if (change.message.content.some((block) => block.type === 'thinking')) {
           this.thinking = true;
           this.retrying = null;
@@ -384,14 +391,18 @@ export class TurnTranslator {
    */
   private ended(message: AssistantMessage | null): void {
     if (!message) return;
+    this.rememberCalls(message);
+    this.costUsd += message.usage.cost.total;
+    if (message.stopReason !== 'aborted' || this.shown) this.rest(message);
+    this.shown = '';
+  }
+
+  private rememberCalls(message: AssistantMessage): void {
     for (const block of message.content) {
       if (block.type === 'toolCall') {
         this.seed(block.id, block.name, block.arguments);
       }
     }
-    this.costUsd += message.usage.cost.total;
-    if (message.stopReason !== 'aborted' || this.shown) this.rest(message);
-    this.shown = '';
   }
 
   /** Sends what `message` says beyond the text already sent. */

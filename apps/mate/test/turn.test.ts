@@ -268,6 +268,36 @@ describe('the translator', () => {
     });
   });
 
+  test('a late partial tool call fills in an already running card', () => {
+    turn.event(toolStart('c1', 'bash', undefined));
+    expect(sink.cards.at(-1)?.title).toBe('$ …');
+    turn.event(
+      event({
+        type: 'message_update',
+        changes: [
+          {
+            type: 'message',
+            message: assistant('', {
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'c1',
+                  name: 'bash',
+                  arguments: { command: 'sleep 300' },
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+    );
+    expect(sink.cards.at(-1)).toEqual({
+      id: 'c1',
+      title: '$ sleep 300',
+      state: 'in_progress',
+    });
+  });
+
   test('a recovered tool end it never saw start opens and closes its card in one step', () => {
     turn.event(toolEnd('c9', 'bash', null));
     turn.event(toolEnd('c10', 'read', false));
