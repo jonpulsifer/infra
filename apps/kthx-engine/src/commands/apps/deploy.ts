@@ -404,8 +404,8 @@ export const deployApp: Command<DeployAppInput, DeployAppResult> = async (
   const leaseCutoff = new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS);
   let buildToRun = latestBuild;
 
-  // `RUNNING` past its lease is a dead runner. `runBuildPass` picks only
-  // `PENDING` rows, so the reset below is what requeues it.
+  // `RUNNING` past its lease is a dead runner, which `runBuildPass` reclaims
+  // and the reset below requeues at once.
   const inFlight =
     buildToRun !== undefined &&
     (buildToRun.status === 'PENDING' ||

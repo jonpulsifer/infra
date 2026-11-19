@@ -781,6 +781,51 @@ describe('unlocking resumes the push the lock held back', () => {
     expect(await deploysOf(component.id)).toHaveLength(1);
   });
 
+  test('a push Build that finished while locked is deployed on unlock', async () => {
+    const { app, repository, component, ctx } = await servingPushApp(
+      'ab01111',
+      77,
+    );
+    await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
+    await pushLands(repository.id, 'ab02222');
+    // Built while locked, so the build loop's deploy of it was refused.
+    const held = await succeededBuild(component.id, 78, 'ab02222#1');
+
+    const unlocked = await setAppLock({ appId: app.id, reason: null }, ctx);
+    expect(unlocked.ok).toBe(true);
+    if (!unlocked.ok) return;
+    expect(unlocked.value.resumed).toMatchObject([
+      {
+        componentId: component.id,
+        commit: 'ab02222',
+        result: { ok: true, value: { buildId: held.id, phase: 'PENDING' } },
+      },
+    ]);
+    expect(await desiredBuildOf(component.id)).toBe(held.id);
+  });
+
+  test('a push Build of the adopted commit that failed is not built again', async () => {
+    const { app, repository, component, ctx } = await servingPushApp(
+      'ac01111',
+      79,
+    );
+    await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
+    await pushLands(repository.id, 'ac02222');
+    const failedBuild = await succeededBuild(component.id, 80, 'ac02222#1');
+    await ctx.db
+      .update(builds)
+      .set({ status: 'FAILED', artifactDigest: null })
+      .where(eq(builds.id, failedBuild.id));
+
+    const stager = new FakeSourceStager();
+    const unlocked = await setAppLock(
+      { appId: app.id, reason: null },
+      { ...ctx, adapters: { ...ctx.adapters, source: () => stager } },
+    );
+    expect(unlocked.ok && unlocked.value.resumed).toEqual([]);
+    expect(stager.staged).toEqual([]);
+  });
+
   test('a manual App resumes nothing', async () => {
     const { app, repository, ctx } = await fixture({ adopted: 'eee5555' });
     await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);

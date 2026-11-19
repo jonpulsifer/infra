@@ -1,17 +1,18 @@
 /**
- * Dispatches PENDING Builds and runs each runner stream to completion, so no
- * HTTP request stays open for a build.
+ * Dispatches PENDING Builds, and RUNNING ones whose lease expired, and runs
+ * each runner stream to completion, so no HTTP request stays open for a build.
  */
-import { and, asc, eq, isNull, lte, or } from 'drizzle-orm';
+import { and, asc, eq, isNotNull, isNull, lt, lte, or } from 'drizzle-orm';
 import {
   type BuildDispatchContext,
+  DISPATCH_LEASE_TIMEOUT_MS,
   dispatchBuild,
   recordDispatchClose,
   recordDispatchWait,
 } from '../commands/builds/dispatch.ts';
 import { buildRouteFor } from '../commands/builds/route.ts';
 import { createDeploy } from '../commands/deploys/create.ts';
-import { builds, components, targets, vessels } from '../db/schema.ts';
+import { apps, builds, components, targets, vessels } from '../db/schema.ts';
 import { recordBuildEvent } from '../domain/attempt-log.ts';
 import { artifactTypeFor, takesShape } from '../domain/placement.ts';
 import { targetLabel } from '../domain/target.ts';
@@ -21,10 +22,10 @@ import {
   reconcilerPickupLatency,
   reconcilerQueueDepth,
 } from '../telemetry/index.ts';
-import { AUTO_DEPLOY_PRINCIPAL } from './auto-deploy.ts';
+import { AUTO_DEPLOY_PRINCIPAL, currentStateOf } from './auto-deploy.ts';
 
 // Idle is seconds: it is the wait between pressing Deploy and a runner
-// starting, and a scan is one indexed select over PENDING rows.
+// starting, and a scan is one select over the queued rows.
 export const DEFAULT_BUILD_INTERVALS = {
   activeMs: 500,
   idleMs: 1_500,
@@ -42,12 +43,15 @@ export interface BuildLoopOptions {
 export async function runBuildPass(
   context: BuildDispatchContext,
 ): Promise<number> {
+  const now = context.clock?.now() ?? new Date();
   // Left joins: an unplaced Component's Build still needs a refusal recorded.
   const rows = await context.db
     .select({
       buildId: builds.id,
+      commit: builds.commit,
       targetId: targets.id,
       appId: components.appId,
+      repositoryId: apps.repositoryId,
       componentId: components.id,
       deployOnSuccess: builds.deployOnSuccess,
       waitingOn: builds.dispatchWaitingOn,
@@ -60,17 +64,26 @@ export async function runBuildPass(
     })
     .from(builds)
     .innerJoin(components, eq(builds.componentId, components.id))
+    .innerJoin(apps, eq(apps.id, components.appId))
     .leftJoin(targets, eq(targets.id, components.placedTargetId))
     .leftJoin(vessels, eq(vessels.id, targets.vesselId))
     .where(
       and(
-        eq(builds.status, 'PENDING'),
+        or(
+          eq(builds.status, 'PENDING'),
+          // Claimed by a reconciler that stopped; `dispatchBuild` reclaims it.
+          and(
+            eq(builds.status, 'RUNNING'),
+            isNotNull(builds.leasedAt),
+            lt(
+              builds.leasedAt,
+              new Date(now.getTime() - DISPATCH_LEASE_TIMEOUT_MS),
+            ),
+          ),
+        ),
         // A refused row waits out its backoff, so a Build that cannot succeed
         // costs one attempt per backoff interval, not one per tick.
-        or(
-          isNull(builds.nextDispatchAt),
-          lte(builds.nextDispatchAt, context.clock?.now() ?? new Date()),
-        ),
+        or(isNull(builds.nextDispatchAt), lte(builds.nextDispatchAt, now)),
       ),
     )
     .orderBy(asc(builds.id));
@@ -170,16 +183,28 @@ export async function runBuildPass(
 
       // `deployOnSuccess`, not `apps.autoDeploy`, so a Rebuild never ships
       // itself; `createDeploy`, since `deployApp` may pick a later Build.
-      if (row.deployOnSuccess && result.value.status === 'SUCCEEDED') {
-        const placed = await createDeploy(
-          {
-            componentId: row.componentId,
-            targetId: row.targetId,
-            buildId: row.buildId,
-          },
-          { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
-        );
-        if (!placed.ok) {
+      // `ran`, so of two overlapping passes only the one that built it deploys.
+      if (
+        row.deployOnSuccess &&
+        result.value.status === 'SUCCEEDED' &&
+        result.value.ran
+      ) {
+        const targetId = row.targetId;
+        const stale = await staleness(context, { ...row, targetId });
+        const placed =
+          stale === null
+            ? await createDeploy(
+                {
+                  componentId: row.componentId,
+                  targetId,
+                  buildId: row.buildId,
+                },
+                { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
+              )
+            : null;
+        const refusal =
+          stale ?? (placed?.ok === false ? placed.failure.message : null);
+        if (refusal !== null) {
           // On this Build's attempt log, where a push sends the developer.
           await recordBuildEvent(
             context.db,
@@ -190,7 +215,7 @@ export async function runBuildPass(
             },
             {
               type: 'log',
-              line: `this Build succeeded, and deploying it was refused: ${placed.failure.message}`,
+              line: `this Build succeeded, and deploying it was refused: ${refusal}`,
               resource: 'dispatch',
             },
           );
@@ -201,6 +226,36 @@ export async function runBuildPass(
   // The backlog this pass found, dispatched or not.
   reconcilerQueueDepth.record(rows.length, { kind: 'build' });
   return dispatched;
+}
+
+/**
+ * Why a finished Build must not be deployed where the pass read it was going,
+ * or `null`. A build can outlast a move or a newer push.
+ */
+async function staleness(
+  context: BuildDispatchContext,
+  row: {
+    readonly commit: string;
+    readonly appId: string;
+    readonly repositoryId: string | null;
+    readonly componentId: string;
+    readonly targetId: string;
+  },
+): Promise<string | null> {
+  const [component] = await context.db
+    .select({ placedTargetId: components.placedTargetId })
+    .from(components)
+    .where(eq(components.id, row.componentId));
+  if (component?.placedTargetId !== row.targetId) {
+    return 'this Component was moved off the Target it was built for while it built';
+  }
+  if (row.repositoryId === null) return null;
+  const state = await currentStateOf(context.db, row.repositoryId, row.appId);
+  const built = row.commit.split('#')[0];
+  if (state?.commit && state.commit !== built) {
+    return `its repository has adopted ${state.commit} since, so deploying ${built} would roll it back`;
+  }
+  return null;
 }
 
 export async function runBuildLoop(
