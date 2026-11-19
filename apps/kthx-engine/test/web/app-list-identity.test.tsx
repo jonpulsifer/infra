@@ -72,7 +72,8 @@ function context(): CommandContext {
   };
 }
 
-// Two different Apps with one name: a service and a website.
+// Two different Apps with one name: a service and a website. Their Components
+// differ, since two `<app>-<component>` workloads of one name cannot coexist.
 async function seedTwins(ctx: CommandContext, name: string) {
   const made: { id: string; kind: 'service' | 'website' }[] = [];
   for (const kind of ['service', 'website'] as const) {
@@ -91,7 +92,7 @@ async function seedTwins(ctx: CommandContext, name: string) {
       kind === 'website'
         ? {
             appId: app.value.appId,
-            name: 'web',
+            name: 'site',
             kind: 'website',
             reach: 'public',
             auth: 'none',

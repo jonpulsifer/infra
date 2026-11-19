@@ -38,6 +38,7 @@ import {
   reconcileRepository,
 } from '../../reconciler/repo-loop.ts';
 import { logWarn } from '../../telemetry/index.ts';
+import { newComponentRefusal, takeNamingLock } from '../apps/names.ts';
 import { routeForTarget } from '../builds/route.ts';
 import type { CreateAppResult } from '../create-app.ts';
 import { connectRepository } from '../repositories/connect.ts';
@@ -246,6 +247,24 @@ export const completeCreationDraft: Command<
       if (!draft.ready) return ok({ draft, app: null });
       if (prepared === null || !prepared.ok) {
         throw new Error('a ready creation draft has no prepared source');
+      }
+
+      await takeNamingLock(txContext.db);
+      const refused = await newComponentRefusal(
+        txContext.db,
+        context.manifest.dns.zones,
+        {
+          app: row.draft.appName,
+          component: row.draft.componentName,
+          reach: row.draft.reach,
+        },
+      );
+      if (refused !== null) {
+        return failed(
+          'INVALID_INPUT',
+          `'${row.draft.componentName}' ${refused}`,
+          [{ path: 'draft.componentName', message: refused }],
+        );
       }
 
       const now = context.clock.now();

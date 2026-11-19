@@ -6,17 +6,19 @@
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 import { components } from '../../db/schema.ts';
-import { heldNames, zoneServes } from '../../domain/naming.ts';
+import { type DnsZones, heldNames, zoneServes } from '../../domain/naming.ts';
 import { kthxNamesOf, reserveForEdit } from '../apps/kthx-names.ts';
 import {
+  type ComponentNaming,
   componentNaming,
   holderLabel,
   nameClash,
   namesUnder,
   placementsFor,
+  withNamingLock,
   zoneReaches,
 } from '../apps/names.ts';
-import { type Command, failed, ok } from '../types.ts';
+import { type Command, type CommandResult, failed, ok } from '../types.ts';
 
 export const setComponentZoneInput = z
   .object({
@@ -35,10 +37,44 @@ export interface SetComponentZoneResult {
   readonly hostnames: readonly string[];
 }
 
+/**
+ * Why `zone` cannot be pinned on `subject`, or `null`. A name another
+ * Component holds is the caller's check, since it needs the label.
+ */
+export function zonePinRefusal<Output>(
+  subject: ComponentNaming,
+  zone: string | null,
+  zones: DnsZones,
+): CommandResult<Output> | null {
+  if (zone === null) return null;
+  if (!zones.some((one) => one.name === zone)) {
+    return failed(
+      'NOT_FOUND',
+      `this installation mints no names in ${zone}. ` +
+        `It has ${zones.map((one) => one.name).join(', ')}.`,
+    );
+  }
+  // `zoneFor` falls through when a pin cannot serve the reach, so the pin is
+  // refused here instead of minting somewhere nobody chose.
+  if (!zoneServes(zone, subject.reach, zones)) {
+    const rule =
+      `${zone} serves ${zoneReaches(zone, zones)}; ${holderLabel(subject)} is ${subject.reach}. ` +
+      `Pick a zone that serves ${subject.reach}, or change the reach first.`;
+    return failed('INVALID_INPUT', rule, [{ path: 'zone', message: rule }]);
+  }
+  return null;
+}
+
 export const setComponentZone: Command<
   SetComponentZoneInput,
   SetComponentZoneResult
-> = async (input, context) => {
+> = (input, context) =>
+  withNamingLock(context, (locked) => setZone(input, locked));
+
+const setZone: Command<SetComponentZoneInput, SetComponentZoneResult> = async (
+  input,
+  context,
+) => {
   const subject = await componentNaming(context.db, input.componentId);
   if (subject === null) {
     return failed(
@@ -48,25 +84,12 @@ export const setComponentZone: Command<
   }
 
   const zones = context.manifest.dns.zones;
-  if (input.zone !== null) {
-    const named = zones.find((zone) => zone.name === input.zone);
-    if (named === undefined) {
-      return failed(
-        'NOT_FOUND',
-        `this installation mints no names in ${input.zone}. ` +
-          `It has ${zones.map((zone) => zone.name).join(', ')}.`,
-      );
-    }
-  }
-
-  // `zoneFor` falls through when a pin cannot serve the reach, so the pin is
-  // refused here instead of minting somewhere nobody chose.
-  if (input.zone !== null && !zoneServes(input.zone, subject.reach, zones)) {
-    const rule =
-      `${input.zone} serves ${zoneReaches(input.zone, zones)}; ${holderLabel(subject)} is ${subject.reach}. ` +
-      `Pick a zone that serves ${subject.reach}, or change the reach first.`;
-    return failed('INVALID_INPUT', rule, [{ path: 'zone', message: rule }]);
-  }
+  const refused = zonePinRefusal<SetComponentZoneResult>(
+    subject,
+    input.zone,
+    zones,
+  );
+  if (refused !== null) return refused;
 
   const clash = await nameClash(
     context.db,

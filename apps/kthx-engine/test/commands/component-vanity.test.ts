@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
+import { withNamingLock } from '../../src/commands/apps/names.ts';
 import { setComponentVanity } from '../../src/commands/components/vanity.ts';
 import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
+import { createDb } from '../../src/db/client.ts';
 import {
   apps,
   components,
@@ -281,8 +283,14 @@ describe("setComponentVanity under kthx's zone", () => {
     const seen: (string | null | undefined)[] = [];
     const kthx = new FakeKthx();
     const reserve = kthx.reserve.bind(kthx);
+    // Another session: the edit's transaction holds the test's one connection.
+    const outside = createDb(database().connect());
     kthx.reserve = async (holder, labels) => {
-      seen.push(await vanityOf(componentId));
+      const [row] = await outside
+        .select({ vanityLabel: components.vanityLabel })
+        .from(components)
+        .where(eq(components.id, componentId));
+      seen.push(row?.vanityLabel);
       return reserve(holder, labels);
     };
 
@@ -449,6 +457,41 @@ describe('one name belongs to one Component', () => {
     expect(result.failure.issues).toEqual([{ path: 'label', message: rule }]);
     expect(await vanityOf(admin)).toBeNull();
     expect(await vanityOf(web)).toBe('shop');
+  });
+
+  test('an edit waits for one in flight, then sees the name it took', async () => {
+    const { appId, componentId: web } = await seed();
+    const { componentId: admin } = await seed({ name: 'admin' }, appId);
+    let release = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let taken = () => {};
+    const written = new Promise<void>((resolve) => {
+      taken = resolve;
+    });
+    const inFlight = withNamingLock(context(), async (locked) => {
+      await locked.db
+        .update(components)
+        .set({ vanityLabel: 'shop' })
+        .where(eq(components.id, web));
+      taken();
+      await held;
+    });
+    await written;
+
+    // Another session, or the test's one connection would serialize the two.
+    const edit = setComponentVanity(
+      { componentId: admin, label: 'shop' },
+      { ...context(), db: createDb(database().connect()) },
+    );
+    await Bun.sleep(50);
+    release();
+    await inFlight;
+    const result = await edit;
+
+    expect(result.ok).toBe(false);
+    expect(await vanityOf(admin)).toBeNull();
   });
 
   test("a label that mints another Component's canonical name is refused", async () => {

@@ -415,6 +415,41 @@ describe('creation drafts', () => {
     expect(await productCounts()).toEqual([1, 1, 1, 0]);
   });
 
+  test('a draft whose App and Component join to a name another App already took creates nothing', async () => {
+    await seedCapabilities();
+    const ctx = await context();
+    const started = await startCreationDraft({}, ctx);
+    if (!started.ok) throw new Error(started.failure.message);
+    const saved = await saveCreationDraft(
+      {
+        id: started.value.id,
+        revision: started.value.revision,
+        draft: pickRepository(started.value.draft),
+      },
+      ctx,
+    );
+    if (!saved.ok) throw new Error(saved.failure.message);
+    const { appName, componentName } = saved.value.draft;
+    const [other] = await database()
+      .db.insert(apps)
+      .values({ name: appName, sourceKind: 'archive' })
+      .returning();
+    await database()
+      .db.insert(components)
+      .values({ appId: other!.id, name: componentName, kind: 'service' });
+
+    const completed = await completeCreationDraft(
+      { id: saved.value.id, revision: saved.value.revision },
+      ctx,
+    );
+
+    expect(completed.ok).toBe(false);
+    if (completed.ok) return;
+    expect(completed.failure.code).toBe('INVALID_INPUT');
+    expect(completed.failure.issues?.[0]?.path).toBe('draft.componentName');
+    expect(await productCounts()).toEqual([1, 1, 0, 0]);
+  });
+
   test('completion is reachable through the validated command boundary', async () => {
     await seedCapabilities();
     const ctx = await context();

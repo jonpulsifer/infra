@@ -3,7 +3,7 @@
  * `setComponentVanity` previews, and the rule that one name belongs to one
  * Component across the installation.
  */
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import type { Database } from '../../db/client.ts';
 import {
@@ -22,6 +22,29 @@ import {
   vanity,
   zoneFor,
 } from '../../domain/naming.ts';
+import type { CommandContext } from '../types.ts';
+
+/**
+ * The installation's one naming lock, held until the transaction ends, so two
+ * acts cannot both find a name free and then both take it.
+ */
+export async function takeNamingLock(transaction: Database): Promise<void> {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended('kthx-engine/naming', 0))`,
+  );
+}
+
+/** Runs `act` in a transaction holding {@link takeNamingLock}. */
+export async function withNamingLock<Output>(
+  context: CommandContext,
+  act: (context: CommandContext) => Promise<Output>,
+): Promise<Output> {
+  return context.db.transaction(async (transaction) => {
+    const locked = transaction as unknown as Database;
+    await takeNamingLock(locked);
+    return act({ ...context, db: locked });
+  });
+}
 
 /** One placed Component, with what its name is minted from. */
 export interface Placement {
@@ -126,7 +149,8 @@ export async function nameHolders(
 export async function nameClash(
   db: Database,
   zones: DnsZones,
-  componentId: string,
+  /** `null` for a Component not yet written. */
+  componentId: string | null,
   names: readonly string[],
   options: { readonly before?: boolean } = {},
 ): Promise<{ readonly name: string; readonly holder: NameHolder } | null> {
@@ -142,6 +166,46 @@ export async function nameClash(
     if (name !== undefined) return { name, holder };
   }
   return null;
+}
+
+/** One DNS label, since the join leads every canonical name. */
+const JOINED_NAME_LIMIT = 63;
+
+/**
+ * Why a new Component may not take `<app>-<component>`, or `null`. The join
+ * names its workload and leads its canonical name, so it is unique across the
+ * installation whatever the reach: App my-shop with Component web and App my
+ * with Component shop-web cannot both exist.
+ */
+export async function newComponentRefusal(
+  db: Database,
+  zones: DnsZones,
+  component: {
+    readonly app: string;
+    readonly component: string;
+    readonly reach: Reach;
+  },
+): Promise<string | null> {
+  const joined = `${component.app}-${component.component}`;
+  if (joined.length > JOINED_NAME_LIMIT) {
+    return `${joined} is ${joined.length} characters; an App's name and a Component's, with the hyphen between them, take at most ${JOINED_NAME_LIMIT}`;
+  }
+  const holders = await nameHolders(db, zones);
+  const twin = holders.find(
+    (holder) => `${holder.app}-${holder.component}` === joined,
+  );
+  if (twin !== undefined) {
+    return `${joined} is ${holderLabel(twin)}'s workload name already`;
+  }
+  const clash = await nameClash(
+    db,
+    zones,
+    null,
+    heldNames({ ...component, zones, zone: null, vanityLabel: null }),
+  );
+  return clash === null
+    ? null
+    : `would take ${clash.name}, which ${holderLabel(clash.holder)} holds`;
 }
 
 /** `shop's web`: how a refusal names the Component holding a name. */

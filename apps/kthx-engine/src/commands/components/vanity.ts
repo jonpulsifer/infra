@@ -4,6 +4,7 @@
  */
 import { eq } from 'drizzle-orm';
 import { z } from 'zod';
+import type { InstallationManifest } from '../../config/manifest.ts';
 import { components } from '../../db/schema.ts';
 import {
   installationHostnames,
@@ -15,11 +16,13 @@ import {
 } from '../../domain/naming.ts';
 import { kthxNamesOf, reserveForEdit } from '../apps/kthx-names.ts';
 import {
+  type ComponentNaming,
   componentNaming,
   holderLabel,
   nameClash,
   namesUnder,
   placementsFor,
+  withNamingLock,
 } from '../apps/names.ts';
 import { type Command, failed, ok } from '../types.ts';
 
@@ -40,7 +43,41 @@ export interface SetComponentVanityResult {
   readonly hostnames: readonly string[];
 }
 
+/**
+ * Why `label` cannot name `subject`, or `null`. Clearing is always allowed; a
+ * name another Component holds is the caller's check, since it needs the zone.
+ */
+export function labelRule(
+  subject: ComponentNaming,
+  label: string | null,
+  manifest: InstallationManifest,
+): string | null {
+  if (label === null) return null;
+  if (!isVanityLabel(label)) {
+    return 'must be a single lowercase DNS label, or @ for the zone itself';
+  }
+  if (!servesNetwork(subject)) {
+    return `cannot name ${holderLabel(subject)}: only a website or an exposed service answers on a name of its own`;
+  }
+  // A Component's exact-hostname route outranks the control plane's at the
+  // gateway, so a label that mints one of its names would take that traffic.
+  const taken = ownHostnameClaimedBy(
+    label,
+    manifest.dns.zones,
+    installationHostnames(manifest.controlPlane),
+  );
+  return taken === null
+    ? null
+    : `would take ${taken}, which this installation reserves`;
+}
+
 export const setComponentVanity: Command<
+  SetComponentVanityInput,
+  SetComponentVanityResult
+> = (input, context) =>
+  withNamingLock(context, (locked) => setVanity(input, locked));
+
+const setVanity: Command<
   SetComponentVanityInput,
   SetComponentVanityResult
 > = async (input, context) => {
@@ -58,33 +95,10 @@ export const setComponentVanity: Command<
       [{ path: 'label', message: rule }],
     );
 
-  if (input.label !== null && !isVanityLabel(input.label)) {
-    return refuse(
-      'must be a single lowercase DNS label, or @ for the zone itself',
-    );
-  }
+  const rule = labelRule(subject, input.label, context.manifest);
+  if (rule !== null) return refuse(rule);
 
-  if (input.label !== null && !servesNetwork(subject)) {
-    return refuse(
-      `cannot name ${holderLabel(subject)}: only a website or an exposed service answers on a name of its own`,
-    );
-  }
-
-  // A Component's exact-hostname route outranks the control plane's at the
-  // gateway, so a label that mints one of its names would take that traffic.
   const zones = context.manifest.dns.zones;
-  const taken =
-    input.label === null
-      ? null
-      : ownHostnameClaimedBy(
-          input.label,
-          zones,
-          installationHostnames(context.manifest.controlPlane),
-        );
-  if (taken !== null) {
-    return refuse(`would take ${taken}, which this installation reserves`);
-  }
-
   const zone = zoneFor(subject.reach, zones, subject.zone);
   if (input.label !== null && zone !== null) {
     const clash = await nameClash(context.db, zones, subject.id, [
