@@ -249,7 +249,7 @@ describe('a locked App refuses ordinary deploys with the reason', () => {
       value: {
         appId: app.id,
         reason: 'change freeze until Monday',
-        resumed: null,
+        resumed: [],
       },
     });
     expect(await lockOf(app.id)).toEqual({
@@ -539,7 +539,7 @@ describe('unlocking', () => {
     const unlocked = await setAppLock({ appId: app.id, reason: null }, ctx);
     expect(unlocked).toEqual({
       ok: true,
-      value: { appId: app.id, reason: null, resumed: null },
+      value: { appId: app.id, reason: null, resumed: [] },
     });
     expect(await lockOf(app.id)).toEqual({
       lockReason: null,
@@ -602,27 +602,30 @@ describe('unlocking resumes the push the lock held back', () => {
     });
 
     // What the push would have done: build the commit, then deploy it.
-    expect(unlocked.value.resumed).toEqual({
-      appId: app.id,
-      commit: 'bbb2222',
-      result: {
-        ok: true,
-        value: {
-          deployId: null,
-          buildId: expect.any(Number),
-          phase: 'BUILDING',
+    expect(unlocked.value.resumed).toEqual([
+      {
+        appId: app.id,
+        componentId: component.id,
+        commit: 'bbb2222',
+        result: {
+          ok: true,
+          value: {
+            deployId: null,
+            buildId: expect.any(Number),
+            phase: 'BUILDING',
+          },
         },
       },
-    });
+    ]);
     expect(stager.staged).toEqual([
       { repository: repository.fullName, commit: 'bbb2222' },
     ]);
-    const resumed = unlocked.value.resumed;
-    if (resumed === null || !resumed.result.ok) return;
+    const result = unlocked.value.resumed[0]?.result;
+    if (!result?.ok) return;
     const [queued] = await ctx.db
       .select()
       .from(builds)
-      .where(eq(builds.id, resumed.result.value.buildId));
+      .where(eq(builds.id, result.value.buildId));
     expect(queued?.componentId).toBe(component.id);
     expect(queued?.commit.split('#')[0]).toBe('bbb2222');
     expect(queued?.status).toBe('PENDING');
@@ -639,6 +642,114 @@ describe('unlocking resumes the push the lock held back', () => {
     expect(workspace.value.workspace.lock).toBeUndefined();
   });
 
+  test('every placed Component behind the adopted commit is resumed on its own Target', async () => {
+    const { app, repository, component, target, ctx } = await servingPushApp(
+      'abc1111',
+      74,
+    );
+    const [worker] = await ctx.db
+      .insert(components)
+      .values({
+        appId: app.id,
+        name: 'worker',
+        kind: 'service',
+        expose: false,
+        placedTargetId: target.id,
+      })
+      .returning();
+    await succeededBuild(
+      worker!.id,
+      75,
+      'abc1111',
+      new Date(FROZEN.getTime() - 60_000),
+    );
+    // Unplaced, so it has nowhere to go.
+    await ctx.db
+      .insert(components)
+      .values({ appId: app.id, name: 'cron', kind: 'job', schedule: '@daily' });
+    await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
+    await pushLands(repository.id, 'abc2222');
+
+    const unlocked = await setAppLock(
+      { appId: app.id, reason: null },
+      {
+        ...ctx,
+        adapters: { ...ctx.adapters, source: () => new FakeSourceStager() },
+      },
+    );
+    expect(unlocked.ok).toBe(true);
+    if (!unlocked.ok) return;
+
+    expect(unlocked.value.resumed).toMatchObject([
+      { componentId: component.id, commit: 'abc2222', result: { ok: true } },
+      { componentId: worker!.id, commit: 'abc2222', result: { ok: true } },
+    ]);
+    for (const { componentId, result } of unlocked.value.resumed) {
+      if (!result?.ok) continue;
+      const [queued] = await ctx.db
+        .select()
+        .from(builds)
+        .where(eq(builds.id, result.value.buildId));
+      expect(queued?.componentId).toBe(componentId);
+      expect(queued?.commit.split('#')[0]).toBe('abc2222');
+    }
+  });
+
+  test('a fault on one Component still resumes the other', async () => {
+    const { app, repository, component, target, ctx } = await servingPushApp(
+      'abd1111',
+      76,
+    );
+    const [worker] = await ctx.db
+      .insert(components)
+      .values({
+        appId: app.id,
+        name: 'worker',
+        kind: 'service',
+        expose: false,
+        placedTargetId: target.id,
+      })
+      .returning();
+    await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
+    await pushLands(repository.id, 'abd2222');
+
+    // The unlock is written before resuming, so a throw would leave the App
+    // unlocked with the second Component never dispatched.
+    let faulted = false;
+    const unlocked = await setAppLock(
+      { appId: app.id, reason: null },
+      {
+        ...ctx,
+        adapters: {
+          ...ctx.adapters,
+          source: () => {
+            if (!faulted) {
+              faulted = true;
+              throw new Error('the database went away');
+            }
+            return new FakeSourceStager();
+          },
+        },
+      },
+    );
+    expect(unlocked.ok).toBe(true);
+    if (!unlocked.ok) return;
+    expect((await lockOf(app.id)).lockReason).toBeNull();
+
+    expect(unlocked.value.resumed).toMatchObject([
+      { componentId: component.id, fault: 'the database went away' },
+      {
+        componentId: worker!.id,
+        result: { ok: true, value: { phase: 'BUILDING' } },
+      },
+    ]);
+    const queued = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, worker!.id));
+    expect(queued.map((row) => row.commit.split('#')[0])).toEqual(['abd2222']);
+  });
+
   test('a refusal is carried out, not thrown, and the App is unlocked anyway', async () => {
     const { app, repository, component, ctx } = await servingPushApp(
       'ccc3333',
@@ -652,11 +763,13 @@ describe('unlocking resumes the push the lock held back', () => {
     expect(unlocked.ok).toBe(true);
     if (!unlocked.ok) return;
     expect((await lockOf(app.id)).lockReason).toBeNull();
-    const resumed = unlocked.value.resumed;
+    const [resumed, ...more] = unlocked.value.resumed;
+    expect(more).toEqual([]);
     expect(resumed?.commit).toBe('ddd4444');
-    expect(resumed?.result.ok).toBe(false);
-    if (resumed === null || resumed.result.ok) return;
-    expect(resumed.result.failure.code).toBe('NOT_BUILDABLE');
+    const result = resumed?.result;
+    expect(result?.ok).toBe(false);
+    if (result === undefined || result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
 
     const workspace = await getAppWorkspace({ name: app.id }, ctx);
     expect(workspace.ok).toBe(true);
@@ -678,7 +791,7 @@ describe('unlocking resumes the push the lock held back', () => {
       { appId: app.id, reason: null },
       { ...ctx, adapters: { ...ctx.adapters, source: () => stager } },
     );
-    expect(unlocked.ok && unlocked.value.resumed).toBeNull();
+    expect(unlocked.ok && unlocked.value.resumed).toEqual([]);
     expect(stager.staged).toEqual([]);
   });
 
@@ -708,7 +821,7 @@ describe('unlocking resumes the push the lock held back', () => {
       { appId: app.id, reason: null },
       { ...ctx, adapters: { ...ctx.adapters, source: () => stager } },
     );
-    expect(unlocked.ok && unlocked.value.resumed).toBeNull();
+    expect(unlocked.ok && unlocked.value.resumed).toEqual([]);
     expect(stager.staged).toEqual([]);
     expect(await desiredBuildOf(component.id)).toBe(older.id);
     expect(await deploysOf(component.id)).toHaveLength(3);
@@ -764,8 +877,8 @@ describe('who asked for each Deploy', () => {
     );
     expect(attempts).toHaveLength(1);
     const result = attempts[0]!.result;
-    expect(result.ok).toBe(true);
-    if (!result.ok || result.value.deployId === null) return;
+    expect(result?.ok).toBe(true);
+    if (!result?.ok || result.value.deployId === null) return;
 
     const [row] = await ctx.db
       .select({ requestedBy: deploys.requestedBy })

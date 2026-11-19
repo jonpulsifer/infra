@@ -5,10 +5,20 @@ import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
-import { apps, repositories, users } from '../../src/db/schema.ts';
+import {
+  apps,
+  components,
+  repositories,
+  targets,
+  users,
+} from '../../src/db/schema.ts';
 import { dispatchAutoDeploys } from '../../src/reconciler/auto-deploy.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -26,6 +36,7 @@ const adapters: AdapterRegistry = {
 describe('deploy on push, turned on and off', () => {
   let ctx: CommandContext;
   let repoAppId: string;
+  let repositoryId: string;
   let archiveAppId: string;
 
   beforeEach(async () => {
@@ -57,6 +68,7 @@ describe('deploy on push, turned on and off', () => {
       })
       .returning();
     repoAppId = repoApp!.id;
+    repositoryId = repository!.id;
     const [archiveApp] = await db
       .insert(apps)
       .values({ name: 'archivetest', sourceKind: 'archive' })
@@ -141,8 +153,29 @@ describe('deploy on push, turned on and off', () => {
         sourceKind: 'repo',
         sourceRepoUrl: 'jonpulsifer/infra',
         sourceRepoSubpath: 'apps/plainboi',
+        repositoryId: repositoryId,
       })
       .returning();
+    // The pass's commit must still govern its repository.
+    await db
+      .update(repositories)
+      .set({ authoritativeCommit: 'feedbeef' })
+      .where(eq(repositories.id, repositoryId));
+    // A push deploys only placed Components.
+    const vessel = await insertVessel(db, 'kubernetes', { name: 'cluster' });
+    const [target] = await db
+      .insert(targets)
+      .values(targetValues({ vesselId: vessel.id }))
+      .returning();
+    await db.insert(components).values(
+      [repoAppId, second!.id].map((appId) => ({
+        appId,
+        name: 'web',
+        kind: 'service' as const,
+        expose: true,
+        placedTargetId: target!.id,
+      })),
+    );
 
     await setAppAutoDeploy({ appId: repoAppId, autoDeploy: true }, ctx);
 
@@ -151,6 +184,9 @@ describe('deploy on push, turned on and off', () => {
       [
         {
           outcome: 'adopted',
+          repositoryId,
+          fullName: 'jonpulsifer/infra',
+          commit: 'feedbeef',
           scopes: [{ appId: repoAppId }, { appId: second!.id }],
         },
       ] as never,
