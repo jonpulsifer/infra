@@ -213,6 +213,7 @@ deployAdapterSuite(
       adapter: new VercelDeployAdapter({
         token: api.token,
         artifactToken: api.token,
+        zones: [],
         fetch: api.fetch,
         pollIntervalMs: 1,
         sleep: async () => {},

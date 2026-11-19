@@ -281,6 +281,7 @@ export function createAdapterRegistry(
     vercel: new VercelDeployAdapter({
       token: options.vercelToken ?? vercelToken(options.env ?? Bun.env),
       artifactToken: cloud,
+      zones: options.manifest.dns.zones.map((zone) => zone.name),
       federation: options.manifest.cloud.federation,
       ...(options.fetch ? { fetch: options.fetch } : {}),
     }),
