@@ -78,6 +78,51 @@ async function repositoryAt(commit: string) {
   return repository!;
 }
 
+/** A Target of its own, with the desired row and placement a first deploy writes. */
+async function placeOnNewTarget(componentId: string) {
+  const db = database().db;
+  const vessel = await insertVessel(db, 'kubernetes', {
+    name: `cluster-${crypto.randomUUID()}`,
+  });
+  const [target] = await db
+    .insert(targets)
+    .values(targetValues({ vesselId: vessel.id }))
+    .returning();
+  await db.insert(componentTargetDesired).values({
+    componentId,
+    targetId: target!.id,
+    updatedAt: NOW,
+  });
+  await db
+    .update(components)
+    .set({ placedTargetId: target!.id })
+    .where(eq(components.id, componentId));
+  return target!;
+}
+
+async function signedBuild(componentId: string, commit: string) {
+  const digest = `sha256:${crypto.randomUUID().replaceAll('-', '').padEnd(64, '0')}`;
+  const [build] = await database()
+    .db.insert(builds)
+    .values({
+      componentId,
+      commit,
+      targetShape: 'image',
+      artifactType: 'image',
+      artifactDigest: digest,
+      bundleDigest: digest,
+      bundleLocation: 'https://depot.lolwtf.ca/bundles/1.zip',
+      status: 'SUCCEEDED',
+      verifiedBuildLevel: 2,
+      signature: testSignature(digest, NOW.toISOString()),
+      // The column defaults to the database's wall-clock `now()`, which is
+      // newer than every row a dispatch writes at the frozen `NOW`.
+      createdAt: new Date(NOW.getTime() - 60_000),
+    })
+    .returning();
+  return build!;
+}
+
 /**
  * A repo App, the only kind that can opt in, with a placed Component and a
  * signed Build of `builtCommit`.
@@ -103,47 +148,41 @@ async function deployableApp(
     .insert(components)
     .values({ appId: app!.id, name: 'web', kind: 'service', expose: true })
     .returning();
-  const vessel = await insertVessel(db, 'kubernetes', {
-    name: `cluster-${crypto.randomUUID()}`,
-  });
-  const [target] = await db
-    .insert(targets)
-    .values(targetValues({ vesselId: vessel.id }))
-    .returning();
-  await db.insert(componentTargetDesired).values({
-    componentId: component!.id,
-    targetId: target!.id,
-    updatedAt: NOW,
-  });
-  await db
-    .update(components)
-    .set({ placedTargetId: target!.id })
-    .where(eq(components.id, component!.id));
-  const digest = `sha256:${crypto.randomUUID().replaceAll('-', '').padEnd(64, '0')}`;
-  const [build] = await db
-    .insert(builds)
-    .values({
-      componentId: component!.id,
-      commit: builtCommit,
-      targetShape: 'image',
-      artifactType: 'image',
-      artifactDigest: digest,
-      bundleDigest: digest,
-      bundleLocation: 'https://depot.lolwtf.ca/bundles/1.zip',
-      status: 'SUCCEEDED',
-      verifiedBuildLevel: 2,
-      signature: testSignature(digest, NOW.toISOString()),
-      // The column defaults to the database's wall-clock `now()`, which is
-      // newer than every row a dispatch writes at the frozen `NOW`.
-      createdAt: new Date(NOW.getTime() - 60_000),
-    })
-    .returning();
+  const target = await placeOnNewTarget(component!.id);
+  const build = await signedBuild(component!.id, builtCommit);
   return {
     app: app!,
     component: component!,
-    build: build!,
+    target,
+    build,
     repository,
   };
+}
+
+/**
+ * A second Component of `appId`, older than the first, so it is the one a
+ * deploy naming no Component falls back to.
+ */
+async function siblingComponent(
+  appId: string,
+  options: { readonly placed: boolean; readonly builtCommit?: string },
+) {
+  const [component] = await database()
+    .db.insert(components)
+    .values({
+      appId,
+      name: 'worker',
+      kind: 'service',
+      expose: false,
+      createdAt: new Date(NOW.getTime() - 120_000),
+    })
+    .returning();
+  const target = options.placed ? await placeOnNewTarget(component!.id) : null;
+  const build =
+    options.builtCommit === undefined
+      ? null
+      : await signedBuild(component!.id, options.builtCommit);
+  return { component: component!, target, build };
 }
 
 /** A real `createDeploy` runs behind this context. */
@@ -200,6 +239,21 @@ async function buildsFor(componentId: string) {
     .where(eq(builds.componentId, componentId));
 }
 
+async function deploysFor(componentId: string) {
+  return await database()
+    .db.select()
+    .from(deploys)
+    .where(eq(deploys.componentId, componentId));
+}
+
+async function placementOf(componentId: string): Promise<string | null> {
+  const [row] = await database()
+    .db.select({ targetId: components.placedTargetId })
+    .from(components)
+    .where(eq(components.id, componentId));
+  return row?.targetId ?? null;
+}
+
 describe('which act a push asks for', () => {
   test('a push whose commit is not built writes a Build for that commit, and deploys nothing', async () => {
     stager = new FakeSourceStager();
@@ -212,6 +266,7 @@ describe('which act a push asks for', () => {
     expect(attempts).toHaveLength(1);
     expect(attempts[0]).toMatchObject({
       appId: app.id,
+      componentId: component.id,
       commit: PUSHED,
       result: { ok: true, value: { phase: 'BUILDING' } },
     });
@@ -321,6 +376,169 @@ describe('which act a push asks for', () => {
       PUSHED,
       otherCommit,
     ]);
+  });
+});
+
+describe('an App with several Components', () => {
+  // Every Component builds from its App's scope, so a push reaches them all.
+  test('a push not yet built starts a Build for each placed Component, on its own Target', async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true);
+    const worker = await siblingComponent(web.app.id, {
+      placed: true,
+      builtCommit: PREVIOUS,
+    });
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id]),
+    ]);
+
+    // Oldest first, each named, so neither falls back to the other.
+    expect(attempts.map((attempt) => attempt.componentId)).toEqual([
+      worker.component.id,
+      web.component.id,
+    ]);
+    for (const attempt of attempts) {
+      expect(attempt).toMatchObject({
+        appId: web.app.id,
+        commit: PUSHED,
+        result: { ok: true, value: { phase: 'BUILDING' } },
+      });
+    }
+
+    for (const { component, target } of [web, worker]) {
+      const pending = (await buildsFor(component.id)).filter(
+        (row) => row.status === 'PENDING',
+      );
+      expect(pending).toHaveLength(1);
+      expect(pending[0]?.commit.split('#')[0]).toBe(PUSHED);
+      expect(pending[0]?.deployOnSuccess).toBe(true);
+      // The build loop dispatches to, and deploys on, the placed Target.
+      expect(await placementOf(component.id)).toBe(target!.id);
+    }
+  });
+
+  test('a push already built deploys each Component its own Build, on its own Target', async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true, PUSHED);
+    const worker = await siblingComponent(web.app.id, {
+      placed: true,
+      builtCommit: PUSHED,
+    });
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id]),
+    ]);
+
+    expect(attempts).toHaveLength(2);
+    for (const attempt of attempts) {
+      expect(attempt).toMatchObject({
+        result: { ok: true, value: { phase: 'PENDING' } },
+      });
+    }
+    for (const { component, target, build } of [web, worker]) {
+      const written = await deploysFor(component.id);
+      expect(written).toHaveLength(1);
+      expect(written[0]?.targetId).toBe(target!.id);
+      expect(written[0]?.buildId).toBe(build!.id);
+    }
+    expect(stager.staged).toEqual([]);
+  });
+
+  test('an unplaced Component is skipped', async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true);
+    const worker = await siblingComponent(web.app.id, { placed: false });
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id]),
+    ]);
+
+    expect(attempts.map((attempt) => attempt.componentId)).toEqual([
+      web.component.id,
+    ]);
+    expect(await buildsFor(worker.component.id)).toEqual([]);
+    expect(await placementOf(worker.component.id)).toBeNull();
+    expect(stager.staged.map((entry) => entry.commit)).toEqual([PUSHED]);
+  });
+
+  test('a lock skips every Component before anything builds', async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true);
+    const worker = await siblingComponent(web.app.id, {
+      placed: true,
+      builtCommit: PREVIOUS,
+    });
+    await database()
+      .db.update(apps)
+      .set({ lockReason: 'incident open', lockedAt: NOW })
+      .where(eq(apps.id, web.app.id));
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id]),
+    ]);
+
+    expect(attempts).toEqual([]);
+    expect(stager.staged).toEqual([]);
+    for (const { component } of [web, worker]) {
+      expect(await buildsFor(component.id)).toHaveLength(1);
+      expect(await deployCountFor(component.id)).toBe(0);
+    }
+  });
+
+  test('an overtaken commit deploys no Component', async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true, PUSHED);
+    const worker = await siblingComponent(web.app.id, {
+      placed: true,
+      builtCommit: PUSHED,
+    });
+    await database()
+      .db.update(repositories)
+      .set({ authoritativeCommit: '3'.repeat(40) })
+      .where(eq(repositories.id, web.repository.id));
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id], PUSHED),
+    ]);
+
+    expect(attempts).toEqual([]);
+    expect(stager.staged).toEqual([]);
+    for (const { component } of [web, worker]) {
+      expect(await buildsFor(component.id)).toHaveLength(1);
+      expect(await deployCountFor(component.id)).toBe(0);
+    }
+  });
+
+  test("one Component's refusal does not stop the next", async () => {
+    stager = new FakeSourceStager();
+    const web = await deployableApp(true, PUSHED);
+    // The oldest, so it is refused first.
+    const worker = await siblingComponent(web.app.id, {
+      placed: true,
+      builtCommit: PUSHED,
+    });
+    await database()
+      .db.update(targets)
+      .set({ status: 'disconnected' })
+      .where(eq(targets.id, worker.target!.id));
+
+    const attempts = await dispatchAutoDeploys(context(), [
+      adoptedPass(web.repository, [web.app.id]),
+    ]);
+
+    expect(attempts).toMatchObject([
+      {
+        componentId: worker.component.id,
+        result: { ok: false, failure: { code: 'NOT_DEPLOYABLE' } },
+      },
+      {
+        componentId: web.component.id,
+        result: { ok: true, value: { phase: 'PENDING' } },
+      },
+    ]);
+    expect(await deployCountFor(worker.component.id)).toBe(0);
+    expect(await deployCountFor(web.component.id)).toBe(1);
   });
 });
 

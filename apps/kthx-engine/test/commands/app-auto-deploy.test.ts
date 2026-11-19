@@ -5,10 +5,20 @@ import type {
   AdapterRegistry,
   CommandContext,
 } from '../../src/commands/types.ts';
-import { apps, repositories, users } from '../../src/db/schema.ts';
+import {
+  apps,
+  components,
+  repositories,
+  targets,
+  users,
+} from '../../src/db/schema.ts';
 import { dispatchAutoDeploys } from '../../src/reconciler/auto-deploy.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
-import { fixtureManifest } from '../harness/installation.ts';
+import {
+  fixtureManifest,
+  insertVessel,
+  targetValues,
+} from '../harness/installation.ts';
 
 const database = withIsolatedDatabase();
 const manifest = await fixtureManifest();
@@ -143,6 +153,21 @@ describe('deploy on push, turned on and off', () => {
         sourceRepoSubpath: 'apps/plainboi',
       })
       .returning();
+    // A push deploys only placed Components.
+    const vessel = await insertVessel(db, 'kubernetes', { name: 'cluster' });
+    const [target] = await db
+      .insert(targets)
+      .values(targetValues({ vesselId: vessel.id }))
+      .returning();
+    await db.insert(components).values(
+      [repoAppId, second!.id].map((appId) => ({
+        appId,
+        name: 'web',
+        kind: 'service' as const,
+        expose: true,
+        placedTargetId: target!.id,
+      })),
+    );
 
     await setAppAutoDeploy({ appId: repoAppId, autoDeploy: true }, ctx);
 

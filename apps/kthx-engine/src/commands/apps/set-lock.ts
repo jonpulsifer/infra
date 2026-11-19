@@ -8,8 +8,8 @@ import { z } from 'zod';
 import type { Database } from '../../db/client.ts';
 import { apps } from '../../db/schema.ts';
 import {
-  AUTO_DEPLOY_PRINCIPAL,
   type AutoDeployAttempt,
+  deployComponentAt,
 } from '../../reconciler/auto-deploy.ts';
 import {
   type Command,
@@ -18,7 +18,6 @@ import {
   ok,
   type Principal,
 } from '../types.ts';
-import { deployApp } from './deploy.ts';
 
 export const setAppLockInput = z
   .object({
@@ -35,10 +34,10 @@ export interface SetAppLockResult {
   /** The hold's reason, or `null` when unlocked. */
   readonly reason: string | null;
   /**
-   * The push an unlock resumed, with `deployApp`'s answer, refusal included.
-   * `null` when there was nothing to resume.
+   * The push an unlock resumed, one attempt per Component, with `deployApp`'s
+   * answer, refusal included. Empty when there was nothing to resume.
    */
-  readonly resumed: AutoDeployAttempt | null;
+  readonly resumed: readonly AutoDeployAttempt[];
 }
 
 /** Also used by `rollbackDeploy`, inside the transaction writing its intent. */
@@ -56,20 +55,19 @@ export async function lockApp(
 }
 
 /**
- * Dispatches the push the lock held back, or answers `null` when there was none.
- * Compares the adopted commit with the primary Component's newest Build.
+ * Dispatches the push the lock held back to each placed Component whose newest
+ * Build is not of the adopted commit, as a push would have.
  */
 async function resumeHeldPush(
   appId: string,
   context: CommandContext,
-): Promise<AutoDeployAttempt | null> {
+): Promise<readonly AutoDeployAttempt[]> {
   const app = await context.db.query.apps.findFirst({
     where: (apps, { eq }) => eq(apps.id, appId),
     with: {
       repository: true,
       components: {
-        orderBy: (comps, { asc }) => [asc(comps.createdAt)],
-        limit: 1,
+        orderBy: (comps, { asc }) => [asc(comps.createdAt), asc(comps.id)],
         with: {
           builds: {
             orderBy: (builds, { desc }) => [
@@ -83,16 +81,18 @@ async function resumeHeldPush(
     },
   });
   const adopted = app?.repository?.authoritativeCommit ?? null;
-  if (app === undefined || !app.autoDeploy || adopted === null) return null;
-  const built = app.components[0]?.builds[0]?.commit.split('#')[0] ?? null;
-  // Already built: after a rollback, redeploying it would undo the rollback.
-  if (built === adopted) return null;
+  if (app === undefined || !app.autoDeploy || adopted === null) return [];
 
-  const result = await deployApp(
-    { name: app.id, commit: adopted },
-    { ...context, principal: AUTO_DEPLOY_PRINCIPAL },
-  );
-  return { appId: app.id, commit: adopted, result };
+  const attempts: AutoDeployAttempt[] = [];
+  for (const { id, placedTargetId, builds } of app.components) {
+    if (placedTargetId === null) continue;
+    // Already built: after a rollback, redeploying it would undo the rollback.
+    if (builds[0]?.commit.split('#')[0] === adopted) continue;
+    attempts.push(
+      await deployComponentAt(context, app.id, { id, placedTargetId }, adopted),
+    );
+  }
+  return attempts;
 }
 
 export const setAppLock: Command<SetAppLockInput, SetAppLockResult> = async (
@@ -111,7 +111,7 @@ export const setAppLock: Command<SetAppLockInput, SetAppLockResult> = async (
   const now = context.clock.now();
   if (input.reason !== null) {
     await lockApp(context.db, app.id, input.reason, context.principal, now);
-    return ok({ appId: app.id, reason: input.reason, resumed: null });
+    return ok({ appId: app.id, reason: input.reason, resumed: [] });
   }
 
   await context.db
