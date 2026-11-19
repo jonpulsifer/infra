@@ -364,7 +364,10 @@ export function turnEvents(
   const prior = new Map(oldSlots.map((slot) => [slot.callId, slot]));
   for (const slot of newSlots) {
     const previous = prior.get(slot.callId);
-    if (!previous && slot.status !== 'pending') {
+    if (
+      slot.status !== 'pending' &&
+      (!previous || previous.status === 'pending')
+    ) {
       const call =
         toolCall(after, slot.callId) ?? toolCall(before, slot.callId);
       result.push({

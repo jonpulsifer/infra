@@ -529,8 +529,22 @@ describe('a restart mid-turn', () => {
         throw new Error(
           `MCP recovery did not settle: ${JSON.stringify({
             turn: (await row(key)).turn,
+            turns: (await row(key)).turns,
             messages: discord.contentsIn(threadId),
             outcomes: second.metrics.turns,
+            turnLog: second.log.entries
+              .filter((one) =>
+                [
+                  'turn ended',
+                  'resumed a turn a restart cut off',
+                  'replaying the thread transcript',
+                ].includes(one.msg),
+              )
+              .map((one) => ({
+                message: one.msg,
+                stop: one.fields?.stopReason,
+                key: one.fields?.key,
+              })),
             notices: second.log
               .of('the session could not be opened')
               .map((one) => one.fields?.error),

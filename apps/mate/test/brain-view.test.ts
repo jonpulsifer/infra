@@ -97,6 +97,29 @@ describe('conversation view changes', () => {
     ]);
   });
 
+  test('draws a tool when its slot changes from pending to running', () => {
+    const calling = entry(2, {
+      ...answer,
+      content: [
+        {
+          type: 'toolCall',
+          id: 'c1',
+          name: 'bash',
+          arguments: { command: 'sleep 300' },
+        },
+      ],
+    });
+    const pending = view([calling], {
+      tools: [{ callId: 'c1', name: 'bash', status: 'pending' }],
+    });
+    const running = view([calling], {
+      tools: [{ callId: 'c1', name: 'bash', status: 'running' }],
+    });
+    expect(turnEvents(pending, running)).toMatchObject([
+      { type: 'tool_execution_start', args: { command: 'sleep 300' } },
+    ]);
+  });
+
   test('reports nested tool status from its slot when it has no result entry', () => {
     const finished = view([], {
       nestedTools: [
