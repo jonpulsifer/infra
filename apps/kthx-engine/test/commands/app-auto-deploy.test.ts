@@ -36,6 +36,7 @@ const adapters: AdapterRegistry = {
 describe('deploy on push, turned on and off', () => {
   let ctx: CommandContext;
   let repoAppId: string;
+  let repositoryId: string;
   let archiveAppId: string;
 
   beforeEach(async () => {
@@ -67,6 +68,7 @@ describe('deploy on push, turned on and off', () => {
       })
       .returning();
     repoAppId = repoApp!.id;
+    repositoryId = repository!.id;
     const [archiveApp] = await db
       .insert(apps)
       .values({ name: 'archivetest', sourceKind: 'archive' })
@@ -151,8 +153,14 @@ describe('deploy on push, turned on and off', () => {
         sourceKind: 'repo',
         sourceRepoUrl: 'jonpulsifer/infra',
         sourceRepoSubpath: 'apps/plainboi',
+        repositoryId: repositoryId,
       })
       .returning();
+    // The pass's commit must still govern its repository.
+    await db
+      .update(repositories)
+      .set({ authoritativeCommit: 'feedbeef' })
+      .where(eq(repositories.id, repositoryId));
     // A push deploys only placed Components.
     const vessel = await insertVessel(db, 'kubernetes', { name: 'cluster' });
     const [target] = await db
@@ -176,6 +184,9 @@ describe('deploy on push, turned on and off', () => {
       [
         {
           outcome: 'adopted',
+          repositoryId,
+          fullName: 'jonpulsifer/infra',
+          commit: 'feedbeef',
           scopes: [{ appId: repoAppId }, { appId: second!.id }],
         },
       ] as never,

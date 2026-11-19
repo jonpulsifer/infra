@@ -84,12 +84,19 @@ async function resumeHeldPush(
   if (app === undefined || !app.autoDeploy || adopted === null) return [];
 
   const attempts: AutoDeployAttempt[] = [];
-  for (const { id, placedTargetId, builds } of app.components) {
+  for (const { id, name, placedTargetId, builds } of app.components) {
     if (placedTargetId === null) continue;
     // Already built: after a rollback, redeploying it would undo the rollback.
     if (builds[0]?.commit.split('#')[0] === adopted) continue;
+    // Never throws: the App is already unlocked, so a fault on one Component
+    // must not leave the rest unresumed.
     attempts.push(
-      await deployComponentAt(context, app.id, { id, placedTargetId }, adopted),
+      await deployComponentAt(
+        context,
+        app.id,
+        { id, name, placedTargetId },
+        adopted,
+      ),
     );
   }
   return attempts;

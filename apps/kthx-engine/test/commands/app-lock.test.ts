@@ -620,12 +620,12 @@ describe('unlocking resumes the push the lock held back', () => {
     expect(stager.staged).toEqual([
       { repository: repository.fullName, commit: 'bbb2222' },
     ]);
-    const [resumed] = unlocked.value.resumed;
-    if (resumed === undefined || !resumed.result.ok) return;
+    const result = unlocked.value.resumed[0]?.result;
+    if (!result?.ok) return;
     const [queued] = await ctx.db
       .select()
       .from(builds)
-      .where(eq(builds.id, resumed.result.value.buildId));
+      .where(eq(builds.id, result.value.buildId));
     expect(queued?.componentId).toBe(component.id);
     expect(queued?.commit.split('#')[0]).toBe('bbb2222');
     expect(queued?.status).toBe('PENDING');
@@ -684,15 +684,70 @@ describe('unlocking resumes the push the lock held back', () => {
       { componentId: component.id, commit: 'abc2222', result: { ok: true } },
       { componentId: worker!.id, commit: 'abc2222', result: { ok: true } },
     ]);
-    for (const attempt of unlocked.value.resumed) {
-      if (!attempt.result.ok) continue;
+    for (const { componentId, result } of unlocked.value.resumed) {
+      if (!result?.ok) continue;
       const [queued] = await ctx.db
         .select()
         .from(builds)
-        .where(eq(builds.id, attempt.result.value.buildId));
-      expect(queued?.componentId).toBe(attempt.componentId);
+        .where(eq(builds.id, result.value.buildId));
+      expect(queued?.componentId).toBe(componentId);
       expect(queued?.commit.split('#')[0]).toBe('abc2222');
     }
+  });
+
+  test('a fault on one Component still resumes the other', async () => {
+    const { app, repository, component, target, ctx } = await servingPushApp(
+      'abd1111',
+      76,
+    );
+    const [worker] = await ctx.db
+      .insert(components)
+      .values({
+        appId: app.id,
+        name: 'worker',
+        kind: 'service',
+        expose: false,
+        placedTargetId: target.id,
+      })
+      .returning();
+    await setAppLock({ appId: app.id, reason: 'freeze' }, ctx);
+    await pushLands(repository.id, 'abd2222');
+
+    // The unlock is written before resuming, so a throw would leave the App
+    // unlocked with the second Component never dispatched.
+    let faulted = false;
+    const unlocked = await setAppLock(
+      { appId: app.id, reason: null },
+      {
+        ...ctx,
+        adapters: {
+          ...ctx.adapters,
+          source: () => {
+            if (!faulted) {
+              faulted = true;
+              throw new Error('the database went away');
+            }
+            return new FakeSourceStager();
+          },
+        },
+      },
+    );
+    expect(unlocked.ok).toBe(true);
+    if (!unlocked.ok) return;
+    expect((await lockOf(app.id)).lockReason).toBeNull();
+
+    expect(unlocked.value.resumed).toMatchObject([
+      { componentId: component.id, fault: 'the database went away' },
+      {
+        componentId: worker!.id,
+        result: { ok: true, value: { phase: 'BUILDING' } },
+      },
+    ]);
+    const queued = await ctx.db
+      .select()
+      .from(builds)
+      .where(eq(builds.componentId, worker!.id));
+    expect(queued.map((row) => row.commit.split('#')[0])).toEqual(['abd2222']);
   });
 
   test('a refusal is carried out, not thrown, and the App is unlocked anyway', async () => {
@@ -711,9 +766,10 @@ describe('unlocking resumes the push the lock held back', () => {
     const [resumed, ...more] = unlocked.value.resumed;
     expect(more).toEqual([]);
     expect(resumed?.commit).toBe('ddd4444');
-    expect(resumed?.result.ok).toBe(false);
-    if (resumed === undefined || resumed.result.ok) return;
-    expect(resumed.result.failure.code).toBe('NOT_BUILDABLE');
+    const result = resumed?.result;
+    expect(result?.ok).toBe(false);
+    if (result === undefined || result.ok) return;
+    expect(result.failure.code).toBe('NOT_BUILDABLE');
 
     const workspace = await getAppWorkspace({ name: app.id }, ctx);
     expect(workspace.ok).toBe(true);
@@ -821,8 +877,8 @@ describe('who asked for each Deploy', () => {
     );
     expect(attempts).toHaveLength(1);
     const result = attempts[0]!.result;
-    expect(result.ok).toBe(true);
-    if (!result.ok || result.value.deployId === null) return;
+    expect(result?.ok).toBe(true);
+    if (!result?.ok || result.value.deployId === null) return;
 
     const [row] = await ctx.db
       .select({ requestedBy: deploys.requestedBy })

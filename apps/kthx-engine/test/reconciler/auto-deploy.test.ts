@@ -542,6 +542,125 @@ describe('an App with several Components', () => {
   });
 });
 
+describe('what happens between one Component and the next', () => {
+  const NEWER = '4'.repeat(40);
+
+  /** Two opted-in Apps on one repository, the first with two Components. */
+  async function twoApps() {
+    const shared = await repositoryAt(PUSHED);
+    const first = await deployableApp(true, PREVIOUS, shared);
+    const worker = await siblingComponent(first.app.id, {
+      placed: true,
+      builtCommit: PREVIOUS,
+    });
+    const later = await deployableApp(true, PREVIOUS, shared);
+    return { shared, first, worker, later };
+  }
+
+  /** Runs `before` as the first Component's source is staged. */
+  function stagingFirst(before: () => Promise<void>): AutoDeployContext {
+    const base = context();
+    let ran = false;
+    return {
+      ...base,
+      adapters: {
+        ...base.adapters,
+        source: () => ({
+          async stageRepository(input) {
+            if (!ran) {
+              ran = true;
+              await before();
+            }
+            return stager.stageRepository(input);
+          },
+        }),
+      },
+    };
+  }
+
+  test('a fault on the first Component still deploys the next, and a later App', async () => {
+    stager = new FakeSourceStager();
+    const { shared, first, worker, later } = await twoApps();
+    const base = context();
+    let faulted = false;
+    const faulting: AutoDeployContext = {
+      ...base,
+      adapters: {
+        ...base.adapters,
+        source: () => {
+          if (!faulted) {
+            faulted = true;
+            throw new Error('the database went away');
+          }
+          return stager;
+        },
+      },
+    };
+
+    const attempts = await dispatchAutoDeploys(faulting, [
+      adoptedPass(shared, [first.app.id, later.app.id]),
+    ]);
+
+    expect(attempts).toMatchObject([
+      { componentId: worker.component.id, fault: 'the database went away' },
+      {
+        componentId: first.component.id,
+        result: { ok: true, value: { phase: 'BUILDING' } },
+      },
+      {
+        componentId: later.component.id,
+        result: { ok: true, value: { phase: 'BUILDING' } },
+      },
+    ]);
+    expect(await buildsFor(worker.component.id)).toHaveLength(1);
+    expect(await buildsFor(first.component.id)).toHaveLength(2);
+    expect(await buildsFor(later.component.id)).toHaveLength(2);
+  });
+
+  test('a commit overtaken after the first Component deploys no further Component', async () => {
+    stager = new FakeSourceStager();
+    const { shared, first, worker, later } = await twoApps();
+
+    const attempts = await dispatchAutoDeploys(
+      stagingFirst(async () => {
+        await database()
+          .db.update(repositories)
+          .set({ authoritativeCommit: NEWER })
+          .where(eq(repositories.id, shared.id));
+      }),
+      [adoptedPass(shared, [first.app.id, later.app.id])],
+    );
+
+    // The first was already staging; nothing after it builds the old commit.
+    expect(attempts.map((attempt) => attempt.componentId)).toEqual([
+      worker.component.id,
+    ]);
+    expect(await buildsFor(first.component.id)).toHaveLength(1);
+    expect(await buildsFor(later.component.id)).toHaveLength(1);
+  });
+
+  test('a lock taken after the first Component skips the rest of that App only', async () => {
+    stager = new FakeSourceStager();
+    const { shared, first, worker, later } = await twoApps();
+
+    const attempts = await dispatchAutoDeploys(
+      stagingFirst(async () => {
+        await database()
+          .db.update(apps)
+          .set({ lockReason: 'incident open', lockedAt: NOW })
+          .where(eq(apps.id, first.app.id));
+      }),
+      [adoptedPass(shared, [first.app.id, later.app.id])],
+    );
+
+    expect(attempts.map((attempt) => attempt.componentId)).toEqual([
+      worker.component.id,
+      later.component.id,
+    ]);
+    expect(await buildsFor(first.component.id)).toHaveLength(1);
+  });
+});
+
 describe('a pass that has been overtaken', () => {
   test('dispatches nothing, because a newer commit already governs', async () => {
     stager = new FakeSourceStager();
