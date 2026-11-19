@@ -104,6 +104,7 @@ describe('a Target with no stated endpoint reaches the adapter default', () => {
     const adapter = new VercelDeployAdapter({
       token: TOKEN,
       artifactToken: TOKEN,
+      zones: [],
       fetch: spy.fetch,
     });
 

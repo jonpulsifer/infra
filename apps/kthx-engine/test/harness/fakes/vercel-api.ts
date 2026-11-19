@@ -29,6 +29,10 @@ export interface FakeVercelOptions {
   readonly refuseDelete?: { status: number; body: unknown };
   /** When set, adding a domain answers with this. */
   readonly domainAnswer?: { status: number; body: unknown };
+  /** When set, removing a domain answers with this and removes nothing. */
+  readonly domainRemoveAnswer?: { status: number; body: unknown };
+  /** Domains already attached, by project. */
+  readonly domains?: Readonly<Record<string, readonly string[]>>;
   /** Served for any URL at `origin`, since artifact URLs carry a digest. */
   readonly bundle?: {
     readonly origin: string;
@@ -74,6 +78,10 @@ export class FakeVercel {
 
   constructor(private readonly options: FakeVercelOptions = {}) {
     for (const project of options.projects ?? []) this.projects.add(project);
+    for (const [project, names] of Object.entries(options.domains ?? {})) {
+      this.projects.add(project);
+      this.domains.set(project, [...names]);
+    }
   }
 
   get team(): string {
@@ -316,6 +324,30 @@ export class FakeVercel {
         ? json(200, { name: domainMatch[2], verified: true })
         : json(404, notFound('no such domain on this project'));
     }
+    if (domainMatch !== null && method === 'DELETE') {
+      if (this.options.domainRemoveAnswer !== undefined) {
+        return json(
+          this.options.domainRemoveAnswer.status,
+          this.options.domainRemoveAnswer.body,
+        );
+      }
+      const project = domainMatch[1] as string;
+      const name = decodeURIComponent(domainMatch[2] as string);
+      const attached = this.domains.get(project) ?? [];
+      if (!attached.includes(name)) {
+        return json(404, notFound('no such domain on this project'));
+      }
+      this.domains.set(
+        project,
+        attached.filter((domain) => domain !== name),
+      );
+      return json(200, {});
+    }
+
+    const listMatch = path.match(/^\/v9\/projects\/([^/]+)\/domains$/);
+    if (listMatch !== null && method === 'GET') {
+      return this.listDomains(listMatch[1] as string, url);
+    }
 
     const domainsMatch = path.match(/^\/v10\/projects\/([^/]+)\/domains$/);
     if (domainsMatch !== null && method === 'POST') {
@@ -327,6 +359,17 @@ export class FakeVercel {
       }
       const project = domainsMatch[1] as string;
       const name = (body as { name?: string })?.name ?? '';
+      const holder = [...this.domains].find(
+        ([other, names]) => other !== project && names.includes(name),
+      );
+      if (holder !== undefined) {
+        return json(409, {
+          error: {
+            code: 'domain_already_in_use',
+            message: `${name} is already in use by another project`,
+          },
+        });
+      }
       this.domains.set(project, [...(this.domains.get(project) ?? []), name]);
       return json(200, {
         name,
@@ -337,6 +380,36 @@ export class FakeVercel {
     }
 
     return json(404, notFound('no such path'));
+  }
+
+  /**
+   * Newest first, as the platform orders by default, with `until` taking the
+   * previous page's `next`. A domain's position stands in for its `createdAt`.
+   */
+  private listDomains(project: string, url: URL): Response {
+    const limit = Number(url.searchParams.get('limit') ?? '20');
+    const until = Number(
+      url.searchParams.get('until') ?? Number.POSITIVE_INFINITY,
+    );
+    const all = (this.domains.get(project) ?? [])
+      .map((name, index) => ({ name, createdAt: index + 1 }))
+      .reverse()
+      .filter((domain) => domain.createdAt < until);
+    const page = all.slice(0, limit);
+    const last = page.at(-1);
+    return json(200, {
+      domains: page.map((domain) => ({
+        ...domain,
+        apexName: domain.name,
+        projectId: project,
+        verified: true,
+      })),
+      pagination: {
+        count: page.length,
+        next: all.length > limit && last !== undefined ? last.createdAt : null,
+        prev: null,
+      },
+    });
   }
 
   private create(body: unknown, url: URL): Response {

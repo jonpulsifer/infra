@@ -44,6 +44,9 @@ const TARGET: DeployTarget = {
 /** The project `vercelProjectName` gives App `shop`, Component `site`. */
 const PROJECT = 'shop-site';
 
+/** The installation's DNS zones, the only names the adapter ever detaches. */
+const ZONES = ['example.test'];
+
 function desired(overrides: Partial<DesiredState> = {}): DesiredState {
   return {
     deploy: 'deploy-1',
@@ -125,6 +128,7 @@ function adapterFor(
       token: api.token,
       // One fake stands for both the platform and the artifact registry.
       artifactToken: api.token,
+      zones: ZONES,
       fetch: api.fetch,
       pollIntervalMs: 1,
       sleep: async () => {},
@@ -396,6 +400,7 @@ describe('a supplied upload is fetched out of the depot', () => {
     const adapter = new VercelDeployAdapter({
       token: api.token,
       artifactToken: api.token,
+      zones: ZONES,
       federation: { ...FEDERATION, readToken: async () => 'jwt' },
       pollIntervalMs: 1,
       sleep: async () => {},
@@ -491,6 +496,110 @@ describe('§9: Vercel serves Public only', () => {
 
     expect(api.domainsOf(PROJECT)).toEqual(['shop.example.test']);
   });
+
+  test('a cleared vanity name is detached from the project', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.test' } }),
+      ),
+    );
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.domainsOf(PROJECT)).toEqual([]);
+  });
+
+  test('a renamed vanity name replaces the old one', async () => {
+    const { api, adapter } = adapterFor();
+    await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'shop.example.test' } }),
+      ),
+    );
+    await drain(
+      adapter.apply(
+        TARGET,
+        desired({ hostname: { canonical: '', vanity: 'store.example.test' } }),
+      ),
+    );
+
+    expect(api.domainsOf(PROJECT)).toEqual(['store.example.test']);
+  });
+
+  test('a domain outside the installation’s zones is never detached', async () => {
+    const { api, adapter } = adapterFor({
+      domains: {
+        [PROJECT]: [
+          `${PROJECT}.vercel.app`,
+          'shop.elsewhere.test',
+          'example.test.elsewhere.test',
+          'stale.example.test',
+          'example.test',
+        ],
+      },
+    });
+    await drain(adapter.apply(TARGET, desired()));
+
+    expect(api.domainsOf(PROJECT)).toEqual([
+      `${PROJECT}.vercel.app`,
+      'shop.elsewhere.test',
+      'example.test.elsewhere.test',
+    ]);
+  });
+
+  test('a name released by one project can go on another', async () => {
+    const { api, adapter } = adapterFor();
+    const name = { canonical: '', vanity: 'shop.example.test' };
+    await drain(adapter.apply(TARGET, desired({ hostname: name })));
+    await drain(adapter.apply(TARGET, desired()));
+    const { verdict } = await drain(
+      adapter.apply(TARGET, desired({ component: 'next', hostname: name })),
+    );
+
+    expect(verdict.phase).toBe('LIVE');
+    expect(api.domainsOf('shop-next')).toEqual(['shop.example.test']);
+  });
+
+  test('every page of the project’s domains is read', async () => {
+    const stale = Array.from(
+      { length: 105 },
+      (_, index) => `stale-${index}.example.test`,
+    );
+    const { api, adapter } = adapterFor({ domains: { [PROJECT]: stale } });
+    await drain(adapter.apply(TARGET, desired()));
+
+    expect(api.domainsOf(PROJECT)).toEqual([]);
+  });
+
+  test('a domain already gone when it is detached is not a failure', async () => {
+    const { adapter } = adapterFor({
+      domains: { [PROJECT]: ['stale.example.test'] },
+      domainRemoveAnswer: {
+        status: 404,
+        body: { error: { code: 'not_found' } },
+      },
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('LIVE');
+  });
+
+  test('a refused detach fails the release', async () => {
+    const { adapter } = adapterFor({
+      domains: { [PROJECT]: ['stale.example.test'] },
+      domainRemoveAnswer: {
+        status: 409,
+        body: { error: { code: 'conflict', message: 'being transferred' } },
+      },
+    });
+    const { verdict } = await drain(adapter.apply(TARGET, desired()));
+
+    expect(verdict.phase).toBe('FAILED');
+    if (verdict.phase === 'FAILED') expect(verdict.reason).toBe('REJECTED');
+  });
 });
 
 describe('§6: the verdict is the platform’s, read from the deployment', () => {
@@ -556,6 +665,7 @@ describe('§6: the verdict is the platform’s, read from the deployment', () =>
     const adapter = new VercelDeployAdapter({
       token: api.token,
       artifactToken: api.token,
+      zones: ZONES,
       fetch: api.fetch,
       pollIntervalMs: 1,
       // Every poll costs a minute, so the five-minute budget runs out long

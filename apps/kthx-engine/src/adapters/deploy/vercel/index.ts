@@ -92,6 +92,11 @@ export interface VercelAdapterOptions {
    */
   readonly artifactToken: TokenProvider;
   /**
+   * The installation's DNS zones. A project domain inside one that the release
+   * no longer names is detached; nothing outside them is ever touched.
+   */
+  readonly zones: readonly string[];
+  /**
    * Signs a short-lived URL for a supplied upload's `gs://` object, or `null`
    * where none is configured.
    */
@@ -270,6 +275,8 @@ const PREVIOUS_DEPLOY_META = 'spindriftDeploy';
 const NOTHING_RUNS = 'Static files are served by the Target.';
 
 const DEFAULT_POLL_MS = 2_000;
+/** The platform's largest page of project domains. */
+const DOMAIN_PAGE = 100;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
 
 interface Deployment {
@@ -279,6 +286,11 @@ interface Deployment {
   readonly errorCode?: string;
   readonly errorMessage?: string | null;
   readonly meta?: Readonly<Record<string, string>>;
+}
+
+interface ProjectDomainList {
+  readonly domains?: readonly { readonly name?: string }[];
+  readonly pagination?: { readonly next?: number | null };
 }
 
 interface DeploymentList {
@@ -512,6 +524,24 @@ export class VercelDeployAdapter implements DeployAdapter {
     ref: DeployRef,
     desired: DesiredState,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
+    const detached = await this.detachStaleDomains(
+      http,
+      connection,
+      project,
+      desired.hostname.vanity,
+    );
+    if (detached.ok === false) {
+      const failure = cloudWriteFailure(detached.failure, ref);
+      yield this.events.status('FAILED', {
+        resource: project,
+        reason: failure.reason,
+      });
+      return failure;
+    }
+    for (const name of detached.value) {
+      yield this.events.log(`detached ${name} from this project`, project);
+    }
+
     if (desired.hostname.vanity !== undefined) {
       const attached = await this.attachDomain(
         http,
@@ -816,6 +846,62 @@ export class VercelDeployAdapter implements DeployAdapter {
   }
 
   /**
+   * Detaches each name in the installation's zones other than `keep`, so a
+   * cleared or renamed vanity name is free for another project to take.
+   */
+  private async detachStaleDomains(
+    http: CloudHttp,
+    connection: VercelAdapterConnection,
+    project: string,
+    keep: string | undefined,
+  ): Promise<Outcome<readonly string[]>> {
+    const listed = await this.projectDomains(http, connection, project);
+    if (listed.ok === false) return listed;
+    const stale = listed.value.filter(
+      (name) =>
+        name !== keep?.toLowerCase() && inZones(name, this.options.zones),
+    );
+    for (const name of stale) {
+      const removed = await http.json<unknown>({
+        method: 'DELETE',
+        path: `/v9/projects/${encodeURIComponent(project)}/domains/${encodeURIComponent(name)}`,
+        query: { teamId: connection.team },
+      });
+      if (removed.ok) continue;
+      if (removed.kind === 'status' && removed.status === 404) continue;
+      return { ok: false, failure: removed };
+    }
+    return { ok: true, value: stale };
+  }
+
+  /** Every domain on the project, lowercased, following `pagination.next`. */
+  private async projectDomains(
+    http: CloudHttp,
+    connection: VercelAdapterConnection,
+    project: string,
+  ): Promise<Outcome<readonly string[]>> {
+    const names: string[] = [];
+    let until: number | null | undefined;
+    do {
+      const page = await http.json<ProjectDomainList>({
+        method: 'GET',
+        path: `/v9/projects/${encodeURIComponent(project)}/domains`,
+        query: {
+          teamId: connection.team,
+          limit: String(DOMAIN_PAGE),
+          until: until == null ? undefined : String(until),
+        },
+      });
+      if (!page.ok) return { ok: false, failure: page };
+      for (const domain of page.value?.domains ?? []) {
+        if (domain.name !== undefined) names.push(domain.name.toLowerCase());
+      }
+      until = page.value?.pagination?.next;
+    } while (until != null);
+    return { ok: true, value: names };
+  }
+
+  /**
    * Polls the deployment to a verdict. The platform's queue and build states
    * all report as one `WAITING`.
    */
@@ -1062,6 +1148,14 @@ function parseRef(
   ref: DeployRef,
 ): string | null {
   return parseScopedRef(connection.team, 'projects', ref);
+}
+
+/** Whether `name` is a zone apex or a name under one. */
+function inZones(name: string, zones: readonly string[]): boolean {
+  return zones.some((zone) => {
+    const apex = zone.toLowerCase();
+    return name === apex || name.endsWith(`.${apex}`);
+  });
 }
 
 /** Hex SHA-1, what the platform keys uploaded files by. */
