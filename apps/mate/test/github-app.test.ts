@@ -110,6 +110,9 @@ class FakeGitHub {
       this.revoked.push(this.calls[this.calls.length - 1]?.bearer ?? '');
       return new Response(null, { status: 204 });
     }
+    if (path === '/repos/jonpulsifer/infra/pulls/1' && method === 'GET') {
+      return Response.json({ number: 1 });
+    }
     return Response.json({ message: 'nope' }, { status: 418 });
   }
 
@@ -289,24 +292,34 @@ describe('a mint', () => {
   });
 });
 
-describe('the reuse rule', () => {
-  test('holds a token only while a whole turn plus five minutes fits in it', async () => {
-    const { app, github, clock } = build();
+describe('turn tokens', () => {
+  test('mate keeps a separate token for its own reads', async () => {
+    const { app, github } = build();
     try {
-      const first = await app.token();
-      expect(github.minted).toBe(1);
-
-      // Nine minutes in, 51 of the 60 are left against a floor of 50.
-      await clock.advance(9 * 60_000);
-      expect((await app.token()).token).toBe(first.token);
-      expect(github.minted).toBe(1);
-
-      // Eleven minutes in, 49 are left: under the floor.
-      await clock.advance(2 * 60_000);
-      const second = await app.token();
-      expect(second.token).not.toBe(first.token);
+      const turn = await app.token();
+      await app.read('/pulls/1');
+      const firstRead = github.of('/repos/jonpulsifer/infra/pulls/1')[0];
+      expect(firstRead?.bearer).not.toBe(turn.token);
+      await app.revoke(turn.token);
+      await app.read('/pulls/1');
+      expect(github.of('/repos/jonpulsifer/infra/pulls/1')[1]?.bearer).toBe(
+        firstRead?.bearer,
+      );
       expect(github.minted).toBe(2);
-      expect(second.expiresAt - clock.now()).toBe(HOUR_MS);
+    } finally {
+      github.stop();
+    }
+  });
+
+  test('concurrent turns have distinct tokens so one can revoke without breaking the other', async () => {
+    const { app, github } = build();
+    try {
+      const [first, second] = await Promise.all([app.token(), app.token()]);
+      expect(first.token).not.toBe(second.token);
+      expect(github.minted).toBe(2);
+      await app.revoke(first.token);
+      expect(github.revoked).toEqual([first.token]);
+      expect(github.revoked).not.toContain(second.token);
     } finally {
       github.stop();
     }
