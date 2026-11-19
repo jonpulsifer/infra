@@ -776,6 +776,7 @@ describe('several servers', () => {
     const both = combineMcp([k.bridge, w.bridge]);
     both.start();
     await eventually(() => k.metrics.up.length === 1, 'the failed attempt');
+    expect(await w.bridge.ready(MCP_CONNECT_TIMEOUT_MS)).toBe(true);
     const waiting = both.ready(10_000);
     await k.clock.advance(10_000);
     expect(await waiting).toBe(false);
