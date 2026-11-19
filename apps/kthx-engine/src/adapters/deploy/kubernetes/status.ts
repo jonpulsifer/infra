@@ -6,7 +6,10 @@ import type { DeployPhase, FailureReason } from '../contract.ts';
 
 export interface DeliveryStatus {
   phase: DeployPhase;
-  /** Unset on `FAILED` when the object gives no cause; pods are read instead. */
+  /**
+   * Unset on `FAILED` when the object gives no cause; pods are read instead.
+   * On `WAITING`, what a deadline concludes if the stall outlasts it.
+   */
   reason?: FailureReason;
   /** The sentence the developer reads, in the platform's own words. */
   detail?: string;
