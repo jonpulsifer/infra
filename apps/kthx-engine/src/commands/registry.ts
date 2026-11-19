@@ -25,9 +25,7 @@ import { listAppRows, listAppRowsInput } from './apps/rows.ts';
 import { setAppLock, setAppLockInput } from './apps/set-lock.ts';
 import { getAppSource, getAppSourceInput } from './apps/source.ts';
 import { uploadArchive, uploadArchiveInput } from './apps/upload-archive.ts';
-import { setAppVanity, setAppVanityInput } from './apps/vanity.ts';
 import { getAppWorkspace, getAppWorkspaceInput } from './apps/workspace.ts';
-import { setAppZone, setAppZoneInput } from './apps/zone.ts';
 import { listArtifacts, listArtifactsInput } from './artifacts/list.ts';
 import { adoptBuild, adoptBuildInput } from './builds/adopt.ts';
 import { cancelBuild, cancelBuildInput } from './builds/cancel.ts';
@@ -59,6 +57,11 @@ import {
   unplaceComponent,
   unplaceComponentInput,
 } from './components/unplace.ts';
+import {
+  setComponentVanity,
+  setComponentVanityInput,
+} from './components/vanity.ts';
+import { setComponentZone, setComponentZoneInput } from './components/zone.ts';
 import {
   setBuildSecrets,
   setBuildSecretsInput,
@@ -197,8 +200,6 @@ export const commandRegistry = {
   },
   setAppLock: { input: setAppLockInput, handler: setAppLock },
   setAppBuildRoute: { input: setAppBuildRouteInput, handler: setAppBuildRoute },
-  setAppZone: { input: setAppZoneInput, handler: setAppZone },
-  setAppVanity: { input: setAppVanityInput, handler: setAppVanity },
   getAppWorkspace: { input: getAppWorkspaceInput, handler: getAppWorkspace },
   getAppSource: { input: getAppSourceInput, handler: getAppSource },
   getDeployDetail: { input: getDeployDetailInput, handler: getDeployDetail },
@@ -243,6 +244,14 @@ export const commandRegistry = {
   setComponentReach: {
     input: setComponentReachInput,
     handler: setComponentReach,
+  },
+  setComponentZone: {
+    input: setComponentZoneInput,
+    handler: setComponentZone,
+  },
+  setComponentVanity: {
+    input: setComponentVanityInput,
+    handler: setComponentVanity,
   },
   runComponent: { input: runComponentInput, handler: runComponent },
   restartComponent: {

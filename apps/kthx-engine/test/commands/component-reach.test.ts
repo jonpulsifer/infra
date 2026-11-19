@@ -303,3 +303,91 @@ describe('a Component edited mid-attempt does not change what is being placed', 
     ]);
   });
 });
+
+describe("a reach edit keeps the Component's names where it chose them", () => {
+  const privateZone = zoneFor('private', manifest.dns.zones) as string;
+  const publicZone = zoneFor('public', manifest.dns.zones) as string;
+
+  async function pinned(componentId: string, zone: string | null) {
+    await database()
+      .db.update(components)
+      .set({ zone })
+      .where(eq(components.id, componentId));
+  }
+
+  test('a pinned zone that does not serve the new reach refuses the edit', async () => {
+    const { component } = await fixture();
+    await pinned(component.id, privateZone);
+
+    const result = await setComponentReach(
+      { componentId: component.id, reach: 'public', auth: 'none' },
+      context(registryOf(new FakeDeployAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.code).toBe('INVALID_INPUT');
+    expect(result.failure.message).toBe(
+      `shop's web is pinned to ${privateZone}, which serves only private. ` +
+        'Clear its zone, or pin one that serves public, before making it public.',
+    );
+    expect(result.failure.issues?.[0]?.path).toBe('reach');
+    const row = await componentRow(component.id);
+    expect(row?.reach).toBe('private');
+    expect(row?.auth).toBe('proxy');
+  });
+
+  test('cleared, the same edit moves the names to the first zone serving the reach', async () => {
+    const { component } = await fixture();
+    await pinned(component.id, null);
+
+    const result = await setComponentReach(
+      { componentId: component.id, reach: 'public', auth: 'none' },
+      context(registryOf(new FakeDeployAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+    expect((await componentRow(component.id))?.reach).toBe('public');
+  });
+
+  test('an auth change on the same reach is not a move, so the pin is not read', async () => {
+    const { component } = await fixture('public', 'proxy');
+    // A pin no edit accepts, as a row written before the rule holds one.
+    await pinned(component.id, privateZone);
+
+    const result = await setComponentReach(
+      { componentId: component.id, reach: 'public', auth: 'none' },
+      context(registryOf(new FakeDeployAdapter())),
+    );
+
+    expect(result.ok).toBe(true);
+  });
+
+  test('a reach that would mint a name another Component holds refuses the edit', async () => {
+    const { component } = await fixture();
+    const [other] = await database()
+      .db.insert(apps)
+      .values({ name: 'store', sourceKind: 'archive' })
+      .returning();
+    await database().db.insert(components).values({
+      appId: other!.id,
+      name: 'front',
+      kind: 'website',
+      reach: 'public',
+      auth: 'none',
+      vanityLabel: 'shop-web',
+    });
+
+    const result = await setComponentReach(
+      { componentId: component.id, reach: 'public', auth: 'none' },
+      context(registryOf(new FakeDeployAdapter())),
+    );
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.failure.message).toBe(
+      `making shop's web public would take shop-web.${publicZone}, which store's front holds`,
+    );
+    expect((await componentRow(component.id))?.reach).toBe('private');
+  });
+});

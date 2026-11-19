@@ -54,13 +54,17 @@ A Build uses the first route, in Settings rank order, whose SLSA (Supply-chain L
 
 A Component's `reach` is `none`, `private` or `public`. [Ingress and DNS](../../platform/network/ingress-and-dns.md) covers the records and zones. `auth: proxy` adds oauth2-proxy, which admits only the owner's GitHub login.
 
-`<app>.lolwtf.dev` shows a status page until a Component serves it. kthx writes the record of an App on a zone apex once, and cannot change or delete it.
+Each Component has its own names. Its canonical name is `<app>-<component>.<zone>`. A website or an exposed service can add a vanity name: one label, or `@` for the zone apex. A Component can pin a zone that serves its reach, or take the first zone that does. kthx refuses a pin that does not serve the reach, and a reach change that the pinned zone does not serve.
 
-When the engine has the `KTHX_ENGINE_KTHX_*` variables, a name an App mints in the quick sites' zone is reserved for the App in kthx first: when its vanity name is set or its zone changes, and before each Deploy. A name a quick site or another App holds refuses the edit or rejects the Deploy.
+One name belongs to one Component in the installation. An edit that takes a name another Component holds is refused, and the refusal names the holder. A Deploy that publishes such a name is rejected unless its Component is the older one. Two Apps of one name with a Component of one name mint one canonical name, so only the older Component deploys.
 
-Only deleting the App releases names: those its placed Components still mint, and none while a retained workload serves them. A name the App reserved through an earlier edit or a deleted Component stays reserved. Two Apps of the same name with a Component of the same name mint one canonical name, so the second one's Deploys are rejected.
+A name a Component holds shows a status page until the Component serves it. kthx writes a record on a zone apex once, and cannot change or delete it.
 
-`apps/kthx-engine/src/commands/apps/kthx-names.ts` holds the rule.
+When the engine has the `KTHX_ENGINE_KTHX_*` variables, a name a Component mints in the quick sites' zone is reserved in kthx for its App first: when the Component's vanity name or zone is set, and before each Deploy. A name a quick site or another App holds refuses the edit or rejects the Deploy.
+
+Only deleting the App releases names in kthx: those its placed Components still mint, and none while a retained workload serves them. A name the App reserved through an earlier edit or a deleted Component stays reserved.
+
+`apps/kthx-engine/src/commands/apps/kthx-names.ts` holds the kthx rule, and `apps/kthx-engine/src/commands/apps/names.ts` holds the rule of one name per Component.
 
 kthx writes config values to Secret Manager in bluenose, and each Target reads them from there ([Secrets](../../platform/secrets.md)).
 

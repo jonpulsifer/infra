@@ -1,8 +1,9 @@
-// deleteComponent makes deleteApp's promises over one Component. Deleting one
-// of two serving Components lets the survivor claim the App's vanity name.
+// deleteComponent makes deleteApp's promises over one Component. Deleting a
+// Component frees the names it held for any other Component.
 import { describe, expect, test } from 'bun:test';
 import { eq } from 'drizzle-orm';
 import { deleteComponent } from '../../src/commands/components/delete.ts';
+import { setComponentVanity } from '../../src/commands/components/vanity.ts';
 import type {
   AdapterRegistry,
   Clock,
@@ -17,10 +18,6 @@ import {
   targets,
 } from '../../src/db/schema.ts';
 import { zoneFor } from '../../src/domain/naming.ts';
-import {
-  type DeployLoopContext,
-  runDeployPass,
-} from '../../src/reconciler/deploy-loop.ts';
 import { withIsolatedDatabase } from '../harness/db.ts';
 import { FakeDeployAdapter } from '../harness/fakes/deploy-adapter.ts';
 import { FakeDnsPublisher } from '../harness/fakes/dns-publisher.ts';
@@ -402,55 +399,40 @@ describe('what it refuses', () => {
   });
 });
 
-// A sole serving Component carries the App's vanity name.
-describe('§9: the sole-serving rule sees one Component afterwards', () => {
-  function loopContext(adapter: FakeDeployAdapter): DeployLoopContext {
-    return {
-      db: database().db,
-      adapters: {
-        deploy: (name) => (name === adapter.adapter ? adapter : null),
-      },
-      clock,
-      manifest,
-    };
-  }
-
-  test('deleting the second claimant frees the vanity name for the survivor', async () => {
+// One name belongs to one Component, so deleting the holder frees it.
+describe('§9: a deleted Component holds no name afterwards', () => {
+  test('deleting the holder of a vanity name lets another Component take it', async () => {
     const target = await seedTarget('folly', 'kubernetes');
     const app = await seedApp('shop');
-    await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
     const survivor = await seedComponent(app.id, 'web', {
       targetId: target.id,
     });
     const demo = await seedComponent(app.id, 'demo', { targetId: target.id });
-
-    const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
-    // Two serving Components, so neither gets the vanity name.
-    await runDeployPass(loopContext(adapter));
-    const contended = adapter.applied.find(
-      (call) => call.desired.component === 'web',
-    );
-    expect(contended?.desired.hostname.vanity).toBeUndefined();
+    await database()
+      .db.update(components)
+      .set({ vanityLabel: 'shop' })
+      .where(eq(components.id, demo.component.id));
 
     const { registry } = fakes();
+    const held = await setComponentVanity(
+      { componentId: survivor.component.id, label: 'shop' },
+      context(registry),
+    );
+    expect(held.ok).toBe(false);
+
     const result = await deleteComponent(
       { componentId: demo.component.id, confirm: true },
       context(registry),
     );
     expect(result.ok).toBe(true);
 
-    // The survivor is now the only serving Component.
-    const redeployed = new FakeDeployAdapter({ adapter: 'kubernetes' });
-    await database()
-      .db.update(deploys)
-      .set({ phase: 'PENDING' })
-      .where(eq(deploys.id, survivor.deploy!.id));
-    await runDeployPass(loopContext(redeployed));
-
+    const taken = await setComponentVanity(
+      { componentId: survivor.component.id, label: 'shop' },
+      context(registry),
+    );
+    expect(taken.ok).toBe(true);
+    if (!taken.ok) return;
     const zone = zoneFor('private', manifest.dns.zones);
-    expect(redeployed.applied[0]?.desired.hostname.vanity).toBe(`shop.${zone}`);
+    expect(taken.value.hostnames).toContain(`shop.${zone}`);
   });
 });

@@ -32,16 +32,19 @@ function get(host: string): Promise<Response> {
   );
 }
 
-async function seedApp(
-  values: { name: string; vanityDomain?: string } & Record<string, unknown>,
-) {
+async function seedApp(values: { name: string; vanityLabel?: string }) {
   const [app] = await database()
     .db.insert(apps)
-    .values({ sourceKind: 'repo', ...values })
+    .values({ sourceKind: 'repo', name: values.name })
     .returning();
   const [component] = await database()
     .db.insert(components)
-    .values({ appId: app!.id, name: 'web', kind: 'service' })
+    .values({
+      appId: app!.id,
+      name: 'web',
+      kind: 'service',
+      vanityLabel: values.vanityLabel ?? null,
+    })
     .returning();
   return component!;
 }
@@ -104,7 +107,7 @@ describe('what an address says about its App', () => {
   });
 
   test('the vanity name reaches the same Component as the canonical', async () => {
-    await seedApp({ name: 'vain', vanityDomain: 'shiny' });
+    await seedApp({ name: 'vain', vanityLabel: 'shiny' });
 
     const canonical = await get(`vain-web.${ZONE}`);
     const flat = await get(`shiny.${ZONE}`);
@@ -116,7 +119,7 @@ describe('what an address says about its App', () => {
 
   test('the apex vanity name reaches the same Component as the canonical', async () => {
     // `@` is the bare zone.
-    await seedApp({ name: 'root', vanityDomain: '@' });
+    await seedApp({ name: 'root', vanityLabel: '@' });
 
     const canonical = await get(`root-web.${ZONE}`);
     const apex = await get(ZONE);

@@ -263,7 +263,7 @@ export const getDeployDetail: Command<
     phase: deploy.phase as DeployPhase,
     phaseWord,
     headline,
-    // Only what this Deploy published: vanityDomain is a label, not an address.
+    // Only what this Deploy published: a vanity label is not an address.
     url: deploy.url ?? '',
     urlLive: deploy.phase === 'LIVE',
     previousReleaseServing,

@@ -9,6 +9,7 @@ import type {
   AppDomainView,
   AppLockView,
   BuildRouteOptionView,
+  ComponentDomainView,
   ComponentView,
   DatastoreView,
   LogLine,
@@ -135,9 +136,10 @@ export type SetLock = (
 >;
 
 export type SetDomain = (choice: {
+  readonly componentId: string;
   /** The label, `@` for the zone itself, or null to have no name of its own. */
   readonly label: string | null;
-  /** The zone to pin to, or null to take the first that serves. */
+  /** The zone to pin to, or null to take the first that serves its reach. */
   readonly zone: string | null;
 }) => Promise<
   { readonly ok: true } | { readonly ok: false; readonly message: string }
@@ -1929,15 +1931,39 @@ function SourceSection({ app }: { app: string }) {
   );
 }
 
-/**
- * The App's vanity name. `@` is the zone apex and never shows on screen; the
- * record publishes on the next deploy.
- */
+/** One domain card per Component: each carries its own names. */
 function DomainSection({
   domain,
   onSetDomain,
 }: {
   domain: AppDomainView;
+  onSetDomain?: SetDomain;
+}) {
+  return (
+    <>
+      {domain.components.map((component) => (
+        <ComponentDomainCard
+          key={component.componentId}
+          zones={domain.zones}
+          domain={component}
+          {...(onSetDomain === undefined ? {} : { onSetDomain })}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * One Component's names. `@` is the zone apex and never shows on screen; the
+ * record publishes on the next deploy.
+ */
+function ComponentDomainCard({
+  zones,
+  domain,
+  onSetDomain,
+}: {
+  zones: AppDomainView['zones'];
+  domain: ComponentDomainView;
   onSetDomain?: SetDomain;
 }) {
   const [choice, setChoice] = useState<'none' | 'apex' | 'label'>(
@@ -1946,30 +1972,34 @@ function DomainSection({
   const [label, setLabel] = useState(
     domain.label === null || domain.label === '@' ? '' : domain.label,
   );
-  const [zone, setZone] = useState(domain.zone ?? domain.zones[0]?.name ?? '');
+  // `''` takes the first zone serving the reach.
+  const [zone, setZone] = useState(domain.zone ?? '');
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  const routes = domain.reach !== 'none';
+  const shownZone = zone === '' ? (domain.servingZones[0] ?? '') : zone;
+  const named = domain.serves && choice !== 'none';
   const issue =
-    choice === 'label' && label !== '' && !isLabel(label)
+    named && choice === 'label' && label !== '' && !isLabel(label)
       ? 'One lowercase label: letters, numbers and hyphens.'
       : null;
-  const preview =
-    choice === 'none'
-      ? null
-      : choice === 'apex'
-        ? zone
-        : label === ''
-          ? null
-          : `${label}.${zone}`;
+  const preview = !named
+    ? null
+    : choice === 'apex'
+      ? shownZone
+      : label === ''
+        ? null
+        : `${label}.${shownZone}`;
 
   const save = async () => {
     if (onSetDomain === undefined || issue !== null) return;
     setSaving(true);
     setFailure(null);
     const result = await onSetDomain({
+      componentId: domain.componentId,
       zone: zone === '' ? null : zone,
-      label: choice === 'none' ? null : choice === 'apex' ? '@' : label,
+      label: !named ? null : choice === 'apex' ? '@' : label,
     });
     setSaving(false);
     if (!result.ok) setFailure(result.message);
@@ -1977,47 +2007,74 @@ function DomainSection({
 
   return (
     <Card>
-      <SectionHeader eyebrow="App address" title="Domain" />
+      <SectionHeader
+        eyebrow={`${domain.component} address`}
+        title={`Domain for ${domain.component}`}
+      />
       <CardContent className="flex flex-col gap-4">
-        {domain.ambiguous ? (
+        {!domain.zoneFits && domain.zone !== null ? (
           <p className="rounded-md border border-destructive bg-destructive-soft px-3 py-2.5 text-sm text-destructive">
-            Nothing is published under a name of your own. More than one
-            Component serves, and kthx will not choose which one the name means.
-            Leave one serving, or the name stays unused.
+            {domain.zone} does not serve {domain.reach}, so this Component's
+            names are minted in {domain.servingZones[0] ?? 'no zone'} instead.
+            Pick a zone that serves {domain.reach}.
           </p>
         ) : null}
 
-        <div className="grid gap-2 sm:grid-cols-3">
-          <Choice
-            selected={choice === 'none'}
-            title="No name of your own"
-            note="Only the address the Target mints."
-            onClick={() => setChoice('none')}
-          />
-          {/* An apex record is published once and never re-pointed; see `isApexName`. */}
-          <Choice
-            selected={choice === 'apex'}
-            title="The domain itself"
-            note={
-              zone === ''
-                ? 'The bare domain. Published once — moving it later is a hand edit in DNS.'
-                : `${zone} — published once. Moving it later is a hand edit in DNS.`
-            }
-            onClick={() => setChoice('apex')}
-          />
-          <Choice
-            selected={choice === 'label'}
-            title="A name under it"
-            note={
-              zone === '' ? 'One label under the domain.' : `something.${zone}`
-            }
-            onClick={() => setChoice('label')}
-          />
-        </div>
+        <dl className="grid gap-1 text-sm sm:grid-cols-[auto_1fr] sm:gap-x-4">
+          <dt className="text-muted-foreground">Canonical</dt>
+          <dd className="break-all font-mono">
+            {domain.canonical ??
+              (routes ? 'Named by its Target' : 'None: its reach is none')}
+          </dd>
+          <dt className="text-muted-foreground">Vanity</dt>
+          <dd className="break-all font-mono">{domain.vanity ?? 'None'}</dd>
+          <dt className="text-muted-foreground">Zones for {domain.reach}</dt>
+          <dd className="break-all font-mono">
+            {domain.servingZones.length > 0
+              ? domain.servingZones.join(', ')
+              : 'None'}
+          </dd>
+        </dl>
 
-        {choice === 'label' ? (
+        {domain.serves ? (
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Choice
+              selected={choice === 'none'}
+              title="No name of its own"
+              note="Only the address the Target mints."
+              onClick={() => setChoice('none')}
+            />
+            {/* An apex record is published once and never re-pointed; see `isApexName`. */}
+            <Choice
+              selected={choice === 'apex'}
+              title="The domain itself"
+              note={
+                shownZone === ''
+                  ? 'The bare domain. Published once — moving it later is a hand edit in DNS.'
+                  : `${shownZone} — published once. Moving it later is a hand edit in DNS.`
+              }
+              onClick={() => setChoice('apex')}
+            />
+            <Choice
+              selected={choice === 'label'}
+              title="A name under it"
+              note={
+                shownZone === ''
+                  ? 'One label under the domain.'
+                  : `something.${shownZone}`
+              }
+              onClick={() => setChoice('label')}
+            />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Only a website or an exposed service takes a name of its own.
+          </p>
+        )}
+
+        {named && choice === 'label' ? (
           <Field
-            name="vanityLabel"
+            name={`vanity-${domain.componentId}`}
             label="Name"
             value={label}
             onChange={(event) => setLabel(event.target.value)}
@@ -2026,20 +2083,28 @@ function DomainSection({
           />
         ) : null}
 
-        {domain.zones.length > 1 && choice !== 'none' ? (
+        {routes && zones.length > 1 ? (
           <Field
-            name="zone"
+            name={`zone-${domain.componentId}`}
             label="Which domain"
-            hint="Domains your admin configured, in Settings."
+            hint={`Only a domain that serves ${domain.reach} can name this Component.`}
           >
             <select
-              id="zone"
+              id={`zone-${domain.componentId}`}
               value={zone}
               onChange={(event) => setZone(event.target.value)}
               className="w-full rounded-md border border-border bg-card px-3 py-2 font-mono text-sm"
             >
-              {domain.zones.map((option) => (
-                <option key={option.name} value={option.name}>
+              <option value="">
+                The first that serves {domain.reach}
+                {domain.servingZones[0] ? ` — ${domain.servingZones[0]}` : ''}
+              </option>
+              {zones.map((option) => (
+                <option
+                  key={option.name}
+                  value={option.name}
+                  disabled={!domain.servingZones.includes(option.name)}
+                >
                   {option.name} — reachable from {option.reaches.join(' and ')}
                 </option>
               ))}
@@ -2049,37 +2114,29 @@ function DomainSection({
 
         {failure ? <p className="text-sm text-destructive">{failure}</p> : null}
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            disabled={onSetDomain === undefined || saving || issue !== null}
-            onClick={save}
-          >
-            {saving ? 'Saving…' : 'Save domain'}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            {/* The deploy loop writes the DNS record, not this button. */}
-            {preview === null
-              ? 'This App answers on the address its Target mints.'
-              : domain.ambiguous
-                ? `Saved as ${preview}, and not published while more than one Component serves.`
+        {routes ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              disabled={onSetDomain === undefined || saving || issue !== null}
+              onClick={save}
+            >
+              {saving ? 'Saving…' : 'Save domain'}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {/* The deploy loop writes the DNS record, not this button. */}
+              {preview === null
+                ? `${domain.component} answers on the address its Target mints.`
                 : choice === 'apex'
-                  ? `This App answers on ${preview} after its next deploy. A bare domain is published once — if it already points somewhere, change it in your DNS provider.`
-                  : `This App answers on ${preview} after its next deploy.`}
-          </p>
-        </div>
+                  ? `${domain.component} answers on ${preview} after its next deploy. A bare domain is published once — if it already points somewhere, change it in your DNS provider.`
+                  : `${domain.component} answers on ${preview} after its next deploy.`}
+            </p>
+          </div>
+        ) : null}
 
         {domain.hostnames.length > 0 ? (
           <p className="text-xs text-muted-foreground">
             Publishing now:{' '}
             <span className="font-mono">{domain.hostnames.join(', ')}</span>
-          </p>
-        ) : null}
-
-        {!domain.ambiguous && domain.servedBy !== null && choice !== 'none' ? (
-          <p className="text-xs text-muted-foreground">
-            Carried by {domain.servedBy}, while it is the only Component this
-            App serves. Add a second serving Component and this name stops being
-            published.
           </p>
         ) : null}
       </CardContent>
@@ -3052,20 +3109,24 @@ function AppWorkspace({
     }
   };
 
-  // The zone goes first: `setAppZone` can refuse, and a label written before
-  // it would leave half an answer.
-  const handleSetAppDomain: SetDomain = async ({ label, zone }) => {
-    const appId = workspace.appId;
-    if (appId === undefined) {
-      return { ok: false, message: 'This App has no id to set a domain on' };
-    }
+  // The zone goes first: `setComponentZone` can refuse, and a label written
+  // before it would leave half an answer. Re-read: the card's names derive
+  // from both.
+  const handleSetComponentDomain: SetDomain = async ({
+    componentId,
+    label,
+    zone,
+  }) => {
     try {
-      const pinned = await command('setAppZone', { appId, zone });
+      const pinned = await command('setComponentZone', { componentId, zone });
       if (!pinned.ok) return { ok: false, message: pinned.failure.message };
-      const named = await command('setAppVanity', { appId, label });
-      return named.ok
-        ? { ok: true }
-        : { ok: false, message: named.failure.message };
+      const named = await command('setComponentVanity', {
+        componentId,
+        label,
+      });
+      if (!named.ok) return { ok: false, message: named.failure.message };
+      read.reload();
+      return { ok: true };
     } catch (cause: unknown) {
       return {
         ok: false,
@@ -3313,7 +3374,7 @@ function AppWorkspace({
         onSetAutoDeploy={handleSetAutoDeploy}
         onSetLock={handleSetLock}
         onSetBuildRoute={handleSetAppBuildRoute}
-        onSetDomain={handleSetAppDomain}
+        onSetDomain={handleSetComponentDomain}
         onStageArchive={handleStageArchive}
         onUploadArchive={handleUploadArchive}
         onSetConfig={handleSetConfig}
