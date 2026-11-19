@@ -582,8 +582,8 @@ describe('config delivery', () => {
         remoteRef: { key: 'blog--web--metal--DSN', version: '2' },
       },
     ]);
-    // Pinned references leave nothing to poll for.
-    expect(external.spec.refreshInterval).toBe('0');
+    // ESO resyncs after a Deploy adds or changes a pinned reference.
+    expect(external.spec.refreshInterval).toBe('1m');
   });
 
   test('an unconfigured Component renders no ExternalSecret', async () => {
