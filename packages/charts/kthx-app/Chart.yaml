@@ -2,7 +2,7 @@ apiVersion: v2
 name: kthx-app
 description: The one chart every Component the kthx engine deploys to a Kubernetes Target renders through
 type: application
-version: 0.6.0
+version: 0.6.1
 appVersion: "1"
 annotations:
   # Read when a Target is pinned. Helm ignores unknown values silently, so a contract
