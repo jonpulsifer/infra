@@ -291,6 +291,24 @@ function lastAsked(view: ConversationView): number | null {
   return null;
 }
 
+function toolCall(view: ConversationView, callId: string) {
+  const committed = view.entries.flatMap(
+    (entry) =>
+      entry.model?.flatMap((message) =>
+        message.role === 'assistant'
+          ? message.content.filter((block) => block.type === 'toolCall')
+          : [],
+      ) ?? [],
+  );
+  const partial = view.docs['pi.live'] as LiveState | undefined;
+  return [
+    ...committed,
+    ...(partial?.generation?.message?.content ?? []).filter(
+      (block) => block.type === 'toolCall',
+    ),
+  ].find((block) => block.id === callId);
+}
+
 function toolResult(
   view: ConversationView,
   callId: string,
@@ -347,17 +365,8 @@ export function turnEvents(
   for (const slot of newSlots) {
     const previous = prior.get(slot.callId);
     if (!previous && slot.status !== 'pending') {
-      const call = [...after.entries]
-        .reverse()
-        .flatMap(
-          (entry) =>
-            entry.model?.flatMap((message) =>
-              message.role === 'assistant'
-                ? message.content.filter((block) => block.type === 'toolCall')
-                : [],
-            ) ?? [],
-        )
-        .find((block) => block.id === slot.callId);
+      const call =
+        toolCall(after, slot.callId) ?? toolCall(before, slot.callId);
       result.push({
         type: 'tool_execution_start',
         toolCallId: slot.callId,
@@ -398,17 +407,7 @@ export function turnEvents(
       newSlots.some((slot) => slot.callId === callId)
     )
       continue;
-    const call = [...after.entries]
-      .reverse()
-      .flatMap(
-        (item) =>
-          item.model?.flatMap((part) =>
-            part.role === 'assistant'
-              ? part.content.filter((block) => block.type === 'toolCall')
-              : [],
-          ) ?? [],
-      )
-      .find((block) => block.id === callId);
+    const call = toolCall(after, callId) ?? toolCall(before, callId);
     if (!call) continue;
     result.push({
       type: 'tool_execution_start',
@@ -576,7 +575,9 @@ export class PiBrain implements Brain {
       await turn.lease.warm();
       tb.interrupted = null;
       turn.live = true;
-      return await this.drive(tb, turn, open.submission);
+      const result = await this.drive(tb, turn, open.submission);
+      if (result.stopReason === 'end_turn') await this.configureProfile(tb);
+      return result;
     });
   }
 
@@ -857,6 +858,24 @@ export class PiBrain implements Brain {
       if (attempt > 0 || !(await this.discardOpen(tb))) {
         return errorResult(RECOVERING);
       }
+      await this.configureProfile(tb);
+    }
+  }
+
+  private async configureProfile(tb: ThreadBrain): Promise<void> {
+    const model = {
+      provider: tb.profile.model.provider,
+      modelId: tb.profile.model.id,
+    };
+    const agent = await this.pi(() => tb.root.agent(CTX));
+    if (
+      agent.model?.provider !== model.provider ||
+      agent.model.modelId !== model.modelId ||
+      agent.thinkingLevel !== tb.profile.thinking
+    ) {
+      await this.pi(() =>
+        tb.root.configure({ model, thinkingLevel: tb.profile.thinking }, CTX),
+      );
     }
   }
 
@@ -1205,15 +1224,17 @@ export class PiBrain implements Brain {
         agent: { model, thinkingLevel: profile.thinking },
       });
       const events = await root.watch(CTX);
-      const agent = await root.agent(CTX);
-      if (
-        agent.model?.provider !== model.provider ||
-        agent.model.modelId !== model.modelId ||
-        agent.thinkingLevel !== profile.thinking
-      ) {
-        await root.configure({ model, thinkingLevel: profile.thinking }, CTX);
-      }
       const open = openRun(events.value);
+      if (!open) {
+        const agent = await root.agent(CTX);
+        if (
+          agent.model?.provider !== model.provider ||
+          agent.model.modelId !== model.modelId ||
+          agent.thinkingLevel !== profile.thinking
+        ) {
+          await root.configure({ model, thinkingLevel: profile.thinking }, CTX);
+        }
+      }
       const fresh = {
         row,
         profile,

@@ -76,6 +76,27 @@ describe('conversation view changes', () => {
     ]);
   });
 
+  test('takes a running tool title from a committed or partial assistant call', () => {
+    const call = {
+      type: 'toolCall',
+      id: 'c1',
+      name: 'bash',
+      arguments: { command: 'sleep 300' },
+    };
+    const partial = view([], {
+      generation: {
+        attempt: 1,
+        message: { ...answer, content: [call] },
+      } as LiveState['generation'],
+    });
+    const running = view([], {
+      tools: [{ callId: 'c1', name: 'bash', status: 'running' }],
+    });
+    expect(turnEvents(partial, running)).toMatchObject([
+      { type: 'tool_execution_start', args: { command: 'sleep 300' } },
+    ]);
+  });
+
   test('reports nested tool status from its slot when it has no result entry', () => {
     const finished = view([], {
       nestedTools: [
