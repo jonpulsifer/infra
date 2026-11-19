@@ -155,6 +155,7 @@ export function DeployLedger({
         }
         filterPlaceholder={`Filter ${deploys.length} Deploys…`}
         caption="Deploys, newest first"
+        detail="inline"
         inspectorLabel={(deploy) => `Deploy ${deploy.id}`}
         empty={
           <EmptyState title="No Deploys exist yet.">

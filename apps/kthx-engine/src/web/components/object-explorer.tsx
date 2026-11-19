@@ -1,7 +1,8 @@
 /**
  * A list beside an inspector: `ObjectExplorer` for mixed rows, `LedgerExplorer`
  * for a sortable table. Selecting a row inspects it without navigating, and the
- * selection survives a filter that hides its row.
+ * selection survives a filter that hides its row. A `LedgerExplorer` with
+ * `detail="inline"` opens the inspector inside the row instead.
  */
 import { Search } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
@@ -269,6 +270,7 @@ export function LedgerExplorer<T>({
   empty,
   inspectorLabel,
   renderInspector,
+  detail = 'inspector',
 }: {
   readonly columns: readonly Column<T>[];
   readonly rows: readonly T[];
@@ -280,8 +282,11 @@ export function LedgerExplorer<T>({
   readonly empty: ReactNode;
   readonly inspectorLabel: (row: T) => string;
   readonly renderInspector: (row: T) => ReactNode;
+  /** `inline` drops the side pane: a row opens below itself, one at a time. */
+  readonly detail?: 'inspector' | 'inline';
 }) {
   const [filter, setFilter] = useState('');
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [selectedKey, setSelectedKey] = useState(() =>
     rows[0] ? rowKey(rows[0]) : '',
   );
@@ -301,6 +306,40 @@ export function LedgerExplorer<T>({
     !visible.some((row) => rowKey(row) === rowKey(selected));
 
   if (rows.length === 0) return <>{empty}</>;
+
+  if (detail === 'inline') {
+    return (
+      <section
+        aria-label="Objects"
+        className="min-w-0 overflow-hidden rounded-sm border border-border bg-card shadow-panel"
+      >
+        <FilterField
+          value={filter}
+          onChange={setFilter}
+          placeholder={filterPlaceholder}
+        />
+        {visible.length === 0 ? (
+          <NoMatch filter={filter} onClear={() => setFilter('')} />
+        ) : (
+          <DataTable
+            columns={columns}
+            rows={visible}
+            rowKey={rowKey}
+            caption={caption}
+            expansion={{
+              expandedKey,
+              onToggle: (row) => {
+                const key = rowKey(row);
+                setExpandedKey((open) => (open === key ? null : key));
+              },
+              render: renderInspector,
+              label: inspectorLabel,
+            }}
+          />
+        )}
+      </section>
+    );
+  }
 
   return (
     <div className="grid overflow-hidden rounded-sm border border-border bg-card shadow-panel xl:grid-cols-[minmax(0,1fr)_minmax(320px,26rem)]">
