@@ -355,8 +355,8 @@ describe('an App whose job sits behind its service', () => {
   });
 
   test('deploys the Component it is showing, not the App’s first', async () => {
-    // `deployApp` takes the App's first Component unless told which, so the
-    // screen presses with the id it shows.
+    // `deployApp` refuses to guess among several Components, so the screen
+    // presses with the id it shows.
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -386,8 +386,7 @@ describe('an App whose job sits behind its service', () => {
     expect(written?.targetId).toBe(app.nightly.targetId);
   });
 
-  test('names the same first Component a deploy that names none acts on', async () => {
-    // Both commands pick the first Component by `createdAt`, and must agree.
+  test('shows the first Component, and a deploy that names none is refused', async () => {
     const backend = withARun();
     const ctx = context(backend);
     const app = await serviceThenJob(ctx, backend);
@@ -396,14 +395,11 @@ describe('an App whose job sits behind its service', () => {
     const pressed = await deployApp({ name: app.appName }, ctx);
 
     expect(view.ok).toBe(true);
-    expect(pressed.ok).toBe(true);
-    if (!view.ok || !pressed.ok) return;
-    const [written] = await ctx.db
-      .select()
-      .from(deploys)
-      .where(eq(deploys.id, pressed.value.deployId as number));
+    if (!view.ok) return;
     expect(view.value.workspace.componentId).toBe(app.web.componentId);
-    expect(written?.componentId).toBe(app.web.componentId);
+    expect(pressed.ok).toBe(false);
+    if (pressed.ok) return;
+    expect(pressed.failure.code).toBe('INVALID_INPUT');
   });
 
   test('refuses a Component this App does not have', async () => {

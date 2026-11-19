@@ -103,7 +103,7 @@ const deployRequests = () =>
   calls.filter((call) => call.name === 'deployApp').map((call) => call.input);
 
 describe('a detail page deploys the Component it shows', () => {
-  test('Deploy this build names the Build’s Component and Target', async () => {
+  test('Deploy this build names the Build, its Component and Target', async () => {
     answers.getBuildDetail = {
       attempt: { ...SECOND, id: null },
       deployId: null,
@@ -119,6 +119,7 @@ describe('a detail page deploys the Component it shows', () => {
         name: SECOND.appId,
         component: SECOND.componentId,
         target: SECOND.targetId,
+        buildId: SECOND.buildId,
       },
     ]);
     screen.unmount();

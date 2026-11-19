@@ -195,6 +195,34 @@ describe('cancelling a Deploy', () => {
     });
   });
 
+  test('the pointer skips an earlier release that failed, to the one still live', async () => {
+    const { intent, pointer } = await pair();
+    const landed = await intent('LIVE', crypto.randomUUID());
+    await intent('FAILED', crypto.randomUUID());
+    const queued = await intent('PENDING');
+
+    expect((await cancelDeploy({ id: queued.id }, context())).ok).toBe(true);
+    expect(await pointer()).toEqual({
+      desiredBuildId: landed.buildId,
+      desiredDeployId: landed.id,
+    });
+  });
+
+  test('the pointer goes back to an earlier intent still on its way to live', async () => {
+    const { intent, pointer } = await pair();
+    await intent('LIVE', crypto.randomUUID());
+    const applying = await intent('APPLYING', crypto.randomUUID());
+    const queued = await intent('PENDING');
+
+    // The deploy loop applies the earlier intent regardless, so it is what
+    // will serve.
+    expect((await cancelDeploy({ id: queued.id }, context())).ok).toBe(true);
+    expect(await pointer()).toEqual({
+      desiredBuildId: applying.buildId,
+      desiredDeployId: applying.id,
+    });
+  });
+
   test('an in-flight attempt is asked, not ended: the row stays in flight with the request on it', async () => {
     const { intent } = await pair();
     const deploy = await intent('WAITING', crypto.randomUUID());

@@ -51,8 +51,8 @@ export interface PlacedComponent {
 }
 
 /**
- * Names the Component and its Target, so `deployApp` never falls back to the
- * App's oldest Component. A move since the placement was read is refused. A
+ * Names the Component and its Target, which `deployApp` needs once an App has
+ * several Components. A move since the placement was read is refused. A
  * refusal or a fault is logged here and returned, never thrown, so the caller
  * goes on to the next Component.
  */

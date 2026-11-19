@@ -535,6 +535,52 @@ describe('a rollback and the entrypoint the older release ran with', () => {
     expect(placed?.desired.schedule).toBe('0 3 * * *');
   });
 
+  test('a rollback replays the release that went live, not a later attempt that failed', async () => {
+    const { app, target } = await fixture();
+    const nightly = await component(app.id, 'nightly');
+    await database()
+      .db.update(components)
+      .set({ kind: 'job', schedule: '0 3 * * *' })
+      .where(eq(components.id, nightly.id));
+
+    const adapter = new FakeDeployAdapter({ adapter: 'kubernetes' });
+    const adapters = registryOf(adapter);
+    const older = await build(nightly.id, 'abcdef0');
+    const newer = await build(nightly.id, 'bcdef01');
+
+    await ship(adapters, adapter, nightly.id, target.id, older.id);
+    await database()
+      .db.update(components)
+      .set({ schedule: '0 4 * * *' })
+      .where(eq(components.id, nightly.id));
+    const retried = await createDeploy(
+      { componentId: nightly.id, targetId: target.id, buildId: older.id },
+      context(adapters),
+    );
+    if (!retried.ok) throw new Error(retried.failure.message);
+    await database()
+      .db.update(deploys)
+      .set({ phase: 'FAILED', reason: 'UNHEALTHY' })
+      .where(eq(deploys.id, retried.value.deployId));
+    await database()
+      .db.update(components)
+      .set({ schedule: '0 5 * * *' })
+      .where(eq(components.id, nightly.id));
+    await ship(adapters, adapter, nightly.id, target.id, newer.id);
+
+    const rolled = await rollbackDeploy(
+      { componentId: nightly.id, targetId: target.id, buildId: older.id },
+      context(adapters),
+    );
+    if (!rolled.ok) throw new Error(rolled.failure.message);
+
+    const [placed] = await database()
+      .db.select()
+      .from(deploys)
+      .where(eq(deploys.id, rolled.value.deployId));
+    expect(placed?.desired.schedule).toBe('0 3 * * *');
+  });
+
   // A rollback that replayed the pinned reach would republish what an operator
   // withdrew.
   test('a rollback does not put back a reach somebody withdrew', async () => {
