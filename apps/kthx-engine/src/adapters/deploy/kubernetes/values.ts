@@ -115,6 +115,18 @@ export function imageReference(
   return artifactAddress(desired.artifact, reachable);
 }
 
+function exposes(desired: DesiredState): boolean {
+  return (
+    desired.kind === 'website' ||
+    (desired.kind === 'service' && desired.expose === true)
+  );
+}
+
+/** Whether the chart renders an HTTPRoute, by the condition its template tests. */
+export function routed(desired: DesiredState): boolean {
+  return exposes(desired) && desired.reach !== 'none';
+}
+
 /** `deployId` labels this rollout's pods; drift compares `artifactDigest`. */
 export function appValues(
   desired: DesiredState,
@@ -128,9 +140,7 @@ export function appValues(
     image,
     // `website` is not a chart branch: normalize it to service values here.
     port: 8080,
-    expose:
-      desired.kind === 'website' ||
-      (desired.kind === 'service' && desired.expose === true),
+    expose: exposes(desired),
     reach: desired.reach,
     auth: desired.auth,
     // '' renders a suspended CronJob: the chart branches on emptiness.

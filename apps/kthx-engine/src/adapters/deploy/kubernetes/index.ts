@@ -73,8 +73,14 @@ import {
   helmReleaseValues,
   OCI_REPOSITORY,
 } from './flux-helmrelease.ts';
+import { HTTP_ROUTE, unroutable } from './http-route.ts';
 import type { DeliveryStatus } from './status.ts';
-import { chartValues, imageReference, VALUES_CONTRACT } from './values.ts';
+import {
+  chartValues,
+  imageReference,
+  routed,
+  VALUES_CONTRACT,
+} from './values.ts';
 
 export interface KubernetesAdapterOptions {
   /**
@@ -801,45 +807,48 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     // does not repeat it.
     let reported: DeployPhase = 'APPLYING';
     let said: string | undefined;
+    let status: DeliveryStatus = { phase: 'APPLYING' };
+    let unread: string | undefined;
 
     for (;;) {
-      const current = await api.get({
-        apiVersion: object.apiVersion,
-        plural: pluralOf(connection.delivery.flavour),
-        namespace: object.metadata.namespace,
-        name: object.metadata.name,
-      });
-      const status: DeliveryStatus =
-        current === null
-          ? { phase: 'APPLYING' }
-          : statusOf(connection.delivery.flavour, current);
+      // A failed read says nothing about the release, which Flux or Argo
+      // carries on with, so only the deadline ends a run of them.
+      try {
+        status = await this.currentStatus(api, connection, desired, object);
+        unread = undefined;
+      } catch (cause) {
+        unread = `the last read of ${resource} failed: ${messageOf(cause)}`;
+      }
 
-      if (status.phase !== reported) {
+      if (unread === undefined && status.phase !== reported) {
         reported = status.phase;
         yield this.events.status(status.phase, {
           resource,
-          ...(status.reason === undefined ? {} : { reason: status.reason }),
+          ...(status.phase === 'FAILED' && status.reason !== undefined
+            ? { reason: status.reason }
+            : {}),
           ...(status.detail === undefined ? {} : { detail: status.detail }),
         });
       }
 
       // Skipped on terminal phases, whose sentence the verdict carries.
+      const line = unread ?? status.detail;
       if (
-        status.detail !== undefined &&
-        status.detail !== said &&
+        line !== undefined &&
+        line !== said &&
         status.phase !== 'LIVE' &&
         status.phase !== 'FAILED'
       ) {
-        said = status.detail;
-        yield this.events.log(status.detail, resource);
+        said = line;
+        yield this.events.log(line, resource);
       }
 
-      if (status.phase === 'LIVE') {
+      if (unread === undefined && status.phase === 'LIVE') {
         // No `url`: on a cluster, core mints the canonical name.
         return { phase: 'LIVE', ref };
       }
 
-      if (status.phase === 'FAILED') {
+      if (unread === undefined && status.phase === 'FAILED') {
         return yield* this.failed(api, connection, desired, status, ref);
       }
 
@@ -851,11 +860,68 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           status,
           ref,
           resource,
+          unread,
         );
       }
 
       await this.wait();
     }
+  }
+
+  /**
+   * The delivery object's status, held at `WAITING` while a ready release's
+   * routes are not served: Helm applied them, but no gateway need accept them.
+   */
+  private async currentStatus(
+    api: KubernetesApi,
+    connection: KubernetesAdapterConnection,
+    desired: DesiredState,
+    object: KubernetesObject,
+  ): Promise<DeliveryStatus> {
+    const current = await api.get({
+      apiVersion: object.apiVersion,
+      plural: pluralOf(connection.delivery.flavour),
+      namespace: object.metadata.namespace,
+      name: object.metadata.name,
+    });
+    if (current === null) return { phase: 'APPLYING' };
+    const status = statusOf(connection.delivery.flavour, current);
+    if (status.phase !== 'LIVE' || !routed(desired)) return status;
+
+    const routes = await api
+      .list(
+        {
+          apiVersion: HTTP_ROUTE.apiVersion,
+          plural: HTTP_ROUTE.plural,
+          namespace: appNamespaceFor(connection, desired.app),
+        },
+        { labelSelector: componentSelector(desired.app, desired.component) },
+      )
+      .catch((cause: unknown) => {
+        // Permanent, unlike the reads the poll waits out: a Target whose
+        // identity may not list routes is not judged on them.
+        if (cause instanceof KubernetesRequestError && cause.status === 403) {
+          return null;
+        }
+        throw cause;
+      });
+    // A cluster serving no HTTPRoute could not have installed one.
+    if (routes === null) return status;
+    const stall = unroutable(routes);
+    if (stall === null) return status;
+    return {
+      phase: 'WAITING',
+      reason: 'TARGET_UNREACHABLE',
+      detail: stall,
+      debug: {
+        delivery: status.debug,
+        routes: routes.map((route) => ({
+          name: route.metadata.name,
+          generation: route.metadata.generation,
+          status: route.status,
+        })),
+      },
+    };
   }
 
   private async *failed(
@@ -894,7 +960,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
 
   /**
    * Reads pods and events as a failure does, minus {@link diagnose}'s fallback,
-   * so with no evidence the verdict stays `TIMEOUT`.
+   * so with no evidence the verdict stays `TIMEOUT`. A stall that already named
+   * its reason needs no read.
    */
   private async *timedOut(
     api: KubernetesApi,
@@ -903,7 +970,19 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     status: DeliveryStatus,
     ref: DeployRef,
     resource: string,
+    unread: string | undefined,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
+    if (status.reason !== undefined) {
+      yield this.events.status('FAILED', { resource, reason: status.reason });
+      return {
+        phase: 'FAILED',
+        ref,
+        reason: status.reason,
+        detail: withUnread(status.detail ?? 'the release stalled', unread),
+        debug: status.debug,
+      };
+    }
+
     const { pods, events } = await this.readOnRed(
       api,
       appNamespaceFor(connection, desired.app),
@@ -921,7 +1000,10 @@ export class KubernetesDeployAdapter implements DeployAdapter {
         phase: 'FAILED',
         ref,
         reason: 'TIMEOUT',
-        detail: status.detail ?? 'the release did not settle in time',
+        detail: withUnread(
+          status.detail ?? 'the release did not settle in time',
+          unread,
+        ),
         debug: status.debug,
       };
     }
@@ -1720,6 +1802,14 @@ function parseRef(ref: DeployRef): ParsedRef | null {
   const [namespace, name] = path.split('/', 2);
   if (namespace === undefined || name === undefined) return null;
   return { flavour, namespace, name };
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+function withUnread(detail: string, unread: string | undefined): string {
+  return unread === undefined ? detail : `${detail}; ${unread}`;
 }
 
 function writeFailure(

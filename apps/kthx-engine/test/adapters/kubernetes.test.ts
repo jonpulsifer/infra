@@ -10,7 +10,10 @@ import type {
   DeployVerdict,
 } from '../../src/adapters/deploy/contract.ts';
 import { blameFor, RESTART_STAMP } from '../../src/adapters/deploy/contract.ts';
-import { KubernetesApi } from '../../src/adapters/deploy/kubernetes/api.ts';
+import {
+  type Fetcher,
+  KubernetesApi,
+} from '../../src/adapters/deploy/kubernetes/api.ts';
 import { KubernetesDeployAdapter } from '../../src/adapters/deploy/kubernetes/index.ts';
 import { VALUES_CONTRACT } from '../../src/adapters/deploy/kubernetes/values.ts';
 import type { PrerequisiteResult } from '../../src/domain/capabilities.ts';
@@ -736,6 +739,261 @@ describe('phases come from the controller', () => {
     );
     if (failure?.type !== 'status') throw new Error('expected a FAILED status');
     expect(failure.reason).toBe('STARTUP_FAILED');
+  });
+});
+
+/** An adapter on a clock that each poll advances, so a deadline is reached. */
+function clocked(
+  cluster: FakeKubernetes,
+  fetch: Fetcher = cluster.fetch,
+  onPoll: (polls: number) => void = () => {},
+): KubernetesDeployAdapter {
+  let clock = 0;
+  return new KubernetesDeployAdapter({
+    chart: CHART,
+    token: cluster.token,
+    fetch,
+    pollIntervalMs: 1_000,
+    timeoutMs: 5_000,
+    sleep: async () => {
+      clock += 1_000;
+      onPoll(clock / 1_000);
+    },
+    now: () => clock,
+  });
+}
+
+/** Answers every read of the delivery object with `failure` while `failing`. */
+function failingReads(
+  cluster: FakeKubernetes,
+  failing: (reads: number) => boolean,
+  failure: () => Response,
+): Fetcher {
+  let reads = 0;
+  return async (request) => {
+    const delivery =
+      request.method === 'GET' && request.url.includes('/helmreleases/');
+    if (delivery && failing(++reads)) return failure();
+    return cluster.fetch(request);
+  };
+}
+
+describe('a read that fails while polling', () => {
+  test('is no verdict: the deploy waits it out and goes LIVE', async () => {
+    const cluster = new FakeKubernetes({ servedKinds: SERVED });
+    const answers = [
+      () => new Response('etcdserver: leader changed', { status: 503 }),
+      () => {
+        throw new TypeError('connection reset by peer');
+      },
+    ];
+    const fetch = failingReads(
+      cluster,
+      (reads) => reads <= answers.length,
+      () => {
+        const answer = answers.shift();
+        if (answer === undefined) throw new Error('no failure left to answer');
+        return answer();
+      },
+    );
+
+    const { verdict } = await drain(
+      clocked(cluster, fetch).apply(target(), desiredState()),
+    );
+    expect(verdict.phase).toBe('LIVE');
+  });
+
+  test('reads failing until the deadline are a TIMEOUT that names the last failure', async () => {
+    const cluster = new FakeKubernetes({
+      servedKinds: SERVED,
+      lists: { pods: [], events: [] },
+    });
+    const fetch = failingReads(
+      cluster,
+      () => true,
+      () => new Response('etcdserver: leader changed', { status: 503 }),
+    );
+
+    const { verdict } = await drain(
+      clocked(cluster, fetch).apply(target(), desiredState()),
+    );
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TIMEOUT');
+    expect(verdict.detail).toContain('etcdserver: leader changed');
+  });
+});
+
+const GATEWAY_REF = { name: 'kthx-apps', namespace: 'kthx-apps' };
+
+interface RouteCondition {
+  type: string;
+  status: 'True' | 'False' | 'Unknown';
+  reason?: string;
+  message?: string;
+  observedGeneration?: number;
+}
+
+function routeParent(conditions: RouteCondition[]): Record<string, unknown> {
+  return {
+    parentRef: {
+      group: 'gateway.networking.k8s.io',
+      kind: 'Gateway',
+      ...GATEWAY_REF,
+    },
+    controllerName: 'io.cilium/gateway-controller',
+    conditions,
+  };
+}
+
+const ROUTED = (generation = 1) => [
+  routeParent([
+    {
+      type: 'Accepted',
+      status: 'True',
+      reason: 'Accepted',
+      observedGeneration: generation,
+    },
+    {
+      type: 'ResolvedRefs',
+      status: 'True',
+      reason: 'ResolvedRefs',
+      observedGeneration: generation,
+    },
+  ]),
+];
+
+/** The chart's route, as the gateway controller has written its status. */
+function httpRoute(
+  parents: Record<string, unknown>[] | undefined,
+  generation = 1,
+): FakeObject {
+  return {
+    apiVersion: 'gateway.networking.k8s.io/v1',
+    kind: 'HTTPRoute',
+    metadata: {
+      name: 'blog-web',
+      namespace: 'app-blog',
+      labels: POD_LABELS,
+      generation,
+    },
+    spec: { parentRefs: [GATEWAY_REF] },
+    ...(parents === undefined ? {} : { status: { parents } }),
+  };
+}
+
+describe('an exposed Component is LIVE only once its route is', () => {
+  test('a route every gateway accepted and resolved is LIVE', async () => {
+    const { adapter } = adapterFor({
+      lists: { httproutes: [httpRoute(ROUTED())] },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    expect(verdict.phase).toBe('LIVE');
+  });
+
+  test('a backend the gateway may not reach keeps it WAITING, and the deadline blames the platform', async () => {
+    const cluster = new FakeKubernetes({
+      servedKinds: SERVED,
+      lists: {
+        httproutes: [
+          httpRoute([
+            routeParent([
+              { type: 'Accepted', status: 'True', observedGeneration: 1 },
+              {
+                type: 'ResolvedRefs',
+                status: 'False',
+                reason: 'RefNotPermitted',
+                message: 'Cross namespace references are not allowed',
+                observedGeneration: 1,
+              },
+            ]),
+          ]),
+        ],
+      },
+    });
+
+    const { events, verdict } = await drain(
+      clocked(cluster).apply(target(), desiredState()),
+    );
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+    expect(blameFor(verdict.reason)).toBe('platform');
+    expect(verdict.detail).toContain('ResolvedRefs');
+    expect(verdict.detail).toContain('RefNotPermitted');
+    expect(verdict.detail).toContain(
+      'Cross namespace references are not allowed',
+    );
+
+    const statuses = events.filter((event) => event.type === 'status');
+    expect(statuses.map((event) => event.phase)).toEqual([
+      'APPLYING',
+      'WAITING',
+      'FAILED',
+    ]);
+    // A stall is not a verdict, so the timeline names no reason until one.
+    expect(
+      statuses.find((event) => event.phase === 'WAITING')?.reason,
+    ).toBeUndefined();
+    expect(
+      events.some(
+        (event) =>
+          event.type === 'log' && event.line.includes('RefNotPermitted'),
+      ),
+    ).toBe(true);
+  });
+
+  test('a route the gateway has not observed at its generation is not yet routable', async () => {
+    const cluster = new FakeKubernetes({ servedKinds: SERVED });
+    cluster.place('httproutes/app-blog/blog-web', httpRoute(ROUTED(1), 2));
+    const adapter = clocked(cluster, cluster.fetch, (polls) => {
+      if (polls === 2) {
+        cluster.place('httproutes/app-blog/blog-web', httpRoute(ROUTED(2), 2));
+      }
+    });
+
+    const { events, verdict } = await drain(
+      adapter.apply(target(), desiredState()),
+    );
+    expect(verdict.phase).toBe('LIVE');
+    expect(
+      events
+        .filter((event) => event.type === 'status')
+        .map((event) => event.phase),
+    ).toEqual(['APPLYING', 'WAITING', 'LIVE']);
+  });
+
+  test('a route no gateway has answered for is not routable', async () => {
+    const cluster = new FakeKubernetes({
+      servedKinds: SERVED,
+      lists: { httproutes: [httpRoute(undefined)] },
+    });
+    const { verdict } = await drain(
+      clocked(cluster).apply(target(), desiredState()),
+    );
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+    expect(verdict.detail).toContain('kthx-apps/kthx-apps');
+  });
+
+  test('an identity that may not list routes is not held on them', async () => {
+    const { adapter } = adapterFor({
+      lists: { httproutes: [httpRoute(undefined)] },
+      forbidden: ['httproutes'],
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    expect(verdict.phase).toBe('LIVE');
+  });
+
+  test('a Component with no reach has no route to wait for', async () => {
+    const { adapter, cluster } = adapterFor({
+      lists: { httproutes: [httpRoute(undefined)] },
+    });
+    const { verdict } = await drain(
+      adapter.apply(target(), desiredState({ reach: 'none', auth: 'none' })),
+    );
+    expect(verdict.phase).toBe('LIVE');
+    expect(
+      cluster.pathsOf('GET').some((path) => path.endsWith('/httproutes')),
+    ).toBe(false);
   });
 });
 
