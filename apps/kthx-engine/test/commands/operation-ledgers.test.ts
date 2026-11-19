@@ -46,7 +46,11 @@ function context(): CommandContext {
   };
 }
 
-async function appComponent(ctx: CommandContext, name: string) {
+async function appComponent(
+  ctx: CommandContext,
+  name: string,
+  componentName = 'web',
+) {
   const app = await createApp(
     {
       name,
@@ -59,7 +63,7 @@ async function appComponent(ctx: CommandContext, name: string) {
   const component = await createComponent(
     {
       appId: app.value.appId,
-      name: 'web',
+      name: componentName,
       kind: 'service',
       expose: true,
       reach: 'private',
@@ -104,7 +108,8 @@ describe('global operation ledgers', () => {
   test('Builds stay newest-first, bounded, and tied to App identity', async () => {
     const ctx = context();
     const first = await appComponent(ctx, 'same-name');
-    const second = await appComponent(ctx, 'same-name');
+    // Its own Component name: two `same-name-web` workloads cannot coexist.
+    const second = await appComponent(ctx, 'same-name', 'api');
 
     for (const [index, owner] of [first, second, first].entries()) {
       await ctx.db.insert(builds).values({

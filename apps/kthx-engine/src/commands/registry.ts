@@ -39,6 +39,10 @@ import {
 } from './components/command.ts';
 import { createComponent, createComponentInput } from './components/create.ts';
 import { deleteComponent, deleteComponentInput } from './components/delete.ts';
+import {
+  setComponentDomain,
+  setComponentDomainInput,
+} from './components/domain.ts';
 import { placeComponent, placeComponentInput } from './components/place.ts';
 import {
   setComponentReach,
@@ -252,6 +256,10 @@ export const commandRegistry = {
   setComponentVanity: {
     input: setComponentVanityInput,
     handler: setComponentVanity,
+  },
+  setComponentDomain: {
+    input: setComponentDomainInput,
+    handler: setComponentDomain,
   },
   runComponent: { input: runComponentInput, handler: runComponent },
   restartComponent: {

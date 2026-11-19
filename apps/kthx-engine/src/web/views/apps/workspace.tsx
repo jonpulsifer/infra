@@ -1981,7 +1981,7 @@ function ComponentDomainCard({
   const shownZone = zone === '' ? (domain.servingZones[0] ?? '') : zone;
   const named = domain.serves && choice !== 'none';
   const issue =
-    named && choice === 'label' && label !== '' && !isLabel(label)
+    named && choice === 'label' && !isLabel(label)
       ? 'One lowercase label: letters, numbers and hyphens.'
       : null;
   const preview = !named
@@ -3109,22 +3109,12 @@ function AppWorkspace({
     }
   };
 
-  // The zone goes first: `setComponentZone` can refuse, and a label written
-  // before it would leave half an answer. Re-read: the card's names derive
-  // from both.
-  const handleSetComponentDomain: SetDomain = async ({
-    componentId,
-    label,
-    zone,
-  }) => {
+  // One command, so a refused label leaves the zone as it was. Re-read: the
+  // card's names derive from both.
+  const handleSetComponentDomain: SetDomain = async (choice) => {
     try {
-      const pinned = await command('setComponentZone', { componentId, zone });
-      if (!pinned.ok) return { ok: false, message: pinned.failure.message };
-      const named = await command('setComponentVanity', {
-        componentId,
-        label,
-      });
-      if (!named.ok) return { ok: false, message: named.failure.message };
+      const result = await command('setComponentDomain', choice);
+      if (!result.ok) return { ok: false, message: result.failure.message };
       read.reload();
       return { ok: true };
     } catch (cause: unknown) {

@@ -22,6 +22,7 @@ import {
   componentNaming,
   holderLabel,
   nameClash,
+  withNamingLock,
   zoneReaches,
 } from '../apps/names.ts';
 import { type Command, failed, ok } from '../types.ts';
@@ -53,6 +54,12 @@ export interface SetComponentReachResult {
 }
 
 export const setComponentReach: Command<
+  SetComponentReachInput,
+  SetComponentReachResult
+> = (input, context) =>
+  withNamingLock(context, (locked) => setReach(input, locked));
+
+const setReach: Command<
   SetComponentReachInput,
   SetComponentReachResult
 > = async (input, context) => {

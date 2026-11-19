@@ -9,6 +9,7 @@ import {
   AUTH_NEEDS_A_ROUTE,
   authHasARoute,
 } from '../../domain/desired-state.ts';
+import { newComponentRefusal, withNamingLock } from '../apps/names.ts';
 import { type Command, failed, ok } from '../types.ts';
 import { argv } from './command.ts';
 
@@ -85,13 +86,30 @@ export interface CreateComponentResult {
 export const createComponent: Command<
   CreateComponentInput,
   CreateComponentResult
-> = async (input, context) => {
+> = (input, context) =>
+  withNamingLock(context, (locked) => create(input, locked));
+
+const create: Command<CreateComponentInput, CreateComponentResult> = async (
+  input,
+  context,
+) => {
   const [app] = await context.db
     .select()
     .from(apps)
     .where(eq(apps.id, input.appId));
   if (app === undefined) {
     return failed('NOT_FOUND', `there is no App with id ${input.appId}`);
+  }
+
+  const refused = await newComponentRefusal(
+    context.db,
+    context.manifest.dns.zones,
+    { app: app.name, component: input.name, reach: input.reach },
+  );
+  if (refused !== null) {
+    return failed('INVALID_INPUT', `'${input.name}' ${refused}`, [
+      { path: 'name', message: refused },
+    ]);
   }
 
   const now = context.clock.now();
