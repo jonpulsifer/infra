@@ -31,7 +31,7 @@ The workflow compresses the image with zstd to `nixos-node-amd64.img.zst` and pu
 
 ## First boot
 
-The install writes `fleet-seed.json` on the ESP: fleetd's seed URL, the machine's UUID and the install code. After the network is up, `fleet-seed.service` fetches the seed from that URL with the UUID from `/sys/class/dmi/id/product_uuid` and the code, and stores it at `/var/lib/fleet/seed.json`, mode `0600`. It sets the seed's name as the transient hostname, logs the profile and deletes the file on the ESP. fleetd marks the device `active` on that read. A boot that finds the stored seed skips the unit.
+The install writes `fleet-seed.json` on the ESP: fleetd's seed URL, the machine's UUID and the install code. After the network is up, `fleet-seed.service`, which runs `apps/fleetd/cmd/fleet-seed`, fetches the seed from that URL with the UUID from `/sys/class/dmi/id/product_uuid` and the code, and stores it at `/var/lib/fleet/seed.json`, mode `0600`. The command rejects an ESP file that carries a field besides the URL, the UUID and the code. It sets the seed's name as the transient hostname, logs the profile and leaves the ESP read-only. fleetd marks the device `active` on that read. A boot that finds the stored seed skips the unit.
 
 ## Rules
 

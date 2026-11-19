@@ -8,6 +8,11 @@ on:
     branches: [main]
     paths: &paths
       - nix/images/node-nixos.nix
+      - apps/fleetd/cmd/fleet-seed/**
+      - apps/fleetd/fleet-seed.nix
+      - apps/fleetd/package.nix
+      - apps/fleetd/go.mod
+      - apps/fleetd/go.sum
       - nix/profiles/**
       - nix/system/**
       - nix/hardware/x86/**
