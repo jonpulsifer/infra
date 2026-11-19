@@ -6,7 +6,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import {
   type BinaryReader,
   type DirReader,

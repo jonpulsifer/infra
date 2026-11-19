@@ -6,9 +6,9 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
-import { createModels, type Message, Type } from '@earendil-works/pi-ai';
+import { createModels, type Message } from '@earendil-works/pi-ai';
 import {
   type FauxResponseStep,
   fauxAssistantMessage,
@@ -20,6 +20,7 @@ import {
 import type { Storage, StorageWrite } from '@earendil-works/pi-durable';
 import { openStorage, storageExists } from '@repo/pi-store-postgres';
 import { SQL } from 'bun';
+import { Type } from 'typebox';
 import {
   NO_TEXT,
   PiBrain,
@@ -861,13 +862,17 @@ interface Plan {
 
 function faulty(storage: Storage, plan: Plan): Storage {
   return decorated(storage, {
-    async commit(writes: readonly StorageWrite[], context: Context) {
+    async commit(
+      batches: readonly (readonly StorageWrite[])[],
+      receive: Parameters<Storage['commit']>[1],
+      context: Context,
+    ) {
       if (plan.failAfter !== null && plan.seen++ >= plan.failAfter) {
         throw new Error('the connection to mate-db dropped');
       }
       if (plan.delayMs > 0) await Bun.sleep(plan.delayMs);
       await plan.holdCommit;
-      return storage.commit(writes, context);
+      return storage.commit(batches, receive, context);
     },
     async close(context: Context) {
       await plan.holdClose;
@@ -1310,7 +1315,6 @@ describe('a restart mid-turn', () => {
       }
       await first.brain.abandon();
       expect(await outcome).toBeInstanceOf(TurnAbandoned);
-      held.open();
 
       const next = faux();
       answers(next, 'the answer');
@@ -1321,6 +1325,7 @@ describe('a restart mid-turn', () => {
       const result = await second.brain.resume(reopened, resumed, ASKER);
       expect(result.stopReason).toBe('end_turn');
       expect(resumed.text).toContain('the answer');
+      held.open();
     });
   }
 

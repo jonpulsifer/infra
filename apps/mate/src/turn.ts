@@ -4,7 +4,36 @@
  * surface shows the one it can.
  */
 import type { AssistantMessage, Message } from '@earendil-works/pi-ai';
-import type { AgentEvent, MessageChange } from '@earendil-works/pi-durable';
+import type { EntryRecord } from '@earendil-works/pi-durable';
+
+type MessageChange =
+  | {
+      type: 'text_start' | 'thinking_start';
+      block: AssistantMessage['content'][number];
+    }
+  | { type: 'text_delta' | 'thinking_delta'; delta: string }
+  | { type: 'message'; message: AssistantMessage };
+
+export type TurnEvent =
+  | { type: 'message_start'; message: Message }
+  | { type: 'message_update'; changes: readonly MessageChange[] }
+  | { type: 'message_end'; entry: EntryRecord }
+  | {
+      type: 'tool_execution_start';
+      toolCallId: string;
+      toolName: string;
+      args: unknown;
+    }
+  | {
+      type: 'tool_execution_end';
+      toolCallId: string;
+      toolName: string;
+      entry?: EntryRecord;
+      result?: { isError: boolean };
+    }
+  | { type: 'auto_retry_start'; attempt: number }
+  | { type: 'run_end' };
+
 import type { Clock, Handle } from './clock.ts';
 import {
   type LeaseEvent,
@@ -185,6 +214,7 @@ export class TurnTranslator {
   /** Says why the fallback answers, until it streams text or calls a tool. */
   private routing: string | null = null;
   private readonly routes = new Set<Route>();
+  private fallbackRefused = false;
   /** The text already sent of the assistant message now open. */
   private shown = '';
   /** SIGTERM: the card is left as it was, so nothing more is drawn. */
@@ -211,12 +241,13 @@ export class TurnTranslator {
 
   /** Some request of the turn went to the fallback. */
   get fellBack(): boolean {
-    return this.routes.has('fallback');
+    return this.fallbackRefused;
   }
 
   /** A request of this turn's session was routed; sync and never throws. */
   routed(event: RouteEvent): void {
     this.routes.add(event.route);
+    if (event.route === 'fallback' && event.reason) this.fallbackRefused = true;
     this.routing =
       event.route === 'fallback' && event.reason
         ? `↪️ ${event.model.id} is answering — ${REASONS[event.reason]}`
@@ -237,16 +268,27 @@ export class TurnTranslator {
    * it again, and its end carries no arguments. Nothing is drawn until then.
    */
   seed(id: string, name: string, args: unknown): void {
-    this.seeded.set(id, toolTitle(name, args));
+    const title = toolTitle(name, args);
+    this.seeded.set(id, title);
+    const running = this.tools.get(id);
+    if (running && running.title === toolTitle(name, undefined)) {
+      this.tool({ ...running, title });
+    }
   }
 
   /** Sync and never throws: pi awaits its listeners. */
-  event(event: AgentEvent): void {
+  event(event: TurnEvent): void {
     switch (event.type) {
       case 'message_start': {
         const message = assistant(event.message);
         if (!message) return;
         this.shown = '';
+        this.rememberCalls(message);
+        if (message.content.some((block) => block.type === 'thinking')) {
+          this.thinking = true;
+          this.retrying = null;
+          this.refresh();
+        }
         this.say(spokenText(message));
         return;
       }
@@ -261,7 +303,11 @@ export class TurnTranslator {
         this.routing = null;
         this.tool({
           id: event.toolCallId,
-          title: toolTitle(event.toolName, event.args),
+          title:
+            event.args === undefined
+              ? (this.seeded.get(event.toolCallId) ??
+                toolTitle(event.toolName, event.args))
+              : toolTitle(event.toolName, event.args),
           state: 'in_progress',
         });
         return;
@@ -269,7 +315,9 @@ export class TurnTranslator {
         const known = this.tools.get(event.toolCallId);
         const result = event.entry?.model?.[0];
         // No entry: the tool task faulted before it wrote a result.
-        const isError = result?.role !== 'toolResult' || result.isError;
+        const isError =
+          event.result?.isError ??
+          (result?.role !== 'toolResult' || result.isError);
         this.metrics.toolEnded(event.toolName, isError);
         this.tool({
           id: event.toolCallId,
@@ -323,6 +371,12 @@ export class TurnTranslator {
         this.refresh();
         return;
       case 'message':
+        this.rememberCalls(change.message);
+        if (change.message.content.some((block) => block.type === 'thinking')) {
+          this.thinking = true;
+          this.retrying = null;
+          this.refresh();
+        }
         this.rest(change.message);
         return;
       default:
@@ -337,9 +391,18 @@ export class TurnTranslator {
    */
   private ended(message: AssistantMessage | null): void {
     if (!message) return;
+    this.rememberCalls(message);
     this.costUsd += message.usage.cost.total;
     if (message.stopReason !== 'aborted' || this.shown) this.rest(message);
     this.shown = '';
+  }
+
+  private rememberCalls(message: AssistantMessage): void {
+    for (const block of message.content) {
+      if (block.type === 'toolCall') {
+        this.seed(block.id, block.name, block.arguments);
+      }
+    }
   }
 
   /** Sends what `message` says beyond the text already sent. */

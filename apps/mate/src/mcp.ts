@@ -7,8 +7,7 @@
  * leaving the set.
  */
 import { createHash } from 'node:crypto';
-import type { Context } from '@earendil-works/chord';
-import type { TSchema } from '@earendil-works/pi-ai';
+import type { Context } from '@earendil-works/chord/context';
 import { validateToolArguments } from '@earendil-works/pi-ai';
 import type { ToolExecutionResult } from '@earendil-works/pi-durable';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -21,6 +20,7 @@ import {
   McpError,
   type Tool as McpTool,
 } from '@modelcontextprotocol/sdk/types.js';
+import type { TSchema } from 'typebox';
 import type {
   BridgedTool,
   McpBridge,

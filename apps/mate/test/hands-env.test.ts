@@ -5,7 +5,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import {
   BACKGROUND_CONTEXT,
   withAbortSignal,

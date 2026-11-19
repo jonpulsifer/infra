@@ -4,13 +4,14 @@
  * store in mate's own process, so no sandbox reaches mate-db. The nightly
  * dream reads the day with them, and an owner's thread can look back.
  */
-import { type Message, Type } from '@earendil-works/pi-ai';
+import type { Message } from '@earendil-works/pi-ai';
 import type {
   EntryRecord,
   ToolExecutionResult,
   ToolRegistration,
 } from '@earendil-works/pi-durable';
 import type { SQL } from 'bun';
+import { Type } from 'typebox';
 import { plain } from './log.ts';
 import { redact } from './redact.ts';
 

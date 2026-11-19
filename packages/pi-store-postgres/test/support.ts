@@ -1,6 +1,6 @@
 import { afterAll, beforeAll } from 'bun:test';
-import type { JsonValue } from '@earendil-works/chord';
 import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
+import type { JsonValue } from '@earendil-works/chord/json';
 import {
   type ConversationId,
   type EntryId,
@@ -87,6 +87,24 @@ export function sessionId(label: string): string {
 }
 
 export const ctx = BACKGROUND_CONTEXT;
+
+/** Single-batch test helper: preserve the seq and surface a validation refusal. */
+export async function commitOne(
+  storage: Storage,
+  writes: readonly StorageWrite[],
+): Promise<number> {
+  let seq: number | undefined;
+  const result = await storage.commit(
+    [writes],
+    (_index, received) => {
+      seq = received;
+    },
+    ctx,
+  );
+  if (result.refused) throw result.refused;
+  if (seq === undefined) throw new Error('commit stored no batch');
+  return seq;
+}
 
 /** A root conversation entry the tests append to. */
 export function note(

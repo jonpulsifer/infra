@@ -4,7 +4,7 @@
  * tool's effect at most once.
  */
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { createModels, Type } from '@earendil-works/pi-ai';
+import { createModels } from '@earendil-works/pi-ai';
 import {
   fauxAssistantMessage,
   fauxProvider,
@@ -19,6 +19,7 @@ import {
   type Storage,
   type StorageWrite,
 } from '@earendil-works/pi-durable';
+import { Type } from 'typebox';
 import { openStorage } from '../src/index.ts';
 import { ctx, sessionId, withDatabase } from './support.ts';
 
@@ -49,10 +50,18 @@ function crashingAfter(
   const storage = new Proxy(inner, {
     get(target, property) {
       if (property === 'commit') {
-        return async (writes: readonly StorageWrite[], context: typeof ctx) => {
-          if (commits.length >= allowed) throw new Error('process died');
-          commits.push([...writes]);
-          return target.commit(writes, context);
+        return async (
+          batches: readonly (readonly StorageWrite[])[],
+          receive: Parameters<Storage['commit']>[1],
+          context: typeof ctx,
+        ) => {
+          const capacity = allowed - commits.length;
+          if (capacity <= 0) throw new Error('process died');
+          const admitted = batches.slice(0, capacity);
+          const result = await target.commit(admitted, receive, context);
+          commits.push(...admitted.map((writes) => [...writes]));
+          if (batches.length > capacity) throw new Error('process died');
+          return result;
         };
       }
       const member = Reflect.get(target, property);

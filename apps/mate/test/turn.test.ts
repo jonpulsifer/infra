@@ -1,7 +1,6 @@
 /** What a turn's events look like on a surface: text, status and cards. */
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import type { AgentEvent } from '@earendil-works/pi-durable';
 import { SANDBOX_CARD_ID } from '../src/lease.ts';
 import {
   CONNECTING,
@@ -12,6 +11,7 @@ import {
   WAITING,
 } from '../src/notices.ts';
 import type { PromptSink, Update } from '../src/sandbox.ts';
+import type { TurnEvent } from '../src/turn.ts';
 import {
   CARD_DELAY_MS,
   SandboxCard,
@@ -37,8 +37,8 @@ class Recorder implements PromptSink {
   }
 }
 
-function event(fields: Record<string, unknown>): AgentEvent {
-  return fields as unknown as AgentEvent;
+function event(fields: Record<string, unknown>): TurnEvent {
+  return fields as unknown as TurnEvent;
 }
 
 const delta = (type: 'text_delta' | 'thinking_delta', text: string) =>
@@ -181,6 +181,27 @@ describe('the translator', () => {
     expect(turn.firstTokenMs).toBe(1_200);
   });
 
+  test('shows thinking from a persisted partial view before text arrives', () => {
+    turn.event(
+      event({
+        type: 'message_start',
+        message: {
+          ...assistant(''),
+          content: [{ type: 'thinking', thinking: 'plan' }],
+        },
+      }),
+    );
+    expect(sink.statuses).toEqual([THINKING]);
+    turn.event(
+      event({
+        type: 'message_update',
+        changes: [{ type: 'message', message: assistant('answer') }],
+      }),
+    );
+    expect(sink.text).toBe('answer');
+    expect(sink.statuses).toEqual([THINKING, null]);
+  });
+
   test('shows the model thinking only before it speaks', () => {
     turn.event(delta('thinking_delta', 'let me see'));
     expect(sink.statuses).toEqual([THINKING]);
@@ -221,6 +242,60 @@ describe('the translator', () => {
     turn.event(delta('text_delta', 'late'));
     await clock.advance(CARD_DELAY_MS);
     expect(sink.updates.slice(drawn)).toEqual([]);
+  });
+
+  test('a committed tool call supplies the title when a running slot has no arguments', () => {
+    turn.event(
+      ended(
+        assistant('', {
+          content: [
+            {
+              type: 'toolCall',
+              id: 'c1',
+              name: 'bash',
+              arguments: { command: 'cat notes.txt' },
+            },
+          ],
+        }),
+      ),
+    );
+    turn.event(toolStart('c1', 'bash', undefined));
+    turn.event(toolEnd('c1', 'bash'));
+    expect(sink.cards.at(-1)).toEqual({
+      id: 'c1',
+      title: '$ cat notes.txt',
+      state: 'complete',
+    });
+  });
+
+  test('a late partial tool call fills in an already running card', () => {
+    turn.event(toolStart('c1', 'bash', undefined));
+    expect(sink.cards.at(-1)?.title).toBe('$ …');
+    turn.event(
+      event({
+        type: 'message_update',
+        changes: [
+          {
+            type: 'message',
+            message: assistant('', {
+              content: [
+                {
+                  type: 'toolCall',
+                  id: 'c1',
+                  name: 'bash',
+                  arguments: { command: 'sleep 300' },
+                },
+              ],
+            }),
+          },
+        ],
+      }),
+    );
+    expect(sink.cards.at(-1)).toEqual({
+      id: 'c1',
+      title: '$ sleep 300',
+      state: 'in_progress',
+    });
   });
 
   test('a recovered tool end it never saw start opens and closes its card in one step', () => {
@@ -309,6 +384,16 @@ describe('the translator', () => {
     expect(sink.statuses.at(-1)).toBeNull();
     expect(turn.fellBack).toBe(true);
     expect(turn.route).toBe('mixed');
+  });
+
+  test('a resumed fallback model does not claim a ChatGPT refusal', () => {
+    turn.routed({
+      route: 'fallback',
+      reason: null,
+      model: { provider: 'opencode-go', id: 'qwen3.8-max' } as Model<Api>,
+    });
+    expect(turn.route).toBe('fallback');
+    expect(turn.fellBack).toBe(false);
   });
 
   test('sums the cost of every request in the run', () => {

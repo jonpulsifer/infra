@@ -6,8 +6,9 @@
  * process and answer in a sentence; the work itself runs in the thread, with
  * its sandbox, cards and Stop button, as a typed message would.
  */
-import { type Static, type TSchema, Type } from '@earendil-works/pi-ai';
+
 import type { ToolRegistration } from '@earendil-works/pi-durable';
+import { type Static, type TSchema, Type } from 'typebox';
 import type { RecallSource } from './recall.ts';
 import { recallTools } from './recall.ts';
 import type { ThreadState } from './threads.ts';

@@ -36,7 +36,6 @@ import {
   type SimpleStreamOptions,
   type ModelThinkingLevel as ThinkingLevel,
   type TranscriptContext,
-  Type,
 } from '@earendil-works/pi-ai';
 import { openaiCodexProvider } from '@earendil-works/pi-ai/providers/openai-codex';
 import { opencodeGoProvider } from '@earendil-works/pi-ai/providers/opencode-go';
@@ -47,6 +46,8 @@ import {
   Harness,
   MemoryStorage,
 } from '@earendil-works/pi-durable';
+import { Type } from 'typebox';
+import { turnEvents } from '../src/brain.ts';
 import {
   LIMIT_FALLBACK,
   PRIMARY_REFUSING,
@@ -516,11 +517,34 @@ describe('the harness', () => {
           instructions: 'You help.',
         },
       });
+      const watch = await root.watch(ctx);
+      let previous = watch.value;
+      const seen: string[] = [];
+      let finished = () => {};
+      const completed = new Promise<void>((resolve) => {
+        finished = resolve;
+      });
+      watch.start(async (call) => {
+        if (call.kind !== 'value') return;
+        const changes = turnEvents(previous, call.value);
+        previous = call.value;
+        seen.push(...changes.map((event) => event.type));
+        if (changes.some((event) => event.type === 'run_end')) finished();
+      });
       const submission = await root.submit(
         { type: 'input', content: 'say hi through echo' },
         ctx,
       );
       expect((await submission.wait(ctx)).status).toBe('done');
+      await Promise.race([
+        completed,
+        Bun.sleep(3_000).then(() => {
+          throw new Error('view did not finish');
+        }),
+      ]);
+      expect(seen).toContain('message_end');
+      expect(seen).toContain('tool_execution_end');
+      await watch.stop();
       const page = await root.entries({}, 100, undefined, ctx);
       const messages = [...page.items]
         .reverse()

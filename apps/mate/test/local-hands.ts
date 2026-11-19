@@ -3,7 +3,7 @@
  * sandbox, and each turn's lease is scripted. It records what the brain asked
  * of it, in order, so a test can tell a chat-only turn from a tool turn.
  */
-import type { Context } from '@earendil-works/chord';
+import type { Context } from '@earendil-works/chord/context';
 import {
   type ExecutionEnv,
   ExecutionError,

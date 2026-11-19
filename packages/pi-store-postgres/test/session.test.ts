@@ -8,6 +8,7 @@ import {
   storageExists,
 } from '../src/index.ts';
 import {
+  commitOne,
   createDatabase,
   createRoot,
   ctx,
@@ -49,7 +50,7 @@ describe('openStorage', () => {
     expect(await storageExists(sql, id)).toBe(false);
 
     const created = await openStorage(sql, id);
-    await created.commit([createRoot, note(2), note(3)], ctx);
+    await commitOne(created, [createRoot, note(2), note(3)]);
     await created.close(ctx);
     expect(await storageExists(sql, id)).toBe(true);
 
@@ -63,7 +64,7 @@ describe('openStorage', () => {
     const { sql } = database();
     const id = sessionId('deleted');
     const session = await openStorage(sql, id);
-    await session.commit([createRoot], ctx);
+    await commitOne(session, [createRoot]);
     await session.close(ctx);
 
     await deleteStorage(sql, id);
@@ -75,6 +76,27 @@ describe('openStorage', () => {
     expect<number>(await fresh.mintId()).toBe(2);
     await fresh.close(ctx);
   });
+});
+
+test('batched commits receipt only durable batches and stop at a validation refusal', async () => {
+  const storage = await openStorage(database().sql, sessionId('batched'));
+  const receipts: [number, number][] = [];
+  const receive = (index: number, seq: number) => receipts.push([index, seq]);
+  const result = await storage.commit(
+    [[createRoot, note(2)], [note(3)], [note(2)], [note(4)]],
+    receive,
+    ctx,
+  );
+  expect(result.stored).toBe(2);
+  expect(result.refused).toBeInstanceOf(Error);
+  expect(String(result.refused)).toBe('Error: ID 2 already belongs to entry');
+  expect(receipts).toEqual([
+    [0, 1],
+    [1, 2],
+  ]);
+  expect(await entryIds(storage)).toEqual([2, 3]);
+  expect(await commitOne(storage, [note(4)])).toBe(3);
+  await storage.close(ctx);
 });
 
 describe('two sessions in one database', () => {
@@ -104,8 +126,8 @@ describe('two sessions in one database', () => {
           content: { kind: 'base', version: 1, value: { extra } },
         },
       ] as never;
-    await first.commit(writes(1), ctx);
-    await second.commit(writes(2), ctx);
+    await commitOne(first, writes(1));
+    await commitOne(second, writes(2));
 
     expect<number>(await first.mintId()).toBe(5);
     expect(await entryIds(first)).toEqual([2]);
@@ -154,7 +176,7 @@ describe('the store', () => {
       zeta: 'a\u0000b',
       alpha: { y: 1, x: [2, '\u{10000}', '\ud800'] },
     };
-    await storage.commit([createRoot, note(2, data)], ctx);
+    await commitOne(storage, [createRoot, note(2, data)]);
 
     const found = await storage.entry(2 as never, ctx);
 
@@ -165,7 +187,7 @@ describe('the store', () => {
   test('mints unique ids across Storage instances and seqs one commit at a time', async () => {
     const { sql } = database();
     const id = sessionId('writers');
-    await (await openStorage(sql, id)).commit([createRoot], ctx);
+    await commitOne(await openStorage(sql, id), [createRoot]);
     const writers = await Promise.all(
       Array.from({ length: 20 }, () => openStorage(sql, id)),
     );
@@ -174,7 +196,7 @@ describe('the store', () => {
     const seqs: number[] = [];
     for (const [index] of writers.entries()) {
       const fresh = await openStorage(sql, id);
-      seqs.push(Number(await fresh.commit([note(ids[index]!)], ctx)));
+      seqs.push(Number(await commitOne(fresh, [note(ids[index]!)])));
       await fresh.close(ctx);
     }
 
@@ -189,7 +211,7 @@ describe('the store', () => {
     const storage = await openStorage(sql, id);
     await sql`UPDATE pi_sessions SET next_seq = ${'9007199254740993'}::bigint WHERE id = ${id}`;
 
-    await expect(storage.commit([createRoot], ctx)).rejects.toThrow(
+    await expect(commitOne(storage, [createRoot])).rejects.toThrow(
       'next_seq is not a safe integer',
     );
     await storage.close(ctx);
@@ -199,10 +221,10 @@ describe('the store', () => {
     const { sql } = database();
     const id = sessionId('close');
     const storage = await openStorage(sql, id);
-    const admitted = storage.commit([createRoot, note(2)], ctx);
+    const admitted = commitOne(storage, [createRoot, note(2)]);
 
     const closed = storage.close(ctx);
-    await expect(storage.commit([note(3)], ctx)).rejects.toThrow('closed');
+    await expect(commitOne(storage, [note(3)])).rejects.toThrow('closed');
     await expect(
       storage.conversation(ROOT_CONVERSATION_ID, ctx),
     ).rejects.toThrow('closed');
@@ -216,14 +238,14 @@ describe('the store', () => {
   test('throws a plain error for a commit that breaks the contract', async () => {
     const { sql } = database();
     const storage = await openStorage(sql, sessionId('rejected'));
-    await storage.commit([createRoot, note(2)], ctx);
+    await commitOne(storage, [createRoot, note(2)]);
 
-    const error = await storage
-      .commit([note(3), note(2)], ctx)
-      .catch((reason: unknown) => reason);
+    const error = await commitOne(storage, [note(3), note(2)]).catch(
+      (reason: unknown) => reason,
+    );
 
     expect((error as Error).message).toContain('ID 2 already belongs to entry');
-    expect(await storage.commit([note(3)], ctx)).toBeGreaterThan(1);
+    expect(await commitOne(storage, [note(3)])).toBeGreaterThan(1);
     expect(await entryIds(storage)).toEqual([2, 3]);
     await storage.close(ctx);
   });
