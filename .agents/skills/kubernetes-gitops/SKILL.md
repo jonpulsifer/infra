@@ -33,6 +33,12 @@ beyond them.
   its Ready condition and upgrade failure before reconciling it. Run
   `flux --context <site> reconcile helmrelease <name> -n <namespace>` after
   correcting the cause. A change to a `valuesFrom` source is one cause.
+- When several OCIRepository or HelmRepository sources fail to resolve names,
+  inspect their Ready messages and CoreDNS logs before changing chart versions.
+  Compare CoreDNS's forward target with the router in the cluster topology and
+  check the gateway's DNS service and return route. An established Cilium BGP
+  peer does not prove that pod DNS reaches the router. A recovered source can
+  leave a dependent Kustomization unhealthy until its next health check.
 - If Kyverno's HelmRelease fails an upgrade, inspect the existing policies in
   `clusters/base/platform/kthx-engine-policy/` and the HelmRelease conditions.
   A failed upgrade also makes the `kyverno` Kustomization fail its health check

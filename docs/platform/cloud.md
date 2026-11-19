@@ -15,7 +15,7 @@ The organization root declares folders, projects, budgets, policies, custom role
 | `bluenose` | It has the storage, identities and Secret Manager of [kthx](../apps/kthx.md). It is also the default Vessel, the project that kthx deploys [Apps](../apps/kthx/built-apps.md) into. |
 | `trusted-builds` | The supply chain of kthx Apps. It has the signing key, the Binary Authorization attestor, a staging registry and the Developer Connect link to GitHub. |
 | `lolcorp` | Holds the org policies a Google Workspace BigQuery export needs. Nothing runs in it. |
-| `wishin-app` | The Firebase project of wishin.app, a gift wishlist site. |
+| `wishin-app` | Holds the Firebase resources declared in `terraform/gcp/projects/wishin-app/`. The wishin.app site's data is in Neon Postgres. |
 | `jonpulsifer` | The owner's `jonpulsifer` bucket and a `dotfiles` Cloud Source repository. |
 
 `projects.tf` also declares `firebees`, `kubesec`, `secure-the-cloud` and `cloud-glue`, which no documented app uses.
