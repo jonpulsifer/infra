@@ -431,27 +431,45 @@ export interface ComponentView {
 /** One zone this installation mints in, as the Domain control offers it. */
 export interface ZoneOptionView {
   readonly name: string;
-  /** A zone that cannot serve a placed Component's reach is shown disabled. */
+  /** A zone that cannot serve a Component's reach is shown disabled. */
   readonly reaches: readonly ('private' | 'public')[];
 }
 
-/** The App's own shared name, as the screen that sets it needs it. */
-export interface AppDomainView {
-  /** The label the App named, `@` for the zone itself, or null for none. */
+/** One Component's own names, as the card that sets them needs them. */
+export interface ComponentDomainView {
+  readonly componentId: string;
+  readonly component: string;
+  readonly reach: Reach;
+  /** A website or an exposed service: only these carry a vanity name. */
+  readonly serves: boolean;
+  /** The label it named, `@` for the zone itself, or null for none. */
   readonly label: string | null;
-  /** The zone the App pinned, or null to take the first that serves. */
+  /** The zone it pinned, or null to take the first that serves its reach. */
   readonly zone: string | null;
-  /** Every zone it mints in, in the order an unpinned App takes. */
-  readonly zones: readonly ZoneOptionView[];
-  /** What the placed Components will answer on once a Deploy publishes. */
-  readonly hostnames: readonly string[];
+  /** The zones that serve its reach, in the order an unpinned one takes. */
+  readonly servingZones: readonly string[];
   /**
-   * Whether more than one Component serves; the reconciler then publishes no
-   * shared name.
+   * False for a pin that does not serve its reach, which only a row written
+   * past the edits holds. Its names then fall to the first serving zone.
    */
-  readonly ambiguous: boolean;
-  /** The Component carrying it while there is exactly one. */
-  readonly servedBy: string | null;
+  readonly zoneFits: boolean;
+  /**
+   * `<app>-<component>.<zone>`; null where its reach routes nowhere, or where
+   * every Target it is placed on names its own.
+   */
+  readonly canonical: string | null;
+  /** The vanity name its label mints, or null. */
+  readonly vanity: string | null;
+  /** What its placements will answer on once a Deploy publishes. */
+  readonly hostnames: readonly string[];
+}
+
+/** Each Component's own names, and the zones they can be minted in. */
+export interface AppDomainView {
+  /** Every zone the installation mints in, in the order an unpinned Component takes. */
+  readonly zones: readonly ZoneOptionView[];
+  /** One per Component, oldest first. */
+  readonly components: readonly ComponentDomainView[];
 }
 
 /** The App workspace's whole state. */

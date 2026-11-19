@@ -5,7 +5,6 @@
 import { z } from 'zod';
 import { apps } from '../db/schema.ts';
 import { digestSchema } from '../domain/digest.ts';
-import { isVanityLabel } from '../domain/naming.ts';
 import { type Command, ok } from './types.ts';
 
 /** A DNS label, because the name appears in canonical hostnames. */
@@ -19,22 +18,14 @@ const appName = z
     'must be lowercase letters, digits and hyphens',
   );
 
-const vanityLabel = z
-  .string()
-  .trim()
-  .min(1)
-  .max(63)
-  .refine(
-    isVanityLabel,
-    'must be a single lowercase DNS label, or @ for the zone itself',
-  );
-
 const archiveDigest = digestSchema;
 
-/** No vessel input: placement picks the boundary, one Component at a time. */
+/**
+ * No vessel input: placement picks the boundary, one Component at a time. No
+ * name either: each Component sets its own with `setComponentVanity`.
+ */
 const common = {
   name: appName,
-  vanityDomain: vanityLabel.optional(),
 };
 
 export const createAppInput = z.discriminatedUnion('sourceKind', [
@@ -81,7 +72,6 @@ export const createApp: Command<CreateAppInput, CreateAppResult> = async (
         input.sourceKind === 'repo' ? (input.subpath ?? null) : null,
       sourceArchiveDigest:
         input.sourceKind === 'archive' ? input.archiveDigest : null,
-      vanityDomain: input.vanityDomain ?? null,
       createdAt: now,
       updatedAt: now,
     })

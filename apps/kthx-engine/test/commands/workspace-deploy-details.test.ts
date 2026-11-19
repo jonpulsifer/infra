@@ -415,7 +415,6 @@ describe('getAppWorkspace command', () => {
         name: appName,
         sourceKind: 'repo',
         repoUrl: 'https://github.com/acme/beacon.git',
-        vanityDomain: 'beacon.example.com',
       },
       ctx,
     );

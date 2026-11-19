@@ -1,7 +1,7 @@
 /**
  * Hostnames. The canonical name always resolves: the platform mints it where it
- * can, otherwise core does. The vanity name is the App's own label, layered on
- * every Target.
+ * can, otherwise core does. The vanity name is the Component's own label,
+ * layered on every Target it is placed on.
  */
 import type { TargetAdapter } from '../config/manifest.schema.ts';
 import type { ComponentKind, Hostname, Reach } from './desired-state.ts';
@@ -39,12 +39,36 @@ export interface DnsZone {
   readonly reaches: readonly RoutedReach[];
 }
 
-/** In priority order: an unpinned App takes the first zone serving its reach. */
+/**
+ * In priority order: an unpinned Component takes the first zone serving its
+ * reach.
+ */
 export type DnsZones = readonly DnsZone[];
 
+/** The zones that serve `reach`, in the order an unpinned Component takes. */
+export function zonesServing(reach: Reach, zones: DnsZones): string[] {
+  if (reach === 'none') return [];
+  return zones
+    .filter((zone) => zone.reaches.includes(reach))
+    .map((zone) => zone.name);
+}
+
 /**
- * `null` for `reach: none`, or when no zone serves the reach. A `preferred` pin
- * that cannot serve the reach falls through to the first zone that can.
+ * Whether a pin on `zone` fits a Component of `reach`. Nothing is minted for
+ * `reach: none`, so any pin fits it.
+ */
+export function zoneServes(
+  zone: string,
+  reach: Reach,
+  zones: DnsZones,
+): boolean {
+  return reach === 'none' || zonesServing(reach, zones).includes(zone);
+}
+
+/**
+ * `null` for `reach: none`, or when no zone serves the reach. The edits refuse a
+ * pin that cannot serve the reach ({@link zoneServes}); a row that holds one
+ * anyway falls through to the first zone that can, so its names stay put.
  */
 export function zoneFor(
   reach: Reach,
@@ -61,8 +85,8 @@ export function zoneFor(
 }
 
 /**
- * Whether the Component may claim the App's front-door name. Publishing and the
- * App screen both call this so they agree.
+ * Whether the Component may carry a vanity name. Publishing, the edits and the
+ * App screen all call this so they agree.
  */
 export function servesNetwork(component: {
   readonly kind: ComponentKind;
@@ -162,8 +186,9 @@ export interface HostnameContext {
   readonly adapter: TargetAdapter;
   readonly reach: Reach;
   readonly zones: DnsZones;
-  /** The App's pinned zone: {@link zoneFor}'s `preferred`. */
+  /** The Component's pinned zone: {@link zoneFor}'s `preferred`. */
   readonly zone: string | null;
+  /** The Component's own label, or null when it carries none. */
   readonly vanityLabel: string | null;
 }
 
@@ -192,6 +217,27 @@ export function hostnameFor(context: HostnameContext): Hostname {
   }
 
   return { canonical: '', ...vanityField };
+}
+
+/**
+ * Every name a Component holds: its canonical name in its zone, whichever
+ * platform it is placed on, and its vanity name. One name belongs to one
+ * Component across the installation, so placement never decides who holds it.
+ */
+export function heldNames(context: Omit<HostnameContext, 'adapter'>): string[] {
+  const zone = zoneFor(context.reach, context.zones, context.zone);
+  if (zone === null) return [];
+  const names = [
+    componentCanonical({
+      app: context.app,
+      component: context.component,
+      zone,
+    }),
+  ];
+  if (context.vanityLabel !== null) {
+    names.push(vanity(context.vanityLabel, zone));
+  }
+  return names.map((name) => name.toLowerCase());
 }
 
 /** Vanity first: it is the name a developer shares. `null` when there is none. */

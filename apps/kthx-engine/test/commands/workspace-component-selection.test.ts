@@ -163,6 +163,12 @@ async function serviceThenJob(ctx: CommandContext, backend: FakeDeployAdapter) {
     ctx,
   );
   if (!nightly.ok) throw new Error(nightly.failure.message);
+  // The clock is frozen, so both rows carry one `createdAt`; the job is made
+  // the younger, as it would be on a clock that moves.
+  await ctx.db
+    .update(components)
+    .set({ createdAt: new Date(NOW.getTime() + 1_000) })
+    .where(eq(components.id, nightly.value.componentId));
 
   const service = await placed(
     ctx,

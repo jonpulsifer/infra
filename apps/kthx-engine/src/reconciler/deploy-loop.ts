@@ -24,6 +24,7 @@ import {
   type ObservedState,
 } from '../adapters/deploy/contract.ts';
 import { kthxRefusal } from '../commands/apps/kthx-names.ts';
+import { holderLabel, nameClash } from '../commands/apps/names.ts';
 import type { AdapterRegistry, Clock } from '../commands/types.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
@@ -235,13 +236,8 @@ interface AttemptSubject {
 export function desiredStateFor(
   subject: AttemptSubject,
   manifest: InstallationManifest,
-  /**
-   * The App's vanity name goes only to its sole network-serving Component: two
-   * claimants would put one hostname on two routes.
-   */
-  vanityIsUnambiguous: boolean,
 ): DesiredState {
-  const { deploy, app, build, target } = subject;
+  const { deploy, app, component, build, target } = subject;
   return {
     deploy: String(deploy.id),
     // What this intent pinned, never re-read from `components`, so an edit
@@ -253,15 +249,16 @@ export function desiredStateFor(
       digest: build.artifactDigest ?? '',
       refs: build.artifactRefs ?? [],
     },
-    // Derived from the App, so a rollback never takes back a bookmarked name.
+    // Derived from the Component's row, so a rollback never takes back a
+    // bookmarked name.
     hostname: hostnameFor({
       app: app.name,
       component: deploy.desired.component,
       adapter: target.adapter,
       reach: deploy.desired.reach,
       zones: manifest.dns.zones,
-      zone: app.zone,
-      vanityLabel: vanityIsUnambiguous ? app.vanityDomain : null,
+      zone: component.zone,
+      vanityLabel: servesNetwork(component) ? component.vanityLabel : null,
     }),
   };
 }
@@ -290,14 +287,10 @@ export async function runAttempt(
     deployId: deploy.id,
   };
   const attemptId = deploy.attemptId;
-  const desired = desiredStateFor(
-    subject,
-    context.manifest,
-    await soleServingComponent(context, subject),
-  );
+  const desired = desiredStateFor(subject, context.manifest);
   const targetRef = deployTargetOf(subject.target, subject.vessel);
 
-  // The reservation `setAppVanity` enforces, for names it never checks:
+  // The reservation `setComponentVanity` enforces, for names it never checks:
   // canonical names, and vanity labels stored without that check.
   const shadowed = ownHostnameMintedIn(
     desired.hostname,
@@ -307,7 +300,27 @@ export async function runAttempt(
     return settle(context, subject, desired, {
       phase: 'FAILED',
       reason: 'REJECTED',
-      detail: `${shadowed} is reserved by this installation, so no App is served on it — rename the Component or change the App's vanity name`,
+      detail: `${shadowed} is reserved by this installation, so no App is served on it — rename the Component or change its vanity name`,
+    });
+  }
+
+  // The edits refuse a name another Component holds. This catches the rest:
+  // canonical names, which no edit mints, and rows written past the edits. The
+  // older Component keeps the name, so one of the two deploys.
+  const clash = await nameClash(
+    context.db,
+    context.manifest.dns.zones,
+    subject.component.id,
+    [desired.hostname.canonical, desired.hostname.vanity ?? ''].filter(
+      (name) => name !== '',
+    ),
+    { before: true },
+  );
+  if (clash !== null) {
+    return settle(context, subject, desired, {
+      phase: 'FAILED',
+      reason: 'REJECTED',
+      detail: `${clash.name} is held by ${holderLabel(clash.holder)} — change this Component's vanity name or zone, or rename it`,
     });
   }
 
@@ -481,23 +494,6 @@ export async function heartbeatAttempt(
   return held.length > 0;
 }
 
-async function soleServingComponent(
-  context: DeployLoopContext,
-  subject: AttemptSubject,
-): Promise<boolean> {
-  const siblings = await context.db
-    .select({
-      id: components.id,
-      kind: components.kind,
-      expose: components.expose,
-    })
-    .from(components)
-    .where(eq(components.appId, subject.app.id));
-
-  const serving = siblings.filter(servesNetwork);
-  return serving.length === 1 && serving[0]?.id === subject.component.id;
-}
-
 async function absorb(
   context: DeployLoopContext,
   attempt: { appId: string; componentId: string; deployId: number },
@@ -647,8 +643,8 @@ async function publishVanityRecord(
 
   const handle = dnsHandleFor(desired.app, desired.component);
 
-  // A cleared or ambiguous vanity withdraws its record; idempotent when none
-  // was published.
+  // A cleared vanity, or a label on a Component that does not serve, withdraws
+  // its record; idempotent when none was published.
   if (desired.hostname.vanity === undefined) {
     try {
       await dns.withdraw(handle);

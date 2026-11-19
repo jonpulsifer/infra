@@ -4,6 +4,7 @@ import {
   componentCanonical,
   coreMintsCanonical,
   displayUrl,
+  heldNames,
   hostnameFor,
   isApexName,
   isLabel,
@@ -11,6 +12,8 @@ import {
   VANITY_LEG_LOSSES,
   vanity,
   zoneFor,
+  zoneServes,
+  zonesServing,
 } from '../../src/domain/naming.ts';
 
 const ZONE = 'apps.example.test';
@@ -136,7 +139,7 @@ describe('§9: core mints a name only where the platform gives none', () => {
     ).toBeNull();
   });
 
-  test('a pin follows the App onto a minted name', () => {
+  test('a pin follows the Component onto a minted name', () => {
     const hostname = hostnameFor({
       app: 'shop',
       component: 'web',
@@ -223,6 +226,33 @@ describe('§9: core mints a name only where the platform gives none', () => {
       }),
     ).toBe('https://shop.sh.example.test');
     expect(displayUrl({ canonical: '' })).toBeNull();
+  });
+});
+
+describe('§9: which zones may name a Component', () => {
+  test('only a zone serving the reach fits a pin, and any pin fits no reach', () => {
+    expect(zonesServing('private', SPLIT)).toEqual([ZONE]);
+    expect(zonesServing('public', SPLIT)).toEqual([VANITY_ZONE]);
+    expect(zonesServing('none', SPLIT)).toEqual([]);
+    expect(zoneServes(VANITY_ZONE, 'public', SPLIT)).toBe(true);
+    expect(zoneServes(VANITY_ZONE, 'private', SPLIT)).toBe(false);
+    expect(zoneServes(VANITY_ZONE, 'none', SPLIT)).toBe(true);
+  });
+
+  test('a Component holds its canonical and vanity names whichever Target it is on', () => {
+    const held = {
+      app: 'shop',
+      component: 'web',
+      reach: 'public',
+      zones: SPLIT,
+      zone: null,
+      vanityLabel: 'Shop',
+    } as const;
+    expect(heldNames(held)).toEqual([
+      'shop-web.sh.example.test',
+      'shop.sh.example.test',
+    ]);
+    expect(heldNames({ ...held, reach: 'none' })).toEqual([]);
   });
 });
 

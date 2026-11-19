@@ -87,13 +87,17 @@ async function pendingDeploy(
     /** The two halves of the canonical name core mints. */
     appName?: string;
     componentName?: string;
+    /** Adds the Component to this App, and creates no App. */
+    app?: typeof apps.$inferSelect;
   } = {},
 ) {
   const db = database().db;
-  const [app] = await db
-    .insert(apps)
-    .values({ name: options.appName ?? 'shop', sourceKind: 'archive' })
-    .returning();
+  const [app] = options.app
+    ? [options.app]
+    : await db
+        .insert(apps)
+        .values({ name: options.appName ?? 'shop', sourceKind: 'archive' })
+        .returning();
   const [component] = await db
     .insert(components)
     .values({
@@ -437,18 +441,27 @@ describe('§12: the diagnosis outlives the platform', () => {
   });
 });
 
-describe('§9: one vanity name, and never two claimants', () => {
+describe('§9: each Component carries its own vanity name', () => {
   // Cloud Run names its own workloads, so core mints only the vanity name.
-  const claimant = () =>
-    pendingDeploy({ adapter: 'cloudrun', reach: 'public', auth: 'none' });
+  const claimant = (options: Parameters<typeof pendingDeploy>[0] = {}) =>
+    pendingDeploy({
+      adapter: 'cloudrun',
+      reach: 'public',
+      auth: 'none',
+      ...options,
+    });
   const claimantAdapter = () => new FakeDeployAdapter({ adapter: 'cloudrun' });
 
-  test('a sole serving Component carries the App’s vanity name', async () => {
-    const { app } = await claimant();
+  async function named(componentId: string, label: string) {
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: label })
+      .where(eq(components.id, componentId));
+  }
+
+  test('a serving Component carries its vanity name', async () => {
+    const { component } = await claimant();
+    await named(component.id, 'shop');
 
     const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
@@ -458,14 +471,9 @@ describe('§9: one vanity name, and never two claimants', () => {
     );
   });
 
-  test('a sole serving Component on a cluster Target carries the vanity name too, beside its own canonical', async () => {
-    // The vanity name is the App's own choice, separate from the Component's
-    // canonical.
-    const { app } = await pendingDeploy();
-    await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
+  test('on a cluster Target the vanity name rides beside its own canonical', async () => {
+    const { component } = await pendingDeploy();
+    await named(component.id, 'shop');
 
     const adapter = new FakeDeployAdapter();
     await runDeployPass(context(adapter));
@@ -476,56 +484,94 @@ describe('§9: one vanity name, and never two claimants', () => {
     expect(hostname?.vanity).toBe(`shop.${zone}`);
   });
 
-  test('a second serving Component means neither gets it', async () => {
-    // One name on two routes is a collision the platform resolves
-    // arbitrarily.
-    const { app, component, target, build } = await claimant();
-    await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
-    await database().db.insert(components).values({
-      appId: app.id,
-      name: 'admin',
-      kind: 'service',
-      expose: true,
-    });
+  test('two serving Components of one App each publish their own', async () => {
+    const web = await claimant();
+    const admin = await claimant({ app: web.app, componentName: 'admin' });
+    await named(web.component.id, 'shop');
+    await named(admin.component.id, 'admin');
 
     const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
 
-    const desired = adapter.applied[0]?.desired;
-    expect(desired?.hostname.vanity).toBeUndefined();
-    // The platform reports its own canonical back, so core hands over an empty
-    // one.
-    expect(desired?.hostname.canonical).toBe('');
-    expect(component.id).toBeDefined();
-    expect(target.id).toBeDefined();
-    expect(build.id).toBeDefined();
+    const zone = zoneFor('public', manifest.dns.zones);
+    const vanities = Object.fromEntries(
+      adapter.applied.map((call) => [
+        call.desired.component,
+        call.desired.hostname.vanity,
+      ]),
+    );
+    expect(vanities).toEqual({ web: `shop.${zone}`, admin: `admin.${zone}` });
+    for (const id of [web.deploy.id, admin.deploy.id]) {
+      expect((await deployRow(id))?.phase).toBe('LIVE');
+    }
   });
 
-  test('an unexposed sibling is not a claimant', async () => {
-    // An unexposed service and a job serve nothing, so neither contends.
-    const { app } = await claimant();
+  test('a Component that does not serve the network publishes no vanity name, even one on its row', async () => {
+    const { component } = await claimant();
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
-    await database().db.insert(components).values({
-      appId: app.id,
-      name: 'worker',
-      kind: 'service',
-      expose: false,
-    });
-    await database()
-      .db.insert(components)
-      .values({ appId: app.id, name: 'nightly', kind: 'job' });
+      .db.update(components)
+      .set({ expose: false, vanityLabel: 'shop' })
+      .where(eq(components.id, component.id));
 
     const adapter = claimantAdapter();
     await runDeployPass(context(adapter));
 
-    expect(adapter.applied[0]?.desired.hostname.vanity).toBe(
-      `shop.${zoneFor('public', manifest.dns.zones)}`,
+    expect(adapter.applied[0]?.desired.hostname.vanity).toBeUndefined();
+  });
+});
+
+describe('§9: one name belongs to one Component at deploy', () => {
+  const expectHeld = async (deployId: number, sentence: string) => {
+    const row = await deployRow(deployId);
+    expect(row?.phase).toBe('FAILED');
+    expect(row?.reason).toBe('REJECTED');
+    expect(row?.detail).toBe(sentence);
+  };
+
+  async function older(componentId: string) {
+    await database()
+      .db.update(components)
+      .set({ createdAt: new Date('2020-01-01T00:00:00.000Z') })
+      .where(eq(components.id, componentId));
+  }
+
+  test('a vanity name an older Component holds rejects the newer one, and the older deploys', async () => {
+    // Written straight to the rows, past `setComponentVanity`'s refusal.
+    const holder = await pendingDeploy();
+    const second = await pendingDeploy({ appName: 'store' });
+    await older(holder.component.id);
+    for (const { component } of [holder, second]) {
+      await database()
+        .db.update(components)
+        .set({ vanityLabel: 'shop' })
+        .where(eq(components.id, component.id));
+    }
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    const zone = zoneFor('private', manifest.dns.zones);
+    expect((await deployRow(holder.deploy.id))?.phase).toBe('LIVE');
+    await expectHeld(
+      second.deploy.id,
+      `shop.${zone} is held by shop's web — change this Component's vanity name or zone, or rename it`,
+    );
+    expect(adapter.applied.map((call) => call.desired.app)).toEqual(['shop']);
+  });
+
+  test('two Apps of one name with one Component name mint one canonical name, and only the older deploys', async () => {
+    const holder = await pendingDeploy();
+    const second = await pendingDeploy();
+    await older(holder.component.id);
+
+    const adapter = new FakeDeployAdapter();
+    await runDeployPass(context(adapter));
+
+    const zone = zoneFor('private', manifest.dns.zones);
+    expect((await deployRow(holder.deploy.id))?.phase).toBe('LIVE');
+    await expectHeld(
+      second.deploy.id,
+      `shop-web.${zone} is held by shop's web — change this Component's vanity name or zone, or rename it`,
     );
   });
 });
@@ -539,15 +585,15 @@ describe("§9: no App is served on the installation's own names", () => {
   };
 
   test('a stored vanity label that mints the control plane never reaches the adapter', async () => {
-    // Written straight to the row, past `setAppVanity`'s refusal.
-    const { app, deploy } = await pendingDeploy({
+    // Written straight to the row, past `setComponentVanity`'s refusal.
+    const { component, deploy } = await pendingDeploy({
       reach: 'public',
       auth: 'none',
     });
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'spindrift' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: 'spindrift' })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter();
     await runDeployPass(context(adapter));
@@ -572,14 +618,14 @@ describe("§9: no App is served on the installation's own names", () => {
   });
 
   test('a stored vanity label that mints a reserved hostname is refused the same way', async () => {
-    const { app, deploy } = await pendingDeploy({
+    const { component, deploy } = await pendingDeploy({
       reach: 'public',
       auth: 'none',
     });
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'kthx' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: 'kthx' })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter();
     await runDeployPass(context(adapter));
@@ -624,9 +670,9 @@ describe('§9: kthx holds every name an App mints in its site zone', () => {
 
   async function withVanity(appId: string, label: string) {
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: label })
-      .where(eq(apps.id, appId));
+      .db.update(components)
+      .set({ vanityLabel: label })
+      .where(eq(components.appId, appId));
   }
 
   test('names kthx holds for this App deploy', async () => {
@@ -658,7 +704,7 @@ describe('§9: kthx holds every name an App mints in its site zone', () => {
     expect(row?.phase).toBe('FAILED');
     expect(row?.reason).toBe('REJECTED');
     expect(row?.detail).toBe(
-      `shop.${KTHX_ZONE} (this App's vanity name) is held by a kthx site — change the App's vanity name or remove the site`,
+      `shop.${KTHX_ZONE} (this Component's vanity name) is held by a kthx site — change the Component's vanity name or remove the site`,
     );
   });
 
@@ -677,7 +723,7 @@ describe('§9: kthx holds every name an App mints in its site zone', () => {
 
     expect(adapter.applied).toHaveLength(0);
     expect((await deployRow(deploy.id))?.detail).toBe(
-      `shop.${KTHX_ZONE} (this App's vanity name) is held by another App — change the App's vanity name; ` +
+      `shop.${KTHX_ZONE} (this Component's vanity name) is held by another App — change the Component's vanity name; ` +
         `shop-web.${KTHX_ZONE} (the canonical name) is held by another App — rename the Component`,
     );
   });
@@ -729,11 +775,11 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   };
 
   test('a vanity name and a reported address publish the record', async () => {
-    const { app } = await claimant();
+    const { component } = await claimant();
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: 'shop' })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter({
       adapter: 'cloudrun',
@@ -761,12 +807,12 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   test('an apex is stated as published once, not as a re-point', async () => {
     // external-dns cannot write its ownership marker at a zone apex, so only
     // the create lands, and the log must not claim a later re-point.
-    const { app, deploy } = await claimant();
+    const { component, deploy } = await claimant();
     const zone = zoneFor('public', manifest.dns.zones) as string;
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: APEX })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: APEX })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter({
       adapter: 'cloudrun',
@@ -816,11 +862,11 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   });
 
   test('with no DNS publisher configured, the deploy still lands LIVE and the log says so', async () => {
-    const { app, deploy } = await claimant();
+    const { component, deploy } = await claimant();
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: 'shop' })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter({
       adapter: 'cloudrun',
@@ -840,11 +886,11 @@ describe('§9: dns publishing on a platform-named Target (ticket 137b)', () => {
   });
 
   test('a publish that throws leaves the deploy LIVE, with the failure on the attempt log', async () => {
-    const { app, deploy } = await claimant();
+    const { component, deploy } = await claimant();
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: 'shop' })
-      .where(eq(apps.id, app.id));
+      .db.update(components)
+      .set({ vanityLabel: 'shop' })
+      .where(eq(components.id, component.id));
 
     const adapter = new FakeDeployAdapter({
       adapter: 'cloudrun',
@@ -881,9 +927,9 @@ describe('§9: a LIVE row states the name a developer shares', () => {
 
   async function named(appId: string, label: string) {
     await database()
-      .db.update(apps)
-      .set({ vanityDomain: label })
-      .where(eq(apps.id, appId));
+      .db.update(components)
+      .set({ vanityLabel: label })
+      .where(eq(components.appId, appId));
   }
 
   test('a cluster Target’s row is the vanity, not the canonical it also minted', async () => {

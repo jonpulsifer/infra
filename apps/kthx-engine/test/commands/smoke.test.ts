@@ -95,7 +95,7 @@ describe('createApp: an App sourced from a repository', () => {
     expect(result.value.createdAt.toISOString()).toBe(FROZEN.toISOString());
   });
 
-  test('leaves an unnamed subpath, vessel, and vanity name unset', async () => {
+  test('leaves an unnamed subpath unset', async () => {
     const result = await createApp(
       {
         name: `plain-${crypto.randomUUID().slice(0, 8)}`,
@@ -109,7 +109,6 @@ describe('createApp: an App sourced from a repository', () => {
 
     const row = await appRow(result.value.appId);
     expect(row?.sourceRepoSubpath).toBeNull();
-    expect(row?.vanityDomain).toBeNull();
   });
 });
 
@@ -121,7 +120,6 @@ describe('createApp: an App sourced from an uploaded archive', () => {
         name: `bundle-${crypto.randomUUID().slice(0, 8)}`,
         sourceKind: 'archive',
         archiveDigest: digest,
-        vanityDomain: 'notes',
       },
       context(),
     );
@@ -132,7 +130,6 @@ describe('createApp: an App sourced from an uploaded archive', () => {
     expect(row?.sourceKind).toBe('archive');
     expect(row?.sourceArchiveDigest).toBe(digest);
     expect(row?.sourceRepoUrl).toBeNull();
-    expect(row?.vanityDomain).toBe('notes');
   });
 });
 

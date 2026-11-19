@@ -103,7 +103,7 @@ export async function appListItems(
       target:
         target?.adapter ??
         (placed == null ? 'none' : `${placed.adapter} (awaiting first deploy)`),
-      // Never `vanityDomain`, which holds a label such as `@` instead of a host.
+      // Never a vanity label, which can be `@` instead of a host.
       url: deploy?.url ?? '',
       urlLive: deploy?.phase === 'LIVE' && !worst?.faulty,
       faulty: worst?.faulty ?? false,

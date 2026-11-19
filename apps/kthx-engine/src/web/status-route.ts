@@ -3,15 +3,11 @@
  * over this wildcard, both at the Gateway and in `Bun.serve`.
  */
 import { desc, eq } from 'drizzle-orm';
+import { nameHolders } from '../commands/apps/names.ts';
 import type { InstallationManifest } from '../config/manifest.schema.ts';
 import type { Database } from '../db/client.ts';
-import { apps, components, deploys } from '../db/schema.ts';
-import {
-  componentCanonical,
-  type DnsZones,
-  vanity,
-  zoneFor,
-} from '../domain/naming.ts';
+import { deploys } from '../db/schema.ts';
+import type { DnsZones } from '../domain/naming.ts';
 import { PRODUCT_NAME } from './brand.ts';
 
 /** Matched after every exact path; the page is chosen by the `Host` header. */
@@ -93,25 +89,15 @@ async function standingFor(
 ): Promise<Standing> {
   // ponytail: names are minted and compared in memory, one unindexed query.
   // The upgrade path stores the chart's hostnames and looks this up by one.
-  const placed = await db
-    .select({
-      id: components.id,
-      component: components.name,
-      reach: components.reach,
-      app: apps.name,
-      zone: apps.zone,
-      vanityDomain: apps.vanityDomain,
-    })
-    .from(components)
-    .innerJoin(apps, eq(components.appId, apps.id));
-
-  const match = placed.find((row) => namesFor(row, zones).includes(host));
+  const match = (await nameHolders(db, zones)).find((holder) =>
+    holder.names.includes(host),
+  );
   if (match === undefined) return 'unclaimed';
 
   const [newest] = await db
     .select({ phase: deploys.phase })
     .from(deploys)
-    .where(eq(deploys.componentId, match.id))
+    .where(eq(deploys.componentId, match.componentId))
     .orderBy(desc(deploys.createdAt))
     .limit(1);
 
@@ -119,31 +105,6 @@ async function standingFor(
   if (newest.phase === 'LIVE') return 'unrouted';
   if (newest.phase === 'FAILED') return 'failed';
   return 'deploying';
-}
-
-/**
- * Minted from the naming primitives, not `hostnameFor`, which returns an empty
- * canonical for backends that name their own workloads.
- */
-function namesFor(
-  row: {
-    app: string;
-    component: string;
-    reach: 'none' | 'private' | 'public';
-    zone: string | null;
-    vanityDomain: string | null;
-  },
-  zones: DnsZones,
-): string[] {
-  const zone = zoneFor(row.reach, zones, row.zone);
-  if (zone === null) return [];
-  const names = [
-    componentCanonical({ app: row.app, component: row.component, zone }),
-  ];
-  if (row.vanityDomain !== null) {
-    names.push(vanity(row.vanityDomain, zone));
-  }
-  return names;
 }
 
 /**

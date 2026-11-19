@@ -28,9 +28,8 @@ export function kthxLabels(
 }
 
 /**
- * The labels every placement would mint. `namesUnder` puts the vanity name on
- * each placement, though only the sole serving Component carries it, so this
- * reserves a little more than is routed. That costs nothing.
+ * The labels one Component's placements would mint, under its own pinned zone
+ * and vanity label. kthx holds them for the App the Component belongs to.
  */
 export function kthxNamesOf(
   appName: string,
@@ -107,9 +106,11 @@ export async function kthxRefusal(
     .map((taken) => {
       const host = `${taken.name}.${kthx.zone}`;
       const isVanity = host === hostname.vanity?.toLowerCase();
-      const which = isVanity ? "this App's vanity name" : 'the canonical name';
+      const which = isVanity
+        ? "this Component's vanity name"
+        : 'the canonical name';
       const fix = isVanity
-        ? "change the App's vanity name"
+        ? "change the Component's vanity name"
         : 'rename the Component';
       const or = taken.by === 'site' ? ' or remove the site' : '';
       return `${host} (${which}) is held by ${holderOf(taken)} — ${fix}${or}`;

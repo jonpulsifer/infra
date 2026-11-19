@@ -124,7 +124,12 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
   const app = matches[0]!;
 
   const ownComponents = await context.db
-    .select({ id: components.id, name: components.name })
+    .select({
+      id: components.id,
+      name: components.name,
+      zone: components.zone,
+      vanityLabel: components.vanityLabel,
+    })
     .from(components)
     .where(eq(components.appId, app.id));
   const componentIds = ownComponents.map((component) => component.id);
@@ -247,17 +252,27 @@ export const deleteApp: Command<DeleteAppInput, DeleteAppResult> = async (
 
   // Read before the rows go: the placement query joins the desired rows.
   const kthx = context.adapters.kthx?.() ?? null;
+  const placements =
+    kthx === null ? [] : await placementsFor(context.db, app.id);
   const kthxNames =
     kthx === null
       ? []
-      : kthxNamesOf(
-          app.name,
-          await placementsFor(context.db, app.id),
-          context.manifest.dns.zones,
-          app.zone,
-          app.vanityDomain,
-          kthx.zone,
-        );
+      : [
+          ...new Set(
+            ownComponents.flatMap((component) =>
+              kthxNamesOf(
+                app.name,
+                placements.filter(
+                  (placement) => placement.componentId === component.id,
+                ),
+                context.manifest.dns.zones,
+                component.zone,
+                component.vanityLabel,
+                kthx.zone,
+              ),
+            ),
+          ),
+        ].sort();
 
   // Torn down before the rows go, so a crash leaves a retryable delete.
   // `destroy` is idempotent, so the retry costs nothing.

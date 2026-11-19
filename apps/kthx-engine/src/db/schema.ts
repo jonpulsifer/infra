@@ -285,13 +285,6 @@ export const apps = pgTable(
      * is live without anyone asking.
      */
     autoDeploy: boolean('auto_deploy').notNull().default(false),
-    /**
-     * A `dns.zones` entry for this App's names; null for the default. `zoneFor`
-     * falls back to a zone serving the reach.
-     */
-    zone: text('zone'),
-    /** A flat single-label name, if the developer chose one. */
-    vanityDomain: text('vanity_domain'),
     createdAt: timestamp('created_at', { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -332,6 +325,16 @@ export const components = pgTable(
     args: jsonbDocument('args').$type<string[]>(),
     reach: reachState('reach').notNull().default('private'),
     auth: authMode('auth').notNull().default('proxy'),
+    /**
+     * A `dns.zones` entry for this Component's names, which serves its reach;
+     * null takes the first zone that does.
+     */
+    zone: text('zone'),
+    /**
+     * One DNS label, or `@` for the zone apex. Only a Component that serves the
+     * network carries one, and no two Components mint the same name.
+     */
+    vanityLabel: text('vanity_label'),
     /**
      * The Target this Component is placed on. The newest desired row cannot
      * answer that: any intent on a retired pair makes that row newest.

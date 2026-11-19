@@ -7,8 +7,18 @@ import type {
 import type { TargetAdapter } from '../../config/manifest.schema.ts';
 import { artifactSummary } from '../../domain/artifact-name.ts';
 import { runsNothingOn } from '../../domain/capabilities.ts';
+import type { ComponentKind, Reach } from '../../domain/desired-state.ts';
 import { elapsedSince } from '../../domain/elapsed.ts';
-import { servesNetwork, vanity, zoneFor } from '../../domain/naming.ts';
+import {
+  componentCanonical,
+  coreMintsCanonical,
+  type DnsZones,
+  servesNetwork,
+  vanity,
+  zoneFor,
+  zoneServes,
+  zonesServing,
+} from '../../domain/naming.ts';
 import {
   datastoreVesselLabel,
   deployTargetOf,
@@ -25,6 +35,7 @@ import { principalLabels } from '../principals.ts';
 import { type Command, type CommandContext, failed, ok } from '../types.ts';
 import type {
   ActivityEntry,
+  AppDomainView,
   AppLockView,
   BuildRouteOptionView,
   ComponentView,
@@ -37,7 +48,7 @@ import type {
   WorkspaceSourceView,
   WorkspaceView,
 } from '../views.ts';
-import { namesUnder, placementsFor } from './names.ts';
+import { namesUnder, type Placement, placementsFor } from './names.ts';
 
 export const getAppWorkspaceInput = z.object({
   name: z.string().min(1),
@@ -252,24 +263,21 @@ export const getAppWorkspace: Command<
     });
   }
 
-  // The reconciler publishes no vanity record for an App with two serving
-  // Components, since it cannot tell which one the name means.
-  const serving = app.components.filter(servesNetwork);
-  const vanityIsPublished = serving.length === 1;
-  const placements = await placementsFor(context.db, app.id);
-  // `@` means the zone apex and is no address, so the label becomes a host.
-  const vanityZone =
-    vanityIsPublished && app.vanityDomain !== null && selected !== undefined
-      ? zoneFor(selected.reach, context.manifest.dns.zones, app.zone)
-      : null;
-  const vanityHost =
-    vanityZone === null || app.vanityDomain === null
-      ? ''
-      : vanity(app.vanityDomain, vanityZone);
+  const domain = domainOf(
+    app.name,
+    app.components,
+    await placementsFor(context.db, app.id),
+    context.manifest.dns.zones,
+  );
+  const selectedDomain = domain.components.find(
+    (one) => one.componentId === selected?.id,
+  );
 
   // A job has no address. The vanity host is a fallback for a serving
-  // Component not yet deployed, and is empty while two Components serve.
-  const url = latestDeploy?.url ?? (selected?.kind === 'job' ? '' : vanityHost);
+  // Component not yet deployed.
+  const url =
+    latestDeploy?.url ??
+    (selected?.kind === 'job' ? '' : (selectedDomain?.vanity ?? ''));
 
   let runtime: Runtime;
   if (
@@ -431,26 +439,7 @@ export const getAppWorkspace: Command<
     activity,
     runtime,
     autoDeploy: app.sourceKind === 'repo' ? app.autoDeploy : null,
-    // The preview `setAppZone` and `setAppVanity` answer with.
-    domain: {
-      label: app.vanityDomain,
-      zone: app.zone,
-      zones: context.manifest.dns.zones.map((zone) => ({
-        name: zone.name,
-        reaches: zone.reaches,
-      })),
-      hostnames: placements.flatMap((placement) =>
-        namesUnder(
-          app.name,
-          placement,
-          context.manifest.dns.zones,
-          app.zone,
-          vanityIsPublished ? app.vanityDomain : null,
-        ),
-      ),
-      ambiguous: serving.length > 1,
-      servedBy: vanityIsPublished ? (serving[0]?.name ?? null) : null,
-    },
+    domain,
     // A null `buildRoute` cannot tell an archive App from a repo App with no
     // route, so this is stated.
     archiveSourced: app.sourceKind !== 'repo',
@@ -473,6 +462,60 @@ export const getAppWorkspace: Command<
 
   return ok({ workspace });
 };
+
+/**
+ * Each Component's names as `setComponentZone` and `setComponentVanity` preview
+ * them, and as the deploy loop mints them.
+ */
+function domainOf(
+  app: string,
+  comps: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly kind: ComponentKind;
+    readonly expose: boolean | null;
+    readonly reach: Reach;
+    readonly zone: string | null;
+    readonly vanityLabel: string | null;
+  }[],
+  placements: readonly Placement[],
+  zones: DnsZones,
+): AppDomainView {
+  return {
+    zones: zones.map((zone) => ({ name: zone.name, reaches: zone.reaches })),
+    components: comps.map((comp) => {
+      const serves = servesNetwork(comp);
+      const label = serves ? comp.vanityLabel : null;
+      const zone = zoneFor(comp.reach, zones, comp.zone);
+      const placed = placements.filter(
+        (placement) => placement.componentId === comp.id,
+      );
+      const coreNamesIt =
+        placed.length === 0 ||
+        placed.some((placement) => coreMintsCanonical(placement.adapter));
+      return {
+        componentId: comp.id,
+        component: comp.name,
+        reach: comp.reach,
+        serves,
+        label: comp.vanityLabel,
+        zone: comp.zone,
+        servingZones: zonesServing(comp.reach, zones),
+        zoneFits:
+          comp.zone === null || zoneServes(comp.zone, comp.reach, zones),
+        canonical:
+          zone === null || !coreNamesIt
+            ? null
+            : componentCanonical({ app, component: comp.name, zone }),
+        // `@` means the zone apex and is no address, so the label becomes a host.
+        vanity: zone === null || label === null ? null : vanity(label, zone),
+        hostnames: placed.flatMap((placement) =>
+          namesUnder(app, placement, zones, comp.zone, label),
+        ),
+      };
+    }),
+  };
+}
 
 /**
  * The Deploy's raw `debug` payload as text, or `null` when there is none. An
