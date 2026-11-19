@@ -405,23 +405,13 @@ describe('a restart mid-turn', () => {
       const { message, threadId, key } = await start(first, 'run the long job');
       const [pid] = await pidsIn(pidFile, 1);
       if (pid === undefined) throw new Error('no sleep pid');
-      try {
-        await eventually(
-          () =>
-            shown(discord, threadId).some((m) =>
-              m.subtext.some((line) => line.includes('sleep 300')),
-            ),
-          'the bash card',
-        );
-      } catch (error) {
-        throw new Error(
-          `bash card did not show: ${JSON.stringify({
-            cards: shown(discord, threadId).map((m) => m.subtext),
-            outcomes: first.metrics.turns,
-          })}`,
-          { cause: error },
-        );
-      }
+      await eventually(
+        () =>
+          shown(discord, threadId).some((m) =>
+            m.subtext.some((line) => line.includes('sleep 300')),
+          ),
+        'the bash card',
+      );
       // Past the edit cadence, so no repaint is still due.
       await Bun.sleep(200);
       const card = shown(discord, threadId);
@@ -523,35 +513,7 @@ describe('a restart mid-turn', () => {
         [fauxAssistantMessage('kthx went quiet; try again later')],
         { brain: { mcpServers: [mcpServer('kthx', empty)] } },
       );
-      try {
-        await settled(discord, { channelId: CHANNEL, message }, key);
-      } catch (error) {
-        throw new Error(
-          `MCP recovery did not settle: ${JSON.stringify({
-            turn: (await row(key)).turn,
-            turns: (await row(key)).turns,
-            messages: discord.contentsIn(threadId),
-            outcomes: second.metrics.turns,
-            turnLog: second.log.entries
-              .filter((one) =>
-                [
-                  'turn ended',
-                  'resumed a turn a restart cut off',
-                  'replaying the thread transcript',
-                ].includes(one.msg),
-              )
-              .map((one) => ({
-                message: one.msg,
-                stop: one.fields?.stopReason,
-                key: one.fields?.key,
-              })),
-            notices: second.log
-              .of('the session could not be opened')
-              .map((one) => one.fields?.error),
-          })}`,
-          { cause: error },
-        );
-      }
+      await settled(discord, { channelId: CHANNEL, message }, key);
 
       expect(second.metrics.turns).toEqual(['end_turn']);
       const said = discord.contentsIn(threadId);
