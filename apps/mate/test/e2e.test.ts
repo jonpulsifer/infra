@@ -352,7 +352,7 @@ describe('a turn', () => {
           githubApiBase: github.base,
         },
       );
-      // The boot preflight mints the token a turn then reuses.
+      // The boot preflight mints a token distinct from the turn's.
       await eventually(
         () => mate.log.of('github app ready').length > 0,
         'the preflight',
@@ -368,7 +368,7 @@ describe('a turn', () => {
       expect((await row(key)).sandbox).toBe(name ?? null);
       // The command saw the token the turn stamped.
       const said = await transcript(database().sql, (await row(key)).sessionId);
-      expect(toolText(said, 'c-cat')).toContain('ghs-token-1');
+      expect(toolText(said, 'c-cat')).toContain('ghs-token-2');
 
       for (const file of [
         '.github-token',
@@ -380,8 +380,8 @@ describe('a turn', () => {
         expect(readFileSync(path, 'utf8')).toBe('');
         expect(mode(path)).toBe(0o600);
       }
-      expect(github.minted).toBe(1);
-      expect(github.revoked).toEqual(['ghs-token-1']);
+      expect(github.minted).toBe(2);
+      expect(github.revoked).toEqual(['ghs-token-2']);
       expect(mate.metrics.turnSandboxes).toEqual(['fresh']);
     },
     SLOW,
@@ -780,9 +780,9 @@ describe('profiles', () => {
         'mate-sandbox-reader',
         'mate-sandbox-admin',
       ]);
-      // The operator turn stamped the preflight's token, then revoked it.
-      expect(github.minted).toBe(1);
-      expect(github.revoked).toEqual(['ghs-token-1']);
+      // The operator turn mints and revokes its own token, not preflight's.
+      expect(github.minted).toBe(2);
+      expect(github.revoked).toEqual(['ghs-token-2']);
       // With a database the operator lists the recall tools too.
       expect(heard[1]).toEqual(
         [

@@ -131,8 +131,8 @@ const CREDENTIAL_HELPER = `!f() { test "$1" = get || exit 0; t=$(cat "$${TOKEN_F
 export const SPARE_TTL_MS = 30 * 60_000;
 export const SPARE_SWEEP_MS = 5 * 60_000;
 const READY_TIMEOUT_MS = 300_000;
-// How long Cilium may take to see a closed checkout window.
-const CHECKOUT_CLOSE_MS = 30_000;
+// Allow Cilium endpoint identity regeneration to finish before failing closed.
+const CHECKOUT_CLOSE_MS = 90_000;
 const CHECKOUT_POLL_MS = 1_000;
 const REFRESH_TIMEOUT_MS = 60_000;
 const GONE_TIMEOUT_MS = 180_000;
@@ -1145,10 +1145,13 @@ export class KubeHands implements Hands {
     let wasClosed: boolean | null = null;
     let patched = false;
     let last: unknown = null;
+    let lastState: CheckoutState | null = null;
     for (;;) {
       let state: CheckoutState | null = null;
       try {
         state = await this.checkoutState(sandbox);
+        last = null;
+        lastState = state;
       } catch (error) {
         if (!passing(error)) {
           throw new CheckoutNotClosed(name, wasClosed === true, error);
@@ -1166,7 +1169,11 @@ export class KubeHands implements Hands {
         patched = true;
       }
       if (Date.now() >= deadline) {
-        throw new CheckoutNotClosed(name, wasClosed === true, last);
+        throw new CheckoutNotClosed(
+          name,
+          wasClosed === true,
+          last ?? `last observed state: ${lastState ?? 'unknown'}`,
+        );
       }
       await new Promise((resolve) => setTimeout(resolve, pollMs));
     }

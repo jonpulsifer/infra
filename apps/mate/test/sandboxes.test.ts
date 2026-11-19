@@ -1220,7 +1220,9 @@ describe('profiles', () => {
     const r = reader();
     r.fake.cepLags = Number.MAX_SAFE_INTEGER;
     const failed = await mintAs(r, INVESTIGATOR);
-    expect(failed.error).toMatch(/could not close its checkout window/);
+    expect(failed.error).toMatch(
+      /could not close its checkout window: last observed state: labelled/,
+    );
     expect(failed.source).toBe('failed');
     expect(r.fake.handsExecs).toEqual([]);
     await until(() => !r.fake.sandboxes.has(READER));
@@ -1251,7 +1253,7 @@ describe('profiles', () => {
     const second = begin(thread);
     const result = await second.env.exists('.', C);
     expect(result.ok ? null : result.error.message).toMatch(
-      /could not close its checkout window/,
+      /could not close its checkout window: last observed state: labelled/,
     );
     await second.lease.finish();
     second.end();

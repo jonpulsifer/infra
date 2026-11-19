@@ -108,7 +108,13 @@ export class GithubApp {
     return this.slug ? `${this.slug}[bot]` : 'unknown[bot]';
   }
 
+  // Turn tokens must be distinct: one turn revokes its token when it ends,
+  // while another turn may still be using its own checkout.
   async token(): Promise<InstallationToken> {
+    return await this.mint();
+  }
+
+  private async readToken(): Promise<InstallationToken> {
     const held = this.held;
     if (held && held.expiresAt - this.options.clock.now() > this.reuseFloorMs) {
       return held;
@@ -120,7 +126,6 @@ export class GithubApp {
   // Only the token itself can revoke it. Revocation takes effect a few seconds
   // after the 204, so a copy briefly outlives the turn.
   async revoke(token: string): Promise<void> {
-    // A revoked token must never be handed out again, whoever asked for this.
     if (this.held?.token === token) this.held = null;
     const response = await this.call('/installation/token', token, {
       method: 'DELETE',
@@ -131,13 +136,13 @@ export class GithubApp {
 
   /**
    * A GET under the App's repository, such as `/pulls/1`, for mate's own
-   * reads. A turn's end revokes the token it shares, so a 401 mints once more.
+   * reads. The cached read token is separate from every revocable turn token.
    */
   async read<T>(path: string): Promise<T> {
     const { owner, repo } = this.options;
     const what = `read ${path.split('?')[0]}`;
     for (let attempt = 0; ; attempt += 1) {
-      const { token } = await this.token();
+      const { token } = await this.readToken();
       const response = await this.call(`/repos/${owner}/${repo}${path}`, token);
       if (response.ok) return (await response.json()) as T;
       if (response.status === 401 && attempt === 0) {
