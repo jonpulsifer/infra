@@ -22,7 +22,7 @@ import {
   type StepStatus,
 } from '../../../commands/views.ts';
 import { BUILD_ADAPTER } from '../../client/build-adapters.ts';
-import { command } from '../../client.ts';
+import { command, type InputOf } from '../../client.ts';
 import { Checklist } from '../../components/checklist.tsx';
 import { DiagnosisPanel, DriftPanel } from '../../components/diagnosis.tsx';
 import { LogPane, Notice } from '../../components/log-pane.tsx';
@@ -51,7 +51,7 @@ import { DetailSkeleton, ScreenFailure, ScreenNotFound } from '../screen.tsx';
 
 /** `busy` names the act in flight, so only one button reads as working. */
 export interface AttemptActions {
-  /** Deploys the App's newest artifact, or builds one if there is none. */
+  /** Deploys the Component's newest artifact, or builds one if there is none. */
   readonly onRedeploy?: () => void;
   readonly onRollback?: () => void;
   readonly onDeployBuild?: () => void;
@@ -873,6 +873,20 @@ export function enteredLive(
   return previous !== undefined && previous !== 'LIVE' && next === 'LIVE';
 }
 
+/**
+ * Deploys the Component this attempt is of, on its Target. Without them
+ * `deployApp` acts on the App's oldest Component. A Build of an unplaced
+ * Component has an empty `targetId`.
+ */
+export function deployRequestOf(view: DeployView): InputOf<'deployApp'> {
+  return {
+    // The App's id, since two Apps can share a name.
+    name: view.appId,
+    component: view.componentId,
+    ...(view.targetId === '' ? {} : { target: view.targetId }),
+  };
+}
+
 /** One Deploy, re-read on each attempt stream event instead of on a timer. */
 export function DeployScreen({
   deployId,
@@ -966,8 +980,7 @@ export function DeployScreen({
     if (state.type !== 'success') return;
     setBusy('redeploy');
     try {
-      // The App's id, since two Apps can share a name.
-      const result = await command('deployApp', { name: state.deploy.appId });
+      const result = await command('deployApp', deployRequestOf(state.deploy));
       if (result.ok) {
         onNavigate(
           result.value.deployId === null
@@ -1174,9 +1187,9 @@ export function BuildScreen({
           : 'Redeploy';
     setBusy(kind);
     try {
-      // `deployApp` places the App's newest artifact, or starts a Build when
-      // there is none.
-      const result = await command('deployApp', { name: state.attempt.appId });
+      // `deployApp` places the Component's newest artifact, or starts a Build
+      // when there is none.
+      const result = await command('deployApp', deployRequestOf(state.attempt));
       if (result.ok) {
         onNavigate(
           result.value.deployId === null
