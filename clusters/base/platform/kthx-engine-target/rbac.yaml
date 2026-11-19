@@ -86,6 +86,26 @@ rules:
       - pods/log
     verbs:
       - get
+  # Release verdicts read only the workloads and routes of placed Components.
+  - apiGroups:
+      - apps
+    resources:
+      - deployments
+      - replicasets
+    verbs:
+      - list
+  - apiGroups:
+      - gateway.networking.k8s.io
+    resources:
+      - httproutes
+    verbs:
+      - list
+  - apiGroups:
+      - external-secrets.io
+    resources:
+      - externalsecrets
+    verbs:
+      - list
   # Runs start from a CronJob's `jobTemplate`, and the CronJob prunes its Jobs.
   # Reads go by label selector, so `list` without `get`.
   - apiGroups:
