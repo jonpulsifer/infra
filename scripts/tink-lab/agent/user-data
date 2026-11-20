@@ -1,0 +1,18 @@
+#cloud-config
+# tink-lab's stand-in for an Ubuntu node's payload, which the attest step leaves in
+# /worker/fleet/payload.tar.gz. The installed Ubuntu prints what a round trip checks to its serial
+# console: its command line, its disks, mounts and signatures, its boot entries and its seed.
+runcmd:
+  - - sh
+    - -c
+    - |
+      exec >/dev/ttyS0 2>&1
+      echo "tink-lab ubuntu: up $(uname -r)"
+      cat /proc/cmdline
+      lsblk -o NAME,SIZE,TYPE,FSTYPE,PARTLABEL,PARTUUID,SERIAL,MOUNTPOINTS
+      findmnt -no SOURCE,TARGET / /boot /boot/efi
+      for d in /dev/vd? /dev/sd? /dev/nvme?n1; do [ -b "$d" ] && wipefs -n "$d" $(lsblk -lnpo NAME,TYPE "$d" | awk '$2 == "part" { print $1 }'); done
+      for v in /sys/firmware/efi/efivars/Boot*; do echo "efivar ${v##*/}"; done
+      command -v efibootmgr >/dev/null && efibootmgr -v
+      cat /var/lib/cloud/seed/nocloud/meta-data
+      echo "tink-lab ubuntu: done"
