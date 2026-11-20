@@ -101,6 +101,10 @@ description = "Run the kthx CLI from this checkout"
 dir = "{{cwd}}"
 run = "bun {{config_root}}/apps/kthx/cli/main.ts"
 
+[tasks."image:ubuntu"]
+description = "Build the Ubuntu noble verity disk image (images/os/ubuntu); arguments go to mkosi"
+run = 'nix run "{{config_root}}#image-ubuntu" --'
+
 [tasks.fmt]
 description = "Format Nix + Terraform"
 run = [
