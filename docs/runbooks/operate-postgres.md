@@ -127,7 +127,9 @@ A Postgres Datastore in `kthx-datastores` archives to that namespace's `garage` 
 | `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
 | `MateDatabaseBackupFailing` fires. | No mate dump has succeeded for 36 hours. | Read the logs of the last `mate-db-backup` Job. A 403 from `upload` is the grant in `terraform/gcp/projects/homelab-ng/mate.tf`. |
 
-For `backup-push`, list the pods with `kubectl --context <site> -n backups get pods -l job-name=<job>`. Read each pod's logs and check the Job's final status. A `cryptcheck` failure can occur when WAL files change between sync and verification; a later successful attempt is distinct from the failed attempts.
+For `backup-push`, list the pods with `kubectl --context <site> -n backups get pods -l job-name=<job>`. Read each pod's logs and check the Job's final status. If a failed pod is gone, search retained logs through [Query Grafana as mate](query-grafana-as-mate.md#search-retained-logs). Filter by cluster, `backups` namespace and Job pod name; check every attempt.
+
+A `cryptcheck` failure can occur when new WAL files appear between sync and verification. Check whether the missing paths are new WAL files before treating it as a credential or copy failure. A later successful attempt is distinct from the failed attempts. If this race persists, change `clusters/base/platform/backups/cronjob.yaml` to verify the sync's fixed file list; do not skip verification.
 
 ## Related
 
