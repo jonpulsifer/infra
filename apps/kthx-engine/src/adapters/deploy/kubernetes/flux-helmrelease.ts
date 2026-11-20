@@ -40,11 +40,16 @@ export interface HelmReleaseSpec {
   sourceRef: { name: string; namespace: string };
   labels: Record<string, string>;
   values: Record<string, unknown>;
+  /** Bounds each Helm action, the release and its remediation alike. */
+  timeout?: string;
 }
 
 /**
  * `retries: 0` because core owns reconciliation: controller retries would put
- * attempts nobody asked for on the timeline.
+ * attempts nobody asked for on the timeline. The last failure is still
+ * remediated, or a failed release would start serving once its cause cleared,
+ * long after its verdict said otherwise: an upgrade rolls back to the release
+ * that served, and an install is uninstalled.
  */
 export function helmRelease(spec: HelmReleaseSpec): KubernetesObject {
   const source = chartSourceKind(spec.chart);
@@ -81,8 +86,15 @@ export function helmRelease(spec: HelmReleaseSpec): KubernetesObject {
               },
             },
           }),
-      install: { remediation: { retries: 0 } },
-      upgrade: { remediation: { retries: 0 } },
+      ...(spec.timeout === undefined ? {} : { timeout: spec.timeout }),
+      install: { remediation: { retries: 0, remediateLastFailure: true } },
+      upgrade: {
+        remediation: {
+          retries: 0,
+          remediateLastFailure: true,
+          strategy: 'rollback',
+        },
+      },
       values: spec.values,
     },
   };

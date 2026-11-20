@@ -243,6 +243,7 @@ async function drain(
 const POD_LABELS = {
   'app.kubernetes.io/name': 'web',
   'app.kubernetes.io/part-of': 'blog',
+  'kthx.dev/deploy': 'deploy-1',
 };
 
 function pod(reason: string, message: string): FakeObject {
@@ -336,6 +337,27 @@ describe('the delivery object', () => {
     expect(spec.chartRef).toBeUndefined();
     // Core owns retries, so the controller makes none.
     expect(spec.install.remediation.retries).toBe(0);
+  });
+
+  test('a failed release is remediated, so it never serves after its verdict', async () => {
+    const { adapter, cluster } = adapterFor();
+    await drain(adapter.apply(target(), desiredState()));
+    const spec = cluster.get('helmreleases/delivery/blog-web')?.spec as any;
+
+    // A failed upgrade rolls back to the release that served, and a failed
+    // install is uninstalled, rather than waiting for its cause to clear.
+    expect(spec.upgrade.remediation).toEqual({
+      retries: 0,
+      remediateLastFailure: true,
+      strategy: 'rollback',
+    });
+    expect(spec.install.remediation).toEqual({
+      retries: 0,
+      remediateLastFailure: true,
+    });
+    // The action and its remediation each take up to `timeout`, and both fit
+    // inside the adapter's ten-minute deadline.
+    expect(spec.timeout).toBe('240s');
   });
 
   test('an oci:// chart is delivered as a chartRef at the Target’s OCIRepository', async () => {
@@ -1038,14 +1060,14 @@ describe('the read on red', () => {
       status: INSTALL_FAILED,
       lists: {
         pods: [],
+        replicasets: [replicaSet('blog-web-5d8f', 'deploy-1')],
         events: [
-          {
-            apiVersion: 'v1',
-            kind: 'Event',
-            metadata: { name: 'e1', namespace: 'apps' },
-            reason: 'FailedCreate',
-            message: 'admission webhook denied the request',
-          },
+          eventAbout(
+            'ReplicaSet',
+            'blog-web-5d8f',
+            'FailedCreate',
+            'admission webhook denied the request',
+          ),
         ],
       },
     });
@@ -1079,6 +1101,266 @@ describe('the read on red', () => {
     expect(
       cluster.pathsOf('GET').filter((path) => path.endsWith('/pods')),
     ).toEqual([]);
+  });
+});
+
+function replicaSet(name: string, deploy: string): FakeObject {
+  return {
+    apiVersion: 'apps/v1',
+    kind: 'ReplicaSet',
+    metadata: {
+      name,
+      namespace: 'apps',
+      labels: { ...POD_LABELS, 'kthx.dev/deploy': deploy },
+    },
+  };
+}
+
+function eventAbout(
+  kind: string,
+  name: string,
+  reason: string,
+  message: string,
+): FakeObject {
+  return {
+    apiVersion: 'v1',
+    kind: 'Event',
+    metadata: { name: `${name}.${reason}`, namespace: 'apps' },
+    involvedObject: { kind, name },
+    reason,
+    message,
+  };
+}
+
+function externalSecret(
+  ready: 'True' | 'False' | null,
+  overrides: { message?: string; generation?: number; synced?: string } = {},
+): FakeObject {
+  return {
+    apiVersion: 'external-secrets.io/v1',
+    kind: 'ExternalSecret',
+    metadata: {
+      name: 'blog-web',
+      namespace: 'apps',
+      labels: {
+        'app.kubernetes.io/name': 'web',
+        'app.kubernetes.io/part-of': 'blog',
+      },
+      generation: overrides.generation ?? 1,
+    },
+    status: {
+      ...(ready === null
+        ? {}
+        : {
+            conditions: [
+              {
+                type: 'Ready',
+                status: ready,
+                reason: ready === 'True' ? 'SecretSynced' : 'SecretSyncedError',
+                message: overrides.message ?? 'secret synced',
+              },
+            ],
+          }),
+      syncedResourceVersion: overrides.synced ?? '1-0a1b2c',
+    },
+  };
+}
+
+describe('the read on red is about this Deploy', () => {
+  test("another Deploy's crashing pod is not this one's evidence", async () => {
+    const { adapter } = adapterFor({
+      status: INSTALL_FAILED,
+      lists: {
+        pods: [
+          {
+            ...pod('ImagePullBackOff', 'the last rollout could not pull'),
+            metadata: {
+              name: 'blog-web-old',
+              namespace: 'apps',
+              labels: { ...POD_LABELS, 'kthx.dev/deploy': 'deploy-0' },
+            },
+          },
+          pod('CrashLoopBackOff', 'back-off restarting failed container'),
+        ],
+        events: [],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('STARTUP_FAILED');
+    expect(verdict.detail).toBe('back-off restarting failed container');
+  });
+
+  test("an event about another Component's pod is not this one's evidence", async () => {
+    const { adapter } = stalling({
+      pods: [],
+      replicasets: [],
+      events: [
+        eventAbout(
+          'Pod',
+          'shop-api-xyz',
+          'FailedScheduling',
+          'Insufficient memory',
+        ),
+      ],
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TIMEOUT');
+  });
+
+  test("a refusal on this Deploy's ReplicaSet is its evidence, with no pod to show", async () => {
+    const { adapter } = stalling({
+      pods: [],
+      replicasets: [
+        replicaSet('blog-web-old', 'deploy-0'),
+        replicaSet('blog-web-new', 'deploy-1'),
+      ],
+      events: [
+        eventAbout(
+          'ReplicaSet',
+          'blog-web-old',
+          'FailedCreate',
+          'an older refusal',
+        ),
+        eventAbout(
+          'ReplicaSet',
+          'blog-web-new',
+          'FailedCreate',
+          'admission webhook denied the request',
+        ),
+      ],
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('REJECTED');
+    expect(verdict.detail).toBe('admission webhook denied the request');
+  });
+});
+
+describe('config the platform never delivered', () => {
+  const unsynced =
+    'could not get secret data from provider: 1Password Connect unreachable';
+
+  test('is the platform’s, not a startup failure', async () => {
+    const { adapter } = adapterFor({
+      status: INSTALL_FAILED,
+      lists: {
+        pods: [
+          pod('CreateContainerConfigError', 'secret "blog-web" not found'),
+        ],
+        events: [],
+        externalsecrets: [externalSecret('False', { message: unsynced })],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(blameFor(verdict.reason)).toBe('platform');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+    expect(verdict.detail).toContain(unsynced);
+  });
+
+  test('outlasting the deadline is the platform’s too', async () => {
+    const { adapter } = stalling({
+      pods: [pod('CreateContainerConfigError', 'secret "blog-web" not found')],
+      events: [],
+      externalsecrets: [externalSecret('False', { message: unsynced })],
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+  });
+
+  test('an ExternalSecret that has not synced its generation has not delivered', async () => {
+    const { adapter } = adapterFor({
+      status: INSTALL_FAILED,
+      lists: {
+        pods: [pod('CreateContainerConfigError', "couldn't find key API_KEY")],
+        events: [],
+        externalsecrets: [
+          externalSecret('True', { generation: 3, synced: '2-0a1b2c' }),
+        ],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('TARGET_UNREACHABLE');
+  });
+
+  test('a synced ExternalSecret leaves the config error with the workload', async () => {
+    const { adapter } = adapterFor({
+      status: INSTALL_FAILED,
+      lists: {
+        pods: [
+          pod('CreateContainerConfigError', 'secret "blog-db-app" not found'),
+        ],
+        events: [],
+        externalsecrets: [externalSecret('True')],
+      },
+    });
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('STARTUP_FAILED');
+  });
+});
+
+describe('a release Flux remediated', () => {
+  /** Flux reports nothing until the rollback is done, then the stall. */
+  const ROLLED_BACK: StatusScript = (reads) =>
+    reads < 30
+      ? {
+          observedGeneration: 0,
+          conditions: [
+            {
+              type: 'Ready',
+              status: 'Unknown',
+              reason: 'Progressing',
+              message: "Running 'upgrade' action with timeout of 4m0s",
+            },
+          ],
+        }
+      : {
+          observedGeneration: 1,
+          conditions: [
+            {
+              type: 'Ready',
+              status: 'False',
+              reason: 'RollbackSucceeded',
+              message: 'Helm rollback to previous release succeeded',
+            },
+            { type: 'Stalled', status: 'True', reason: 'RetriesExceeded' },
+          ],
+        };
+
+  test('is diagnosed from what its pods showed before the rollback took them', async () => {
+    const cluster = new FakeKubernetes({
+      servedKinds: SERVED,
+      status: ROLLED_BACK,
+      lists: { events: [] },
+    });
+    cluster.place(
+      'pods/apps/blog-web-abc',
+      pod('CrashLoopBackOff', 'back-off restarting failed container'),
+    );
+    let clock = 0;
+    const adapter = new KubernetesDeployAdapter({
+      chart: CHART,
+      token: cluster.token,
+      fetch: cluster.fetch,
+      pollIntervalMs: 1_000,
+      timeoutMs: 120_000,
+      sleep: async () => {
+        clock += 1_000;
+        // The rollback scales this Deploy's pods away before Flux says so.
+        if (clock === 28_000) cluster.remove('pods/apps/blog-web-abc');
+      },
+      now: () => clock,
+    });
+
+    const { verdict } = await drain(adapter.apply(target(), desiredState()));
+    if (verdict.phase !== 'FAILED') throw new Error('expected a failure');
+    expect(verdict.reason).toBe('STARTUP_FAILED');
+    expect(verdict.detail).toBe('back-off restarting failed container');
   });
 });
 

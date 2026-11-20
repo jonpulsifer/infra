@@ -64,7 +64,7 @@ import {
   argoChartRef,
   argoRepository,
 } from './argo-application.ts';
-import { diagnose, evidence } from './diagnose.ts';
+import { diagnose, evidence, type Observed } from './diagnose.ts';
 import {
   chartSourceKind,
   HELM_RELEASE,
@@ -100,6 +100,11 @@ export interface KubernetesAdapterOptions {
 
 const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1_000;
+/**
+ * How often a pending release's pods are looked at. Flux remediates before it
+ * reports a failure, so the read on red can find the failed pods already gone.
+ */
+const LOOK_INTERVAL_MS = 10_000;
 const RUNTIME_LOG_LIMIT_BYTES = 256 * 1024;
 
 /** `ClusterSecretStore` provider keys, mapped to store adapters. */
@@ -122,6 +127,12 @@ const POLICY = {
 const EGRESS_POLICY = {
   apiVersion: 'cilium.io/v2',
   kind: 'CiliumNetworkPolicy',
+} as const;
+
+/** What the App chart renders to deliver a Component's config. */
+const EXTERNAL_SECRET = {
+  apiVersion: 'external-secrets.io/v1',
+  plural: 'externalsecrets',
 } as const;
 
 const SECRET_STORE = {
@@ -301,14 +312,9 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     const available = conditionOf(deployment, 'Available');
     if (available?.status !== 'False') return status;
 
-    const { pods, events } = await this.readOnRed(
-      api,
-      placed.namespace,
-      placed.selector,
-    );
+    const observed = await this.readOnRed(api, placed.namespace, placed);
     const diagnosis = diagnose(
-      pods,
-      events,
+      observed,
       available.message ?? 'the workload is no longer available',
     );
     return {
@@ -809,6 +815,8 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     let said: string | undefined;
     let status: DeliveryStatus = { phase: 'APPLYING' };
     let unread: string | undefined;
+    let looked = this.events.now();
+    let seen: Observed | null = null;
 
     for (;;) {
       // A failed read says nothing about the release, which Flux or Argo
@@ -849,7 +857,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       }
 
       if (unread === undefined && status.phase === 'FAILED') {
-        return yield* this.failed(api, connection, desired, status, ref);
+        return yield* this.failed(api, connection, desired, status, ref, seen);
       }
 
       if (this.events.now() >= deadline) {
@@ -861,7 +869,20 @@ export class KubernetesDeployAdapter implements DeployAdapter {
           ref,
           resource,
           unread,
+          seen,
         );
+      }
+
+      if (this.events.now() - looked >= LOOK_INTERVAL_MS) {
+        looked = this.events.now();
+        const look = await this.readOnRed(
+          api,
+          appNamespaceFor(connection, desired.app),
+          desired,
+        );
+        // A look after the rollback finds nothing, and must not erase one
+        // that saw why.
+        if (evidence(look) !== null) seen = look;
       }
 
       await this.wait();
@@ -930,6 +951,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     desired: DesiredState,
     status: DeliveryStatus,
     ref: DeployRef,
+    seen: Observed | null,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     if (status.reason !== undefined) {
       // The delivery object already named a reason; pods would add nothing.
@@ -942,12 +964,15 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    const { pods, events } = await this.readOnRed(
+    const observed = await this.readOnRed(
       api,
       appNamespaceFor(connection, desired.app),
-      componentSelector(desired.app, desired.component),
+      desired,
     );
-    const diagnosis = diagnose(pods, events, status.detail);
+    const diagnosis =
+      evidence(observed, status.detail) ??
+      (seen === null ? null : evidence(seen, status.detail)) ??
+      diagnose(observed, status.detail);
     yield this.events.log(diagnosis.detail);
     return {
       phase: 'FAILED',
@@ -971,6 +996,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     ref: DeployRef,
     resource: string,
     unread: string | undefined,
+    seen: Observed | null,
   ): AsyncGenerator<DeployEvent, DeployVerdict, void> {
     if (status.reason !== undefined) {
       yield this.events.status('FAILED', { resource, reason: status.reason });
@@ -983,12 +1009,14 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       };
     }
 
-    const { pods, events } = await this.readOnRed(
+    const observed = await this.readOnRed(
       api,
       appNamespaceFor(connection, desired.app),
-      componentSelector(desired.app, desired.component),
+      desired,
     );
-    const found = evidence(pods, events, status.detail);
+    const found =
+      evidence(observed, status.detail) ??
+      (seen === null ? null : evidence(seen, status.detail));
 
     yield this.events.status('FAILED', {
       resource,
@@ -1018,27 +1046,58 @@ export class KubernetesDeployAdapter implements DeployAdapter {
     };
   }
 
-  /** A list that throws reads as empty, so the verdict is never lost. */
+  /**
+   * One Deploy's pods and ReplicaSets, the events about them, and its release's
+   * ExternalSecrets, so another rollout's crash is never this one's cause. A
+   * list that throws reads as empty, so the verdict is never lost.
+   */
   private async readOnRed(
     api: KubernetesApi,
     namespace: string,
-    selector: string,
-  ): Promise<{
-    readonly pods: readonly KubernetesObject[];
-    readonly events: readonly KubernetesObject[];
-  }> {
-    const [pods, events] = await Promise.all([
+    scope: {
+      readonly app: string;
+      readonly component: string;
+      readonly deploy?: string;
+    },
+  ): Promise<Observed> {
+    const component = componentSelector(scope.app, scope.component);
+    const selector =
+      scope.deploy === undefined
+        ? component
+        : `${DEPLOY_LABEL}=${scope.deploy}`;
+    const read = (
+      ref: { apiVersion: string; plural: string },
+      labelSelector?: string,
+    ) =>
       api
         .list(
-          { apiVersion: 'v1', plural: 'pods', namespace },
-          { labelSelector: selector },
+          { ...ref, namespace },
+          labelSelector === undefined ? undefined : { labelSelector },
         )
-        .catch(() => null),
-      api
-        .list({ apiVersion: 'v1', plural: 'events', namespace })
-        .catch(() => null),
+        .catch(() => null)
+        .then((items) => items ?? []);
+
+    const [pods, replicaSets, events, secrets] = await Promise.all([
+      read({ apiVersion: 'v1', plural: 'pods' }, selector),
+      read({ apiVersion: 'apps/v1', plural: 'replicasets' }, selector),
+      read({ apiVersion: 'v1', plural: 'events' }),
+      read(EXTERNAL_SECRET, component),
     ]);
-    return { pods: pods ?? [], events: events ?? [] };
+    // List items carry no `kind`, so each is keyed by the kind it was listed as.
+    const involved = new Set([
+      ...pods.map((pod) => `Pod/${pod.metadata.name}`),
+      ...replicaSets.map((set) => `ReplicaSet/${set.metadata.name}`),
+    ]);
+    return {
+      pods,
+      events: events.filter((event) => {
+        const about = (
+          event as { involvedObject?: { kind?: string; name?: string } }
+        ).involvedObject;
+        return involved.has(`${about?.kind}/${about?.name}`);
+      }),
+      secrets,
+    };
   }
 
   private async checklist(
@@ -1386,6 +1445,7 @@ export class KubernetesDeployAdapter implements DeployAdapter {
       sourceRef: connection.delivery.sourceRef,
       labels,
       values,
+      timeout: helmTimeout(this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     });
   }
 
@@ -1723,9 +1783,17 @@ function placedWorkload(
   readonly kind: string;
   readonly namespace: string;
   readonly selector: string;
+  readonly app: string;
+  readonly component: string;
+  readonly deploy?: string;
 } | null {
   const app = valuesOf(flavour, object).app as
-    | { name?: unknown; component?: unknown; kind?: unknown }
+    | {
+        name?: unknown;
+        component?: unknown;
+        kind?: unknown;
+        deployId?: unknown;
+      }
     | undefined;
   const namespace = workloadNamespace(flavour, object);
   if (
@@ -1739,6 +1807,11 @@ function placedWorkload(
     kind: typeof app.kind === 'string' ? app.kind : 'service',
     namespace,
     selector: componentSelector(app.name, app.component),
+    app: app.name,
+    component: app.component,
+    ...(typeof app.deployId === 'string' && app.deployId !== ''
+      ? { deploy: app.deployId }
+      : {}),
   };
 }
 
@@ -1768,6 +1841,14 @@ function appliedDigest(flavour: Flavour, object: KubernetesObject): string {
     | { artifactDigest?: string }
     | undefined;
   return app?.artifactDigest ?? '';
+}
+
+/**
+ * Two fifths of the deadline, so a failed action and its remediation both end
+ * inside it, and the verdict is Flux's rather than the deadline's.
+ */
+function helmTimeout(deadlineMs: number): string {
+  return `${Math.max(1, Math.floor((deadlineMs * 2) / 5 / 1_000))}s`;
 }
 
 /** A DNS label's length limit. */
