@@ -32,7 +32,7 @@ A profile sets what a thread may do. `apps/mate/src/profiles.ts` declares them, 
 | `operator` | interactive | The owner's mention | `mate-sandbox-admin` | Everything in [What the agent can do](#what-the-agent-can-do) | The process limits, and the shared interactive day |
 | `custodian` | job | The daily check | `mate-sandbox-admin` | As `operator` | 10 turns a UTC day of its own |
 | `investigator` | interactive | A mention starting `+investigator` | `mate-sandbox-reader`, read-only on both clusters | GET on Prometheus and Alertmanager, Grafana queries, and the `weather_*` tools | 20-minute turns, 10 a thread, and the shared interactive day |
-| `responder` | job | An Alertmanager notification | As `investigator` | As `investigator` | 20-minute turns, 10 a thread, 30 a UTC day of its own |
+| `responder` | job | An Alertmanager notification (inactive) | As `investigator` | As `investigator` | 20-minute turns, 10 a thread, 30 a UTC day of its own |
 | `dreamer` | job | The nightly dream | None | GitHub, to open one pull request, and the `recall_*` tools | 30-minute turns, 5 a thread, 5 a UTC day of its own |
 
 - Interactive: the owner's threads, which share the turn slots and the daily count.
@@ -55,15 +55,9 @@ A restart resumes an interrupted turn. If mate stops after Slack accepts the roo
 
 ## Alert responder
 
-offsite's Alertmanager posts each firing `warning` or `critical` alert group to mate, and mate opens a thread for it in Slack `#chatops`, configured by `MATE_RESPONDER_CHANNEL` in `clusters/offsite/apps/mate/deployment.yaml`. The root names the alert, the cluster, the count and the severity, with the first alert's message under it.
+Both clusters' Alertmanagers post directly to Slack `#alerts` through `clusters/base/monitoring/alertmanager-slack.yaml`. Reply to an alert with `@Rowbutt` and your request: the mention opens an `operator` turn in that alert's thread, with the access to investigate and make a fix through GitOps. A reply without a mention does not open a turn until Rowbutt owns the thread. [Alerting](../platform/observability/alerting.md) describes the route.
 
-The thread's assignment lists every firing alert with its labels and annotations, and asks for a read-only investigation: whether each alert still fires, what changed and why, the evidence, and the change the agent would make, naming the runbook or the file that owns the fix.
-
-It runs under the `responder` profile in job mode, with `investigator`'s access and 30 turns a UTC day of its own. The groups are Discord's, so an incident with several alert names opens a thread for each, one turn at a time in the automation lane, and the daily cap bounds what an incident spends; a group past the cap gets a line saying so, and Discord has the alert.
-
-A group is one thread while it fires. An alert that joins the group wakes the thread with its details, a repeat notification opens nothing, an alert that leaves and rejoins an open group wakes nothing, and the resolution is one `✅ resolved` line. A group that fires again after it resolved gets a new thread.
-
-A reply in the thread runs a `responder` turn in a new sandbox, read-only like the first; the owner makes changes in a thread of their own. `apps/mate/src/responder.ts` owns this, with the rows in `mate_alert_groups`. [Alerting](../platform/observability/alerting.md) has the route, which `clusters/offsite/monitoring/alertmanager-mate.yaml` declares and the selector in `kube-prometheus.yaml` turns on.
+The read-only webhook responder in `apps/mate/src/responder.ts` is inactive: `MATE_RESPONDER_CHANNEL` is unset and no Alertmanager selects a `mate` receiver. The `responder` profile remains available for existing alert threads.
 
 ## Memory and dreams
 
@@ -148,9 +142,9 @@ The other alerts are in `clusters/offsite/monitoring/mate-rules.yaml`, and each 
 
 To take mate off Discord and Slack, set `replicas` to `0` in `clusters/offsite/apps/mate/deployment.yaml`. To take turns off ChatGPT until mate restarts, say `chatgpt pause <minutes>`. CD restarts mate at each new image, so for longer, set `MATE_MODEL` to the fallback's model and `MATE_FALLBACK_MODEL` to `none`, as [Operate the Rowbutt model fallback](../runbooks/operate-the-rowbutt-model-fallback.md) says.
 
-To disable GitHub, cluster, host, Talos API or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE`, `MATE_TALOSCONFIG_FILE` or `MATE_SWITCHBOARD_URL`. To disable read-only cluster access, unset `MATE_SANDBOX_KUBE_READER_SA`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. To stop opening alert threads, drop `mate` from the selector in `kube-prometheus.yaml`, then unset `MATE_RESPONDER_CHANNEL`; in the other order Alertmanager counts each refused post as a failed notification.
+To disable GitHub, cluster, host, Talos API or phone access, unset `MATE_GITHUB_APP_ID`, `MATE_SANDBOX_KUBE_SA`, `MATE_SSH_KEY_FILE`, `MATE_TALOSCONFIG_FILE` or `MATE_SWITCHBOARD_URL`. To disable read-only cluster access, unset `MATE_SANDBOX_KUBE_READER_SA`. To keep the agent off folly, unset `MATE_SANDBOX_KUBE_PEERS`. Alert notifications go directly through the `slack` receiver selected by each cluster's `kube-prometheus.yaml`.
 
-To rotate the bearer, edit the item `mate alertmanager token`, then force-sync the ExternalSecrets `mate-alertmanager` in `mate` and `alertmanager-mate` in `monitoring` together; until both hold the new value mate answers 401, which counts as failed too. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`, and unset `MATE_KTHX_GCP_AUDIENCE` to deploy without the Google identity.
+The inactive webhook responder reads the bearer from `mate-alertmanager` in `mate`; the selected Slack route uses the Rowbutt Slack bot token instead. Rotate that token through the `mate-slack` item and the `alertmanager-slack` ExternalSecret on both clusters. To disable kthx quick sites or built apps, unset `MATE_KTHX_ORIGIN` or `MATE_KTHX_MCP_URL`, and unset `MATE_KTHX_GCP_AUDIENCE` to deploy without the Google identity.
 
 To disable the weather tools, unset `MATE_WEATHER_MCP_URL`. [Connect an agent to kthx](../runbooks/connect-an-agent-to-kthx.md#give-rowbutt-a-token) gives Rowbutt its built-apps token. [Rotate the Rowbutt Slack token](../runbooks/rotate-the-rowbutt-slack-token.md) replaces the Slack App-Level Token when mate warns that Slack splits its events.
 
@@ -161,6 +155,6 @@ To disable the weather tools, unset `MATE_WEATHER_MCP_URL`. [Connect an agent to
 
 - Source: `apps/mate/`, `images/mate-sandbox/`, `packages/mate-hands/` and `packages/pi-store-postgres/`
 - Memory: `apps/mate/profile/memory.md`
-- Manifests: `clusters/offsite/apps/mate/`, and the alert route in `clusters/offsite/monitoring/alertmanager-mate.yaml`
+- Manifests: `clusters/offsite/apps/mate/`, and the alert route in `clusters/base/monitoring/alertmanager-slack.yaml`
 - Items in the `homelab` vault: `mate alertmanager token`, the bearer Alertmanager's posts carry
 - Images: `ghcr.io/jonpulsifer/mate`, `ghcr.io/jonpulsifer/mate-sandbox`

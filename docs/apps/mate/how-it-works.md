@@ -52,9 +52,9 @@ It follows `AGENTS.md` for GitOps and escalates risky or unclear changes. A fail
 
 `apps/mate/src/responder.ts` answers `POST /alertmanager` on mate's port, behind the bearer in the file `MATE_ALERTMANAGER_TOKEN_FILE` names, which mate reads at each request. The Secret `mate-alertmanager` mounts it, and Alertmanager's `alertmanager-mate` reads the same 1Password item, `mate alertmanager token`, so a Secret that appears or rotates after mate started needs no restart.
 
-The route exists whenever `MATE_RESPONDER_CHANNEL` is set: it answers 503 while mate starts, while the token file is missing, or when Slack or the database is unavailable, and Alertmanager retries a 503 for about its `groupInterval`, as it does a 500 from a store or Slack failure and a 503 from a draining mate.
+The responder route exists only when `MATE_RESPONDER_CHANNEL` is set. It is unset in the deployment; each Alertmanager sends directly to Slack. If enabled, the route answers 503 while mate starts, while the token file is missing, or when Slack or the database is unavailable, and Alertmanager retries a 503 for about its `groupInterval`, as it does a 500 from a store or Slack failure and a 503 from a draining mate.
 
-A request that is not a POST, carries another bearer or is not JSON is refused with a 4xx, which Alertmanager counts as a failed notification and does not retry. A JSON body that is not the version 4 payload mate reads is answered 200 and logged as an error, because Discord still carries the alert and a payload drift should not page.
+A request that is not a POST, carries another bearer or is not JSON is refused with a 4xx, which Alertmanager counts as a failed notification and does not retry. A JSON body that is not the version 4 payload mate reads is answered 200 and logged as an error, so a payload drift does not cause retries; keep another notification route active if enabling the responder.
 
 `mate_alert_groups` holds one row per Alertmanager group key. A firing notification claims the row, replacing one that resolved, posts the root in `MATE_RESPONDER_CHANNEL` if the row has no `thread_ts` yet, saves the timestamp and calls `Threads.start` with the `responder` profile and the owner as the asker.
 
@@ -227,7 +227,7 @@ Grafana accepts the cluster identity through the query-only sidecar in `clusters
 
 `sandbox-network-policy.yaml` declares the sandbox policy and `mate-sandbox-baseline`, which selects every pod with `lolwtf.ca/hands` and allows DNS for `cluster.local` alone. A sandbox whose own policy is missing gets that egress and no more. `sandbox-reader-network-policy.yaml` declares the read-only policy and the checkout window. Before the agent's first command, mate sets the pod's `lolwtf.ca/checkout` to `closed` and waits for its CiliumEndpoint to carry the new label.
 
-The microVM isolates the kernel. mate's ingress admits the node it runs on, for the readiness probe, Alertmanager's pods in `monitoring`, for the alert responder, the bridge's pods, for the voice link, and cloudflared's pods in `cloudflare`, through which ElevenLabs Speech Engine reaches `/speech-engine`; the edge admits ElevenLabs' addresses alone and mate verifies the JWT.
+The microVM isolates the kernel. mate's ingress admits the node it runs on, for the readiness probe, Alertmanager's pods in `monitoring`, for the inactive alert responder, the bridge's pods, for the voice link, and cloudflared's pods in `cloudflare`, through which ElevenLabs Speech Engine reaches `/speech-engine`; the edge admits ElevenLabs' addresses alone and mate verifies the JWT.
 
 The sandbox's policy keeps it away from `mate` and from Alertmanager, whose API takes an alert from anyone, but as `cluster-admin` and root on the nodes it can reach both on purpose.
 

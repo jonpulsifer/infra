@@ -229,7 +229,7 @@ spec:
           # Anything the AlertmanagerConfig sub-route does not take lands here.
           receiver: "null"
           routes:
-            # Watchdog always fires, and Discord cannot show its absence.
+            # Watchdog always fires, and Slack cannot show its absence.
             - receiver: "null"
               matchers:
                 - alertname = "Watchdog"
@@ -247,11 +247,11 @@ spec:
             equal: [namespace]
           - target_matchers: [alertname = "InfoInhibitor"]
       alertmanagerSpec:
-        # Selects the Discord AlertmanagerConfig in base/monitoring; the chart's
+        # Selects the Slack AlertmanagerConfig in base/monitoring; the chart's
         # default empty selector selects nothing.
         alertmanagerConfigSelector:
           matchLabels:
-            alertmanagerConfig: discord
+            alertmanagerConfig: slack
         # Otherwise the operator limits that route to namespace=monitoring alerts.
         alertmanagerConfigMatcherStrategy:
           type: None

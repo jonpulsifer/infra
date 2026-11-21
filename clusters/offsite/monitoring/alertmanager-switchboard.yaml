@@ -1,7 +1,7 @@
 ---
 # Rings the owner's phone through switchboard (docs/apps/switchboard.md) for a
-# critical alert. The Discord config in base/monitoring stays the record of
-# every alert; this one carries only what is worth a call.
+# critical alert. The Slack config in base/monitoring carries the alert;
+# this one carries only what is worth a call.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -27,7 +27,7 @@ spec:
         property: alert-token
 ---
 # The operator makes each selected AlertmanagerConfig a sub-route with
-# `continue: true`, so a critical alert reaches Discord and this receiver.
+# `continue: true`, so a critical alert reaches Slack and this receiver.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:

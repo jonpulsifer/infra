@@ -35,9 +35,8 @@ spec:
         - ports:
             - port: "8080"
               protocol: TCP
-    # Alertmanager's notifications (clusters/offsite/monitoring/
-    # alertmanager-mate.yaml), by the label the operator sets on its pods.
-    # The bearer in the request is what mate checks; this is who may try.
+    # The inactive alert responder, by the label the operator sets on
+    # Alertmanager pods. A bearer still gates any request.
     - fromEndpoints:
         - matchLabels:
             io.kubernetes.pod.namespace: monitoring

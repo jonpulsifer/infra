@@ -51,7 +51,7 @@ covers the screen, the contacts and the star codes.
   progress with its IVR stage, each line's handset and trunk registration,
   and the calls that ended since the board started. See
   [Switchboard board](../apps/switchboard/board.md).
-- **Alerts** in `clusters/folly/monitoring/pbx-rules.yaml` go to Discord:
+- **Alerts** in `clusters/folly/monitoring/pbx-rules.yaml` go to Slack `#alerts`:
   `PBXDown`, `PBXTrunkNotRegistered` per sub-account, and `PBXHandsetOffline`
   per line.
 - **The Asterisk CLI.** Pass `-C`, or the CLI looks for its control socket in
