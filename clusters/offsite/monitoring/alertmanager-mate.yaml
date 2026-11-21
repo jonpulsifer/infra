@@ -1,8 +1,7 @@
 ---
-# Opens a Rowbutt thread for a firing warning or critical alert group
-# (docs/apps/mate.md#alert-responder). The Discord config in base/monitoring
-# stays the record of every alert, and alertmanager-switchboard.yaml rings for
-# a critical one; this one asks mate to look.
+# Opens a Rowbutt thread for each firing alert group
+# (docs/apps/mate.md#alert-responder). Switchboard rings for a critical
+# alert; this receiver keeps the alert in Slack.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -31,7 +30,7 @@ spec:
       remoteRef: {key: mate alertmanager token, property: credential}
 ---
 # The operator makes each selected AlertmanagerConfig a sub-route with
-# `continue: true`, so an alert reaches Discord and this receiver.
+# `continue: true`, so a critical alert reaches switchboard and this receiver.
 apiVersion: monitoring.coreos.com/v1alpha1
 kind: AlertmanagerConfig
 metadata:
@@ -44,16 +43,11 @@ spec:
     # Matches every namespace only while alertmanagerConfigMatcherStrategy is None.
     receiver: mate
     matchers:
-      # Info alerts are inhibited unless a warning fires beside them, and
-      # mate's turns are the cost; a thread per warning is the floor.
-      - name: severity
-        value: critical|warning
-        matchType: "=~"
       # Watchdog always fires, and InfoInhibitor is a synthetic inhibitor.
       - name: alertname
         value: Watchdog|InfoInhibitor
         matchType: "!~"
-    # The same grouping as Discord's, so a thread is one Discord title.
+    # One thread per cluster, namespace and alert name.
     groupBy: [cluster, namespace, alertname]
     # A minute gathers a burst into one thread.
     groupWait: 1m

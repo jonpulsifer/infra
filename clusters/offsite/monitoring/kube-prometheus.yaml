@@ -60,7 +60,7 @@ spec:
         # Same retention as folly, so a query spans both sites alike.
         retention: 30d
         retentionSize: 16GB
-        # Tells the sites apart in the shared Discord channel and in the
+        # Tells the sites apart in the shared alert channel and in the
         # multi-cluster dashboards.
         externalLabels:
           cluster: ${CLUSTER_NAME}
@@ -86,7 +86,7 @@ spec:
           # Anything the AlertmanagerConfig sub-route does not take lands here.
           receiver: "null"
           routes:
-            # Watchdog always fires; its absence is the signal, which Discord
+            # Watchdog always fires; its absence is the signal, which Slack
             # cannot show.
             - receiver: "null"
               matchers:
@@ -105,10 +105,9 @@ spec:
             equal: [namespace]
           - target_matchers: [alertname = "InfoInhibitor"]
       alertmanagerSpec:
-        # The Discord receiver is an AlertmanagerConfig in base/monitoring;
-        # the switchboard and mate receivers are ones here. The chart's
-        # default selector selects none. Each selected config is a sub-route
-        # with continue, so a critical alert goes to all three. `switchboard`
+        # The switchboard and mate receivers are AlertmanagerConfigs here.
+        # The chart's default selector selects none. Each selected config is
+        # a sub-route with continue, so a critical alert reaches both. `switchboard`
         # and `mate` stay in the values only while both hold for each: its
         # 1Password item exists (`switchboard`, `mate alertmanager token`),
         # and its Deployment has a Ready pod (switchboard in elevenlabs, mate
@@ -123,9 +122,9 @@ spec:
           matchExpressions:
             - key: alertmanagerConfig
               operator: In
-              values: [discord, switchboard, mate]
+              values: [switchboard, mate]
         # Otherwise the operator pins that config's route to alerts labelled
-        # namespace=monitoring, and nothing else ever reaches Discord.
+        # namespace=monitoring, and nothing else ever reaches these receivers.
         alertmanagerConfigMatcherStrategy:
           type: None
       ingress:
