@@ -42,7 +42,7 @@ ARG FLUX_VERSION=2.10.0
 # renovate: datasource=github-releases depName=junegunn/fzf
 ARG FZF_VERSION=0.75.0
 # renovate: datasource=github-releases depName=cli/cli
-ARG GH_VERSION=2.104.0
+ARG GH_VERSION=2.105.0
 # renovate: datasource=github-releases depName=helm/helm
 ARG HELM_VERSION=4.3.2
 # renovate: datasource=github-releases depName=cilium/hubble
