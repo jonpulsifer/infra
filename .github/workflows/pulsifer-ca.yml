@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0 # Fetch all history for .GitInfo and .Lastmod
 
       # hugo, tailwind, pandoc and typst are pinned in the app's mise.toml; the CV fonts come from the flake's nixpkgs.
-      - uses: NixOS/nix-installer-action@62c1943b776c509394b550f3f983adc14e9212d6 # main
+      - uses: NixOS/nix-installer-action@a84a22837f6812a9c608843ae5a9e1944ea94211 # main
         with:
           extra-conf: |
             experimental-features = nix-command flakes
