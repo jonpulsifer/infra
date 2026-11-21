@@ -64,8 +64,10 @@ spec:
                       echo "garage:$bucket is empty and its GCS copy is not; refusing to sync" >&2
                       exit 1
                     fi
-                    rclone sync "garage:$bucket" "crypt:$bucket" --stats 1m --stats-one-line --stats-log-level NOTICE
-                    rclone cryptcheck "garage:$bucket" "crypt:$bucket"
+                    # New CNPG WAL files can appear while verification traverses
+                    # the source. Check the files present when the sync ran.
+                    rclone sync "garage:$bucket" "crypt:$bucket" --dest-after /tmp/synced-files --stats 1m --stats-one-line --stats-log-level NOTICE
+                    rclone cryptcheck "garage:$bucket" "crypt:$bucket" --files-from-raw /tmp/synced-files
                   done
               env:
                 # Bucket and account: terraform/gcp/projects/homelab-ng.
