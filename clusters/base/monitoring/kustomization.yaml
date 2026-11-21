@@ -11,6 +11,7 @@ resources:
   - opentelemetry-collector.yaml
   - opentelemetry-collector-servicemonitor.yaml
   - alertmanager-discord.yaml
+  - alertmanager-slack.yaml
   - coredns-rules.yaml
   - etcd-rules.yaml
   - etcd-snapshot-rules.yaml
