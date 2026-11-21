@@ -1,7 +1,6 @@
 ---
-# Where Alertmanager posts its notifications (clusters/offsite/monitoring/
-# alertmanager-mate.yaml): mate's one port, which also answers the readiness
-# probe. network-policy.yaml admits Alertmanager's pods and the node alone.
+# Mate's one port answers readiness and the inactive alert responder.
+# network-policy.yaml admits the node and Alertmanager pods.
 apiVersion: v1
 kind: Service
 metadata:

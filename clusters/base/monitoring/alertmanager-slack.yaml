@@ -51,6 +51,9 @@ spec:
             key: api-url
           channel: C0CKRP9DPRB
           sendResolved: true
+          # Keep the alert's original root (and the owner's fix thread) when
+          # Alertmanager repeats or resolves the group.
+          updateMessage: true
           messageText: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.cluster }} · {{ . }}{{ end }}{{ if gt (len .Alerts) 1 }} ({{ len .Alerts }}){{ end }}{{ "\n" }}{{ range .Alerts }}• {{ if .Annotations.message }}{{ .Annotations.message }}{{ else if .Annotations.summary }}{{ .Annotations.summary }}{{ else }}{{ .Labels.alertname }}{{ end }}{{ "\n" }}{{ end }}'
           httpConfig:
             authorization:

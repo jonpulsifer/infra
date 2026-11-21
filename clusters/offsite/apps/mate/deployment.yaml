@@ -102,20 +102,14 @@ spec:
             - name: MATE_SLACK_ALLOWED_USER_IDS
               value: UAR78LSKC
             - name: MATE_SLACK_ALLOWED_CHANNEL_IDS
-              value: CARBAMA05,C062BS4GADR
+              value: CARBAMA05,C062BS4GADR,C0CKRP9DPRB
             # 18:00 America/Halifax; uses the existing mate-db and Slack identity.
             - name: MATE_CUSTODIAN_CHANNEL
               value: C062BS4GADR
-            # Alertmanager posts each firing warning or critical alert group to
-            # /alertmanager on this pod (clusters/offsite/monitoring/
-            # alertmanager-mate.yaml), and mate opens a read-only thread for it
-            # here, #chatops. Unset to open none.
-            - name: MATE_RESPONDER_CHANNEL
-              value: C062BS4GADR
-            # The bearer those posts carry (external-secret.yaml), read at each
-            # request so the Secret's arrival or rotation needs no restart.
-            # While the file is missing mate answers 503, which Alertmanager
-            # retries.
+            # Alerts go directly to Slack. Mention Rowbutt in an alert thread
+            # to run an operator turn; the read-only webhook responder is off.
+            # The inactive webhook responder still reads its optional bearer
+            # from this file if re-enabled.
             - name: MATE_ALERTMANAGER_TOKEN_FILE
               value: /var/run/mate/alertmanager/token
             # 03:00 America/Halifax: the nightly dream reads the day's threads

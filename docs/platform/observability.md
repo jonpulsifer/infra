@@ -3,7 +3,7 @@ title: Observability
 description: The metrics, logs, traces, dashboards and alerts on each Kubernetes cluster, the hosts and Windows desktops they watch, and the daily k6 check.
 ---
 
-The monitoring stack collects metrics, logs and traces from the [Kubernetes](kubernetes.md) clusters, lab hosts and Windows desktops, and sends alerts to Discord. Each cluster, folly and offsite, runs a copy in the `monitoring` namespace.
+The monitoring stack collects metrics, logs and traces from the [Kubernetes](kubernetes.md) clusters, lab hosts and Windows desktops, and sends alerts to Slack `#alerts`. Each cluster, folly and offsite, runs a copy in the `monitoring` namespace.
 
 ## Parts
 
@@ -28,7 +28,7 @@ Clients that route to a cluster's load-balancer range reach its addresses.
 
 ## Alerts and logs
 
-Alertmanager routes every alert to Discord, and on offsite a firing `critical` alert to the owner's phone as well. [Alerting](observability/alerting.md) has the routes, the selector rules and who can post an alert.
+Alertmanager routes alerts to Slack `#alerts`, and on offsite a firing `critical` alert to the owner's phone as well. [Alerting](observability/alerting.md) has the routes, the selector rules and who can post an alert.
 
 The in-cluster log streams carry `cluster` and a `job` of `kubernetes`, `talos` (with `host` and `service`) or `talos-kernel` (with `host`). Vector listens on each node's loopback for the Talos service and kernel logs. The desktop streams carry `job="windows-eventlog"`, `host`, `channel` and `level`. Query logs in Grafana, or directly with the header `AccountID: 1`.
 
@@ -49,7 +49,7 @@ The k6 operator on folly runs each new TestRun, a k6 test, in a runner Job. Each
 
 ## Where it lives
 
-- `clusters/base/monitoring/`: the shared parts, Discord route, rules and dashboards
+- `clusters/base/monitoring/`: the shared parts, Slack route, rules and dashboards
 - `clusters/<site>/monitoring/`: `kube-prometheus.yaml` and the rules of one cluster. folly's also holds its scrape targets and `grafana-dashboards/`.
 - `clusters/base/monitoring-crds/`: the Prometheus Operator CRDs. kube-prometheus-stack installs none.
 - `clusters/folly/apps/k6/`: the k6 operator, CronJob and test script
