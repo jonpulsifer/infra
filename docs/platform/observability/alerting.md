@@ -7,7 +7,7 @@ Alertmanager in each cluster's [monitoring stack](../observability.md) routes al
 
 ## Routes
 
-The `slack` AlertmanagerConfig sends alerts with Rowbutt's Slack bot token from 1Password to `#alerts`, except `Watchdog` and `InfoInhibitor`. Each alert carries its `cluster` label, repeats every 12 hours, and reports when it resolves. Reply to an alert with `@Rowbutt` and a request to open an operator turn in that thread; without a mention, Rowbutt does not read an unowned thread. The `inhibit_rules` in `kube-prometheus.yaml` send an info alert only while a warning or critical alert fires in its namespace.
+The `slack` AlertmanagerConfig sends alerts with Rowbutt's Slack bot token from 1Password to `#alerts`, except `Watchdog` and `InfoInhibitor`. Each alert carries its `cluster` label; repeats and resolutions update the original Slack message, preserving its thread. Reply to an alert with `@Rowbutt` and a request to open an operator turn in that thread; without a mention, Rowbutt does not read an unowned thread. The `inhibit_rules` in `kube-prometheus.yaml` send an info alert only while a warning or critical alert fires in its namespace.
 
 On offsite, the `switchboard` AlertmanagerConfig posts a firing `critical` alert to Switchboard and repeats it every 15 minutes, so a notification skipped for quiet hours or the cap is retried soon after. A switchboard restart forgets what it rang, so a pod roll during an incident rings once more per firing critical alert.
 
