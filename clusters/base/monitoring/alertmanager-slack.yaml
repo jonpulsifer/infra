@@ -1,0 +1,60 @@
+# The Slack bot already belongs to #alerts. Alertmanager uses chat.postMessage
+# instead of an incoming webhook so the owner can mention Rowbutt in the
+# alert's thread and ask it to make the fix.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: alertmanager-slack
+  namespace: monitoring
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword-connect
+  target:
+    name: alertmanager-slack
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      data:
+        api-url: https://slack.com/api/chat.postMessage
+        token: '{{ .botToken }}'
+  data:
+    - secretKey: botToken
+      remoteRef:
+        key: b2mwpnj65nhi6oreyofkutsqxq
+        property: Bot User OAuth Token
+---
+apiVersion: monitoring.coreos.com/v1alpha1
+kind: AlertmanagerConfig
+metadata:
+  name: slack
+  namespace: monitoring
+  labels:
+    alertmanagerConfig: slack
+spec:
+  route:
+    receiver: slack
+    matchers:
+      - name: alertname
+        value: Watchdog|InfoInhibitor
+        matchType: "!~"
+    groupBy: [cluster, namespace, alertname]
+    groupWait: 30s
+    groupInterval: 5m
+    repeatInterval: 12h
+  receivers:
+    - name: slack
+      slackConfigs:
+        - apiURL:
+            name: alertmanager-slack
+            key: api-url
+          channel: C0CKRP9DPRB
+          sendResolved: true
+          messageText: '[{{ .Status | toUpper }}] {{ .CommonLabels.alertname }}{{ with .CommonLabels.cluster }} · {{ . }}{{ end }}{{ if gt (len .Alerts) 1 }} ({{ len .Alerts }}){{ end }}{{ "\n" }}{{ range .Alerts }}• {{ if .Annotations.message }}{{ .Annotations.message }}{{ else if .Annotations.summary }}{{ .Annotations.summary }}{{ else }}{{ .Labels.alertname }}{{ end }}{{ "\n" }}{{ end }}'
+          httpConfig:
+            authorization:
+              type: Bearer
+              credentials:
+                name: alertmanager-slack
+                key: token
