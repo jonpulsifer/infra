@@ -158,6 +158,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
       file \
+      ffmpeg \
       git \
       iproute2 \
       less \
@@ -238,6 +239,8 @@ RUN set -eux; \
     kubectl cnpg version >/dev/null; \
     kustomize version >/dev/null; \
     pixlet version >/dev/null; \
+    ffmpeg -version >/dev/null; \
+    ffprobe -version >/dev/null; \
     talosctl version --client >/dev/null; \
     ssh -V 2>/dev/null
 
