@@ -11,7 +11,7 @@ RUN go mod download
 COPY go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/go-upload .
 
-FROM docker.io/oven/bun:1.4.4-slim AS runner
+FROM docker.io/oven/bun:1.4.5-slim AS runner
 # Python with its own venv beside Bun, so one image carries all three.
 RUN apt-get update -q \
  && apt-get install -yq --no-install-recommends python3 python3-venv ca-certificates \
