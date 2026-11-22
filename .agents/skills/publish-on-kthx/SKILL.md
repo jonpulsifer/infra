@@ -53,6 +53,11 @@ printf '%s\n' <name> | kthx rm  # deletes the site and frees the name
   directory, not the target.
 - Never run `kthx upgrade` in a sandbox. The image bakes the CLI, and upgrade
   installs a second copy the sandbox's `kthx` never runs.
+- For a report informed by a private recording, check that the sandbox can
+  decode it with `ffprobe` and `ffmpeg` before promising a visual review. A
+  Slack attachment's name and thumbnail do not show its motion. Download it
+  only with the bot's `files:read` scope, inspect frames locally, and publish
+  findings without the recording, frames or private screen content.
 - Never commit a site's `kthx.json` or `SKILL.md` into this repository unless
   the site's source lives here.
 
