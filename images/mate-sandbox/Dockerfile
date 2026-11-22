@@ -34,7 +34,7 @@ ARG CONFTEST_VERSION=0.71.1
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
 # renovate: datasource=github-releases depName=dandavison/delta
-ARG DELTA_VERSION=0.21.1
+ARG DELTA_VERSION=0.21.2
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
