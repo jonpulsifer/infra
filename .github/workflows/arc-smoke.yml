@@ -24,7 +24,7 @@ jobs:
     # A service that never turns healthy fails the job before any step runs.
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:19-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
