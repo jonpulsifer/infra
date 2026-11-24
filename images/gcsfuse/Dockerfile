@@ -3,7 +3,7 @@
 # gcsfuse for the kthx sites pod (clusters/offsite/apps/kthx-sites): the sidecar
 # that mounts the sites bucket read-only for nginx. The release .deb is pinned by
 # sha256, so a version bump moves GCSFUSE_SHA256 with it.
-FROM debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
+FROM debian:trixie-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 
 # renovate: datasource=github-releases depName=GoogleCloudPlatform/gcsfuse
 ARG GCSFUSE_VERSION=3.13.1
