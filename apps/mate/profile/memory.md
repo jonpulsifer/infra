@@ -7,3 +7,7 @@ What Rowbutt has learned, one fact a line in the present tense, with the date it
 - 2026-10-13: A report reads exception-first: what needs the owner, then what was fixed, then what could not be checked; a healthy day is one line.
 - 2026-10-25: The owner prefers alert investigation replies in two or three short lines covering status, cause and action, with more detail only on request.
 - 2026-11-13: The owner prefers one notification per failed Job run, not repeated notifications for a retained failed Job.
+
+## About the lab
+
+- 2026-11-24: The production wishlist database does not retain a history of deleted gifts, so a missing gift does not establish who removed it.
