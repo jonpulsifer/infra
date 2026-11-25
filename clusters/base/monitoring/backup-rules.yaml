@@ -4,9 +4,9 @@
 # metricLabelsAllowlist in kube-prometheus.yaml. Host jobs write
 # lab_backup_last_success_timestamp_seconds to the node-exporter textfile
 # directory. Velero exports velero_backup_last_* per Schedule, and the
-# barman-cloud plugin exports the time of a database's last backup. Each alert
-# keys on the time of the last success, so it clears on the next good run and
-# never on a Job someone deletes.
+# barman-cloud plugin exports the time of a database's last backup. Backup
+# staleness and failed runs clear on the next success; a missed schedule clears
+# when the CronJob controller resumes scheduling.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -32,15 +32,14 @@ spec:
             or on (namespace, cronjob)
             max by (namespace, cronjob) (kube_cronjob_labels{label_lolwtf_ca_backup="true"}) * 0 + 8 * 86400
 
-        # The second arm is a CronJob an hour past a schedule it never fired:
-        # suspended, held by a hung run under concurrencyPolicy Forbid, or a
-        # controller that stopped. It catches a job that has never succeeded,
-        # which the first arm cannot see.
+        # A stale success is distinct from a run the controller never started.
+        # While a schedule is missed, the missed alert takes precedence so one
+        # CronJob does not page twice for the same gap.
         - alert: BackupJobStale
           expr: |
             max by (namespace, cronjob) (time() - kube_cronjob_status_last_successful_time)
               > on (namespace, cronjob) cronjob:backup_max_age_seconds
-            or
+            unless on (namespace, cronjob)
             max by (namespace, cronjob) (time() - kube_cronjob_next_schedule_time > 3600)
               and on (namespace, cronjob) kube_cronjob_labels{label_lolwtf_ca_backup="true"}
           for: 15m
@@ -48,7 +47,21 @@ spec:
             severity: warning
           annotations:
             message: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has no recent success"
-            description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` shows whether it is suspended and when it last ran; `kubectl -n {{ $labels.namespace }} get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
+            description: "The last successful run is older than the backup window: a day and two hours for daily jobs, or eight days for folly's weekly push. Check `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` for the last schedule and `kubectl -n {{ $labels.namespace }} get jobs` for failed or active runs. The backup remains stale until a run succeeds."
+
+        # An overdue schedule can follow a control-plane outage longer than
+        # the CronJob's starting deadline, without creating a failed Job.
+        # It also catches a CronJob that has never started or succeeded.
+        - alert: BackupJobMissed
+          expr: |
+            max by (namespace, cronjob) (time() - kube_cronjob_next_schedule_time > 3600)
+              and on (namespace, cronjob) kube_cronjob_labels{label_lolwtf_ca_backup="true"}
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            message: "Backup CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} missed its scheduled run"
+            description: "The next scheduled run is over an hour late. Check `kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }}` and control-plane availability around the schedule; check its startingDeadlineSeconds, whether it is suspended, and whether an earlier Job is still active. The last successful backup remains the restore point until another run succeeds."
 
         # Under concurrencyPolicy Forbid at most one run is active, so a last
         # schedule newer than the last success with nothing active is a run
