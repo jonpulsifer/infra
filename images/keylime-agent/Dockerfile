@@ -5,7 +5,7 @@
 # rust-keylime tag and the base digests move by hand.
 FROM gcr.io/distroless/cc-debian12:latest@sha256:e5d81ddde149641e2a9ba55be4545bc125c67de07508b03ba4c22e6eb0ded5aa AS runtime
 
-FROM docker.io/library/rust:1.100.0-bookworm@sha256:1b9dc70890ec494e466c87f5ad41ad544bfb30ea6acc99a3e068c47a4ae3f23e AS build
+FROM docker.io/library/rust:1.100.0-bookworm@sha256:75d26c23c24cc6ea1cdabf0714a6bff8fd7bf3248716043fd7ae86dac7f41b94 AS build
 # tss-esapi's generate-bindings feature needs clang; the openssl and tss2 crates link the
 # distribution's libraries, which the runtime stage copies.
 RUN apt-get update \
