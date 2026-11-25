@@ -59,6 +59,9 @@ tests:
         alertname: BackupJobFailed
         exp_alerts: []
       - eval_time: 90m
+        alertname: BackupJobMissed
+        exp_alerts: []
+      - eval_time: 90m
         alertname: BackupPushMissing
         exp_alerts: []
 
@@ -103,7 +106,7 @@ tests:
               cronjob: paperless-db-backup
             exp_annotations:
               message: "Backup CronJob paperless/paperless-db-backup has no recent success"
-              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n paperless get cronjob paperless-db-backup` shows whether it is suspended and when it last ran; `kubectl -n paperless get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
+              description: "The last successful run is older than the backup window: a day and two hours for daily jobs, or eight days for folly's weekly push. Check `kubectl -n paperless get cronjob paperless-db-backup` for the last schedule and `kubectl -n paperless get jobs` for failed or active runs. The backup remains stale until a run succeeds."
 
   # The weekly push may be eight days old: a success 7d23h50m ago goes stale
   # at minute 10 while this week's run is still active, so only staleness
@@ -136,7 +139,7 @@ tests:
               cronjob: backup-push
             exp_annotations:
               message: "Backup CronJob backups/backup-push has no recent success"
-              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n backups get cronjob backup-push` shows whether it is suspended and when it last ran; `kubectl -n backups get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
+              description: "The last successful run is older than the backup window: a day and two hours for daily jobs, or eight days for folly's weekly push. Check `kubectl -n backups get cronjob backup-push` for the last schedule and `kubectl -n backups get jobs` for failed or active runs. The backup remains stale until a run succeeds."
 
   # A new CronJob that has never succeeded. Its first run failed, so only the
   # failure fires; a second has never fired at all and is two hours past its
@@ -170,14 +173,52 @@ tests:
               description: "The most recent run ended without succeeding, and no run is active. `kubectl -n hass get jobs` names the failed Job; its pods' logs carry the error. An unreachable Garage or GCS, a wrong crypt password in the backup-push Secret, or a cryptcheck that found the copy differs from Garage are the usual causes. The alert clears on the next successful run."
       - eval_time: 20m
         alertname: BackupJobStale
+        exp_alerts: []
+      - eval_time: 14m
+        alertname: BackupJobMissed
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: BackupJobMissed
         exp_alerts:
           - exp_labels:
               severity: warning
               namespace: hass
               cronjob: hass-db-backup
             exp_annotations:
-              message: "Backup CronJob hass/hass-db-backup has no recent success"
-              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n hass get cronjob hass-db-backup` shows whether it is suspended and when it last ran; `kubectl -n hass get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
+              message: "Backup CronJob hass/hass-db-backup missed its scheduled run"
+              description: "The next scheduled run is over an hour late. Check `kubectl -n hass get cronjob hass-db-backup` and control-plane availability around the schedule; check its startingDeadlineSeconds, whether it is suspended, and whether an earlier Job is still active. The last successful backup remains the restore point until another run succeeds."
+
+  # A missed daily schedule after a healthy run has no failed Job. The
+  # overdue schedule takes precedence even when yesterday's success ages out.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_labels{namespace="backups",cronjob="etcd-snapshot",label_lolwtf_ca_backup="true",job="kube-state-metrics"}'
+        values: 1x90
+      - series: 'kube_cronjob_status_last_schedule_time{namespace="backups",cronjob="etcd-snapshot",job="kube-state-metrics"}'
+        values: -90000x90
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="etcd-snapshot",job="kube-state-metrics"}'
+        values: -90000x90
+      - series: 'kube_cronjob_next_schedule_time{namespace="backups",cronjob="etcd-snapshot",job="kube-state-metrics"}'
+        values: -5400x90
+      - series: 'kube_cronjob_status_active{namespace="backups",cronjob="etcd-snapshot",job="kube-state-metrics"}'
+        values: 0x90
+    alert_rule_test:
+      - eval_time: 90m
+        alertname: BackupJobStale
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: BackupJobFailed
+        exp_alerts: []
+      - eval_time: 90m
+        alertname: BackupJobMissed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: backups
+              cronjob: etcd-snapshot
+            exp_annotations:
+              message: "Backup CronJob backups/etcd-snapshot missed its scheduled run"
+              description: "The next scheduled run is over an hour late. Check `kubectl -n backups get cronjob etcd-snapshot` and control-plane availability around the schedule; check its startingDeadlineSeconds, whether it is suspended, and whether an earlier Job is still active. The last successful backup remains the restore point until another run succeeds."
 
   # A suspended CronJob exports no next schedule, so even a weekly one is held
   # to a day: a success two days old fires.
@@ -210,7 +251,7 @@ tests:
               cronjob: backup-push
             exp_annotations:
               message: "Backup CronJob backups/backup-push has no recent success"
-              description: "The CronJob's last success is older than its window allows, a day and two hours for a daily job and eight days for folly's weekly push, or it is an hour past a run it never started. The encrypted copy in GCS holds nothing newer than that success. `kubectl -n backups get cronjob backup-push` shows whether it is suspended and when it last ran; `kubectl -n backups get jobs` names a run still active or one that failed, whose pod logs carry rclone's error."
+              description: "The last successful run is older than the backup window: a day and two hours for daily jobs, or eight days for folly's weekly push. Check `kubectl -n backups get cronjob backup-push` for the last schedule and `kubectl -n backups get jobs` for failed or active runs. The backup remains stale until a run succeeds."
 
   # Host jobs: a daily one 27 hours old fires, and a fresh one is quiet.
   - interval: 1m

@@ -79,7 +79,7 @@ Velero skips a pod that is not running when the backup starts, and records a war
 - Give a new PVC a pod annotation `backup.velero.io/backup-volumes`, or a line in `scripts/backup-coverage.exclusions` that says why it needs no backup. Run `mise run backup:coverage folly` and `mise run backup:coverage offsite` before you merge.
 
 - Keep `backup-crypt` in 1Password. Without it the GCS copy cannot be read.
-- Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale` and `BackupJobFailed` watch only those.
+- Label each backup CronJob `lolwtf.ca/backup: "true"`. `BackupJobStale`, `BackupJobMissed` and `BackupJobFailed` watch only those.
 - Give a new database an `ObjectStore` and a `ScheduledBackup`. It has no backup without them.
 - Give a re-created `Cluster` a new `backup.serverName`. The kthx engine does this for a Datastore: each generation archives under its own prefix, `<name>-<8 hex characters of the row id>`. The plugin refuses a prefix that holds WAL; [Recover a re-created database](../runbooks/recover-a-re-created-database.md) has the steps.
 

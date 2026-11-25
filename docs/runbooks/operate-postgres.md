@@ -122,6 +122,7 @@ A Postgres Datastore in `kthx-datastores` archives to that namespace's `garage` 
 | `flags cannot be placed before plugin name: --context` | `--context` is before `cnpg`. | Put `--context` after the `cnpg` command. |
 | `unknown command "cnpg" for "kubectl"` | The plugin is not installed. | Run `mise install github:cloudnative-pg/cloudnative-pg`. |
 | `cnpg status` shows no primary. | The `Cluster` is in bootstrap or in a restart. | If no primary shows after 5 minutes, read `kubectl cnpg logs cluster`. |
+| `BackupJobMissed` fires. | The backup CronJob did not start its scheduled run. | Check the CronJob's last schedule, suspension and starting deadline, then check control-plane availability around that time. No failed Job need exist. |
 | `BackupJobStale` or `BackupJobFailed` fires. | The `backup-push` CronJob has not succeeded in its window. | Check the last Job's status and the logs of every attempt, including failed pods. |
 | `CNPGBackupStale` fires. | A database has no backup newer than 36 hours. An immediate backup can run before a recovering Cluster has a pod. | Run `kubectl get scheduledbackup,backup -n <namespace>`, then read `kubectl cnpg status`. If the Cluster is ready without a completed base backup, run `kubectl cnpg backup` as in [Recover a re-created database](recover-a-re-created-database.md#take-a-last-backup). |
 | `KthxBackupFailing` fires. | No kthx dump has succeeded for 36 hours. | Read the logs of the last `kthx-db-backup` Job. |
