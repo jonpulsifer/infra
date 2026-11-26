@@ -4,7 +4,7 @@
 # web app. The context is the repo root, because the web is the `tally-web`
 # workspace and turbo prune reads the root lockfile. Dockerfile.ocr is this
 # image plus the `ocr` extra; keep the two in step.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS bun
+FROM cgr.dev/chainguard/node:latest-dev@sha256:b9ed639e17936247866afb17a9a3ae7ae1da7d6419fd8d72266860d31a244afa AS bun
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
