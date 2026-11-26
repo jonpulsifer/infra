@@ -75,7 +75,7 @@ ARG TERRAFORM_DOCS_VERSION=0.25.1
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
 # in its place.
 # renovate: datasource=github-releases depName=opentofu/opentofu
-ARG TOFU_VERSION=1.13.9
+ARG TOFU_VERSION=1.13.10
 # renovate: datasource=github-releases depName=mikefarah/yq
 ARG YQ_VERSION=4.54.3
 
