@@ -3,7 +3,7 @@
 # packages Keylime for aarch64 and x86_64, nixpkgs does not, and upstream's quay.io images are
 # amd64 only, so this image exists for the Pi. The base is the multi-arch index digest, which
 # the owner moves by hand.
-FROM quay.io/fedora/fedora:43@sha256:b274bd9796447dd926ebd634eaad5708b99f8e45c66c7b02ec8f3cb070ea5188
+FROM quay.io/fedora/fedora:43@sha256:94622fc51eb4f9d5245d802b5cfe0324425fe40531ce28f520f0c06ead472d82
 # A fixed uid, so the host's bind mount of /var/lib/keylime can be owned ahead of the package's
 # dynamic account. keylime-base keeps an existing user; the base already has the tss group.
 RUN useradd --system --uid 1900 --gid tss --home-dir /var/lib/keylime --shell /sbin/nologin keylime \
