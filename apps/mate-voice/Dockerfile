@@ -3,7 +3,7 @@
 # mate-voice: the bridge that holds mate's Discord voice connection. One Bun
 # process running its source as committed, with no build step. The smoke run
 # in the runner proves the DAVE and Opus pieces load where they will run.
-FROM cgr.dev/chainguard/node:latest-dev@sha256:8e8d45dd674724ccc71aed270223c3e2efc74edde6c841158d618d2baaaf5527 AS base
+FROM cgr.dev/chainguard/node:latest-dev@sha256:b9ed639e17936247866afb17a9a3ae7ae1da7d6419fd8d72266860d31a244afa AS base
 # renovate: datasource=npm depName=bun
 ARG BUN_VERSION=1.4.3
 ENV BUN_INSTALL=/usr/local \
@@ -25,7 +25,7 @@ COPY --from=pruner /app/out/json/ .
 COPY --from=pruner /app/out/bun.lock ./bun.lock
 RUN bun install --frozen-lockfile --production
 
-FROM cgr.dev/chainguard/node:latest@sha256:3fb5318a58807dec0f2ece547efbe8d62c67b7b2fd91a16795b98651d6385dbe AS runner
+FROM cgr.dev/chainguard/node:latest@sha256:aaf2e52e7deb1f4e5e51461ec480516ddd9ed4559188866f131145f93dee0f44 AS runner
 ENV NODE_ENV=production \
   MATE_VOICE_PORT=8080
 WORKDIR /app
