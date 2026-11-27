@@ -17,6 +17,7 @@ resources:
   - flux-monitoring.yaml
   - flux-rules.yaml
   - gateway-api-generation.yaml
+  - job-rules.yaml
   - mate-sandbox-reader.yaml
   - node-saturation-rules.yaml
   - node-storage-rules.yaml

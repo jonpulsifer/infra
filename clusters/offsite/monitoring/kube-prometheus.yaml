@@ -30,6 +30,8 @@ spec:
     crds:
       enabled: false
     defaultRules:
+      disabled:
+        KubeJobFailed: true
       rules:
         etcd: true
         kubeControllerManager: true

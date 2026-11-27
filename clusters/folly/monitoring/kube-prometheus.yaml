@@ -30,6 +30,7 @@ spec:
     defaultRules:
       # target-down.yaml declares it without the Windows desktops.
       disabled:
+        KubeJobFailed: true
         TargetDown: true
       rules:
         etcd: true

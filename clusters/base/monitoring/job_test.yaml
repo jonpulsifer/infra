@@ -1,0 +1,70 @@
+# promtool tests for job-rules.yaml; kustomization.yaml omits this file.
+rule_files:
+  - job.yaml
+
+evaluation_interval: 1m
+
+tests:
+  # A failed run alerts until the next run succeeds, even while it is retained.
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="backups",job_name="failed",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_owner{namespace="backups",job_name="failed",owner_kind="CronJob",owner_name="backup-push",owner_is_controller="true",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_status_start_time{namespace="backups",job_name="failed",job="kube-state-metrics"}'
+        values: 120x50
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="backup-push",job="kube-state-metrics"}'
+        values: '0x24 1500x25'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: KubeJobFailed
+        exp_alerts:
+          - exp_labels: {namespace: backups, job_name: failed, job: kube-state-metrics, severity: warning}
+            exp_annotations:
+              summary: "Job failed to complete."
+              description: "Job backups/failed failed to complete. A later successful CronJob run clears this alert; investigate the failed Job and its pods."
+      - eval_time: 40m
+        alertname: KubeJobFailed
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'kube_job_failed{namespace="backups",job_name="old",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_owner{namespace="backups",job_name="old",owner_kind="CronJob",owner_name="backup-push",owner_is_controller="true",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_status_start_time{namespace="backups",job_name="old",job="kube-state-metrics"}'
+        values: 120x50
+      - series: 'kube_job_failed{namespace="backups",job_name="new",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_owner{namespace="backups",job_name="new",owner_kind="CronJob",owner_name="backup-push",owner_is_controller="true",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_status_start_time{namespace="backups",job_name="new",job="kube-state-metrics"}'
+        values: 1100x50
+      - series: 'kube_cronjob_status_last_successful_time{namespace="backups",cronjob="backup-push",job="kube-state-metrics"}'
+        values: 900x50
+      - series: 'kube_job_failed{namespace="jobs",job_name="standalone",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_failed{namespace="jobs",job_name="never-succeeded",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_owner{namespace="jobs",job_name="never-succeeded",owner_kind="CronJob",owner_name="first-run",owner_is_controller="true",job="kube-state-metrics"}'
+        values: 1x50
+      - series: 'kube_job_status_start_time{namespace="jobs",job_name="never-succeeded",job="kube-state-metrics"}'
+        values: 120x50
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: KubeJobFailed
+        exp_alerts:
+          - exp_labels: {namespace: backups, job_name: new, job: kube-state-metrics, severity: warning}
+            exp_annotations:
+              summary: "Job failed to complete."
+              description: "Job backups/new failed to complete. A later successful CronJob run clears this alert; investigate the failed Job and its pods."
+          - exp_labels: {namespace: jobs, job_name: standalone, job: kube-state-metrics, severity: warning}
+            exp_annotations:
+              summary: "Job failed to complete."
+              description: "Job jobs/standalone failed to complete. A later successful CronJob run clears this alert; investigate the failed Job and its pods."
+          - exp_labels: {namespace: jobs, job_name: never-succeeded, job: kube-state-metrics, severity: warning}
+            exp_annotations:
+              summary: "Job failed to complete."
+              description: "Job jobs/never-succeeded failed to complete. A later successful CronJob run clears this alert; investigate the failed Job and its pods."
