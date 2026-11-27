@@ -53,7 +53,7 @@ spec:
         - name: tally-ocr
           # CD rewrites this digest (`.github/containers.json`) by matching the
           # whole `ghcr.io/…/tally-ocr…@sha256:` string, so keep it one literal.
-          image: ghcr.io/jonpulsifer/tally-ocr:latest@sha256:7209ba419f92e0df016ebd8180d29e2614b52cc6d7f97cf4351a5ec5052cb483
+          image: ghcr.io/jonpulsifer/tally-ocr:latest@sha256:81ff845582b3a7c129b3488bd7e1eebc11a769930da827af1c7d2c83fb58351f
           imagePullPolicy: IfNotPresent
           env:
             - name: TALLY_API_URL
