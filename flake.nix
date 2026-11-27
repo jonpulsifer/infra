@@ -55,7 +55,7 @@
 
   # Hosts are declared in nix/hosts/default.nix; every per-host output below derives from it.
   outputs =
-    inputs@{ nixpkgs, ... }:
+    inputs@{ self, nixpkgs, ... }:
     let
       inherit (nixpkgs) lib;
 
@@ -87,7 +87,13 @@
     {
       inherit (fleet) nixosConfigurations;
 
-      packages = forAllSystems fleet.packagesFor;
+      packages = forAllSystems (
+        system:
+        fleet.packagesFor system
+        // {
+          image-ubuntu = pkgsFor.${system}.callPackage ./images/os/ubuntu/builder.nix { };
+        }
+      );
 
       checks.x86_64-linux = import ./nix/lib/checks.nix {
         inherit lib;
@@ -100,6 +106,12 @@
         (import ./nix/lib/apps.nix).mkApps {
           pkgs = pkgsFor.${system};
           inherit (fleet) deployHosts;
+        }
+        // {
+          image-ubuntu = {
+            type = "app";
+            program = "${self.packages.${system}.image-ubuntu}/bin/image-ubuntu";
+          };
         }
       );
 

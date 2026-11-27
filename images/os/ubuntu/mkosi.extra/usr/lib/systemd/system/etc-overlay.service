@@ -1,0 +1,17 @@
+[Unit]
+Description=Volatile overlay on /etc
+DefaultDependencies=no
+Before=sysinit.target local-fs.target systemd-tmpfiles-setup.service systemd-sysusers.service systemd-machine-id-commit.service
+Conflicts=shutdown.target
+ConditionPathIsReadWrite=!/etc
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/mkdir -p /run/etc-overlay
+ExecStart=/usr/bin/mount -t tmpfs -o mode=0755 tmpfs /run/etc-overlay
+ExecStart=/usr/bin/mkdir /run/etc-overlay/upper /run/etc-overlay/work
+ExecStart=/usr/bin/mount -t overlay overlay -o lowerdir=/etc,upperdir=/run/etc-overlay/upper,workdir=/run/etc-overlay/work /etc
+
+[Install]
+WantedBy=sysinit.target
