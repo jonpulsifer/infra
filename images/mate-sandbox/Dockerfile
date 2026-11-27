@@ -5,7 +5,7 @@
 # HOME is an emptyDir, so a tool the agent installs goes with the sandbox. The
 # build context is the repo root, so the image can compile packages/mate-hands;
 # the root .dockerignore lets in the files copied from this directory.
-FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS base
+FROM debian:bookworm-slim@sha256:e67eeead736ff7bbe258ef088bff683635c561b1fcfefad0806c1df4ab49ce0e AS base
 
 FROM base AS toolset
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -20,7 +20,7 @@ ARG AGE_VERSION=1.3.2
 # renovate: datasource=github-releases depName=sharkdp/bat
 ARG BAT_VERSION=0.26.1
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.4
+ARG BUN_VERSION=1.4.5
 # renovate: datasource=github-releases depName=cilium/cilium-cli
 ARG CILIUM_CLI_VERSION=0.20.3
 # Must equal the operator's version, the appVersion of the chart that
@@ -34,11 +34,11 @@ ARG CONFTEST_VERSION=0.71.1
 # renovate: datasource=github-releases depName=terrastruct/d2
 ARG D2_VERSION=0.9.0
 # renovate: datasource=github-releases depName=dandavison/delta
-ARG DELTA_VERSION=0.21.2
+ARG DELTA_VERSION=0.22.0
 # renovate: datasource=github-releases depName=eza-community/eza
 ARG EZA_VERSION=0.23.5
 # renovate: datasource=github-releases depName=fluxcd/flux2
-ARG FLUX_VERSION=2.10.0
+ARG FLUX_VERSION=2.10.1
 # renovate: datasource=github-releases depName=junegunn/fzf
 ARG FZF_VERSION=0.75.0
 # renovate: datasource=github-releases depName=cli/cli
@@ -54,7 +54,7 @@ ARG KUBECTL_VERSION=1.37.2
 # renovate: datasource=github-releases depName=kubernetes-sigs/kustomize extractVersion=^kustomize/v(?<version>.*)$
 ARG KUSTOMIZE_VERSION=5.8.3
 # renovate: datasource=github-releases depName=jdx/mise
-ARG MISE_VERSION=2026.11.10
+ARG MISE_VERSION=2026.11.14
 # No Renovate datasource covers 1Password's CDN, so this pin moves by hand.
 ARG OP_VERSION=2.39.0
 # renovate: datasource=github-releases depName=tronbyt/pixlet
@@ -69,7 +69,7 @@ ARG SHFMT_VERSION=3.14.1
 ARG SOPS_VERSION=3.13.3
 # The clusters' Talos API client; keep it on their Talos minor.
 # renovate: datasource=github-releases depName=siderolabs/talos
-ARG TALOSCTL_VERSION=1.14.6
+ARG TALOSCTL_VERSION=1.14.7
 # renovate: datasource=github-releases depName=terraform-docs/terraform-docs
 ARG TERRAFORM_DOCS_VERSION=0.25.1
 # Must equal opentofu in the root mise.toml: the repo's tasks run this binary
