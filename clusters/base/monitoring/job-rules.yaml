@@ -1,0 +1,35 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: job
+  namespace: monitoring
+  labels:
+    release: prom-stack
+spec:
+  groups:
+    - name: job
+      rules:
+        # A retained failed CronJob run is no longer actionable after a newer
+        # run succeeds. Standalone Jobs and failures since the last success
+        # still alert, including failures without a CronJob success metric.
+        - alert: KubeJobFailed
+          expr: |
+            kube_job_failed{job="kube-state-metrics"} > 0
+            unless on (namespace, job_name)
+            (
+              kube_job_owner{job="kube-state-metrics", owner_kind="CronJob", owner_is_controller="true"}
+                * on (namespace, owner_name) group_left()
+                  label_replace(
+                    kube_cronjob_status_last_successful_time{job="kube-state-metrics"},
+                    "owner_name", "$1", "cronjob", "(.*)"
+                  )
+                >= on (namespace, job_name)
+                  kube_job_status_start_time{job="kube-state-metrics"}
+            )
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Job failed to complete."
+            description: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed to complete. A later successful CronJob run clears this alert; investigate the failed Job and its pods."
