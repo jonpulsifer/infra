@@ -67,3 +67,8 @@ do, and `docs/apps/kthx/security.md` lists the identities. No kthx tools in
 the session means no token, an expired or revoked token, or, for Rowbutt, that
 mate has not reached the engine since it started; mate retries every minute.
 Say which is likely rather than retry, and do not assume the token is bad.
+
+After a built app change merges, check its deployment with `kthx_listDeploys`
+then `kthx_getDeployDetail` for the matching commit. Confirm the target deploy
+is `LIVE` before asking the owner to test it. A green repository CI run or an
+HTTP 200 from the app does not establish which version the target serves.
