@@ -1,8 +1,8 @@
 # slides
 
-Project decks, one directory each. Every deck is a single self-contained
-`index.html` — no build step, no dependencies, no JavaScript — so the file in
-git is byte-for-byte what gets served.
+Project decks, one directory each. The spindrift and bosun decks are each a
+single self-contained `index.html` — no build step, no dependencies, no
+JavaScript — so the file in git is byte-for-byte what gets served.
 
 | Deck | Subject | Served at |
 | --- | --- | --- |
@@ -47,3 +47,17 @@ observation.
 A Firebase Hosting site id is permanently reserved once created, and deleting
 the site does not give the name back. Never delete a Hosting site to reclaim
 one; route a wanted address to the serving site instead.
+
+## Christmas talk
+
+`trust-a-computer/` is a family-friendly, approximately eight-minute talk about
+machine trust. It uses the lab's attestation and identity design as an example,
+not ElevenLabs infrastructure. The self-contained `index.html` is served as a
+kthx quick site at `https://trust-a-computer.kthx.dev`. Arrow keys or buttons
+change slides; N opens speaker notes; printing produces a handout.
+
+To redeploy as the site's owner, run
+`kthx init --name trust-a-computer apps/slides/trust-a-computer`, remove the
+CLI-generated `SKILL.md`, then run
+`kthx deploy apps/slides/trust-a-computer`. Keep the local `kthx.json` for
+later deploys; do not commit either generated file.
