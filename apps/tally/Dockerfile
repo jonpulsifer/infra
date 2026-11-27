@@ -6,7 +6,7 @@
 # image plus the `ocr` extra; keep the two in step.
 FROM cgr.dev/chainguard/node:latest-dev@sha256:b9ed639e17936247866afb17a9a3ae7ae1da7d6419fd8d72266860d31a244afa AS bun
 # renovate: datasource=npm depName=bun
-ARG BUN_VERSION=1.4.3
+ARG BUN_VERSION=1.4.5
 ENV BUN_INSTALL=/usr/local \
   TURBO_TELEMETRY_DISABLED=1
 USER root
@@ -15,7 +15,7 @@ RUN apk add --no-cache bash curl unzip \
 
 FROM bun AS pruner
 # renovate: datasource=npm depName=turbo
-ARG TURBO_VERSION=2.11.9
+ARG TURBO_VERSION=2.11.13
 WORKDIR /app
 COPY . .
 RUN bun x "turbo@${TURBO_VERSION}" prune tally-web --docker
