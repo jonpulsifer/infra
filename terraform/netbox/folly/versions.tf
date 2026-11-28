@@ -9,7 +9,7 @@ terraform {
     # 6.0 supports only NetBox 4.6.8 and later.
     netbox = {
       source  = "e-breuninger/netbox"
-      version = "~> 5.8"
+      version = "~> 6.0"
     }
     # Writes a device's declared custom fields with a PATCH of typed JSON.
     # netbox_device sends custom fields as strings, which NetBox refuses for
