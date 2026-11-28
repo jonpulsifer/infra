@@ -41,7 +41,7 @@ locals {
   op_vault_homelab = "ib23znjeikv74p37f6mbfk7uya"
 
   # renovate: datasource=github-releases depName=siderolabs/talos
-  talos_version = "v1.14.5"
+  talos_version = "v1.14.7"
 
   # Signed with the lab's Secure Boot keys, with the extensions below. The
   # image build publishes one per Talos version, tagged with the version.
